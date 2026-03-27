@@ -1,7 +1,7 @@
 drawdot: ; ax = y, bx = x, cl = color
-    push ax
     push di
     push dx
+    push ax
 
     shl ax, 8        ; ax = y * 256
     mov dx, ax       ; store (y * 256) in dx

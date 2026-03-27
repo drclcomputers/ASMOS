@@ -1,4 +1,4 @@
-; ax - Y, bx - X, dx - Width, si - Height, cl - Color
+; ax - Y, bx - X, dx - Width, si - Height, cl - Color, di - Title string ptr
 draw_window:
     push ax
     push bx
@@ -11,6 +11,7 @@ draw_window:
     mov [window_width], dx
     mov [window_height], si
     mov [window_color], cl
+    mov [window_title], di
 
     ; Title bar - ax = Y, bx = X, dx = Width, si = Height, cl = Color
     mov si, 10
@@ -28,6 +29,16 @@ draw_window:
     pop dx
     sub ax, 2
     sub bx, 2
+
+    ; Title text — X+12 to clear the close button, Y+2 to center in bar
+    mov si, [window_title]
+    mov bx, [window_x]
+    add bx, 12
+    mov ax, [window_y]
+    add ax, 2
+    mov cl, 0
+    mov ch, 1
+    call draw_string
 
     ; Content area
     mov ax, [window_y]
@@ -64,7 +75,7 @@ window_y dw 0
 window_width dw 0
 window_height dw 0
 window_color db 0
-windows_title db 0
+window_title dw 0
 
 init_grayscale_palette:
     ; Port 0x3C8 = palette index write
