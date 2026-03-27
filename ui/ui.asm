@@ -1,10 +1,3 @@
-; ============================================================
-; ui/ui.asm  —  Generic UI component system
-; ============================================================
-; Provides: buttons, menu bar, dropdown menus, labels
-; All components are defined as data records — one draw
-; function handles everything. No per-button code needed.
-;
 ; BUTTON RECORD FORMAT (12 bytes each):
 ;   dw  x, y, width, height   ; position and size
 ;   dw  label                 ; pointer to null-terminated string
@@ -29,19 +22,17 @@
 ;   db  item_count            ; number of items
 ;   db  x                     ; X position in menu bar (set by init_menubar)
 ;   dw  _reserved
-; ============================================================
 
-UI_BUTTON_SIZE  equ 12
-UI_LABEL_SIZE   equ 9
+UI_BUTTON_SIZE   equ 12
+UI_LABEL_SIZE    equ 8
 UI_MENUITEM_SIZE equ 5
-UI_MENU_SIZE    equ 8
+UI_MENU_SIZE     equ 7
 
-MENUBAR_HEIGHT  equ 12
-MENUBAR_COLOR   equ 0xFF    ; white
-MENUBAR_TEXT    equ 0x00    ; black
+MENUBAR_HEIGHT   equ 12
+MENUBAR_COLOR    equ 0xFF
+MENUBAR_TEXT     equ 0x00
 
-; ── draw_buttons ──────────────────────────────────────────
-; Draw all buttons in a table.
+; Draw buttons
 ; si = pointer to button table
 ; cx = number of buttons
 draw_buttons:
@@ -56,7 +47,6 @@ draw_buttons:
     push cx
     push si
 
-    ; Read record fields
     mov ax, [si+2]      ; Y
     mov bx, [si+0]      ; X
     mov dx, [si+4]      ; width
@@ -65,13 +55,11 @@ draw_buttons:
     mov cl, [si+10]     ; bg_color
     pop di
 
-    ; Draw button background
     push si
     mov si, di          ; si = height
     call drawrect_fast
     pop si
 
-    ; Draw button border (outline) — draw 1px darker rect around it
     mov ax, [si+2]
     mov bx, [si+0]
     mov dx, [si+4]
@@ -81,20 +69,19 @@ draw_buttons:
     call draw_rect_outline
     pop si
 
-    ; Draw button label centered
+    ; Draw button centered
     mov di, [si+8]      ; label pointer
     test di, di
     jz .no_label
 
-    ; Simple centering: X + 4, Y + 2 (good enough for small labels)
     mov bx, [si+0]
     add bx, 4
     mov ax, [si+2]
     add ax, 2
     mov [si_save], si
     mov si, di
-    mov cl, 0x00        ; black text
-    mov ch, 1           ; small font
+    mov cl, 0x00
+    mov ch, 1
     call draw_string
     mov si, [si_save]
 
@@ -114,8 +101,7 @@ draw_buttons:
     pop ax
     ret
 
-; ── hit_test_buttons ──────────────────────────────────────
-; Check if mouse click landed on any button.
+; Check if mouse click on button
 ; si = pointer to button table
 ; cx = number of buttons
 ; Returns: al = button ID if hit (1-255), or 0 if no hit
@@ -129,7 +115,7 @@ hit_test_buttons:
     mov dx, [mouse_y]   ; current mouse Y
 
 .loop:
-    ; Check X bounds: mouse_x >= btn.x AND mouse_x < btn.x + btn.width
+    ; Check X bounds
     mov ax, [si+0]      ; btn.x
     cmp bx, ax
     jl .miss
@@ -147,7 +133,6 @@ hit_test_buttons:
     cmp dx, ax
     jge .miss
 
-    ; Hit!
     mov al, [si+11]     ; return button ID
     jmp .done
 
@@ -156,10 +141,7 @@ hit_test_buttons:
     dec cx
     jnz .loop
 
-    xor al, al          ; no hit — return 0
-
-.no_hit:
-    mov al, 0xFF
+    xor al, al          ; no hit
 
 .done:
     pop si
@@ -168,8 +150,7 @@ hit_test_buttons:
     pop bx
     ret
 
-; ── draw_labels ───────────────────────────────────────────
-; Draw all labels in a table.
+; Draw labels in table
 ; si = pointer to label table
 ; cx = number of labels
 draw_labels:
@@ -206,70 +187,67 @@ draw_labels:
     pop ax
     ret
 
-; ── draw_menubar ──────────────────────────────────────────
-; Draw the menu bar and all menu titles.
+; Draw menubar and menus
 ; si = pointer to menu table
 ; cx = number of menus
 draw_menubar:
+    push ds
+    push es
     push ax
     push bx
     push cx
     push dx
     push si
+    push di
 
-    ; Draw the white bar across the top
     xor ax, ax
-    xor bx, bx
-    mov dx, 320
+    mov ds, ax
+
+    xor ax, ax          ; Y = 0
+    xor bx, bx          ; X = 0
+    mov dx, 320         ; Width
     mov [si_tmp], si
     mov si, MENUBAR_HEIGHT
     mov cl, MENUBAR_COLOR
     call drawrect_fast
 
-    ; Draw bottom border line
     xor bx, bx
     mov ax, MENUBAR_HEIGHT
     mov dx, 320
     mov si, 1
-    mov cl, 0x00
+    mov cl, 0x00        ; Black
     call drawrect_fast
 
-    ; Draw each menu title
-    mov si, [si_tmp]
-    mov bx, 4           ; starting X for first menu title
+    mov si, [si_tmp]    ; Restore menu table pointer
+    mov bx, 6           ; Starting X for first menu
 
 .menu_loop:
-    push cx
+    push cx             ; number of menus left
     push si
-    push bx
 
-    mov di, [si+0]      ; menu label pointer
-    mov ax, 2           ; Y = 2 (centered in 12px bar)
+    mov di, [si+0]
+
+    mov ax, 2           ; Y = 2
     mov cl, MENUBAR_TEXT
-    mov ch, 1           ; small font
+    mov ch, 1
 
     push si
     mov si, di
     call draw_string
     pop si
 
-    ; Store the X position in the menu record for hit testing
     mov ax, bx
-    mov [si+5], al      ; store X (byte — assumes X < 256, fine for menu bar)
+    mov [si+4], al      ; Store X start
 
-    ; Advance X: measure title width (5px per char * strlen + 8px padding)
     mov di, [si+0]
-    call strlen_di      ; returns length in cx
-    push cx
-    mov ax, cx
-    mov cl, 5
-    mul cl              ; ax = strlen * 5
-    add ax, 8           ; padding
-    pop cx
+    call strlen_di      ; returns length in CX
+
+    mov ax, cx          ; CX = string length
+    mov dl, 5
+    mul dl              ; AX = length * 5
+    add ax, 10          ; padding
     add bx, ax
 
-    pop [bx_tmp]
-    ; bx_tmp held old bx — we already updated bx above
     pop si
     pop cx
 
@@ -277,38 +255,38 @@ draw_menubar:
     dec cx
     jnz .menu_loop
 
+    pop di
     pop si
     pop dx
     pop cx
     pop bx
     pop ax
+    pop es
+    pop ds
     ret
 
-; ── hit_test_menubar ──────────────────────────────────────
-; Returns index (0-based) of menu title clicked, or 0xFF if none.
+; Returns index of menu title clicked, or 0xFF if none
 ; si = pointer to menu table
 ; cx = number of menus
 hit_test_menubar:
     push bx
     push cx
+    push dx
     push si
 
-    ; Only trigger if click is in the menu bar Y range
     mov ax, [mouse_y]
     cmp ax, MENUBAR_HEIGHT
     jge .no_hit
 
     mov bx, [mouse_x]
-    xor dx, dx          ; menu index counter
+    xor dx, dx
 
 .loop:
-    ; Each menu stored its X at [si+5]
-    xor ah, ah
-    mov al, [si+5]      ; menu X start
+    xor ax, ax
+    mov al, [si+4]
     cmp bx, ax
     jl .miss
 
-    ; Compute end X = start + strlen*5 + 8
     mov di, [si+0]
     call strlen_di
     push cx
@@ -317,13 +295,17 @@ hit_test_menubar:
     mul cl
     add ax, 8
     pop cx
-    xor ah, ah
-    mov ah, 0
-    add ax, [si+5]      ; end X
+
+    push dx
+    xor dx, dx
+    mov dl, [si+4]
+    add ax, dx
+    pop dx
+
     cmp bx, ax
     jge .miss
 
-    mov al, dl          ; return menu index
+    mov al, dl
     jmp .done
 
 .miss:
@@ -332,19 +314,17 @@ hit_test_menubar:
     dec cx
     jnz .loop
 
-    mov al, 0xFF
-
 .no_hit:
     mov al, 0xFF
 
 .done:
     pop si
+    pop dx
     pop cx
     pop bx
     ret
 
-; ── draw_dropdown ─────────────────────────────────────────
-; Draw a dropdown menu for a given menu record.
+; Draw a dropdown menu for a given menu record
 ; si = pointer to single menu record
 ; bx = X position to draw at
 draw_dropdown:
@@ -355,7 +335,7 @@ draw_dropdown:
     push si
 
     ; Count items and compute height
-    mov cl, [si+4]          ; item_count
+    mov cl, [si+4]
     xor ch, ch
     mov ax, cx
     mov dl, 9
@@ -365,8 +345,8 @@ draw_dropdown:
 
     ; Draw background
     mov ax, MENUBAR_HEIGHT
-    inc ax                  ; just below menu bar
-    mov dx, 80              ; dropdown width
+    inc ax
+    mov dx, 80
     mov [si_tmp2], si
     push ax
     mov si, [dropdown_height]
@@ -382,10 +362,9 @@ draw_dropdown:
     mov cl, 0x00
     call draw_rect_outline
 
-    ; Draw items
     mov si, [si_tmp2]
-    mov di, [si+2]          ; items pointer
-    mov cl, [si+4]          ; item_count
+    mov di, [si+2]
+    mov cl, [si+4]
     xor ch, ch
 
     mov ax, MENUBAR_HEIGHT
@@ -396,7 +375,6 @@ draw_dropdown:
     push di
     push ax
 
-    ; Draw separator if needed
     cmp byte [di+4], 1
     jne .no_sep
     push ax
@@ -409,7 +387,6 @@ draw_dropdown:
     pop ax
 
 .no_sep:
-    ; Check enabled state
     mov cl, 0x00            ; black text = enabled
     cmp byte [di+3], 0
     jne .draw_item
@@ -419,8 +396,8 @@ draw_dropdown:
     push bx
     add bx, 4               ; indent text
     push si
-    mov si, [di+0]          ; item label pointer
-    mov ch, 1               ; small font
+    mov si, [di+0]
+    mov ch, 1
     call draw_string
     pop si
     pop bx
@@ -441,8 +418,7 @@ draw_dropdown:
     pop ax
     ret
 
-; ── hit_test_dropdown ─────────────────────────────────────
-; Returns item ID clicked in open dropdown, or 0 if none.
+; Returns item ID clicked in open dropdown, or 0 if none
 ; si = pointer to single menu record
 ; bx = X of dropdown
 hit_test_dropdown:
@@ -450,7 +426,7 @@ hit_test_dropdown:
     push cx
     push si
 
-    ; Check X bounds (dropdown is 80px wide)
+    ; Check X bounds
     mov ax, [mouse_x]
     cmp ax, bx
     jl .no_hit
@@ -458,7 +434,7 @@ hit_test_dropdown:
     cmp ax, bx
     jge .no_hit
 
-    ; Check Y — find which row was clicked
+    ; Check Y
     mov ax, [mouse_y]
     sub ax, MENUBAR_HEIGHT
     sub ax, 4
@@ -467,7 +443,7 @@ hit_test_dropdown:
     ; row = (mouse_y - MENUBAR_HEIGHT - 4) / 9
     xor dx, dx
     mov cx, 9
-    div cx                  ; ax = row index, dx = remainder
+    div cx
 
     ; Validate row index < item_count
     xor ch, ch
@@ -477,12 +453,11 @@ hit_test_dropdown:
 
     ; Get item at that index
     mov cx, ax
-    mov si, [si+2]          ; items pointer
+    mov si, [si+2]
     mov dx, UI_MENUITEM_SIZE
     mul dx                  ; offset = row * item_size
     add si, ax
 
-    ; Check enabled
     cmp byte [si+3], 0
     je .no_hit
 
@@ -498,15 +473,14 @@ hit_test_dropdown:
     pop bx
     ret
 
-; ── draw_rect_outline ─────────────────────────────────────
-; Draw a 1px border around a rect without filling it.
+; Draw border
 ; ax=Y, bx=X, dx=Width, si=Height, cl=Color
 draw_rect_outline:
     push ax
     push bx
+    push cx
     push dx
     push si
-    push cx
 
     ; Top edge
     push si
@@ -517,8 +491,7 @@ draw_rect_outline:
     ; Bottom edge
     push ax
     push si
-    mov ax, [esp+2]
-    add ax, si
+    add ax, si      ; Add height to Y
     dec ax
     mov si, 1
     call drawrect_fast
@@ -534,22 +507,21 @@ draw_rect_outline:
     ; Right edge
     push bx
     push dx
-    add bx, dx
+    add bx, dx      ; Add width to X
     dec bx
     mov dx, 1
     call drawrect_fast
     pop dx
     pop bx
 
-    pop cx
     pop si
     pop dx
+    pop cx
     pop bx
     pop ax
     ret
 
-; ── strlen_di ─────────────────────────────────────────────
-; Returns length of null-terminated string at di, in cx.
+; length of string at di, in cx.
 strlen_di:
     push di
     xor cx, cx
@@ -563,9 +535,7 @@ strlen_di:
     pop di
     ret
 
-; ── Scratch variables ─────────────────────────────────────
 si_save         dw 0
 si_tmp          dw 0
 si_tmp2         dw 0
-bx_tmp          dw 0
 dropdown_height dw 0

@@ -21,7 +21,7 @@ start:
     mov bx, 0x8000      ; ES:BX = 0x0000:0x8000
 
     mov ah, 0x02        ; BIOS read sector function
-    mov al, 10           ; Number of sectors
+    mov al, 20           ; Number of sectors
     mov ch, 0           ; Cylinder 0
     mov dh, 0           ; Head 0
     mov cl, 2           ; Sector 2
