@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "lib/utils.h"
 #include "lib/types.h"
 
 void blit(void) {

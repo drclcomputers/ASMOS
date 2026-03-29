@@ -3,6 +3,7 @@
 
 #include "lib/types.h"
 #include "lib/utils.h"
+#include "config/config.h"
 
 typedef struct {
     int x, y;
@@ -18,5 +19,6 @@ extern mousevar mouse;
 
 void mouse_init(void);
 void mouse_update(void);
+void mouse_process_byte(uint8_t raw);
 
 #endif

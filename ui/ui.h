@@ -2,5 +2,6 @@
 #define UI_H
 
 #include "ui/window.h"
+#include "ui/cursor.h"
 
 #endif

@@ -1,11 +1,6 @@
 #include "io/keyboard.h"
-#include "lib/utils.h"
-
-#include "io/keyboard.h"
 #include "lib/io.h"
 
-#define PS2_DATA   0x60
-#define PS2_STATUS 0x64
 #define KEY_RELEASE 0x80
 
 keyboardvar kb = { 0, 0, 0, 0, 0, 0, 0 };
@@ -48,44 +43,49 @@ static const char upper[128] = {
   0,   0,   0,   0,   0,   0,   0,   0,
 };
 
+static bool extended = false;
+
 void kb_init(void) {
-    while (inb(PS2_STATUS) & 0x01)
-        inb(PS2_DATA);
+    while (inb(0x64) & 0x01)
+        inb(0x60);
 }
 
+// call once per frame BEFORE ps2_poll_all to reset per-frame flags
 void kb_update(void) {
     kb.last_char     = 0;
     kb.last_scancode = 0;
     kb.key_pressed   = false;
+}
 
-    if (!(inb(PS2_STATUS) & 0x01))
+void kb_process_byte(uint8_t raw) {
+    if (raw == 0xE0) {
+        extended = true;
         return;
-
-    uint8_t raw = inb(PS2_DATA);
-
-    if (raw == 0xE0)
-        return;
+    }
 
     bool released = (raw & KEY_RELEASE) != 0;
     uint8_t sc    = raw & ~KEY_RELEASE;
 
+    bool ext  = extended;
+    extended  = false;
+
+    if (ext) return;
+
     if (sc == LSHIFT || sc == RSHIFT) { kb.shift   = !released; return; }
-    if (sc == LCTRL)                      { kb.ctrl    = !released; return; }
-    if (sc == LALT)                       { kb.alt     = !released; return; }
+    if (sc == LCTRL)                  { kb.ctrl    = !released; return; }
+    if (sc == LALT)                   { kb.alt     = !released; return; }
 
     if (sc == CAPSLOCK && !released) {
         kb.capslock = !kb.capslock;
         return;
     }
 
-    if (released)
-        return;
+    if (released) return;
 
     kb.last_scancode = sc;
     kb.key_pressed   = true;
 
     bool use_upper = kb.shift ^ kb.capslock;
-
     if (sc < 128)
         kb.last_char = use_upper ? upper[sc] : lower[sc];
 }

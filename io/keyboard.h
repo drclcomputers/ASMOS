@@ -41,5 +41,6 @@ extern keyboardvar kb;
 
 void kb_init(void);
 void kb_update(void);
+void kb_process_byte(uint8_t raw);
 
 #endif

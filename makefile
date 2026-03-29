@@ -7,7 +7,11 @@ LDFLAGS = -m elf_i386 -Ttext 0x8000 --oformat binary
 
 BUILD_DIR = make
 
-OBJ = $(BUILD_DIR)/fonts/fonts.o \
+OBJ = $(BUILD_DIR)/loader.o \
+	  $(BUILD_DIR)/kernel.o \
+	  $(BUILD_DIR)/config/config.o \
+	  $(BUILD_DIR)/fonts/fonts.o \
+	  $(BUILD_DIR)/io/ps2.o \
 	  $(BUILD_DIR)/io/mouse.o \
       $(BUILD_DIR)/io/keyboard.o \
 	  $(BUILD_DIR)/lib/io.o \
@@ -17,10 +21,9 @@ OBJ = $(BUILD_DIR)/fonts/fonts.o \
 	  $(BUILD_DIR)/lib/string.o \
 	  $(BUILD_DIR)/lib/types.o \
 	  $(BUILD_DIR)/lib/utils.o \
+	  $(BUILD_DIR)/ui/cursor.o \
 	  $(BUILD_DIR)/ui/ui.o \
-	  $(BUILD_DIR)/ui/window.o \
-	  $(BUILD_DIR)/kernel.o \
-	  $(BUILD_DIR)/loader.o
+	  $(BUILD_DIR)/ui/window.o
 
 all: os_image.bin
 
