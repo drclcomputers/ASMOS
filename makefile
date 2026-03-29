@@ -21,6 +21,7 @@ OBJ = $(BUILD_DIR)/loader.o \
 	  $(BUILD_DIR)/lib/string.o \
 	  $(BUILD_DIR)/lib/types.o \
 	  $(BUILD_DIR)/lib/utils.o \
+	  $(BUILD_DIR)/ui/menubar.o \
 	  $(BUILD_DIR)/ui/cursor.o \
 	  $(BUILD_DIR)/ui/ui.o \
 	  $(BUILD_DIR)/ui/widgets.o \
