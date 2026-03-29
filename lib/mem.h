@@ -1,7 +1,6 @@
 #ifndef MEM_H
 #define MEM_H
 
-#include "lib/mem.h"
 #include "lib/types.h"
 
 void* memset(void* dst, int c, size_t n);

@@ -1,6 +1,7 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include "lib/io.h"
 #include "lib/math.h"
 #include "lib/mem.h"
 #include "lib/primitive_graphics.h"
@@ -8,10 +9,9 @@
 #include "lib/types.h"
 
 // Manage Screen
-void clear_screen_fast(unsigned char color);
+#define BACKBUF ((uint8_t*)0x100000)
+void blit(void);
+void clear_screen(unsigned char color);
 void delay(int count);
-
-// IO
-void outb(unsigned short port, unsigned char val);
 
 #endif

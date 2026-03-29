@@ -1,9 +1,12 @@
 #include "lib/primitive_graphics.h"
 #include "lib/math.h"
 #include "fonts/fonts.h"
+#include "lib/types.h"
+#include "lib/mem.h"
+#include "lib/utils.h"
 
 void draw_dot(int x, int y, unsigned char color) {
-    unsigned char* vga = (unsigned char*)0xA0000;
+    unsigned char* vga = BACKBUF;
     vga[y * 320 + x] = color;
 }
 
@@ -30,11 +33,17 @@ void draw_line(int x0, int y0, int x1, int y1, unsigned char color) {
     }
 }
 
-void draw_rectangle(int x, int y, int w, int h, unsigned char color){
+void draw_rect(int x, int y, int w, int h, unsigned char color) {
 	draw_line(x, y, x+w, y, color);
 	draw_line(x, y, x, y+h, color);
 	draw_line(x, y+h, x+w, y+h, color);
 	draw_line(x+w, y, x+w, y+h, color);
+}
+
+void fill_rect(int x, int y, int w, int h, unsigned char color) {
+    uint8_t* vga = (uint8_t*)0xA0000;
+    for (int row = y; row < y + h; row++)
+        memset(vga + row * 320 + x, color, w);
 }
 
 void draw_char(int x, int y, char c, unsigned char color, int size) { // 1 -  big, else small
@@ -58,6 +67,7 @@ void draw_char(int x, int y, char c, unsigned char color, int size) { // 1 -  bi
 
 void draw_string(int x, int y, char* str, unsigned char color, int size) {
     for (int i = 0; str[i] != '\0'; i++) {
-        draw_char(x + (i * 8), y, str[i], color, size);
+    	int s = (size == 1) ? 8 : 5;
+        draw_char(x + (i * s), y, str[i], color, size);
     }
 }

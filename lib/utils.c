@@ -1,13 +1,18 @@
 #include "utils.h"
 #include "lib/types.h"
 
-void clear_screen_fast(uint8_t color) {
-    uint8_t* video_mem = (uint8_t*)0xA0000;
-    uint32_t screen_size = 320 * 200;
+void blit(void) {
+    uint32_t* src = (uint32_t*)0x100000;
+    uint32_t* dst = (uint32_t*)0xA0000;
+    for (int i = 0; i < 320*200/4; i++)
+        dst[i] = src[i];
+}
 
-    for (uint32_t i = 0; i < screen_size; i++) {
-        video_mem[i] = color;
-    }
+void clear_screen(uint8_t color) {
+    uint32_t* vga = (uint32_t*)0xA0000;
+    uint32_t val = color | (color << 8) | (color << 16) | (color << 24);
+    for (uint32_t i = 0; i < 320 * 200 / 4; i++)
+        vga[i] = val;
 }
 
 void delay(int count) {
@@ -15,14 +20,4 @@ void delay(int count) {
     for (i = 0; i < count; i++) {
         __asm__("nop");
     }
-}
-
-unsigned char inb(unsigned short port) {
-    unsigned char ret;
-    asm volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
-    return ret;
-}
-
-void outb(unsigned short port, unsigned char val) {
-    asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }

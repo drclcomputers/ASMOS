@@ -15,12 +15,15 @@ OBJ = $(BUILD_DIR)/loader.o \
 	  $(BUILD_DIR)/lib/mem.o \
 	  $(BUILD_DIR)/lib/string.o \
 	  $(BUILD_DIR)/lib/math.o \
+	  $(BUILD_DIR)/lib/io.o \
 	  $(BUILD_DIR)/fonts/fonts.o \
       $(BUILD_DIR)/io/mouse.o \
-      $(BUILD_DIR)/io/keyboard.o
+      $(BUILD_DIR)/io/keyboard.o \
+	  $(BUILD_DIR)/ui/window.o \
+	  $(BUILD_DIR)/ui/ui.o
+
 
 all: os_image.bin
-	 @rm boot.bin kernel.bin
 
 kernel.bin: $(OBJ)
 	$(LD) $(LDFLAGS) -o $@ $^
