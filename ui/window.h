@@ -34,6 +34,7 @@ extern int     win_count;
 void window_draw(window *win);
 bool window_update(window *win);
 void window_add_widget(window *win, widget wg);
+void window_dragged(window *win);
 
 void wm_register(window *win);
 void wm_unregister(window *win);

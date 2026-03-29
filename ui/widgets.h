@@ -8,7 +8,6 @@
 #define MAX_DROP_ITEMS  8
 
 typedef struct widget widget;
-
 typedef bool (*WidgetCallback)(widget *wg);
 
 typedef enum {
@@ -21,7 +20,7 @@ typedef enum {
 } widget_type;
 
 typedef struct {
-    char            *label;
+    char           *label;
     WidgetCallback  on_click;
 } widget_button;
 
@@ -44,10 +43,10 @@ typedef struct {
 } widget_textbox;
 
 typedef struct {
-    char *items[MAX_DROP_ITEMS];
-    int   item_count;
-    int   selected;             // -1 - nothing selected
-    bool  open;
+    char          *items[MAX_DROP_ITEMS];
+    int            item_count;
+    int            selected;        // -1 = nothing selected
+    bool           open;
     WidgetCallback on_select;
 } widget_dropdown;
 
@@ -59,10 +58,11 @@ typedef struct {
 } widget_menu;
 
 struct widget {
-    widget_type type;
-    int x, y;
-    int w, h;
-    unsigned char bg_color, fg_color, border_color;
+    widget_type   type;
+    int           x, y, w, h;
+    unsigned char bg_color;
+    unsigned char fg_color;
+    unsigned char border_color;
 
     union {
         widget_button   button;
@@ -74,52 +74,69 @@ struct widget {
     } as;
 };
 
-static inline widget make_button(int x, int y, int w, int h, unsigned char bg_color, unsigned char fg_color, unsigned char border_color, char *label, WidgetCallback on_click) {
+static inline widget make_button(int x, int y, int w, int h,
+                                  char *label,
+                                  unsigned char bg, unsigned char fg,
+                                  unsigned char border,
+                                  WidgetCallback on_click) {
     widget wg = {0};
     wg.type = WIDGET_BUTTON;
     wg.x = x; wg.y = y; wg.w = w; wg.h = h;
+    wg.bg_color = bg; wg.fg_color = fg; wg.border_color = border;
     wg.as.button.label    = label;
     wg.as.button.on_click = on_click;
     return wg;
 }
 
-static inline widget make_label(int x, int y, char *text, unsigned char bg_color, unsigned char fg_color, unsigned char border_color, int font_size) {
+static inline widget make_label(int x, int y, char *text,
+                                 unsigned char color, int font_size) {
     widget wg = {0};
     wg.type = WIDGET_LABEL;
     wg.x = x; wg.y = y;
-    wg.w = 0; wg.h = 0;
+    wg.fg_color           = color;
     wg.as.label.text      = text;
     wg.as.label.color     = color;
     wg.as.label.font_size = font_size;
     return wg;
 }
 
-static inline widget make_checkbox(int x, int y, char *label, unsigned char bg_color, unsigned char fg_color, unsigned char border_color, bool checked, WidgetCallback on_change) {
+static inline widget make_checkbox(int x, int y, char *label,
+                                    unsigned char bg, unsigned char fg, unsigned char border,
+                                    bool checked, WidgetCallback on_change) {
     widget wg = {0};
     wg.type = WIDGET_CHECKBOX;
     wg.x = x; wg.y = y; wg.w = 10; wg.h = 10;
+    wg.bg_color = bg; wg.fg_color = fg; wg.border_color = border;
     wg.as.checkbox.label     = label;
     wg.as.checkbox.checked   = checked;
     wg.as.checkbox.on_change = on_change;
     return wg;
 }
 
-static inline widget make_textbox(int x, int y, int w, int h, unsigned char bg_color, unsigned char fg_color, unsigned char border_color) {
+static inline widget make_textbox(int x, int y, int w, int h,
+                                   unsigned char bg, unsigned char fg,
+                                   unsigned char border) {
     widget wg = {0};
     wg.type = WIDGET_TEXTBOX;
     wg.x = x; wg.y = y; wg.w = w; wg.h = h;
+    wg.bg_color = bg; wg.fg_color = fg; wg.border_color = border;
     return wg;
 }
 
 static inline widget make_dropdown(int x, int y, int w, int h,
-unsigned char bg_color, unsigned char fg_color, unsigned char border_color, char **items, int count, WidgetCallback on_select) {
+                                    unsigned char bg, unsigned char fg,
+                                    unsigned char border,
+                                    char **items, int count,
+                                    WidgetCallback on_select) {
     widget wg = {0};
     wg.type = WIDGET_DROPDOWN;
     wg.x = x; wg.y = y; wg.w = w; wg.h = h;
-    wg.as.dropdown.item_count = count < MAX_DROP_ITEMS ? count : MAX_DROP_ITEMS;
+    wg.bg_color = bg; wg.fg_color = fg; wg.border_color = border;
+    int n = count < MAX_DROP_ITEMS ? count : MAX_DROP_ITEMS;
+    wg.as.dropdown.item_count = n;
     wg.as.dropdown.selected   = -1;
     wg.as.dropdown.on_select  = on_select;
-    for (int i = 0; i < wg.as.dropdown.item_count; i++)
+    for (int i = 0; i < n; i++)
         wg.as.dropdown.items[i] = items[i];
     return wg;
 }

@@ -21,10 +21,6 @@ static bool in_titlebar(window *win, int mx, int my) {
            my >= win->y && my < win->y + 16;
 }
 
-static widget make_close_btn(window *win) {
-    return make_button(3, -7, 10, 10, "X", 0xCC, win->on_close);
- }
-
 static void draw_titlebar_btn(int ax, int ay, int w, int h,
                                char *label, unsigned char bg) {
     fill_rect(ax, ay, w, h, bg);
@@ -88,11 +84,9 @@ void wm_draw_all(void) {
 
 void wm_update_all(void) {
     bool click_consumed = false;
-
     for (int i = win_count - 1; i >= 0; i--) {
         window *win = win_stack[i];
         if (!win->visible) continue;
-
         if (win->minimized) {
             int taskbar_x = 0;
             for (int j = 0; j < i; j++)
@@ -109,13 +103,11 @@ void wm_update_all(void) {
             }
             continue;
         }
-
         if (!click_consumed && mouse.left_clicked &&
             in_titlebar(win, mouse.x, mouse.y)) {
             wm_focus(win);
             click_consumed = true;
         }
-
         if (i == win_count - 1)
             window_update(win);
     }
@@ -123,54 +115,52 @@ void wm_update_all(void) {
 
 void window_draw(window *win) {
     if (!win->visible || win->minimized) return;
-
-    // Title bar
     fill_rect(win->x, win->y, win->w, 16, win->bar_color);
-
-    // Close button (X) at x+3, y+3
     draw_titlebar_btn(win->x + 3,  win->y + 3, 10, 10, "X", 0xCC);
-    // Minimize button (_) at x+16, y+3
     draw_titlebar_btn(win->x + 16, win->y + 3, 10, 10, "_", 0xA0);
-
-    // Centered title text
     int tx = win->x + win->w / 2 - (int)(strlen(win->title) * 2);
     draw_string(tx, win->y + 6, win->title, win->title_color, 2);
-
-    // Content area
     fill_rect(win->x, win->y + 16, win->w, win->h - 16, win->content_color);
-
-    // Border
     draw_rect(win->x, win->y, win->w, win->h, 0x00);
-
-    // Widgets
     for (int i = 0; i < win->widget_count; i++)
         widget_draw(&win->widgets[i], win->x, win->y);
 }
 
 bool window_update(window *win) {
     if (!win->visible || win->minimized) return false;
-
-    // Close button
     if (click_titlebar_btn(win->x + 3, win->y + 3, 10, 10)) {
         if (win->on_close) win->on_close(NULL);
         else win->visible = false;
         return false;
     }
-
-    // Minimize button
     if (click_titlebar_btn(win->x + 16, win->y + 3, 10, 10)) {
         if (win->on_minimize) win->on_minimize(NULL);
         else win->minimized = true;
         return true;
     }
-
+    window_dragged(win);
     for (int i = 0; i < win->widget_count; i++)
         widget_update(&win->widgets[i], win->x, win->y);
-
     return true;
 }
 
 void window_add_widget(window *win, widget wg) {
     if (win->widget_count >= MAX_WIN_WIDGETS) return;
     win->widgets[win->widget_count++] = wg;
+}
+
+void window_dragged(window *win) {
+    if (mouse.left && in_titlebar(win, mouse.x, mouse.y)) {
+        win->x += mouse.dx;
+        win->y += mouse.dy;
+
+        if (win->x <= 0)
+            win->x = 0;
+        if (win->y <= 0)
+            win->y = 0;
+        if (win->x + win->w >= SCREEN_WIDTH)
+            win->x = SCREEN_WIDTH - win->w;
+        if (win->y + win->h >= SCREEN_HEIGHT)
+            win->y = SCREEN_HEIGHT - win->h;
+    }
 }
