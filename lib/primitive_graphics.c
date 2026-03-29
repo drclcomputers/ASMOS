@@ -34,16 +34,16 @@ void draw_line(int x0, int y0, int x1, int y1, unsigned char color) {
 }
 
 void draw_rect(int x, int y, int w, int h, unsigned char color) {
-	draw_line(x, y, x+w, y, color);
-	draw_line(x, y, x, y+h, color);
-	draw_line(x, y+h, x+w, y+h, color);
-	draw_line(x+w, y, x+w, y+h, color);
+	draw_line(x, y, x+w-1, y, color);
+	draw_line(x, y, x, y+h-1, color);
+	draw_line(x, y+h-1, x+w-1, y+h-1, color);
+	draw_line(x+w-1, y, x+w-1, y+h-1, color);
 }
 
 void fill_rect(int x, int y, int w, int h, unsigned char color) {
-    uint8_t* vga = (uint8_t*)0xA0000;
+    uint8_t* buf = BACKBUF;
     for (int row = y; row < y + h; row++)
-        memset(vga + row * 320 + x, color, w);
+        memset(buf + row * 320 + x, color, w);
 }
 
 void draw_char(int x, int y, char c, unsigned char color, int size) { // 1 -  big, else small

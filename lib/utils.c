@@ -9,10 +9,10 @@ void blit(void) {
 }
 
 void clear_screen(uint8_t color) {
-    uint32_t* vga = (uint32_t*)0xA0000;
+    uint32_t* buf = (uint32_t*)BACKBUF;
     uint32_t val = color | (color << 8) | (color << 16) | (color << 24);
     for (uint32_t i = 0; i < 320 * 200 / 4; i++)
-        vga[i] = val;
+        buf[i] = val;
 }
 
 void delay(int count) {
