@@ -1,4 +1,4 @@
-#include "cursor.h"
+#include "ui/cursor.h"
 #include "lib/primitive_graphics.h"
 #include "lib/types.h"
 
@@ -14,8 +14,8 @@ static const uint8_t cursor_shape[8] = {
 };
 
 void draw_cursor(int x, int y) {
-    for (int row = 0; row < 11; row++) {
-        for (int col = 0; col < 16; col++) {
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 8; col++) {
             if (cursor_shape[row] & (1 << (10 - col))) {
                 int px = x + col;
                 int py = y + row;

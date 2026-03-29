@@ -2,7 +2,6 @@
 #include "io/keyboard.h"
 #include "io/mouse.h"
 #include "lib/io.h"
-#include "mouse.h"
 
 void ps2_init(void) {
 	mouse_init();
@@ -11,7 +10,7 @@ void ps2_init(void) {
 
 void ps2_update(void) {
 	kb_update();
-	mouse_init();
+	mouse_update();
     while (1) {
         unsigned char status = inb(PS2_STATUS);
         if (!(status & 0x01)) break;

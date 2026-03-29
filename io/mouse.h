@@ -2,8 +2,6 @@
 #define MOUSE_H
 
 #include "lib/types.h"
-#include "lib/utils.h"
-#include "config/config.h"
 
 typedef struct {
     int x, y;

@@ -23,6 +23,7 @@ OBJ = $(BUILD_DIR)/loader.o \
 	  $(BUILD_DIR)/lib/utils.o \
 	  $(BUILD_DIR)/ui/cursor.o \
 	  $(BUILD_DIR)/ui/ui.o \
+	  $(BUILD_DIR)/ui/widgets.o \
 	  $(BUILD_DIR)/ui/window.o
 
 all: os_image.bin

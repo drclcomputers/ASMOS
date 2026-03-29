@@ -11,9 +11,10 @@ typedef signed char        int8_t;
 typedef signed short       int16_t;
 typedef signed int         int32_t;
 
-//define bool
 typedef _Bool bool;
 #define true 1
 #define false 0
+
+#define NULL ((void *)0)
 
 #endif
