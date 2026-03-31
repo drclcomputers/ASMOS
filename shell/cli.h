@@ -4,7 +4,6 @@
 #include "lib/types.h"
 
 void cli_run(void);
-
 bool cli_execute_command(const char *cmd);
 
 void cmd_help(void);
@@ -20,6 +19,7 @@ void cmd_mkdir(const char *dirname);
 void cmd_rmdir(const char *dirname);
 void cmd_df(void);
 void cmd_mv(const char *args);
+void cmd_cp(const char *args);
 void cmd_write(const char *args);
 void cmd_echo(const char *text);
 

@@ -9,25 +9,26 @@
 #include "config/config.h"
 
 #define CLI_BUFFER_SIZE 256
-#define CHAR_WIDTH 4
-#define CHAR_HEIGHT 6
-#define CHAR_SPACING 5
+#define CHAR_WIDTH       4
+#define CHAR_HEIGHT      6
+#define CHAR_SPACING     5
 
 typedef struct {
     char buffer[CLI_BUFFER_SIZE];
-    int buffer_pos;
-    int cursor_x;
-    int cursor_y;
-    int line_height;
+    int  buffer_pos;
+    int  cursor_x;
+    int  cursor_y;
+    int  line_height;
 } cli_state_t;
 
 static cli_state_t cli = {
-    .buffer_pos = 0,
-    .cursor_x = 0,
-    .cursor_y = 0,
+    .buffer_pos  = 0,
+    .cursor_x    = 0,
+    .cursor_y    = 0,
     .line_height = 7
 };
 
+//UI
 static void cli_print(const char *str) {
     while (*str) {
         if (*str == '\n') {
@@ -53,23 +54,14 @@ static void cli_print(const char *str) {
 }
 
 static void cli_print_prompt(void) {
+    char pwd[256];
+    if (fat16_pwd(pwd, sizeof(pwd))) {
+        cli_print(pwd);
+    }
     cli_print("> ");
 }
 
-void cmd_help(void) {
-    cli_print("Available commands:\n");
-    cli_print("help   - Show this message\n");
-    cli_print("clear  - Clear screen\n");
-    cli_print("ls     - List files\n");
-    cli_print("cat    - Read file contents\n");
-    cli_print("touch  - Create empty file\n");
-    cli_print("rm     - Delete file\n");
-    cli_print("write  - Write to file\n");
-    cli_print("echo   - Print text\n");
-    cli_print("mv     - Rename file\n");
-    cli_print("gui    - Start the GUI\n");
-    cli_print("exit   - Exit CLI\n\n");
-}
+// Core cmds
 
 void cmd_clear(void) {
     clear_screen(0x00);
@@ -78,11 +70,52 @@ void cmd_clear(void) {
     blit();
 }
 
+void cmd_help(void) {
+    cli_print("Available commands:\n");
+    cli_print("help         - Show this message\n");
+    cli_print("clear        - Clear screen\n");
+    cli_print("pwd          - Print current working directory\n");
+    cli_print("cd <d>       - Change directory\n");
+    cli_print("ls           - List files and dirs\n");
+    cli_print("cat <f>      - Print file contents\n");
+    cli_print("touch <f>    - Create empty file\n");
+    cli_print("rm <f>       - Delete file\n");
+    cli_print("rm -r <d>    - Delete directory recursively\n");
+    cli_print("write <f> t  - Write text to file\n");
+    cli_print("echo <t>     - Print text\n");
+    cli_print("cp <s> <d>   - Copy file or directory\n");
+    cli_print("mv <s> <d>   - Move/rename file or directory\n");
+    cli_print("mkdir <d>    - Create directory\n");
+    cli_print("rmdir <d>    - Remove empty directory\n");
+    cli_print("df           - Show disk usage\n");
+    cli_print("gui          - Start the GUI\n");
+    cli_print("exit         - Exit CLI\n\n");
+}
+
+void cmd_pwd(void) {
+    char pwd[256];
+    if (fat16_pwd(pwd, sizeof(pwd))) {
+        cli_print(pwd);
+        cli_print("\n\n");
+    }
+}
+
+void cmd_cd(const char *path) {
+    if (!path || path[0] == '\0') {
+        cli_print("Usage: cd <path>\n\n");
+        return;
+    }
+    if (!fat16_chdir(path)) {
+        cli_print("Error: directory not found\n\n");
+        return;
+    }
+}
+
 void cmd_ls(void) {
     dir_entry_t entries[32];
     int count = 0;
 
-    if (!fat16_list(entries, 32, &count)) {
+    if (!fat16_list_dir(dir_context.current_cluster, entries, 32, &count)) {
         cli_print("Error listing files\n\n");
         return;
     }
@@ -90,8 +123,8 @@ void cmd_ls(void) {
     cli_print("Files:\n");
     for (int i = 0; i < count; i++) {
         char name_buffer[16];
-
         int j = 0;
+
         for (int k = 0; k < 8 && entries[i].name[k] != ' '; k++) {
             name_buffer[j++] = entries[i].name[k];
         }
@@ -119,10 +152,7 @@ void cmd_ls(void) {
             } else {
                 int temp = size;
                 int digits = 0;
-                while (temp > 0) {
-                    digits++;
-                    temp /= 10;
-                }
+                while (temp > 0) { digits++; temp /= 10; }
                 temp = size;
                 for (int d = 0; d < digits; d++) {
                     size_str[digits - d - 1] = '0' + (temp % 10);
@@ -139,24 +169,21 @@ void cmd_ls(void) {
     cli_print("\n");
 }
 
+// fs
 void cmd_cat(const char *filename) {
     if (!filename || filename[0] == '\0') {
         cli_print("Usage: cat <filename>\n\n");
         return;
     }
 
-    char name83[13];
-    fat16_make_83(filename, name83);
-
     fat16_file_t file;
-    if (!fat16_open(name83, &file)) {
+    if (!fat16_open(filename, &file)) {
         cli_print("Error: file not found\n\n");
         return;
     }
 
     char buffer[512];
     int bytes_read;
-
     while ((bytes_read = fat16_read(&file, buffer, 512)) > 0) {
         for (int i = 0; i < bytes_read; i++) {
             if (buffer[i] == '\n') {
@@ -169,46 +196,6 @@ void cmd_cat(const char *filename) {
     }
 
     fat16_close(&file);
-    cli_print("\n\n");
-}
-
-void cmd_touch(const char *filename) {
-    if (!filename || filename[0] == '\0') {
-        cli_print("Usage: touch <filename>\n\n");
-        return;
-    }
-
-    char name83[13];
-    fat16_make_83(filename, name83);
-
-    fat16_file_t file;
-    if (!fat16_create(name83, &file)) {
-        cli_print("Error: file already exists\n\n");
-        return;
-    }
-
-    fat16_close(&file);
-    cli_print("Created: ");
-    cli_print(filename);
-    cli_print("\n\n");
-}
-
-void cmd_rm(const char *filename) {
-    if (!filename || filename[0] == '\0') {
-        cli_print("Usage: rm <filename>\n\n");
-        return;
-    }
-
-    char name83[13];
-    fat16_make_83(filename, name83);
-
-    if (!fat16_delete(name83)) {
-        cli_print("Error: file not found\n\n");
-        return;
-    }
-
-    cli_print("Deleted: ");
-    cli_print(filename);
     cli_print("\n\n");
 }
 
@@ -236,33 +223,27 @@ void cmd_write(const char *args) {
     filename[fname_len] = '\0';
 
     while (args[i] == ' ') i++;
-
     if (args[i] == '\0') {
         cli_print("Usage: write <file> <text>\n\n");
         return;
     }
 
-    char name83[13];
-    fat16_make_83(filename, name83);
-
     fat16_file_t file;
     dir_entry_t entry;
-    if (fat16_find(name83, &entry)) {
-        if (!fat16_open(name83, &file)) {
+    if (fat16_find(filename, &entry)) {
+        if (!fat16_open(filename, &file)) {
             cli_print("Error: cannot open file\n\n");
             return;
         }
     } else {
-        if (!fat16_create(name83, &file)) {
+        if (!fat16_create(filename, &file)) {
             cli_print("Error: cannot create file\n\n");
             return;
         }
     }
 
     int text_len = 0;
-    while (args[i + text_len] != '\0') {
-        text_len++;
-    }
+    while (args[i + text_len] != '\0') text_len++;
 
     int written = fat16_write(&file, &args[i], text_len);
     fat16_close(&file);
@@ -272,13 +253,9 @@ void cmd_write(const char *args) {
     int temp = written;
     int digits = 0;
     if (temp == 0) {
-        num_str[0] = '0';
-        num_str[1] = '\0';
+        num_str[0] = '0'; num_str[1] = '\0';
     } else {
-        while (temp > 0) {
-            digits++;
-            temp /= 10;
-        }
+        while (temp > 0) { digits++; temp /= 10; }
         temp = written;
         for (int d = 0; d < digits; d++) {
             num_str[digits - d - 1] = '0' + (temp % 10);
@@ -290,20 +267,168 @@ void cmd_write(const char *args) {
     cli_print(" bytes\n\n");
 }
 
-void cmd_echo(const char *text) {
-    if (!text || text[0] == '\0') {
-        cli_print("\n");
+void cmd_touch(const char *filename) {
+    if (!filename || filename[0] == '\0') {
+        cli_print("Usage: touch <filename>\n\n");
         return;
     }
 
-    cli_print(text);
+    fat16_file_t file;
+    if (!fat16_create(filename, &file)) {
+        cli_print("Error: file already exists or invalid path\n\n");
+        return;
+    }
+    fat16_close(&file);
+    cli_print("Created: ");
+    cli_print(filename);
     cli_print("\n\n");
 }
 
-void cmd_df(void) {
-    uint32_t total_bytes = 0;
-    uint32_t used_bytes = 0;
+void cmd_rm(const char *args) {
+    if (!args || args[0] == '\0') {
+        cli_print("Usage: rm [-r] <filename>\n\n");
+        return;
+    }
 
+    if (strncmp(args, "-r ", 3) == 0) {
+        if (!fat16_rm_rf(args + 3)) {
+            cli_print("Error: dir not found or delete failed\n\n");
+            return;
+        }
+        cli_print("Deleted (recursive): ");
+        cli_print(args + 3);
+        cli_print("\n\n");
+    } else {
+        if (!fat16_delete(args)) {
+            cli_print("Error: file not found\n\n");
+            return;
+        }
+        cli_print("Deleted: ");
+        cli_print(args);
+        cli_print("\n\n");
+    }
+}
+
+void cmd_mkdir(const char *dirname) {
+    if (!dirname || dirname[0] == '\0') {
+        cli_print("Usage: mkdir <dirname>\n\n");
+        return;
+    }
+
+    if (!fat16_mkdir(dirname)) {
+        cli_print("Error: could not create '");
+        cli_print(dirname);
+        cli_print("' (may already exist)\n\n");
+        return;
+    }
+
+    cli_print("Created directory: ");
+    cli_print(dirname);
+    cli_print("\n\n");
+}
+
+void cmd_rmdir(const char *dirname) {
+    if (!dirname || dirname[0] == '\0') {
+        cli_print("Usage: rmdir <dirname>\n\n");
+        return;
+    }
+
+    if (!fat16_rmdir(dirname)) {
+        cli_print("Error: '");
+        cli_print(dirname);
+        cli_print("' not found, not a dir, or not empty\n\n");
+        return;
+    }
+    cli_print("Removed directory: ");
+    cli_print(dirname);
+    cli_print("\n\n");
+}
+
+void cmd_cp(const char *args) {
+    if (!args || args[0] == '\0') {
+        cli_print("Usage: cp <src> <dest>\n\n");
+        return;
+    }
+
+    int i = 0;
+    while (args[i] == ' ') i++;
+    int src_start = i;
+    while (args[i] != ' ' && args[i] != '\0') i++;
+    int src_len = i - src_start;
+
+    while (args[i] == ' ') i++;
+    int dest_start = i;
+    while (args[i] != ' ' && args[i] != '\0') i++;
+    int dest_len = i - dest_start;
+
+    if (src_len == 0 || dest_len == 0) {
+        cli_print("Usage: cp <src> <dest>\n\n");
+        return;
+    }
+
+    char src[64], dest[64];
+    if (src_len >= 64) src_len = 63;
+    if (dest_len >= 64) dest_len = 63;
+    memcpy(src, &args[src_start], src_len); src[src_len] = '\0';
+    memcpy(dest, &args[dest_start], dest_len); dest[dest_len] = '\0';
+
+    dir_entry_t entry;
+    if (!fat16_find(src, &entry)) {
+        cli_print("Error: source not found\n\n");
+        return;
+    }
+
+    bool ok = (entry.attr & ATTR_DIRECTORY) ? fat16_copy_dir(src, dest) : fat16_copy_file(src, dest);
+    if (ok) {
+        cli_print("Copied: "); cli_print(src); cli_print(" -> "); cli_print(dest); cli_print("\n\n");
+    } else {
+        cli_print("Error: copy failed\n\n");
+    }
+}
+
+void cmd_mv(const char *args) {
+    if (!args || args[0] == '\0') {
+        cli_print("Usage: mv <src> <dest>\n\n");
+        return;
+    }
+
+    int i = 0;
+    while (args[i] == ' ') i++;
+    int src_start = i;
+    while (args[i] != ' ' && args[i] != '\0') i++;
+    int src_len = i - src_start;
+
+    while (args[i] == ' ') i++;
+    int dest_start = i;
+    while (args[i] != ' ' && args[i] != '\0') i++;
+    int dest_len = i - dest_start;
+
+    if (src_len == 0 || dest_len == 0) {
+        cli_print("Usage: mv <src> <dest>\n\n");
+        return;
+    }
+
+    char src[64], dest[64];
+    memcpy(src, &args[src_start], src_len); src[src_len] = '\0';
+    memcpy(dest, &args[dest_start], dest_len); dest[dest_len] = '\0';
+
+    dir_entry_t entry;
+    if (!fat16_find(src, &entry)) {
+        cli_print("Error: source not found\n\n");
+        return;
+    }
+
+    bool ok = (entry.attr & ATTR_DIRECTORY) ? fat16_move_dir(src, dest) : fat16_move_file(src, dest);
+    if (ok) {
+        cli_print("Moved: "); cli_print(src); cli_print(" -> "); cli_print(dest); cli_print("\n\n");
+    } else {
+        cli_print("Error: move failed\n\n");
+    }
+}
+
+// other
+void cmd_df(void) {
+    uint32_t total_bytes = 0, used_bytes = 0;
     if (!fat16_get_usage(&total_bytes, &used_bytes)) {
         cli_print("Error reading storage info\n\n");
         return;
@@ -314,111 +439,30 @@ void cmd_df(void) {
     uint32_t free_kb = (total_bytes - used_bytes) / 1024;
     char buf[256];
 
-    cli_print("Storage Total: ");
-    cli_print(uint32_to_str(total_kb, buf));
-    cli_print(" KB\n");
-
-    cli_print("Storage Used:  ");
-    cli_print(uint32_to_str(used_kb, buf));
-    cli_print(" KB\n");
-
-    cli_print("Storage Free:  ");
-    cli_print(uint32_to_str(free_kb, buf));
-    cli_print(" KB\n\n");
+    cli_print("Storage Total: "); cli_print(uint32_to_str(total_kb, buf)); cli_print(" KB\n");
+    cli_print("Storage Used:  "); cli_print(uint32_to_str(used_kb, buf));  cli_print(" KB\n");
+    cli_print("Storage Free:  "); cli_print(uint32_to_str(free_kb, buf));  cli_print(" KB\n\n");
 }
 
-
-void cmd_mv(const char *args) {
-    if (!args || args[0] == '\0') {
-        cli_print("Usage: mv <old> <new>\n\n");
-        return;
-    }
-
-    int i = 0;
-    while (args[i] == ' ') i++;
-
-    int old_start = i;
-    while (args[i] != ' ' && args[i] != '\0') i++;
-
-    if (i == old_start) {
-        cli_print("Usage: mv <old> <new>\n\n");
-        return;
-    }
-
-    char old_name[64];
-    int old_len = i - old_start;
-    if (old_len >= 64) old_len = 63;
-    memcpy(old_name, &args[old_start], old_len);
-    old_name[old_len] = '\0';
-
-    while (args[i] == ' ') i++;
-
-    if (args[i] == '\0') {
-        cli_print("Usage: mv <old> <new>\n\n");
-        return;
-    }
-
-    int new_start = i;
-    while (args[i] != ' ' && args[i] != '\0') i++;
-
-    char new_name[64];
-    int new_len = i - new_start;
-    if (new_len >= 64) new_len = 63;
-    memcpy(new_name, &args[new_start], new_len);
-    new_name[new_len] = '\0';
-
-    cli_print("Rename: ");
-    cli_print(old_name);
-    cli_print(" -> ");
-    cli_print(new_name);
-    cli_print("\n");
-    cli_print("(requires FAT16 API extension)\n\n");
+void cmd_echo(const char *text) {
+    if (!text || text[0] == '\0') { cli_print("\n"); return; }
+    cli_print(text); cli_print("\n\n");
 }
 
-void cmd_mkdir(const char *dirname) {
-    if (!dirname || dirname[0] == '\0') {
-        cli_print("Usage: mkdir <dirname>\n\n");
-        return;
-    }
+void cmd_gui(void)  { cli_print("Starting GUI...\n\n"); }
+void cmd_exit(void) { cli_print("Exiting...\n"); }
 
-    cli_print("mkdir not yet implemented\n");
-    cli_print("(requires FAT16 API extension)\n\n");
-}
-
-void cmd_rmdir(const char *dirname) {
-    if (!dirname || dirname[0] == '\0') {
-        cli_print("Usage: rmdir <dirname>\n\n");
-        return;
-    }
-
-    cli_print("rmdir not yet implemented\n");
-    cli_print("(requires FAT16 API extension)\n\n");
-}
-
-void cmd_gui(void) {
-    cli_print("Starting GUI...\n\n");
-}
-
-void cmd_exit(void) {
-    cli_print("Exiting...\n");
-}
-
+//parser
 static void parse_command(const char *input, char *cmd, char *arg) {
-    cmd[0] = '\0';
-    arg[0] = '\0';
-
+    cmd[0] = '\0'; arg[0] = '\0';
     int i = 0;
-
     while (input[i] == ' ') i++;
-
     int cmd_idx = 0;
     while (input[i] != '\0' && input[i] != ' ' && cmd_idx < 63) {
         cmd[cmd_idx++] = input[i++];
     }
     cmd[cmd_idx] = '\0';
-
     while (input[i] == ' ') i++;
-
     int arg_idx = 0;
     while (input[i] != '\0' && arg_idx < 255) {
         arg[arg_idx++] = input[i++];
@@ -428,7 +472,7 @@ static void parse_command(const char *input, char *cmd, char *arg) {
 
 bool cli_execute_command(const char *cmd) {
     char command[64];
-    char argument[256];
+    char argument[1000];
 
     parse_command(cmd, command, argument);
 
@@ -437,6 +481,12 @@ bool cli_execute_command(const char *cmd) {
         return false;
     } else if (strcmp(command, "clear") == 0) {
         cmd_clear();
+        return false;
+    } else if (strcmp(command, "pwd") == 0) {
+        cmd_pwd();
+        return false;
+    } else if (strcmp(command, "cd") == 0) {
+        cmd_cd(argument);
         return false;
     } else if (strcmp(command, "ls") == 0) {
         cmd_ls();
@@ -457,8 +507,11 @@ bool cli_execute_command(const char *cmd) {
         cmd_echo(argument);
         return false;
     } else if (strcmp(command, "df") == 0) {
-    	cmd_df();
-     	return false;
+        cmd_df();
+        return false;
+    } else if (strcmp(command, "cp") == 0) {
+        cmd_cp(argument);
+        return false;
     } else if (strcmp(command, "mv") == 0) {
         cmd_mv(argument);
         return false;
@@ -495,14 +548,10 @@ void cli_run(void) {
 
         while (1) {
             ps2_update();
-
             if (kb.key_pressed) {
                 if (kb.last_scancode == ENTER) {
                     cli_print("\n\n");
-
-                    if (cli_execute_command(cli.buffer)) {
-                        return;
-                    }
+                    if (cli_execute_command(cli.buffer)) return;
                     break;
                 } else if (kb.last_scancode == BACKSPACE) {
                     if (cli.buffer_pos > 0) {
@@ -516,7 +565,6 @@ void cli_run(void) {
                     if (cli.buffer_pos < CLI_BUFFER_SIZE - 1) {
                         cli.buffer[cli.buffer_pos++] = kb.last_char;
                         cli.buffer[cli.buffer_pos] = '\0';
-
                         char c[2] = {kb.last_char, '\0'};
                         cli_print(c);
                     }

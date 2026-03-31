@@ -75,7 +75,7 @@ $(BUILD_DIR):
 
 run: all
 	qemu-system-i386 -drive format=raw,file=os_image.bin \
-	                 -m 32M -machine pc
+	                 -m 4M -machine pc
 
 clean:
 	rm -rf $(BUILD_DIR)
