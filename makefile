@@ -46,6 +46,9 @@ boot.bin: boot.asm
 
 os_image.bin: boot.bin kernel.bin
 	cat boot.bin kernel.bin > os_image.bin
+    dd if=/dev/zero of=os_image.bin bs=512 count=65536 2>/dev/null
+    dd if=boot.bin of=os_image.bin conv=notrunc 2>/dev/null
+    dd if=kernel.bin of=os_image.bin bs=512 seek=1 conv=notrunc 2>/dev/null
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
