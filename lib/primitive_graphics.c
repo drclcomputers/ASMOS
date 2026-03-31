@@ -71,3 +71,23 @@ void draw_string(int x, int y, char* str, unsigned char color, int size) {
         draw_char(x + (i * s), y, str[i], color, size);
     }
 }
+
+void blit(void) {
+    uint32_t* src = (uint32_t*)BACKBUF;
+    uint32_t* dst = (uint32_t*)0xA0000;
+    for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT / 4; i++)
+        dst[i] = src[i];
+}
+
+void clear_screen(unsigned char color) {
+    uint32_t* buf = (uint32_t*)BACKBUF;
+    uint32_t  val = color | (color << 8) | (color << 16) | (color << 24);
+    for (uint32_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT / 4; i++)
+        buf[i] = val;
+}
+
+void delay(int count) {
+    volatile int i;
+    for (i = 0; i < count; i++)
+        __asm__("nop");
+}
