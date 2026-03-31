@@ -12,4 +12,6 @@
 #define MENUBAR_H_SIZE  MENUBAR_H
 #define TASKBAR_H       10
 
+static bool START_IN_GUI = true;
+
 #endif

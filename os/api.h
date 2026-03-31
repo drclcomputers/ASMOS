@@ -28,4 +28,7 @@
 // OS services
 #include "os/os.h"
 
+// Shell CLI
+#include "shell/cli.h"
+
 #endif

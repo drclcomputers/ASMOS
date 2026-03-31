@@ -17,4 +17,6 @@ void os_register_app(app_descriptor *app);
 
 void os_run(void);
 
+void os_request_exit(void);
+
 #endif

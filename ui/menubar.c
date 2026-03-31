@@ -14,8 +14,6 @@
 #define DROP_DIS    0x88
 #define PADDING     4
 
-//extern menubar g_menubar;
-
 void menubar_init(void) {
     memset(&g_menubar, 0, sizeof(menubar));
     g_menubar.open_index = -1;

@@ -16,6 +16,8 @@ OBJ = $(BUILD_DIR)/loader.o             \
       \
       $(BUILD_DIR)/os/os.o              \
       \
+      $(BUILD_DIR)/shell/cli.o          \
+      \
       $(BUILD_DIR)/apps/filefinder.o        \
       $(BUILD_DIR)/apps/terminal.o      \
       \

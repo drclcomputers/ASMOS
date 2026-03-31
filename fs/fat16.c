@@ -82,7 +82,7 @@ void fat16_make_83(const char *filename, char *out83) {
         out83[j++] = (c >= 'a' && c <= 'z') ? c - 32 : c;
     }
     if (filename[i] == '.') i++;
-    // extension
+
     j = 8;
     while (filename[i] && j < 11) {
         char c = filename[i++];
@@ -146,6 +146,8 @@ static bool list_cb(dir_entry_t *e, uint32_t lba, int idx, void *user) {
     return true;
 }
 
+
+// files
 bool fat16_list(dir_entry_t *buf, int max, int *count) {
     list_ctx ctx = { buf, max, 0 };
     bool ok = root_dir_iterate(list_cb, &ctx);
@@ -345,4 +347,237 @@ bool fat16_delete(const char *name83) {
         }
     }
     return false;
+}
+
+bool fat16_rename(const char *name83, const char *new_name83) {
+    dir_entry_t temp;
+    if (fat16_find(new_name83, &temp)) return false;
+
+    uint32_t root_sectors = (fs.bpb.root_entry_count * 32 + 511) / 512;
+    for (uint32_t s = 0; s < root_sectors; s++) {
+        uint32_t lba = fs.root_lba + s;
+        if (!ata_read_sector(lba, sector_buf)) return false;
+
+        dir_entry_t *entries = (dir_entry_t *)sector_buf;
+        for (int i = 0; i < 16; i++) {
+            if (name83_eq(entries[i].name, name83)) {
+
+                memcpy(entries[i].name, new_name83, 11);
+
+                return ata_write_sector(lba, sector_buf);
+            }
+        }
+    }
+    return false;
+}
+
+// dirs
+bool fat16_mkdir(const char *name83, fat16_file_t *f) {
+    dir_entry_t existing;
+    if (fat16_find(name83, &existing)) return false;
+
+    uint16_t cluster = fat_alloc();
+    if (cluster == 0) return false;
+
+    uint32_t root_sectors = (fs.bpb.root_entry_count * 32 + 511) / 512;
+    for (uint32_t s = 0; s < root_sectors; s++) {
+        uint32_t lba = fs.root_lba + s;
+        if (!ata_read_sector(lba, sector_buf)) return false;
+        dir_entry_t *entries = (dir_entry_t *)sector_buf;
+
+        for (int i = 0; i < 16; i++) {
+            uint8_t first = entries[i].name[0];
+            if (first == DIR_ENTRY_FREE || first == DIR_ENTRY_END) {
+                memset(&entries[i], 0, sizeof(dir_entry_t));
+                memcpy(entries[i].name, name83, 11);
+                entries[i].attr       = ATTR_DIRECTORY;
+                entries[i].cluster_lo = cluster;
+                entries[i].file_size  = 0;
+
+                if (first == DIR_ENTRY_END && i + 1 < 16)
+                    entries[i + 1].name[0] = DIR_ENTRY_END;
+
+                if (!ata_write_sector(lba, sector_buf)) return false;
+
+                memset(f, 0, sizeof(fat16_file_t));
+                f->entry           = entries[i];
+                f->dir_entry_lba   = lba;
+                f->dir_entry_idx   = i;
+                f->cur_cluster     = cluster;
+                f->open            = true;
+
+				uint8_t dir_block[512];
+				memset(dir_block, 0, 512);
+				dir_entry_t *dot_entries = (dir_entry_t *)dir_block;
+
+				memcpy(dot_entries[0].name, ".          ", 11);
+				dot_entries[0].attr = ATTR_DIRECTORY;
+				dot_entries[0].cluster_lo = cluster;
+
+				memcpy(dot_entries[1].name, "..         ", 11);
+				dot_entries[1].attr = ATTR_DIRECTORY;
+				dot_entries[1].cluster_lo = 0;
+
+				dot_entries[2].name[0] = DIR_ENTRY_END;
+
+				uint32_t new_dir_lba = cluster_to_lba(cluster);
+				if (!ata_write_sector(new_dir_lba, dir_block)) return false;
+
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool is_dir_empty(uint16_t cluster) {
+    if (cluster == 0) return false;
+
+    uint32_t lba = cluster_to_lba(cluster);
+    if (!ata_read_sector(lba, sector_buf)) return false;
+
+    dir_entry_t *entries = (dir_entry_t *)sector_buf;
+
+    for (int i = 0; i < 16; i++) {
+        uint8_t first = entries[i].name[0];
+
+        if (first == DIR_ENTRY_END) break;
+
+        if (first == DIR_ENTRY_FREE) continue;
+
+        if (entries[i].name[0] == '.') {
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+void fat16_wipe_cluster(uint16_t cluster) {
+    if (cluster == 0 || cluster >= FAT16_RESERVED) return;
+
+    uint8_t local_buf[512];
+    uint32_t lba = cluster_to_lba(cluster);
+
+    if (!ata_read_sector(lba, local_buf)) return;
+    dir_entry_t *entries = (dir_entry_t *)local_buf;
+
+    for (int i = 0; i < 16; i++) {
+        uint8_t first = entries[i].name[0];
+
+        if (first == DIR_ENTRY_END) break;
+        if (first == DIR_ENTRY_FREE) continue;
+
+        if (entries[i].name[0] == '.') continue;
+
+        if (entries[i].attr & ATTR_DIRECTORY) {
+            fat16_wipe_cluster(entries[i].cluster_lo);
+        } else {
+            fat_free_chain(entries[i].cluster_lo);
+        }
+    }
+
+    fat_set(cluster, FAT16_FREE);
+}
+
+bool fat16_rmdir(const char *name83) {
+    dir_entry_t entry;
+    if (!fat16_find(name83, &entry)) return false;
+
+    if (!(entry.attr & ATTR_DIRECTORY)) return false;
+
+    if (!is_dir_empty(entry.cluster_lo)) return false;
+
+    uint32_t root_sectors = (fs.bpb.root_entry_count * 32 + 511) / 512;
+    for (uint32_t s = 0; s < root_sectors; s++) {
+        uint32_t lba = fs.root_lba + s;
+        if (!ata_read_sector(lba, sector_buf)) return false;
+        dir_entry_t *entries = (dir_entry_t *)sector_buf;
+
+        for (int i = 0; i < 16; i++) {
+            if (name83_eq(entries[i].name, name83)) {
+                fat_set(entry.cluster_lo, FAT16_FREE);
+
+                entries[i].name[0] = DIR_ENTRY_FREE;
+                return ata_write_sector(lba, sector_buf);
+            }
+        }
+    }
+    return false;
+}
+
+bool fat16_rm_rf(const char *name83) {
+	dir_entry_t entry;
+    if (!fat16_find(name83, &entry)) return false;
+
+    if (!(entry.attr & ATTR_DIRECTORY)) return false;
+
+	fat16_wipe_cluster(entry.cluster_lo);
+
+	uint32_t root_sectors = (fs.bpb.root_entry_count * 32 + 511) / 512;
+    for (uint32_t s = 0; s < root_sectors; s++) {
+        uint32_t lba = fs.root_lba + s;
+        if (!ata_read_sector(lba, sector_buf)) return false;
+        dir_entry_t *entries = (dir_entry_t *)sector_buf;
+
+        for (int i = 0; i < 16; i++) {
+            if (name83_eq(entries[i].name, name83)) {
+                entries[i].name[0] = DIR_ENTRY_FREE;
+                return ata_write_sector(lba, sector_buf);
+            }
+        }
+    }
+    return false;
+}
+
+// Move and copy
+bool fat16_copy_file(const char *src_name, const char *dest_name) {
+    fat16_file_t src_f, dest_f;
+    uint8_t buffer[512];
+    int bytes_read;
+
+    if (!fat16_open(src_name, &src_f)) return false;
+
+    if (!fat16_create(dest_name, &dest_f)) {
+        fat16_close(&src_f);
+        return false;
+    }
+
+    while ((bytes_read = fat16_read(&src_f, buffer, 512)) > 0) {
+        fat16_write(&dest_f, buffer, bytes_read);
+    }
+
+    fat16_close(&src_f);
+    fat16_close(&dest_f);
+    return true;
+}
+
+
+
+// Usage function
+bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
+    if (!fs.mounted) return false;
+
+    *total_bytes = (fs.bpb.total_sectors_32 ? fs.bpb.total_sectors_32 : fs.bpb.total_sectors_16)
+                 * fs.bpb.bytes_per_sector;
+
+    uint32_t used_clusters = 0;
+    uint16_t fat_buf[256];
+
+    uint32_t fat_sectors = fs.bpb.sectors_per_fat;
+    for (uint32_t s = 0; s < fat_sectors; s++) {
+        if (!ata_read_sector(fs.fat_lba + s, fat_buf)) return false;
+
+        for (int i = 0; i < 256; i++) {
+            if (fat_buf[i] != FAT16_FREE && fat_buf[i] != FAT16_RESERVED) {
+                used_clusters++;
+            }
+        }
+    }
+
+    *used_bytes = used_clusters * fs.bpb.bytes_per_sector * fs.bpb.sectors_per_cluster;
+    return true;
 }

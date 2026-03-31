@@ -11,6 +11,7 @@ static app_descriptor *apps[MAX_APPS];
 static int app_count = 0;
 
 menubar g_menubar;
+static bool gui_should_exit = false;
 
 void os_register_app(app_descriptor *app) {
     if (app_count >= MAX_APPS) return;
@@ -18,10 +19,12 @@ void os_register_app(app_descriptor *app) {
 }
 
 void os_run(void) {
+    gui_should_exit = false;
+    
     for (int i = 0; i < app_count; i++)
         if (apps[i]->init) apps[i]->init();
 
-    while (1) {
+    while (!gui_should_exit) {
         ps2_update();
 
         for (int i = 0; i < app_count; i++)
@@ -40,4 +43,8 @@ void os_run(void) {
         draw_cursor(mouse.x, mouse.y);
         blit();
     }
+}
+
+void os_request_exit(void) {
+    gui_should_exit = true;
 }

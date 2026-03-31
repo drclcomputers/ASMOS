@@ -171,6 +171,12 @@ void window_draw(window *win) {
 
     int wy = win->y + MENUBAR_H_SIZE;
 
+    if (win->dragging) {
+        draw_rect(win->x + 2, wy + 2, win->w, win->h, 0x00);
+        draw_rect(win->x,     wy,     win->w, win->h, 0x88);
+        return;
+    }
+
     fill_rect(win->x, wy, win->w, 16, win->bar_color);
     draw_titlebar_btn(win->x + 3,  wy + 3, 10, 10, "X", 0xCC);
     draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", 0xA0);
@@ -216,14 +222,19 @@ void window_add_widget(window *win, widget wg) {
 
 void window_dragged(window *win) {
     int wy = win->y + MENUBAR_H_SIZE;
+
     if (mouse.left && in_titlebar(win, mouse.x, mouse.y)) {
+        if (!win->dragging) win->dragging = true;
+
         win->x += mouse.dx;
         win->y += mouse.dy;
-        if (win->x < 0)                       win->x = 0;
-        if (win->y < 0)                       win->y = 0;
-        if (win->x + win->w > SCREEN_WIDTH)   win->x = SCREEN_WIDTH - win->w;
-        if (win->y + win->h + MENUBAR_H_SIZE + TASKBAR_H > SCREEN_HEIGHT)
-            win->y = SCREEN_HEIGHT - win->h - MENUBAR_H_SIZE - TASKBAR_H;
-        (void)wy;
+
+        if (win->x < 0) win->x = 0;
+        if (win->y < 0) win->y = 0;
+        if (win->x + win->w > SCREEN_WIDTH) win->x = SCREEN_WIDTH - win->w;
+        if (win->y + win->h + MENUBAR_H_SIZE + TASKBAR_H > SCREEN_HEIGHT) win->y = SCREEN_HEIGHT - win->h - MENUBAR_H_SIZE - TASKBAR_H;
+    } else {
+        win->dragging = false;
     }
+    (void)wy;
 }

@@ -25,6 +25,7 @@ struct window {
     int            show_order;
     WidgetCallback on_close;
     WidgetCallback on_minimize;
+    bool           dragging;
     widget         widgets[MAX_WIN_WIDGETS];
     int            widget_count;
     menu           win_menus[MAX_WIN_MENUS];

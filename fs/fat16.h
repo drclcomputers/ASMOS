@@ -93,6 +93,7 @@ int  fat16_read(fat16_file_t *f, void *buf, int len);
 int  fat16_write(fat16_file_t *f, const void *buf, int len);
 bool fat16_close(fat16_file_t *f);
 bool fat16_delete(const char *name83);
+bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes);
 
 void fat16_make_83(const char *filename, char *out83);
 
