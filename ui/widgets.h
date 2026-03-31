@@ -4,7 +4,7 @@
 #include "lib/types.h"
 #include "lib/string.h"
 
-#define MAX_MENU_ITEMS  8
+#define MAX_MENU_ITEMS  12
 #define MAX_DROP_ITEMS  8
 
 typedef struct widget widget;

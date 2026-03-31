@@ -11,7 +11,6 @@
 #include "ui/widgets.h"
 
 #define MAX_MENUS        8
-#define MAX_MENU_ITEMS   12
 #define MENU_ITEM_H      10
 #define MENU_ITEM_MIN_W  60
 #define MENUBAR_H_SIZE   10

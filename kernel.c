@@ -10,10 +10,35 @@ static void on_file_close(void) { /* close focused window  */ }
 static void on_edit_copy(void)  { }
 static void on_edit_paste(void) { }
 
+void createterminalapp() {
+	window terminal = {
+        .x=20, .y=20, .w=200, .h=150,
+        .title        = "Terminal",
+        .title_color  = 0x08,
+        .bar_color    = 0x10,
+        .content_color= 0x00,
+        .visible      = true,
+        .minimized    = false,
+        .on_close     = NULL,
+        .on_minimize  = NULL,
+    };
+    wm_register(&terminal);
+
+    menu *file_menu = window_add_menu(&terminal, "File");
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "Close", on_file_close);
+
+    window_add_widget(&terminal,
+        make_label(10, 6, ">", 0x0F, 2));
+    window_add_widget(&terminal,
+        make_textbox(17, 2, 170, 12, 0x0F, 0x00, 0x00));
+}
 
 void kmain(void) {
     ps2_init();
     menubar_init();
+
+    createterminalapp();
 
     window win_settings = {
         .x=20, .y=20, .w=200, .h=150,

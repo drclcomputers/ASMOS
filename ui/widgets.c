@@ -109,8 +109,12 @@ static void update_checkbox(widget *wg, int ax, int ay) {
 
 static void update_textbox(widget *wg, int ax, int ay) {
     widget_textbox *tb = &wg->as.textbox;
-    if (mouse.left_clicked)
-        tb->focused = mouse_over(ax, ay, wg->w, wg->h);
+    if (mouse.left_clicked) {
+        if (mouse_over(ax, ay, wg->w, wg->h))
+            tb->focused = true;
+        else if (tb->focused)
+            tb->focused = false;
+    }
     if (!tb->focused) return;
     if (kb.key_pressed && kb.last_char && kb.last_char != '\b') {
         if (tb->len < (int)sizeof(tb->buf) - 1) {

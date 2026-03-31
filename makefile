@@ -11,6 +11,8 @@ OBJ = $(BUILD_DIR)/loader.o \
 	  $(BUILD_DIR)/kernel.o \
 	  $(BUILD_DIR)/config/config.o \
 	  $(BUILD_DIR)/fonts/fonts.o \
+	  $(BUILD_DIR)/fs/ata.o \
+	  $(BUILD_DIR)/fs/fat16.o \
 	  $(BUILD_DIR)/io/ps2.o \
 	  $(BUILD_DIR)/io/mouse.o \
       $(BUILD_DIR)/io/keyboard.o \

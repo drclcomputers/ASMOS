@@ -3,6 +3,31 @@
 
 KERNEL_OFFSET equ 0x8000
 
+
+jmp short start
+nop
+
+oem_name:           db "MYOS    "       ; 8 bytes
+bytes_per_sector:   dw 512
+sectors_per_cluster:db 4                ; 4 * 512 = 2048 byte clusters
+reserved_sectors:   dw 4               ; boot sector + 3 extra = 4
+fat_count:          db 2
+root_entry_count:   dw 512             ; 512 * 32 = 16384 bytes = 32 sectors
+total_sectors_16:   dw 0               ; 0 = use total_sectors_32
+media_type:         db 0xF8            ; fixed disk
+sectors_per_fat:    dw 32              ; 32 * 512 = 16384 bytes -> covers 8192 clusters
+sectors_per_track:  dw 63
+head_count:         dw 16
+hidden_sectors:     dd 0
+total_sectors_32:   dd 65536           ; 65536 * 512 = 32MB image
+
+drive_number:       db 0x80
+reserved1:          db 0
+boot_sig:           db 0x29            ; extended boot record signature
+volume_id:          dd 0xDEADBEEF
+volume_label:       db "MYOS       "   ; 11 bytes
+fs_type:            db "FAT16   "      ; 8 bytes
+
 start:
     mov ax, 0x0013
     int 0x10
@@ -14,11 +39,11 @@ start:
 
     mov [BOOT_DRIVE], dl
 
-    mov ah, 0x02      ; BIOS Read Sector
-    mov al, 100       ; Read 100 sectors
-    mov ch, 0x00      ; Cylinder 0
-    mov dh, 0x00      ; Head 0
-    mov cl, 0x02      ; Start reading at Sector 2
+    mov ah, 0x02
+    mov al, 100
+    mov ch, 0x00
+    mov dh, 0x00
+    mov cl, 0x02
     mov dl, [BOOT_DRIVE]
     mov bx, KERNEL_OFFSET
     int 0x13
