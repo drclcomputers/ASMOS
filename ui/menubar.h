@@ -1,5 +1,5 @@
-#ifndef MENUBAR_H
-#define MENUBAR_H
+#ifndef MENUBAR_H_
+#define MENUBAR_H_
 
 #include "lib/types.h"
 #include "lib/string.h"

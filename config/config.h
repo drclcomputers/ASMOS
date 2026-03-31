@@ -9,6 +9,7 @@
 #define BACKBUF         ((uint8_t*)0x100000)
 
 #define MENUBAR_H       10
+#define MENUBAR_H_SIZE  MENUBAR_H
 #define TASKBAR_H       10
 
 #endif

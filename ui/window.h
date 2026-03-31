@@ -3,8 +3,8 @@
 
 #include "lib/types.h"
 #include "lib/string.h"
-#include "ui/widgets.h"
 #include "ui/menubar.h"
+#include "ui/widgets.h"
 #include "config/config.h"
 
 #define MAX_WINDOWS     16

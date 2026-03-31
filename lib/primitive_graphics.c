@@ -3,7 +3,6 @@
 #include "fonts/fonts.h"
 #include "lib/types.h"
 #include "lib/mem.h"
-#include "lib/utils.h"
 
 void draw_dot(int x, int y, unsigned char color) {
     unsigned char* vga = BACKBUF;
