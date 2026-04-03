@@ -8,6 +8,7 @@
 #include "fs/fat16.h"
 #include "os/os.h"
 #include "config/config.h"
+#include "lib/time.h"
 
 #define CLI_BUFFER_SIZE 256
 #define CHAR_WIDTH       4
@@ -459,6 +460,13 @@ void cmd_echo(const char *text) {
     cli_print(text); cli_print("\n\n");
 }
 
+void cmd_clock(){
+	time_full_t t = time_rtc();
+	char buf[256];
+	sprintf(buf, "%d-%d-%d / %d:%d:%d\n", t.year, t.month, t.day, t.hours, t.minutes, t.seconds);
+	cli_print(buf);
+}
+
 void cmd_gui(void)  { cli_print("Starting GUI...\n\n"); }
 void cmd_exit(void) { cli_print("Exiting...\n"); }
 
@@ -516,6 +524,9 @@ bool cli_execute_command(const char *cmd) {
     } else if (strcmp(command, "echo") == 0) {
         cmd_echo(argument);
         return false;
+    } else if (strcmp(command, "clock") == 0) {
+    	cmd_clock();
+     	return false;
     } else if (strcmp(command, "df") == 0) {
         cmd_df();
         return false;

@@ -5,6 +5,7 @@
 #include "shell/cli.h"
 #include "config/config.h"
 #include "lib/alloc.h"
+#include "interrupts/idt.h"
 
 extern app_descriptor finder_app;
 extern app_descriptor terminal_app;
@@ -37,6 +38,8 @@ static void detect_heap_end(void) {
 void kmain(void) {
     alloc_init();
     detect_heap_end();
+
+    idt_init();
 
     ps2_init();
     fat16_mount();

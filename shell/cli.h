@@ -23,5 +23,6 @@ void cmd_mv(const char *args);
 void cmd_cp(const char *args);
 void cmd_write(const char *args);
 void cmd_echo(const char *text);
+void cmd_clock();
 
 #endif

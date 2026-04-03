@@ -14,6 +14,9 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/kernel.o                     \
       \
       $(BUILD_DIR)/os/os.o                      \
+	  \
+	  $(BUILD_DIR)/interrupts/interrupt.o  		\
+      $(BUILD_DIR)/interrupts/idt.o        		\
       \
       $(BUILD_DIR)/shell/cli.o                  \
       \
@@ -37,6 +40,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/lib/mem.o                    \
       $(BUILD_DIR)/lib/primitive_graphics.o     \
       $(BUILD_DIR)/lib/string.o                 \
+	  $(BUILD_DIR)/lib/time.o                   \
       $(BUILD_DIR)/lib/types.o                  \
       \
       $(BUILD_DIR)/ui/cursor.o                  \
@@ -68,7 +72,6 @@ kernel.bin: $(OBJ)
 $(BUILD_DIR)/loader.o: loader.asm | $(BUILD_DIR)
 	$(AS) -f elf32 $< -o $@
 
-# Interrupt stubs (ASM → ELF object)
 $(BUILD_DIR)/interrupts/interrupt.o: interrupts/interrupt.asm | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
@@ -97,4 +100,3 @@ run: all
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f *.bin os_image.bin
-	rm qemu.log

@@ -2,6 +2,7 @@
 #include "fs/ata.h"
 #include "lib/mem.h"
 #include "lib/string.h"
+#include "lib/time.h"
 
 fat16_fs_t fs;
 static uint8_t sector_buf[512];
@@ -79,11 +80,11 @@ static void fat_free_chain(uint16_t cluster) {
 }
 
 static uint16_t make_fat_time(uint8_t hour, uint8_t min, uint8_t sec) {
-    return ((hour & 0x1F) << 11) | ((min & 0x3F) << 5) | ((sec / 2) & 0x1F);
+    return time_from_rtc();
 }
 
 static uint16_t make_fat_date(uint16_t year, uint8_t month, uint8_t day) {
-    return (((year - 1980) & 0x7F) << 9) | ((month & 0x0F) << 5) | (day & 0x1F);
+    return date_from_rtc();
 }
 
 // path
