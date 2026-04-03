@@ -20,6 +20,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/shell/cli.o                  \
       \
+	  $(BUILD_DIR)/apps/desktop.o               \
       $(BUILD_DIR)/apps/filefinder.o            \
       $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \
@@ -86,7 +87,6 @@ $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 boot.bin: boot.asm
 	$(AS) -f bin $< -o $@
 
-# Create a clean 32 MB image, write boot sector, then kernel from sector 1
 os_image.bin: boot.bin kernel.bin
 	dd if=/dev/zero    of=os_image.bin bs=512 count=65536  2>/dev/null
 	dd if=boot.bin     of=os_image.bin bs=512 seek=0  conv=notrunc 2>/dev/null

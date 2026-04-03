@@ -1,6 +1,7 @@
 #include "ui/widgets.h"
 #include "lib/primitive_graphics.h"
 #include "lib/string.h"
+#include "lib/math.h"
 #include "io/mouse.h"
 #include "io/keyboard.h"
 
@@ -77,16 +78,60 @@ static void draw_menu(widget *wg, int ax, int ay) {
     }
 }
 
+static void draw_vscrollbar(widget *wg, int ax, int ay) {
+    widget_scrollbar *sb = &wg->as.scrollbar;
+
+    fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
+    draw_rect(ax, ay, wg->w, wg->h, wg->border_color);
+
+    if (sb->max > 0 && sb->viewport > 0) {
+        int track_height = wg->h - 4;
+        int thumb_height = max(12, (sb->viewport * track_height) / (sb->max + sb->viewport));
+        int thumb_range = track_height - thumb_height;
+        int thumb_pos = 0;
+
+        if (sb->max > 0) {
+            thumb_pos = (sb->value * thumb_range) / sb->max;
+        }
+
+        fill_rect(ax + 2, ay + 2 + thumb_pos, wg->w - 4, thumb_height, wg->fg_color);
+        draw_rect(ax + 2, ay + 2 + thumb_pos, wg->w - 4, thumb_height, wg->border_color);
+    }
+}
+
+static void draw_hscrollbar(widget *wg, int ax, int ay) {
+    widget_scrollbar *sb = &wg->as.scrollbar;
+
+    fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
+    draw_rect(ax, ay, wg->w, wg->h, wg->border_color);
+
+    if (sb->max > 0 && sb->viewport > 0) {
+        int track_width = wg->w - 4;
+        int thumb_width = max(12, (sb->viewport * track_width) / (sb->max + sb->viewport));
+        int thumb_range = track_width - thumb_width;
+        int thumb_pos = 0;
+
+        if (sb->max > 0) {
+            thumb_pos = (sb->value * thumb_range) / sb->max;
+        }
+
+        fill_rect(ax + 2 + thumb_pos, ay + 2, thumb_width, wg->h - 4, wg->fg_color);
+        draw_rect(ax + 2 + thumb_pos, ay + 2, thumb_width, wg->h - 4, wg->border_color);
+    }
+}
+
 void widget_draw(widget *wg, int win_x, int win_y) {
     int ax = abs_x(win_x, wg->x);
     int ay = abs_y(win_y, wg->y);
     switch (wg->type) {
-        case WIDGET_BUTTON:   draw_button(wg, ax, ay);   break;
-        case WIDGET_LABEL:    draw_label(wg, ax, ay);    break;
-        case WIDGET_CHECKBOX: draw_checkbox(wg, ax, ay); break;
-        case WIDGET_TEXTBOX:  draw_textbox(wg, ax, ay);  break;
-        case WIDGET_DROPDOWN: draw_dropdown(wg, ax, ay); break;
-        case WIDGET_MENU:     draw_menu(wg, ax, ay);     break;
+        case WIDGET_BUTTON:               draw_button(wg, ax, ay);      break;
+        case WIDGET_LABEL:                draw_label(wg, ax, ay);       break;
+        case WIDGET_CHECKBOX:             draw_checkbox(wg, ax, ay);    break;
+        case WIDGET_TEXTBOX:              draw_textbox(wg, ax, ay);     break;
+        case WIDGET_DROPDOWN:             draw_dropdown(wg, ax, ay);    break;
+        case WIDGET_MENU:                 draw_menu(wg, ax, ay);        break;
+        case WIDGET_SCROLLBAR_VERTICAL:   draw_vscrollbar(wg, ax, ay);  break;
+        case WIDGET_SCROLLBAR_HORIZONTAL: draw_hscrollbar(wg, ax, ay);  break;
     }
 }
 
@@ -155,15 +200,107 @@ static void update_menu(widget *wg, int ax, int ay) {
     }
 }
 
+static void update_vscrollbar(widget *wg, int ax, int ay) {
+    widget_scrollbar *sb = &wg->as.scrollbar;
+
+    if (sb->max <= 0) return;
+
+    int track_height = wg->h - 4;
+    int thumb_height = max(12, (sb->viewport * track_height) / (sb->max + sb->viewport));
+    int thumb_range = track_height - thumb_height;
+    int thumb_pos = 0;
+
+    if (sb->max > 0) {
+        thumb_pos = (sb->value * thumb_range) / sb->max;
+    }
+
+    int thumb_ax = ax + 2;
+    int thumb_ay = ay + 2 + thumb_pos;
+    int thumb_w = wg->w - 4;
+    int thumb_h = thumb_height;
+
+    if (mouse.left_clicked && mouse_over(thumb_ax, thumb_ay, thumb_w, thumb_h)) {
+        sb->dragging = true;
+        sb->drag_offset = mouse.y - thumb_ay;
+    }
+
+    if (sb->dragging) {
+        if (mouse.left) {
+            int new_thumb_pos = mouse.y - (ay + 2) - sb->drag_offset;
+            if (new_thumb_pos < 0) new_thumb_pos = 0;
+            if (new_thumb_pos > thumb_range) new_thumb_pos = thumb_range;
+
+            int new_value = 0;
+            if (thumb_range > 0) {
+                new_value = (new_thumb_pos * sb->max) / thumb_range;
+            }
+
+            if (new_value != sb->value) {
+                sb->value = new_value;
+                if (sb->on_change) sb->on_change(wg);
+            }
+        } else {
+            sb->dragging = false;
+        }
+    }
+}
+
+static void update_hscrollbar(widget *wg, int ax, int ay) {
+    widget_scrollbar *sb = &wg->as.scrollbar;
+
+    if (sb->max <= 0) return;
+
+    int track_width = wg->w - 4;
+    int thumb_width = max(12, (sb->viewport * track_width) / (sb->max + sb->viewport));
+    int thumb_range = track_width - thumb_width;
+    int thumb_pos = 0;
+
+    if (sb->max > 0) {
+        thumb_pos = (sb->value * thumb_range) / sb->max;
+    }
+
+    int thumb_ax = ax + 2 + thumb_pos;
+    int thumb_ay = ay + 2;
+    int thumb_w = thumb_width;
+    int thumb_h = wg->h - 4;
+
+    if (mouse.left_clicked && mouse_over(thumb_ax, thumb_ay, thumb_w, thumb_h)) {
+        sb->dragging = true;
+        sb->drag_offset = mouse.x - thumb_ax;
+    }
+
+    if (sb->dragging) {
+        if (mouse.left) {
+            int new_thumb_pos = mouse.x - (ax + 2) - sb->drag_offset;
+            if (new_thumb_pos < 0) new_thumb_pos = 0;
+            if (new_thumb_pos > thumb_range) new_thumb_pos = thumb_range;
+
+            int new_value = 0;
+            if (thumb_range > 0) {
+                new_value = (new_thumb_pos * sb->max) / thumb_range;
+            }
+
+            if (new_value != sb->value) {
+                sb->value = new_value;
+                if (sb->on_change) sb->on_change(wg);
+            }
+        } else {
+            sb->dragging = false;
+        }
+    }
+}
+
 void widget_update(widget *wg, int win_x, int win_y) {
     int ax = abs_x(win_x, wg->x);
     int ay = abs_y(win_y, wg->y);
     switch (wg->type) {
-        case WIDGET_BUTTON:   update_button(wg, ax, ay);   break;
-        case WIDGET_LABEL:                                  break;
-        case WIDGET_CHECKBOX: update_checkbox(wg, ax, ay); break;
-        case WIDGET_TEXTBOX:  update_textbox(wg, ax, ay);  break;
-        case WIDGET_DROPDOWN: update_dropdown(wg, ax, ay); break;
-        case WIDGET_MENU:     update_menu(wg, ax, ay);     break;
+        case WIDGET_BUTTON:               update_button(wg, ax, ay);      break;
+        case WIDGET_LABEL:                                                 break;
+        case WIDGET_CHECKBOX:             update_checkbox(wg, ax, ay);    break;
+        case WIDGET_TEXTBOX:              update_textbox(wg, ax, ay);     break;
+        case WIDGET_DROPDOWN:             update_dropdown(wg, ax, ay);    break;
+        case WIDGET_MENU:                 update_menu(wg, ax, ay);        break;
+        case WIDGET_SCROLLBAR_VERTICAL:   update_vscrollbar(wg, ax, ay);  break;
+        case WIDGET_SCROLLBAR_HORIZONTAL: update_hscrollbar(wg, ax, ay);  break;
     }
 }

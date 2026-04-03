@@ -7,6 +7,7 @@
 #include "lib/alloc.h"
 #include "interrupts/idt.h"
 
+extern app_descriptor desktop_app;
 extern app_descriptor finder_app;
 extern app_descriptor terminal_app;
 extern app_descriptor monitor_app;
@@ -47,12 +48,14 @@ void kmain(void) {
 
     menubar_init();
 
+    os_install_app(&desktop_app);
     os_install_app(&finder_app);
     os_install_app(&terminal_app);
     os_install_app(&monitor_app);
 
     if (!START_IN_GUI) cli_run();
 
+    os_launch_app(&desktop_app);
     os_launch_app(&finder_app);
     os_launch_app(&terminal_app);
     os_launch_app(&monitor_app);

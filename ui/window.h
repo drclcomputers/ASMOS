@@ -37,6 +37,7 @@ struct window {
 	uint8_t content_color;
 
 	bool visible;
+	bool visible_buttons;
 	bool minimized;
 	bool dragging;
 	int show_order;

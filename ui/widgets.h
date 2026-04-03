@@ -17,6 +17,8 @@ typedef enum {
     WIDGET_TEXTBOX,
     WIDGET_DROPDOWN,
     WIDGET_MENU,
+    WIDGET_SCROLLBAR_VERTICAL,
+    WIDGET_SCROLLBAR_HORIZONTAL,
 } widget_type;
 
 typedef struct {
@@ -57,6 +59,15 @@ typedef struct {
     bool           open;
 } widget_menu;
 
+typedef struct {
+    int            value;        // Current scroll position (0 to max)
+    int            max;          // Maximum scroll value
+    int            viewport;     // Visible area size
+    bool           dragging;
+    int            drag_offset;
+    WidgetCallback on_change;
+} widget_scrollbar;
+
 struct widget {
     widget_type   type;
     int           x, y, w, h;
@@ -65,12 +76,13 @@ struct widget {
     unsigned char border_color;
 
     union {
-        widget_button   button;
-        widget_label    label;
-        widget_checkbox checkbox;
-        widget_textbox  textbox;
-        widget_dropdown dropdown;
-        widget_menu     menu;
+        widget_button    button;
+        widget_label     label;
+        widget_checkbox  checkbox;
+        widget_textbox   textbox;
+        widget_dropdown  dropdown;
+        widget_menu      menu;
+        widget_scrollbar scrollbar;
     } as;
 };
 
@@ -136,6 +148,36 @@ static inline widget make_dropdown(int x, int y, int w, int h,
     wg.as.dropdown.on_select  = on_select;
     for (int i = 0; i < n; i++)
         wg.as.dropdown.items[i] = items[i];
+    return wg;
+}
+
+static inline widget make_vscrollbar(int x, int y, int h,
+                                     unsigned char bg, unsigned char fg, unsigned char border,
+                                     int max, int viewport, WidgetCallback on_change) {
+    widget wg = {0};
+    wg.type = WIDGET_SCROLLBAR_VERTICAL;
+    wg.x = x; wg.y = y; wg.w = 12; wg.h = h;
+    wg.bg_color = bg; wg.fg_color = fg; wg.border_color = border;
+    wg.as.scrollbar.value     = 0;
+    wg.as.scrollbar.max       = max;
+    wg.as.scrollbar.viewport  = viewport;
+    wg.as.scrollbar.dragging  = false;
+    wg.as.scrollbar.on_change = on_change;
+    return wg;
+}
+
+static inline widget make_hscrollbar(int x, int y, int w,
+                                     unsigned char bg, unsigned char fg, unsigned char border,
+                                     int max, int viewport, WidgetCallback on_change) {
+    widget wg = {0};
+    wg.type = WIDGET_SCROLLBAR_HORIZONTAL;
+    wg.x = x; wg.y = y; wg.w = w; wg.h = 12;
+    wg.bg_color = bg; wg.fg_color = fg; wg.border_color = border;
+    wg.as.scrollbar.value     = 0;
+    wg.as.scrollbar.max       = max;
+    wg.as.scrollbar.viewport  = viewport;
+    wg.as.scrollbar.dragging  = false;
+    wg.as.scrollbar.on_change = on_change;
     return wg;
 }
 

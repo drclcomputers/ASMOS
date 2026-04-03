@@ -60,18 +60,19 @@ window *wm_register(const window_spec_t *spec) {
 
     memset(win, 0, sizeof(window));
 
-    win->x             = spec->x;
-    win->y             = spec->y;
-    win->w             = spec->w;
-    win->h             = spec->h;
-    win->title         = spec->title ? spec->title : "";
-    win->title_color   = spec->title_color;
-    win->bar_color     = spec->bar_color;
-    win->content_color = spec->content_color;
-    win->visible       = spec->visible;
-    win->on_close      = spec->on_close;
-    win->on_minimize   = spec->on_minimize;
-    win->show_order    = win_count;
+    win->x               = spec->x;
+    win->y               = spec->y;
+    win->w               = spec->w;
+    win->h               = spec->h;
+    win->title           = spec->title ? spec->title : "";
+    win->title_color     = spec->title_color;
+    win->bar_color       = spec->bar_color;
+    win->content_color   = spec->content_color;
+    win->visible         = spec->visible;
+    win->visible_buttons = true;
+    win->on_close        = spec->on_close;
+    win->on_minimize     = spec->on_minimize;
+    win->show_order      = win_count;
 
     wm_clamp(win);
 
@@ -207,15 +208,18 @@ void window_draw(window *win) {
         return;
     }
 
-    fill_rect(win->x, wy, win->w, 16, win->bar_color);
-    draw_titlebar_btn(win->x + 3,  wy + 3, 10, 10, "X", RED);
-    draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", LIGHT_BLUE);
+    if(win->visible_buttons) {
+	    fill_rect(win->x, wy, win->w, 16, win->bar_color);
 
-    int tx = win->x + win->w / 2 - (int)(strlen(win->title) * 2);
-    draw_string(tx, wy + 6, (char *)win->title, win->title_color, 2);
+	    draw_titlebar_btn(win->x + 3,  wy + 3, 10, 10, "X", RED);
+	    draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", LIGHT_BLUE);
 
-    fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
-    draw_rect(win->x, wy, win->w, win->h, BLACK);
+	    int tx = win->x + win->w / 2 - (int)(strlen(win->title) * 2);
+	    draw_string(tx, wy + 6, (char *)win->title, win->title_color, 2);
+
+	    fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
+	    draw_rect(win->x, wy, win->w, win->h, BLACK);
+    }
 
     for (int i = 0; i < win->widget_count; i++)
         widget_draw(&win->widgets[i], win->x, wy);
