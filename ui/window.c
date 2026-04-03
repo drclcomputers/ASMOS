@@ -223,18 +223,25 @@ void window_add_widget(window *win, widget wg) {
 void window_dragged(window *win) {
     int wy = win->y + MENUBAR_H_SIZE;
 
-    if (mouse.left && in_titlebar(win, mouse.x, mouse.y)) {
-        if (!win->dragging) win->dragging = true;
-
-        win->x += mouse.dx;
-        win->y += mouse.dy;
-
-        if (win->x < 0) win->x = 0;
-        if (win->y < 0) win->y = 0;
-        if (win->x + win->w > SCREEN_WIDTH) win->x = SCREEN_WIDTH - win->w;
-        if (win->y + win->h + MENUBAR_H_SIZE + TASKBAR_H > SCREEN_HEIGHT) win->y = SCREEN_HEIGHT - win->h - MENUBAR_H_SIZE - TASKBAR_H;
-    } else {
-        win->dragging = false;
+    if (!win->dragging && mouse.left && in_titlebar(win, mouse.x, mouse.y)) {
+        win->dragging = true;
     }
+
+    if (win->dragging) {
+        if (mouse.left) {
+            win->x += mouse.dx;
+            win->y += mouse.dy;
+
+            if (win->x < 0) win->x = 0;
+            if (win->y < 0) win->y = 0;
+            if (win->x + win->w > SCREEN_WIDTH)
+                win->x = SCREEN_WIDTH - win->w;
+            if (win->y + win->h + MENUBAR_H_SIZE + TASKBAR_H > SCREEN_HEIGHT)
+                win->y = SCREEN_HEIGHT - win->h - MENUBAR_H_SIZE - TASKBAR_H;
+        } else {
+            win->dragging = false;
+        }
+    }
+
     (void)wy;
 }

@@ -19,3 +19,18 @@ void outb(unsigned short port, unsigned char val) {
 void outw(unsigned short port, unsigned short val) {
     asm volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
 }
+
+void cpu_halt(void) {
+    asm volatile ("hlt");
+}
+
+void cpu_idle(void) {
+    asm volatile ("sti; hlt");
+}
+
+void cpu_sleep_ms(uint32_t ms) {
+    volatile uint32_t count = ms * 1000;
+    while (count--) {
+        asm volatile ("nop");
+    }
+}

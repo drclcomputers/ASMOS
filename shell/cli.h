@@ -18,6 +18,7 @@ void cmd_rm(const char *filename);
 void cmd_mkdir(const char *dirname);
 void cmd_rmdir(const char *dirname);
 void cmd_df(void);
+void cmd_mem(void);
 void cmd_mv(const char *args);
 void cmd_cp(const char *args);
 void cmd_write(const char *args);

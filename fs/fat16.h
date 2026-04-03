@@ -66,8 +66,6 @@ typedef struct {
     bool     mounted;
 } fat16_fs_t;
 
-extern fat16_fs_t fs;
-
 typedef struct {
     dir_entry_t entry;
     uint32_t    dir_entry_lba;
@@ -84,42 +82,51 @@ typedef struct {
     char     path[256];
 } fat16_dir_context_t;
 
+extern fat16_fs_t fs;
 extern fat16_dir_context_t dir_context;
 
-bool fat16_mount(void);
+// init
 
-int  fat16_read(fat16_file_t *f, void *buf, int len);
-int  fat16_write(fat16_file_t *f, const void *buf, int len);
-bool fat16_close(fat16_file_t *f);
-bool fat16_delete(const char *path);
-bool fat16_rename(const char *path, const char *new_name);
+bool fat16_mount(void);
 bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes);
 
+// path
+
 void fat16_make_83(const char *filename, char *out83);
-
-// dirs
-bool fat16_rmdir(const char *path);
-bool fat16_rm_rf(const char *path);
-bool is_dir_empty(uint16_t cluster);
-void fat16_wipe_cluster(uint16_t cluster);
-
-// cp and mv - files
-bool fat16_copy_file(const char *src_path, const char *dest_path);
-bool fat16_move_file(const char *src_path, const char *dest_path);
-
-// cp and mv - dirs
-bool fat16_copy_dir(const char *src_path, const char *dest_path);
-bool fat16_move_dir(const char *src_path, const char *dest_path);
-
-
+bool fat16_resolve(const char *path, uint16_t *out_cluster, char *out_name83);
 bool fat16_chdir(const char *path);
 bool fat16_pwd(char *buf, int buflen);
+
+// dirs
+
+bool fat16_mkdir(const char *path);
 bool fat16_find_in_dir(uint16_t dir_cluster, const char *name83, dir_entry_t *out);
 bool fat16_find(const char *path, dir_entry_t *out);
 bool fat16_list_dir(uint16_t dir_cluster, dir_entry_t *buf, int max, int *count);
+bool is_dir_empty(uint16_t cluster);
+void fat16_wipe_cluster(uint16_t cluster);
+
+// files
+
 bool fat16_open(const char *path, fat16_file_t *f);
 bool fat16_create(const char *path, fat16_file_t *f);
-bool fat16_mkdir(const char *path);
-bool fat16_resolve(const char *path, uint16_t *out_cluster, char *out_name83);
+int  fat16_read(fat16_file_t *f, void *buf, int len);
+int  fat16_write(fat16_file_t *f, const void *buf, int len);
+bool fat16_seek(fat16_file_t *f, uint32_t offset);
+int fat16_tell(fat16_file_t *f);
+bool fat16_close(fat16_file_t *f);
+
+// file and dir
+
+bool fat16_rename(const char *path, const char *new_name);
+bool fat16_delete(const char *path);
+bool fat16_rmdir(const char *path);
+bool fat16_rm_rf(const char *path);
+
+bool fat16_copy_file(const char *src_path, const char *dest_path);
+bool fat16_move_file(const char *src_path, const char *dest_path);
+
+bool fat16_copy_dir(const char *src_path, const char *dest_path);
+bool fat16_move_dir(const char *src_path, const char *dest_path);
 
 #endif

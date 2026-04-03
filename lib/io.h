@@ -8,4 +8,8 @@ unsigned short inw(unsigned short port);
 void outb(unsigned short port, unsigned char val);
 void outw(unsigned short port, unsigned short val);
 
+void cpu_halt(void);
+void cpu_idle(void);
+void cpu_sleep_ms(uint32_t ms);
+
 #endif

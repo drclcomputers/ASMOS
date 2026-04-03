@@ -10,53 +10,70 @@ LDFLAGS = -m elf_i386 -Ttext 0x8000 --oformat binary
 
 BUILD_DIR = build
 
-# loader.o MUST be first — the bootloader jumps to 0x8000 which must be _start
-OBJ = $(BUILD_DIR)/loader.o             \
-      $(BUILD_DIR)/kernel.o             \
+OBJ = $(BUILD_DIR)/loader.o                     \
+      $(BUILD_DIR)/kernel.o                     \
       \
-      $(BUILD_DIR)/os/os.o              \
+      $(BUILD_DIR)/os/os.o                      \
       \
-      $(BUILD_DIR)/shell/cli.o          \
+      $(BUILD_DIR)/shell/cli.o                  \
       \
-      $(BUILD_DIR)/apps/filefinder.o        \
-      $(BUILD_DIR)/apps/terminal.o      \
+      $(BUILD_DIR)/apps/filefinder.o            \
+      $(BUILD_DIR)/apps/terminal.o              \
       \
-      $(BUILD_DIR)/config/config.o      \
+      $(BUILD_DIR)/config/config.o              \
       \
-      $(BUILD_DIR)/fonts/fonts.o        \
+      $(BUILD_DIR)/fonts/fonts.o                \
       \
-      $(BUILD_DIR)/fs/ata.o             \
-      $(BUILD_DIR)/fs/fat16.o           \
+      $(BUILD_DIR)/fs/ata.o                     \
+      $(BUILD_DIR)/fs/fat16.o                   \
       \
-      $(BUILD_DIR)/io/ps2.o             \
-      $(BUILD_DIR)/io/mouse.o           \
-      $(BUILD_DIR)/io/keyboard.o        \
+      $(BUILD_DIR)/io/ps2.o                     \
+      $(BUILD_DIR)/io/mouse.o                   \
+      $(BUILD_DIR)/io/keyboard.o                \
       \
-      $(BUILD_DIR)/lib/io.o             \
-      $(BUILD_DIR)/lib/math.o           \
-      $(BUILD_DIR)/lib/mem.o            \
-      $(BUILD_DIR)/lib/primitive_graphics.o \
-      $(BUILD_DIR)/lib/string.o         \
-      $(BUILD_DIR)/lib/types.o          \
+      $(BUILD_DIR)/lib/alloc.o                  \
+      $(BUILD_DIR)/lib/io.o                     \
+      $(BUILD_DIR)/lib/math.o                   \
+      $(BUILD_DIR)/lib/mem.o                    \
+      $(BUILD_DIR)/lib/primitive_graphics.o     \
+      $(BUILD_DIR)/lib/string.o                 \
+      $(BUILD_DIR)/lib/types.o                  \
       \
-      $(BUILD_DIR)/ui/cursor.o          \
-      $(BUILD_DIR)/ui/menubar.o         \
-      $(BUILD_DIR)/ui/ui.o              \
-      $(BUILD_DIR)/ui/widgets.o         \
+      $(BUILD_DIR)/ui/cursor.o                  \
+      $(BUILD_DIR)/ui/menubar.o                 \
+      $(BUILD_DIR)/ui/ui.o                      \
+      $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 
+# boot.asm loads 100 sectors (51,200 bytes) starting at KERNEL_OFFSET (0x8000).
+# The kernel binary must not exceed this — increase 'al' in boot.asm if needed.
+KERNEL_SECTORS_LOADED = 100
+
 all: os_image.bin
-	@echo ""
-	@echo "Kernel size : $$(wc -c < kernel.bin) bytes"
-	@echo "Max safe    : $$(( 60 * 512 )) bytes (60 sectors)"
-	@echo ""
+	@KSIZE=$$(wc -c < kernel.bin); \
+	 MAX=$$(($(KERNEL_SECTORS_LOADED) * 512)); \
+	 echo ""; \
+	 echo "Kernel size  : $$KSIZE bytes"; \
+	 echo "Max loadable : $$MAX bytes  ($(KERNEL_SECTORS_LOADED) sectors)"; \
+	 if [ $$KSIZE -gt $$MAX ]; then \
+	   echo "*** ERROR: kernel too large — increase sector count in boot.asm ***"; \
+	   exit 1; \
+	 fi; \
+	 echo ""
 
 kernel.bin: $(OBJ)
 	$(LD) $(LDFLAGS) -o $@ $^
 
+# Boot sector
 $(BUILD_DIR)/loader.o: loader.asm | $(BUILD_DIR)
 	$(AS) -f elf32 $< -o $@
 
+# Interrupt stubs (ASM → ELF object)
+$(BUILD_DIR)/interrupts/interrupt.o: interrupts/interrupt.asm | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(AS) -f elf32 $< -o $@
+
+# All C sources
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< -o $@
@@ -64,11 +81,11 @@ $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 boot.bin: boot.asm
 	$(AS) -f bin $< -o $@
 
-# Create a clean 32MB image, write boot sector, then kernel starting at sector 1
+# Create a clean 32 MB image, write boot sector, then kernel from sector 1
 os_image.bin: boot.bin kernel.bin
-	dd if=/dev/zero        of=os_image.bin bs=512 count=65536  2>/dev/null
-	dd if=boot.bin         of=os_image.bin bs=512 seek=0  conv=notrunc 2>/dev/null
-	dd if=kernel.bin       of=os_image.bin bs=512 seek=1  conv=notrunc 2>/dev/null
+	dd if=/dev/zero    of=os_image.bin bs=512 count=65536  2>/dev/null
+	dd if=boot.bin     of=os_image.bin bs=512 seek=0  conv=notrunc 2>/dev/null
+	dd if=kernel.bin   of=os_image.bin bs=512 seek=1  conv=notrunc 2>/dev/null
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -80,3 +97,4 @@ run: all
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f *.bin os_image.bin
+	rm qemu.log

@@ -1,6 +1,7 @@
 #include "shell/cli.h"
 #include "lib/string.h"
 #include "lib/mem.h"
+#include "lib/alloc.h"
 #include "lib/primitive_graphics.h"
 #include "io/keyboard.h"
 #include "io/ps2.h"
@@ -62,7 +63,6 @@ static void cli_print_prompt(void) {
 }
 
 // Core cmds
-
 void cmd_clear(void) {
     clear_screen(0x00);
     cli.cursor_x = 0;
@@ -444,6 +444,16 @@ void cmd_df(void) {
     cli_print("Storage Free:  "); cli_print(uint32_to_str(free_kb, buf));  cli_print(" KB\n\n");
 }
 
+void cmd_mem(void) {
+    char buf[32];
+    cli_print("Heap used:  ");
+    cli_print(uint32_to_str(heap_used() / 1024, buf));
+    cli_print(" KB\n");
+    cli_print("Heap free:  ");
+    cli_print(uint32_to_str(heap_remaining() / 1024, buf));
+    cli_print(" KB\n\n");
+}
+
 void cmd_echo(const char *text) {
     if (!text || text[0] == '\0') { cli_print("\n"); return; }
     cli_print(text); cli_print("\n\n");
@@ -509,6 +519,9 @@ bool cli_execute_command(const char *cmd) {
     } else if (strcmp(command, "df") == 0) {
         cmd_df();
         return false;
+    } else if (strcmp(command, "mem") == 0) {
+    	cmd_mem();
+     	return false;
     } else if (strcmp(command, "cp") == 0) {
         cmd_cp(argument);
         return false;

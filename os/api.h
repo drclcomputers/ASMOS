@@ -10,6 +10,7 @@
 // string and memory utilities
 #include "lib/string.h"
 #include "lib/mem.h"
+#include "lib/alloc.h"
 #include "lib/math.h"
 
 // graphics

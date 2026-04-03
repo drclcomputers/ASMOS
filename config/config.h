@@ -14,4 +14,7 @@
 
 #define START_IN_GUI 0
 
+#define HEAP_START  0x164000
+#define HEAP_END    0x200000
+
 #endif

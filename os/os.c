@@ -20,7 +20,7 @@ void os_register_app(app_descriptor *app) {
 
 void os_run(void) {
     gui_should_exit = false;
-    
+
     for (int i = 0; i < app_count; i++)
         if (apps[i]->init) apps[i]->init();
 
