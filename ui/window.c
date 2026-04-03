@@ -36,10 +36,10 @@ static bool in_titlebar(const window *win, int mx, int my) {
 
 static void draw_titlebar_btn(int ax, int ay, int w, int h, const char *label, uint8_t bg) {
     fill_rect(ax, ay, w, h, bg);
-    draw_rect(ax, ay, w, h, 0x00);
-    int tx = ax + w / 2 - (int)(strlen(label) * 3);
-    int ty = ay + h / 2 - 3;
-    draw_string(tx, ty, (char *)label, 0x00, 2);
+    draw_rect(ax, ay, w, h, BLACK);
+    int tx = ax + w / 2 - (int)(strlen(label) * 3) + 1;
+    int ty = ay + h / 2 - 3 + 1;
+    draw_string(tx, ty, (char *)label, WHITE, 2);
 }
 
 static bool clicked_titlebar_btn(int ax, int ay, int w, int h) {
@@ -153,7 +153,7 @@ void wm_draw_all(void) {
         int ty = SCREEN_HEIGHT - TASKBAR_H;
 
         fill_rect(taskbar_x, ty, lw, TASKBAR_H, win->bar_color);
-        draw_rect(taskbar_x, ty, lw, TASKBAR_H, 0x00);
+        draw_rect(taskbar_x, ty, lw, TASKBAR_H, BLACK);
         draw_string(taskbar_x + 4, ty + 2, (char *)win->title, win->title_color, 2);
         taskbar_x += lw + 1;
     }
@@ -202,20 +202,20 @@ void window_draw(window *win) {
     int wy = win->y + MENUBAR_H_SIZE;
 
     if (win->dragging) {
-        draw_rect(win->x + 2, wy + 2, win->w, win->h, 0x00);
-        draw_rect(win->x, wy, win->w, win->h, 0x88);
+        draw_rect(win->x + 2, wy + 2, win->w, win->h, BLACK);
+        draw_rect(win->x, wy, win->w, win->h, LIGHT_GRAY);
         return;
     }
 
     fill_rect(win->x, wy, win->w, 16, win->bar_color);
-    draw_titlebar_btn(win->x + 3,  wy + 3, 10, 10, "X", 0xCC);
-    draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", 0xA0);
+    draw_titlebar_btn(win->x + 3,  wy + 3, 10, 10, "X", RED);
+    draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", LIGHT_BLUE);
 
     int tx = win->x + win->w / 2 - (int)(strlen(win->title) * 2);
     draw_string(tx, wy + 6, (char *)win->title, win->title_color, 2);
 
     fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
-    draw_rect(win->x, wy, win->w, win->h, 0x00);
+    draw_rect(win->x, wy, win->w, win->h, BLACK);
 
     for (int i = 0; i < win->widget_count; i++)
         widget_draw(&win->widgets[i], win->x, wy);

@@ -7,7 +7,7 @@
 #include "ui/widgets.h"
 #include "config/config.h"
 
-#define MAX_WINDOWS 64
+#define MAX_WINDOWS 32
 #define MAX_WIN_WIDGETS 128
 #define MAX_WIN_MENUS 16
 

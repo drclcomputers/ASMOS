@@ -6,4 +6,6 @@
 #include "ui/window.h"
 #include "ui/cursor.h"
 
+void draw_wallpaper_pattern(void);
+
 #endif

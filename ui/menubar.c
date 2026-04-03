@@ -6,16 +6,16 @@
 #include "config/config.h"
 #include "lib/time.h"
 
-#define BAR_BG      0x08
-#define BAR_FG      0xFF
-#define DROP_BG     0xE0
-#define DROP_FG     0x00
-#define DROP_SEL    0x01
-#define DROP_SEP    0xA0
-#define DROP_DIS    0x88
+#define BAR_BG      LIGHT_GRAY
+#define BAR_FG      WHITE
+#define DROP_BG     CYAN
+#define DROP_FG     WHITE
+#define DROP_SEL    RED
+#define DROP_SEP    WHITE
+#define DROP_DIS    WHITE
 #define PADDING     4
-#define CLOCK_CHARS  8
-#define CLOCK_W      (CLOCK_CHARS * 5 + PADDING * 2)
+#define CLOCK_CHARS 8
+#define CLOCK_W     (CLOCK_CHARS * 5 + PADDING * 2)
 
 void menubar_init(void) {
     memset(&g_menubar, 0, sizeof(menubar));
@@ -112,10 +112,10 @@ void menubar_draw(menubar *mb) {
             int dy = MENUBAR_H_SIZE;
             int dh = m->item_count * MENU_ITEM_H;
 
-            fill_rect(m->bar_x + 2, dy + 2, dw, dh, 0x00);
+            fill_rect(m->bar_x + 2, dy + 2, dw, dh, BLACK);
 
             fill_rect(m->bar_x, dy, dw, dh, DROP_BG);
-            draw_rect(m->bar_x, dy, dw, dh, 0x00);
+            draw_rect(m->bar_x, dy, dw, dh, BLACK);
 
             for (int j = 0; j < m->item_count; j++) {
                 menu_item *it = &m->items[j];

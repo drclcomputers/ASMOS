@@ -4,8 +4,8 @@
 #include "lib/types.h"
 #include "lib/string.h"
 
-#define MAX_MENU_ITEMS  12
-#define MAX_DROP_ITEMS  8
+#define MAX_MENU_ITEMS 12
+#define MAX_DROP_ITEMS 8
 
 typedef struct widget widget;
 typedef bool (*WidgetCallback)(widget *wg);
@@ -37,7 +37,7 @@ typedef struct {
 } widget_checkbox;
 
 typedef struct {
-    char buf[64];
+    char buf[1024];
     int  len;
     bool focused;
 } widget_textbox;
@@ -45,7 +45,7 @@ typedef struct {
 typedef struct {
     char          *items[MAX_DROP_ITEMS];
     int            item_count;
-    int            selected;        // -1 = nothing selected
+    int            selected;
     bool           open;
     WidgetCallback on_select;
 } widget_dropdown;
@@ -113,9 +113,7 @@ static inline widget make_checkbox(int x, int y, char *label,
     return wg;
 }
 
-static inline widget make_textbox(int x, int y, int w, int h,
-                                   unsigned char bg, unsigned char fg,
-                                   unsigned char border) {
+static inline widget make_textbox(int x, int y, int w, int h, unsigned char bg, unsigned char fg, unsigned char border) {
     widget wg = {0};
     wg.type = WIDGET_TEXTBOX;
     wg.x = x; wg.y = y; wg.w = w; wg.h = h;

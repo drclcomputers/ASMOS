@@ -36,12 +36,12 @@ void draw_cursor(int x, int y) {
 
             // fill
             if (cursor_fill[row] & (1 << (8 - col))) {
-                draw_dot(px, py, 0x0F);
+                draw_dot(px, py, WHITE);
             }
 
             // border
             if (cursor_border[row] & (1 << (8 - col))) {
-                draw_dot(px, py, 0x00);
+                draw_dot(px, py, BLACK);
             }
         }
     }

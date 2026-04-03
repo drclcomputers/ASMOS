@@ -10,10 +10,10 @@
 menubar g_menubar;
 
 app_descriptor *installed_apps[MAX_INSTALLED_APPS];
-int             installed_app_count = 0;
+int installed_app_count = 0;
 
 app_instance_t  running_apps[MAX_RUNNING_APPS];
-int             running_app_count = 0;
+int running_app_count = 0;
 
 static bool gui_should_exit = false;
 
@@ -110,7 +110,7 @@ void os_run(void) {
                 running_apps[i].desc->on_frame(running_apps[i].state);
         }
 
-        clear_screen(0xD0);
+        draw_wallpaper_pattern();
 
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);

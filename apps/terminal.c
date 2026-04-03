@@ -1,6 +1,6 @@
 #include "os/api.h"
 
-#define TEXTBOX_IDX  1
+#define TEXTBOX_IDX 1
 
 typedef struct {
     window *win;
@@ -13,6 +13,10 @@ static bool terminal_close(window *w) {
     (void)w;
     os_quit_app_by_desc(&terminal_app);
     return true;
+}
+
+static void on_file_close() {
+	terminal_close(NULL);
 }
 
 static void terminal_init(void *state) {
@@ -34,11 +38,11 @@ static void terminal_init(void *state) {
     if (!s->win) return;
 
     menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "Close", NULL);
+    menu_add_item(file_menu, "Close", on_file_close);
 
-    window_add_widget(s->win, make_label(4, 6, ">", 0x0F, 2));
-
-    window_add_widget(s->win, make_textbox(12, 2, 170, 12, 0x00, 0x0F, 0x08));
+    window_add_widget(s->win, make_label(4, 6, ">", WHITE, 2));
+    window_add_widget(s->win, make_textbox(12, 2, 170, 42, BLACK, WHITE, LIGHT_GRAY));
+    window_add_widget(s->win, make_textbox(12, 52, 170, 42, BLACK, WHITE, LIGHT_GRAY));
 }
 
 static void terminal_on_frame(void *state) {
@@ -47,17 +51,22 @@ static void terminal_on_frame(void *state) {
 
     if (s->win->widget_count <= TEXTBOX_IDX) return;
 
-    widget         *tb  = &s->win->widgets[TEXTBOX_IDX];
-    widget_textbox *wtb = &tb->as.textbox;
+    widget         *tb     = &s->win->widgets[TEXTBOX_IDX];
+    widget         *tbout  = &s->win->widgets[TEXTBOX_IDX+1];
+    widget_textbox *wtb    = &tb->as.textbox;
+    widget_textbox *wtbout = &tbout->as.textbox;
 
     if (!wtb->focused) return;
+    if (wtbout->focused) return;
+    if (!wtbout->focused) return;
     if (!kb.key_pressed || kb.last_scancode != ENTER) return;
 
     if (wtb->len > 0) {
-        cli_execute_command(wtb->buf);
+    	char outbuf[1024];
+        cli_execute_command(wtb->buf, outbuf, 1024);
 
-        memset(wtb->buf, 0, sizeof(wtb->buf));
-        wtb->len = 0;
+        wtbout->len = strlen(outbuf);
+        strcpy(wtbout->buf, outbuf);
     }
 }
 

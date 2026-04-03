@@ -32,7 +32,7 @@
 // OS services
 #include "os/os.h"
 
-// Shell CLI (for terminal app)
+// Shell CLI
 #include "shell/cli.h"
 
 #endif

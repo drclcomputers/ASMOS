@@ -29,7 +29,7 @@ typedef struct {
 typedef struct {
     menu menus[MAX_MENUS];
     int  menu_count;
-    int  open_index;        // -1 = none open
+    int  open_index;
 } menubar;
 
 extern menubar g_menubar;
