@@ -69,6 +69,13 @@ void os_quit_app(app_instance_t *inst) {
     inst->desc    = NULL;
     inst->running = false;
     running_app_count--;
+
+    for (int i = win_count - 1; i >= 0; i--) {
+        if (win_stack[i]->visible && !win_stack[i]->minimized) {
+            wm_focus(win_stack[i]);
+            break;
+        }
+    }
 }
 
 void os_quit_app_by_desc(app_descriptor *desc) {

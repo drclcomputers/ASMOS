@@ -5,12 +5,19 @@ typedef struct {
     window *win_info;
 } finder_state_t;
 
+extern app_descriptor finder_app;
 
 static void on_file_new(void)   { /* TODO: open new window */ }
 static void on_file_save(void)  { /* TODO: save focused document */ }
 static void on_file_close(void) { /* TODO: close focused window */ }
 static void on_edit_copy(void)  { }
 static void on_edit_paste(void) { }
+
+static bool finder_close(widget *w) {
+    (void)w;
+    os_quit_app_by_desc(&finder_app);
+    return true;
+}
 
 static void finder_init(void *state) {
     finder_state_t *s = (finder_state_t *)state;
@@ -28,6 +35,7 @@ static void finder_init(void *state) {
         .visible       = true,
     };
     wm_register(s->win_settings);
+    s->win_settings->on_close = finder_close;
 
     menu *file_menu = window_add_menu(s->win_settings, "File");
     menu_add_item(file_menu, "New",   on_file_new);
@@ -57,6 +65,7 @@ static void finder_init(void *state) {
         .visible       = true,
     };
     wm_register(s->win_info);
+    s->win_info->on_close = finder_close;
 
     menu *info_file = window_add_menu(s->win_info, "File");
     menu_add_item(info_file, "Close", on_file_close);

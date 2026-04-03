@@ -58,6 +58,10 @@ static void monitor_on_frame(void *state) {
     monitor_state_t *s = (monitor_state_t *)state;
     if (!s->win) return;
 
+    s->last_update_time++;
+    if (s->last_update_time < 2000) return;
+    s->last_update_time = 0;
+
     // Get memory information
     uint32_t heap_used_kb = heap_used();
     uint32_t heap_remaining_kb = heap_remaining();

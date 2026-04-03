@@ -133,7 +133,8 @@ void wm_draw_all(void) {
 
 void wm_update_all(void) {
     bool click_consumed = false;
-    for (int i = win_count - 1; i >= 0; i--) {
+    int count = win_count;
+    for (int i = count - 1; i >= 0; i--) {
         window *win = win_stack[i];
         if (!win->visible) continue;
 
@@ -154,17 +155,19 @@ void wm_update_all(void) {
             continue;
         }
 
-        if (!click_consumed && mouse.left_clicked &&
-            in_titlebar(win, mouse.x, mouse.y)) {
+        int wy = win->y + MENUBAR_H_SIZE;
+        bool on_window = mouse.x >= win->x && mouse.x < win->x + win->w &&
+                         mouse.y >= wy     && mouse.y < wy + win->h;
+
+        if (!click_consumed && mouse.left_clicked && on_window) {
             wm_focus(win);
             click_consumed = true;
         }
 
-        if (i == win_count - 1)
+        if (i == count - 1)
             window_update(win);
     }
 }
-
 
 void window_draw(window *win) {
     if (!win->visible || win->minimized) return;
