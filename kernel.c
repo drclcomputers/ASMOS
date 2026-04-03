@@ -9,6 +9,7 @@
 
 extern app_descriptor finder_app;
 extern app_descriptor terminal_app;
+extern app_descriptor monitor_app;
 
 typedef struct __attribute__((packed)) {
     uint64_t base;
@@ -46,10 +47,15 @@ void kmain(void) {
 
     menubar_init();
 
-    os_register_app(&finder_app);
-    os_register_app(&terminal_app);
+    os_install_app(&finder_app);
+    os_install_app(&terminal_app);
+    os_install_app(&monitor_app);
 
     if (!START_IN_GUI) cli_run();
+
+    os_launch_app(&finder_app);
+    os_launch_app(&terminal_app);
+    os_launch_app(&monitor_app);
 
     os_run();
 }

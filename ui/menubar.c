@@ -4,6 +4,7 @@
 #include "lib/mem.h"
 #include "io/mouse.h"
 #include "config/config.h"
+#include "lib/time.h"
 
 #define BAR_BG      0x08
 #define BAR_FG      0xFF
@@ -13,6 +14,8 @@
 #define DROP_SEP    0xA0
 #define DROP_DIS    0x88
 #define PADDING     4
+#define CLOCK_CHARS  8
+#define CLOCK_W      (CLOCK_CHARS * 5 + PADDING * 2)
 
 void menubar_init(void) {
     memset(&g_menubar, 0, sizeof(menubar));
@@ -21,27 +24,27 @@ void menubar_init(void) {
 
 menu* menubar_add_menu(menubar *mb, char *title) {
     if (mb->menu_count >= MAX_MENUS) return 0;
-    menu *m       = &mb->menus[mb->menu_count++];
+    menu *m = &mb->menus[mb->menu_count++];
     memset(m, 0, sizeof(menu));
-    m->title      = title;
-    m->open       = false;
+    m->title = title;
+    m->open = false;
     return m;
 }
 
 void menu_add_item(menu *m, char *label, MenuAction action) {
     if (m->item_count >= MAX_MENU_ITEMS) return;
-    menu_item *it  = &m->items[m->item_count++];
-    it->label      = label;
-    it->action     = action;
-    it->disabled   = false;
+    menu_item *it = &m->items[m->item_count++];
+    it->label = label;
+    it->action = action;
+    it->disabled = false;
 }
 
 void menu_add_separator(menu *m) {
     if (m->item_count >= MAX_MENU_ITEMS) return;
     menu_item *it  = &m->items[m->item_count++];
-    it->label      = 0;
-    it->action     = 0;
-    it->disabled   = true;
+    it->label = 0;
+    it->action = 0;
+    it->disabled = true;
 }
 
 void menubar_close_all(menubar *mb) {
@@ -51,14 +54,29 @@ void menubar_close_all(menubar *mb) {
 }
 
 void menubar_layout(menubar *mb) {
-    int cursor_x = 2;
+    int cursor_x = 2 + CLOCK_W;
     for (int i = 0; i < mb->menu_count; i++) {
-        menu *m  = &mb->menus[i];
-        int   tw = (int)strlen(m->title) * 5 + PADDING * 2;
+        menu *m = &mb->menus[i];
+        int tw = (int)strlen(m->title) * 5 + PADDING * 2;
         m->bar_x = cursor_x;
         m->bar_w = tw;
         cursor_x += tw + 2;
     }
+}
+
+static void write_2digit(char *buf, uint8_t val) {
+    buf[0] = '0' + (val / 10);
+    buf[1] = '0' + (val % 10);
+}
+
+static void build_clock_str(char *out) {
+    time_full_t t = time_rtc();
+    write_2digit(out + 0, t.hours);
+    out[2] = ':';
+    write_2digit(out + 3, t.minutes);
+    out[5] = ':';
+    write_2digit(out + 6, t.seconds);
+    out[8] = '\0';
 }
 
 void menubar_draw(menubar *mb) {
@@ -66,15 +84,19 @@ void menubar_draw(menubar *mb) {
 
     int cursor_x = 2;
 
+    char clock_str[9];
+    build_clock_str(clock_str);
+    draw_string(cursor_x, 2, clock_str, BAR_FG, 2);
+    cursor_x += CLOCK_W;
+
     for (int i = 0; i < mb->menu_count; i++) {
-        menu *m  = &mb->menus[i];
-        int   tw = (int)strlen(m->title) * 5 + PADDING * 2;
+        menu *m = &mb->menus[i];
+        int tw = (int)strlen(m->title) * 5 + PADDING * 2;
 
         m->bar_x = cursor_x;
         m->bar_w = tw;
 
-        if (m->open)
-            fill_rect(cursor_x, 0, tw, MENUBAR_H_SIZE, DROP_SEL);
+        if (m->open) fill_rect(cursor_x, 0, tw, MENUBAR_H_SIZE, DROP_SEL);
 
         draw_string(cursor_x + PADDING, 2, m->title, BAR_FG, 2);
         cursor_x += tw + 2;
@@ -97,7 +119,7 @@ void menubar_draw(menubar *mb) {
 
             for (int j = 0; j < m->item_count; j++) {
                 menu_item *it = &m->items[j];
-                int         iy = dy + j * MENU_ITEM_H;
+                int iy = dy + j * MENU_ITEM_H;
 
                 if (!it->label) {
                     int sy = iy + MENU_ITEM_H / 2;
@@ -122,6 +144,8 @@ void menubar_draw(menubar *mb) {
 
 void menubar_update(menubar *mb) {
     if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
+    	if (mouse.x < 2 + CLOCK_W) return;
+
         for (int i = 0; i < mb->menu_count; i++) {
             menu *m = &mb->menus[i];
             if (mouse.x >= m->bar_x && mouse.x < m->bar_x + m->bar_w) {
@@ -129,7 +153,7 @@ void menubar_update(menubar *mb) {
                     menubar_close_all(mb);
                 } else {
                     menubar_close_all(mb);
-                    m->open        = true;
+                    m->open = true;
                     mb->open_index = i;
                 }
                 return;
@@ -140,8 +164,8 @@ void menubar_update(menubar *mb) {
     }
 
     if (mb->open_index >= 0 && mouse.left_clicked) {
-        menu *m  = &mb->menus[mb->open_index];
-        int   dy = MENUBAR_H_SIZE;
+        menu *m = &mb->menus[mb->open_index];
+        int dy = MENUBAR_H_SIZE;
 
         int dw = MENU_ITEM_MIN_W;
         for (int j = 0; j < m->item_count; j++) {

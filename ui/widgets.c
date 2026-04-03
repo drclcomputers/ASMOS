@@ -14,7 +14,7 @@ static inline bool mouse_over(int ax, int ay, int w, int h) {
 
 static void draw_button(widget *wg, int ax, int ay) {
     fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
-    draw_rect(ax, ay, wg->w, wg->h, wg->border_color);  // fixed: was b->border_color
+    draw_rect(ax, ay, wg->w, wg->h, wg->border_color);
     int tx = ax + wg->w / 2 - (int)(strlen(wg->as.button.label) * 3);
     int ty = ay + wg->h / 2 - 3;
     draw_string(tx, ty, wg->as.button.label, wg->fg_color, 2);

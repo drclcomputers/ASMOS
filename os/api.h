@@ -26,10 +26,13 @@
 // filesystem
 #include "fs/fat16.h"
 
+// time
+#include "lib/time.h"
+
 // OS services
 #include "os/os.h"
 
-// Shell CLI
+// Shell CLI (for terminal app)
 #include "shell/cli.h"
 
 #endif

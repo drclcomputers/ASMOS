@@ -22,6 +22,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/apps/filefinder.o            \
       $(BUILD_DIR)/apps/terminal.o              \
+	  $(BUILD_DIR)/apps/monitor.o               \
       \
       $(BUILD_DIR)/config/config.o              \
       \
