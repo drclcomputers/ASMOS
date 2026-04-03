@@ -5,15 +5,15 @@ typedef struct {
     window *win_info;
 } finder_state_t;
 
-extern app_descriptor finder_app;
+app_descriptor finder_app;
 
-static void on_file_new(void)   { /* TODO: open new window */ }
-static void on_file_save(void)  { /* TODO: save focused document */ }
-static void on_file_close(void) { /* TODO: close focused window */ }
-static void on_edit_copy(void)  { }
-static void on_edit_paste(void) { }
+static void on_file_new(void)   { /* TODO: open new document window */ }
+static void on_file_save(void)  { /* TODO: save focused document    */ }
+static void on_file_close(void) { /* TODO: close focused window     */ }
+static void on_edit_copy(void)  { /* TODO */ }
+static void on_edit_paste(void) { /* TODO */ }
 
-static bool finder_close(widget *w) {
+static bool finder_close(window *w) {
     (void)w;
     os_quit_app_by_desc(&finder_app);
     return true;
@@ -22,20 +22,20 @@ static bool finder_close(widget *w) {
 static void finder_init(void *state) {
     finder_state_t *s = (finder_state_t *)state;
 
-    s->win_settings = (window *)kmalloc(sizeof(window));
-    s->win_info     = (window *)kmalloc(sizeof(window));
-    if (!s->win_settings || !s->win_info) return;
-
-    *s->win_settings = (window){
-        .x=20, .y=20, .w=200, .h=150,
+    const window_spec_t settings_spec = {
+        .x             = 20,
+        .y             = 20,
+        .w             = 200,
+        .h             = 150,
         .title         = "Settings",
         .title_color   = 0xFF,
         .bar_color     = 0x08,
         .content_color = 0xEE,
         .visible       = true,
+        .on_close      = finder_close,
     };
-    wm_register(s->win_settings);
-    s->win_settings->on_close = finder_close;
+    s->win_settings = wm_register(&settings_spec);
+    if (!s->win_settings) return;
 
     menu *file_menu = window_add_menu(s->win_settings, "File");
     menu_add_item(file_menu, "New",   on_file_new);
@@ -56,16 +56,20 @@ static void finder_init(void *state) {
     window_add_widget(s->win_settings,
         make_button(10, 54, 50, 12, "OK", 0xCC, 0x00, 0x00, NULL));
 
-    *s->win_info = (window){
-        .x=60, .y=40, .w=120, .h=80,
+    const window_spec_t info_spec = {
+        .x             = 60,
+        .y             = 40,
+        .w             = 120,
+        .h             = 80,
         .title         = "Info",
         .title_color   = 0xFF,
         .bar_color     = 0x01,
         .content_color = 0xEE,
         .visible       = true,
+        .on_close      = finder_close,
     };
-    wm_register(s->win_info);
-    s->win_info->on_close = finder_close;
+    s->win_info = wm_register(&info_spec);
+    if (!s->win_info) return;
 
     menu *info_file = window_add_menu(s->win_info, "File");
     menu_add_item(info_file, "Close", on_file_close);
@@ -81,16 +85,8 @@ static void finder_on_frame(void *state) {
 static void finder_destroy(void *state) {
     finder_state_t *s = (finder_state_t *)state;
 
-    if (s->win_settings) {
-        wm_unregister(s->win_settings);
-        kfree(s->win_settings);
-        s->win_settings = NULL;
-    }
-    if (s->win_info) {
-        wm_unregister(s->win_info);
-        kfree(s->win_info);
-        s->win_info = NULL;
-    }
+    wm_unregister(s->win_settings); s->win_settings = NULL;
+    wm_unregister(s->win_info);     s->win_info     = NULL;
 }
 
 app_descriptor finder_app = {

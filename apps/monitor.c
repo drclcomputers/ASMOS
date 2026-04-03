@@ -1,115 +1,100 @@
 #include "os/api.h"
 
+#define UPDATE_INTERVAL  2000
+#define MEM_LABEL_IDX       1
+#define STOR_LABEL_IDX      3
+
 typedef struct {
-    window *win;
-    char memory_str[64];
-    char storage_str[64];
-    uint32_t last_update_time;
+    window  *win;
+    char     memory_str[32];
+    char     storage_str[32];
+    uint32_t frame_counter;
 } monitor_state_t;
 
-static void on_file_close(void) {
-    // Window will be closed by the app framework
+static void fmt_bytes(char *dst, int dst_size,
+                      uint32_t used, uint32_t total) {
+    char u[12], t[12];
+    uint32_to_str(used,  u);
+    uint32_to_str(total, t);
+
+    int pos = 0;
+    for (int i = 0; u[i] && pos < dst_size - 1; i++) dst[pos++] = u[i];
+    const char *sep = " B / ";
+    for (int i = 0; sep[i] && pos < dst_size - 1; i++) dst[pos++] = sep[i];
+    for (int i = 0; t[i] && pos < dst_size - 1; i++) dst[pos++] = t[i];
+    const char *unit = " B";
+    for (int i = 0; unit[i] && pos < dst_size - 1; i++) dst[pos++] = unit[i];
+    dst[pos] = '\0';
+}
+
+static void update_label_text(window *win, int idx, char *new_text) {
+    if (!win || idx < 0 || idx >= win->widget_count) return;
+    win->widgets[idx].as.label.text = new_text;
+}
+
+static void monitor_refresh(monitor_state_t *s) {
+    /* Memory */
+    uint32_t used  = heap_used();
+    uint32_t total = heap_used() + heap_remaining();
+    fmt_bytes(s->memory_str, (int)sizeof(s->memory_str), used, total);
+    update_label_text(s->win, MEM_LABEL_IDX, s->memory_str);
+
+    uint32_t stor_total = 0, stor_used = 0;
+    if (fat16_get_usage(&stor_total, &stor_used)) {
+        fmt_bytes(s->storage_str, (int)sizeof(s->storage_str),
+                  stor_used, stor_total);
+    } else {
+        strcpy(s->storage_str, "unavailable");
+    }
+    update_label_text(s->win, STOR_LABEL_IDX, s->storage_str);
 }
 
 static void monitor_init(void *state) {
     monitor_state_t *s = (monitor_state_t *)state;
 
-    s->win = (window *)kmalloc(sizeof(window));
-    if (!s->win) return;
+    strcpy(s->memory_str,  "...");
+    strcpy(s->storage_str, "...");
 
-    *s->win = (window){
-        .x = 20,
-        .y = 20,
-        .w = 240,
-        .h = 140,
+    const window_spec_t spec = {
+        .x             = 20,
+        .y             = 20,
+        .w             = 240,
+        .h             = 140,
         .title         = "Monitor",
         .title_color   = 0xFF,
         .bar_color     = 0x08,
         .content_color = 0xEE,
         .visible       = true,
     };
-    wm_register(s->win);
+    s->win = wm_register(&spec);
+    if (!s->win) return;
 
     menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "Close", on_file_close);
+    menu_add_item(file_menu, "Close", NULL);
 
-    // Memory label header
-    window_add_widget(s->win,
-        make_label(10, 8, "Memory:", 0x00, 2));
+    window_add_widget(s->win, make_label(10, 8,  "Memory:",  0x00, 2));
+    window_add_widget(s->win, make_label(90, 8,  s->memory_str,  0x00, 2));
+    window_add_widget(s->win, make_label(10, 28, "Storage:", 0x00, 2));
+    window_add_widget(s->win, make_label(90, 28, s->storage_str, 0x00, 2));
 
-    // Memory value label
-    strcpy(s->memory_str, "Heap: 0 MB / 0 MB");
-    window_add_widget(s->win,
-        make_label(90, 8, s->memory_str, 0x00, 2));
-
-    // Storage label header
-    window_add_widget(s->win,
-        make_label(10, 28, "Storage:", 0x00, 2));
-
-    // Storage value label
-    strcpy(s->storage_str, "Storage: 0 MB / 0 MB");
-    window_add_widget(s->win,
-        make_label(90, 28, s->storage_str, 0x00, 2));
-
-    s->last_update_time = 0;
+    monitor_refresh(s);
 }
 
 static void monitor_on_frame(void *state) {
     monitor_state_t *s = (monitor_state_t *)state;
     if (!s->win) return;
 
-    s->last_update_time++;
-    if (s->last_update_time < 2000) return;
-    s->last_update_time = 0;
+    s->frame_counter++;
+    if (s->frame_counter < UPDATE_INTERVAL) return;
+    s->frame_counter = 0;
 
-    // Get memory information
-    uint32_t heap_used_kb = heap_used();
-    uint32_t heap_remaining_kb = heap_remaining();
-    uint32_t heap_total_kb = heap_used_kb + heap_remaining_kb;
-    uint32_t heap_used_mb = heap_used_kb;
-    uint32_t heap_total_mb = heap_total_kb;
-
-    // Build memory string
-    char used_str[16] = {0};
-    char total_str[16] = {0};
-    uint32_to_str(heap_used_mb, used_str);
-    uint32_to_str(heap_total_mb, total_str);
-
-    strcpy(s->memory_str, "Heap: ");
-    strcat(s->memory_str, used_str);
-    strcat(s->memory_str, " B / ");
-    strcat(s->memory_str, total_str);
-    strcat(s->memory_str, " B");
-
-    // Get storage information
-    uint32_t total_bytes = 0;
-    uint32_t used_bytes = 0;
-    if (fat16_get_usage(&total_bytes, &used_bytes)) {
-        uint32_t total_mb = total_bytes;
-        uint32_t used_mb = used_bytes;
-
-        // Build storage string
-        char used_str_storage[16] = {0};
-        char total_str_storage[16] = {0};
-        uint32_to_str(used_mb, used_str_storage);
-        uint32_to_str(total_mb, total_str_storage);
-
-        strcpy(s->storage_str, "Storage: ");
-        strcat(s->storage_str, used_str_storage);
-        strcat(s->storage_str, " B / ");
-        strcat(s->storage_str, total_str_storage);
-        strcat(s->storage_str, " B");
-    }
+    monitor_refresh(s);
 }
 
 static void monitor_destroy(void *state) {
     monitor_state_t *s = (monitor_state_t *)state;
-
-    if (s->win) {
-        wm_unregister(s->win);
-        kfree(s->win);
-        s->win = NULL;
-    }
+    wm_unregister(s->win);
+    s->win = NULL;
 }
 
 app_descriptor monitor_app = {

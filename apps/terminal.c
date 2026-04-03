@@ -1,46 +1,70 @@
 #include "os/api.h"
 
+#define TEXTBOX_IDX  1
+
 typedef struct {
     window *win;
+    bool    waiting_for_enter;
 } terminal_state_t;
+
+app_descriptor terminal_app;
+
+static bool terminal_close(window *w) {
+    (void)w;
+    os_quit_app_by_desc(&terminal_app);
+    return true;
+}
 
 static void terminal_init(void *state) {
     terminal_state_t *s = (terminal_state_t *)state;
 
-    s->win = (window *)kmalloc(sizeof(window));
-    if (!s->win) return;
-
-    *s->win = (window){
-        .x=20, .y=20, .w=200, .h=150,
+    const window_spec_t spec = {
+        .x             = 20,
+        .y             = 20,
+        .w             = 200,
+        .h             = 150,
         .title         = "Terminal",
         .title_color   = 0x0F,
         .bar_color     = 0x08,
         .content_color = 0x00,
         .visible       = true,
+        .on_close      = terminal_close,
     };
-    wm_register(s->win);
+    s->win = wm_register(&spec);
+    if (!s->win) return;
 
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Close", NULL);
 
-    window_add_widget(s->win,
-        make_label(4, 6, ">", 0x0F, 2));
-    window_add_widget(s->win,
-        make_textbox(12, 2, 170, 12, 0x00, 0x0F, 0x08));
+    window_add_widget(s->win, make_label(4, 6, ">", 0x0F, 2));
+
+    window_add_widget(s->win, make_textbox(12, 2, 170, 12, 0x00, 0x0F, 0x08));
 }
 
 static void terminal_on_frame(void *state) {
-    (void)state;
-    // TODO: read kb input from the textbox widget, run cli_execute_command
+    terminal_state_t *s = (terminal_state_t *)state;
+    if (!s->win) return;
+
+    if (s->win->widget_count <= TEXTBOX_IDX) return;
+
+    widget         *tb  = &s->win->widgets[TEXTBOX_IDX];
+    widget_textbox *wtb = &tb->as.textbox;
+
+    if (!wtb->focused) return;
+    if (!kb.key_pressed || kb.last_scancode != ENTER) return;
+
+    if (wtb->len > 0) {
+        cli_execute_command(wtb->buf);
+
+        memset(wtb->buf, 0, sizeof(wtb->buf));
+        wtb->len = 0;
+    }
 }
 
 static void terminal_destroy(void *state) {
     terminal_state_t *s = (terminal_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        kfree(s->win);
-        s->win = NULL;
-    }
+    wm_unregister(s->win);
+    s->win = NULL;
 }
 
 app_descriptor terminal_app = {

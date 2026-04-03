@@ -94,9 +94,12 @@ os_image.bin: boot.bin kernel.bin
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-run: all
+qemu: all
 	qemu-system-i386 -drive format=raw,file=os_image.bin \
 	                 -m 4M -machine pc
+
+bochs: all
+	bochs -f bochs/bochssrc.txt -q
 
 clean:
 	rm -rf $(BUILD_DIR)
