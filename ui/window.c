@@ -95,14 +95,14 @@ void wm_unregister(window *win) {
     }
 }
 
-window *focused_window = NULL;  // add at top with other globals
+window *focused_window = NULL;
 
 void wm_focus(window *win) {
     if (!win) return;
 
-    focused_window = win;  // always track focus regardless of pinned_bottom
+    focused_window = win;
 
-    if (win->pinned_bottom) return;  // but don't change z-order
+    if (win->pinned_bottom) return;
 
     int old = win->show_order;
     for (int i = 0; i < win_count; i++)
@@ -229,6 +229,8 @@ void window_draw(window *win) {
 
 	    fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
 	    draw_rect(win->x, wy, win->w, win->h, BLACK);
+
+		if (win->on_draw) win->on_draw(win, win->on_draw_userdata);
     }
 
     for (int i = 0; i < win->widget_count; i++)
@@ -266,7 +268,7 @@ void window_dragged(window *win) {
     int wy = win->y + MENUBAR_H_SIZE;
     (void)wy;
 
-    if (!win->dragging && mouse.left && in_titlebar(win, mouse.x, mouse.y)) win->dragging = true;
+    if (!win->dragging && mouse.left_clicked && in_titlebar(win, mouse.x, mouse.y)) win->dragging = true;
 
     if (win->dragging) {
         if (mouse.left) {

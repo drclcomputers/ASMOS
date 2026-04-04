@@ -159,48 +159,15 @@ static void term_execute(terminal_state_t *s) {
     term_scroll_to_bottom(s);
 }
 
-static void terminal_init(void *state) {
-    terminal_state_t *s = (terminal_state_t *)state;
+void terminal_window_draw(window *win, void *userdata) {
+    terminal_state_t *s = (terminal_state_t *)userdata;
+    if (!win || !win->visible) return;
+    if (win->dragging) return;
 
-    const window_spec_t spec = {
-        .x             = 20,
-        .y             = 20,
-        .w             = 210,
-        .h             = 160,
-        .title         = "Terminal",
-        .title_color   = 0x0F,
-        .bar_color     = 0x08,
-        .content_color = 0x00,
-        .visible       = true,
-        .on_close      = terminal_close,
-    };
-    s->win = wm_register(&spec);
-    if (!s->win) return;
-
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "Close", on_file_close);
-
-    int content_h    = s->win->h - 16;
-    int output_area_h = content_h - INPUT_H - 4;
-    s->visible_rows  = output_area_h / LINE_H;
-    if (s->visible_rows < 1) s->visible_rows = 1;
-
-    s->input_focused = true;
-    s->hist_pos      = -1;
-
-    term_push_line(s, "ASMOS Terminal");
-    term_push_line(s, "Type 'help' for commands.");
-    term_push_line(s, "");
-    term_scroll_to_bottom(s);
-}
-
-static void terminal_draw(terminal_state_t *s) {
-    if (!s->win || !s->win->visible) return;
-
-    int wx = s->win->x;
-    int wy = s->win->y + MENUBAR_H + 16;
-    int ww = s->win->w;
-    int wh = s->win->h - 16;
+    int wx = win->x;
+    int wy = win->y + MENUBAR_H + 16;
+    int ww = win->w;
+    int wh = win->h - 16;
 
     int content_x = wx + TERM_X;
     int text_area_w = ww - TERM_X * 2 - SCROLL_BAR_W;
@@ -266,6 +233,44 @@ static void terminal_draw(terminal_state_t *s) {
     (void)text_area_w;
 }
 
+static void terminal_init(void *state) {
+    terminal_state_t *s = (terminal_state_t *)state;
+
+    const window_spec_t spec = {
+        .x             = 20,
+        .y             = 20,
+        .w             = 210,
+        .h             = 160,
+        .title         = "Terminal",
+        .title_color   = WHITE,
+        .bar_color     = DARK_GRAY,
+        .content_color = BLACK,
+        .visible       = true,
+        .on_close      = terminal_close,
+    };
+    s->win = wm_register(&spec);
+    if (!s->win) return;
+    s->win->on_draw = terminal_window_draw;
+	s->win->on_draw_userdata = s;
+
+    menu *file_menu = window_add_menu(s->win, "File");
+    menu_add_item(file_menu, "Close", on_file_close);
+
+    int content_h    = s->win->h - 16;
+    int output_area_h = content_h - INPUT_H - 4;
+    s->visible_rows  = output_area_h / LINE_H;
+    if (s->visible_rows < 1) s->visible_rows = 1;
+
+    s->input_focused = true;
+    s->hist_pos      = -1;
+
+    term_push_line(s, "ASMOS Terminal");
+    term_push_line(s, "Type 'help' for commands.");
+    term_push_line(s, "");
+    term_scroll_to_bottom(s);
+    //terminal_window_draw(s->win, s->win->on_draw_userdata);
+}
+
 static void terminal_on_frame(void *state) {
     terminal_state_t *s = (terminal_state_t *)state;
     if (!s->win || !s->win->visible) return;
@@ -301,18 +306,18 @@ static void terminal_on_frame(void *state) {
     }
 
     if (!s->input_focused || !kb.key_pressed) {
-        terminal_draw(s);
+        terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
     uint8_t sc = kb.last_scancode;
 
-    if (sc == F5) { term_scroll_up(s, s->visible_rows);   terminal_draw(s); return; }
-    if (sc == F6) { term_scroll_down(s, s->visible_rows); terminal_draw(s); return; }
+    if (sc == F5) { term_scroll_up(s, s->visible_rows);   terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
+    if (sc == F6) { term_scroll_down(s, s->visible_rows); terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
 
     if (sc == ENTER) {
         term_execute(s);
-        terminal_draw(s);
+        terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
@@ -320,12 +325,12 @@ static void terminal_on_frame(void *state) {
         if (s->input_len > 0) {
             s->input[--s->input_len] = '\0';
         }
-        terminal_draw(s);
+        terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
     if (sc == 0x48) {
-        if (s->hist_count == 0) { terminal_draw(s); return; }
+        if (s->hist_count == 0) { terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
 
         if (s->hist_pos == -1) {
             int di = 0;
@@ -344,12 +349,12 @@ static void terminal_on_frame(void *state) {
             s->input_len++;
         }
         s->input[s->input_len] = '\0';
-        terminal_draw(s);
+        terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
     if (sc == 0x50) {
-        if (s->hist_pos == -1) { terminal_draw(s); return; }
+        if (s->hist_pos == -1) { terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
 
         if (s->hist_pos < s->hist_count - 1) {
             s->hist_pos++;
@@ -369,7 +374,7 @@ static void terminal_on_frame(void *state) {
             }
             s->input[s->input_len] = '\0';
         }
-        terminal_draw(s);
+        terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
@@ -381,7 +386,7 @@ static void terminal_on_frame(void *state) {
         }
     }
 
-    terminal_draw(s);
+    terminal_window_draw(s->win, s->win->on_draw_userdata);
 }
 
 static void terminal_destroy(void *state) {

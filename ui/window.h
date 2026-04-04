@@ -46,6 +46,9 @@ struct window {
 	win_callback_t on_close;
 	win_callback_t on_minimize;
 
+	void (*on_draw)(struct window *win, void *userdata);
+	void *on_draw_userdata;
+
 	widget widgets[MAX_WIN_WIDGETS];
 	int widget_count;
 
