@@ -25,17 +25,11 @@ void os_install_app(app_descriptor *desc) {
 
 app_instance_t *os_launch_app(app_descriptor *desc) {
     if (!desc) return NULL;
-
-    if (os_find_instance(desc)) return NULL;
-
     if (running_app_count >= MAX_RUNNING_APPS) return NULL;
 
     app_instance_t *inst = NULL;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        if (!running_apps[i].running) {
-            inst = &running_apps[i];
-            break;
-        }
+        if (!running_apps[i].running) { inst = &running_apps[i]; break; }
     }
     if (!inst) return NULL;
 
@@ -52,7 +46,6 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
     running_app_count++;
 
     if (desc->init) desc->init(state);
-
     return inst;
 }
 
@@ -91,6 +84,14 @@ app_instance_t *os_find_instance(app_descriptor *desc) {
     return NULL;
 }
 
+int os_find_instances(app_descriptor *desc, app_instance_t **out, int max) {
+    int found = 0;
+    for (int i = 0; i < MAX_RUNNING_APPS && found < max; i++)
+        if (running_apps[i].running && running_apps[i].desc == desc)
+            out[found++] = &running_apps[i];
+    return found;
+}
+
 app_descriptor *os_find_app(const char *name) {
     for (int i = 0; i < installed_app_count; i++) {
         if (strcmp(installed_apps[i]->name, name) == 0)
@@ -110,7 +111,7 @@ void os_run(void) {
                 running_apps[i].desc->on_frame(running_apps[i].state);
         }
 
-        draw_wallpaper_pattern();
+        desktop_on_frame();
 
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);

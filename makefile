@@ -20,7 +20,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/shell/cli.o                  \
       \
-	  $(BUILD_DIR)/apps/desktop.o               \
       $(BUILD_DIR)/apps/filefinder.o            \
       $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \
@@ -47,6 +46,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/lib/types.o                  \
       \
       $(BUILD_DIR)/ui/cursor.o                  \
+	  $(BUILD_DIR)/ui/desktop.o                 \
       $(BUILD_DIR)/ui/menubar.o                 \
       $(BUILD_DIR)/ui/ui.o                      \
       $(BUILD_DIR)/ui/widgets.o                 \
