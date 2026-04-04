@@ -48,13 +48,12 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/ui/cursor.o                  \
 	  $(BUILD_DIR)/ui/desktop.o                 \
       $(BUILD_DIR)/ui/menubar.o                 \
+	  $(BUILD_DIR)/ui/modal.o                   \
       $(BUILD_DIR)/ui/ui.o                      \
       $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 
-# boot.asm loads 100 sectors (51,200 bytes) starting at KERNEL_OFFSET (0x8000).
-# The kernel binary must not exceed this — increase 'al' in boot.asm if needed.
-KERNEL_SECTORS_LOADED = 100
+KERNEL_SECTORS_LOADED = 110
 
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \

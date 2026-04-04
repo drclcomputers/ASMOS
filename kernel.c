@@ -46,18 +46,14 @@ void kmain(void) {
     ps2_init();
     fat16_mount();
 
+    if (!START_IN_GUI) cli_run();
+
     desktop_init();
     menubar_init();
 
     os_install_app(&finder_app);
     os_install_app(&terminal_app);
     os_install_app(&monitor_app);
-
-    if (!START_IN_GUI) cli_run();
-
-    os_launch_app(&finder_app);
-    os_launch_app(&terminal_app);
-    os_launch_app(&monitor_app);
 
     os_run();
 }

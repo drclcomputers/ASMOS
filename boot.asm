@@ -40,7 +40,7 @@ start:
     mov [BOOT_DRIVE], dl
 
     mov ah, 0x02
-    mov al, 100
+    mov al, 110
     mov ch, 0x00
     mov dh, 0x00
     mov cl, 0x02

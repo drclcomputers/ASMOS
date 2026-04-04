@@ -4,6 +4,7 @@
 #include "lib/alloc.h"
 #include "lib/string.h"
 #include "ui/ui.h"
+#include "ui/modal.h"
 #include "io/ps2.h"
 #include "config/config.h"
 
@@ -115,11 +116,17 @@ void os_run(void) {
 
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);
-        menubar_update(&g_menubar);
-        wm_update_all();
+
+        if (!modal_active()) {
+            menubar_update(&g_menubar);
+            wm_update_all();
+        }
 
         wm_draw_all();
         menubar_draw(&g_menubar);
+
+        modal_update();
+        modal_draw();
 
         draw_cursor(mouse.x, mouse.y);
         blit();
