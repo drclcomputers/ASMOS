@@ -95,19 +95,28 @@ void wm_unregister(window *win) {
     }
 }
 
+window *focused_window = NULL;  // add at top with other globals
+
 void wm_focus(window *win) {
     if (!win) return;
 
+    focused_window = win;  // always track focus regardless of pinned_bottom
+
+    if (win->pinned_bottom) return;  // but don't change z-order
+
     int old = win->show_order;
     for (int i = 0; i < win_count; i++)
-        if (win_stack[i] != win && win_stack[i]->show_order > old)
-        	win_stack[i]->show_order--;
+        if (win_stack[i] != win && win_stack[i]->show_order > old
+            && !win_stack[i]->pinned_bottom)
+            win_stack[i]->show_order--;
 
     win->show_order = win_count - 1;
     wm_sort();
 }
 
 window *wm_focused_window(void) {
+    if (focused_window && focused_window->visible && !focused_window->minimized)
+        return focused_window;
     for (int i = win_count - 1; i >= 0; i--) {
         window *w = win_stack[i];
         if (w->visible && !w->minimized) return w;
@@ -168,7 +177,6 @@ void wm_update_all(void) {
         for (int i = 0; i < win_count; i++) {
             window *win = win_stack[i];
             if (!win->visible || !win->minimized) continue;
-
             int lw = taskbar_label_width(win);
             if (mouse.x >= tx && mouse.x < tx + lw) {
                 win->minimized = false;
@@ -191,10 +199,12 @@ void wm_update_all(void) {
         if (!click_consumed && mouse.left_clicked && on_window) {
             wm_focus(win);
             click_consumed = true;
+            break;
         }
-
-        if (i == win_count - 1) window_update(win);
     }
+
+    if (focused_window && focused_window->visible && !focused_window->minimized)
+        window_update(focused_window);
 }
 
 void window_draw(window *win) {
@@ -251,7 +261,7 @@ bool window_update(window *win) {
 }
 
 void window_dragged(window *win) {
-    if (!win) return;
+    if (!win || win->pinned_bottom) return;
 
     int wy = win->y + MENUBAR_H_SIZE;
     (void)wy;

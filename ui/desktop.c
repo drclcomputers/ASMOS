@@ -58,12 +58,16 @@ void draw_wallpaper_pattern() {
 
 void desktop_init(void) {
     static const window_spec_t spec = {
-        .x = 0, .y = 0, .w = 1, .h = 1,
+        .x = 0, .y = MENUBAR_H,
+        .w = SCREEN_WIDTH,
+        .h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H,
         .title = "", .visible = true,
     };
     window *win = wm_register(&spec);
-    if (!win) return;
-    win->visible_buttons = false;
+	if (!win) return;
+	win->visible_buttons = false;
+	win->pinned_bottom   = true;
+	win->show_order      = -1;
 
     apps_menu = window_add_menu(win, "Apps");
     menu_add_item(apps_menu, "Finder",   launch_finder);
@@ -72,15 +76,5 @@ void desktop_init(void) {
 }
 
 void desktop_on_frame(void) {
-	draw_wallpaper_pattern();
-    if (win_count == 0) return;
-    window *bottom = win_stack[0];
-    bool any_above = false;
-    for (int i = 1; i < win_count; i++) {
-        if (win_stack[i]->visible && !win_stack[i]->minimized) {
-            any_above = true;
-            break;
-        }
-    }
-    if (!any_above) wm_focus(bottom);
+    draw_wallpaper_pattern();
 }

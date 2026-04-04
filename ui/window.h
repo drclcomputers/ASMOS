@@ -41,6 +41,7 @@ struct window {
 	bool minimized;
 	bool dragging;
 	int show_order;
+	bool pinned_bottom;
 
 	win_callback_t on_close;
 	win_callback_t on_minimize;
@@ -54,6 +55,7 @@ struct window {
 
 extern window *win_stack[MAX_WINDOWS];
 extern int win_count;
+extern window *focused_window;
 
 window *wm_register(const window_spec_t *spec);
 

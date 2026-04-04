@@ -19,10 +19,6 @@ static void on_file_close() {
 
 static void finder_init(void *state) {
     finder_state_t *s = (finder_state_t *)state;
-    app_instance_t *existing[2];
-    if (os_find_instances(&finder_app, existing, 2) > 1) {
-        os_quit_app(state);
-    }
 
     const window_spec_t settings_spec = {
         .x             = 20,

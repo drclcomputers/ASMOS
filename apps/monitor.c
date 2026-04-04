@@ -83,9 +83,9 @@ static void monitor_init(void *state) {
     menu_add_item(file_menu, "Close", on_file_close);
 
     window_add_widget(s->win, make_label(10, 8,  "Memory:",  0, 2));
-    window_add_widget(s->win, make_label(50, 8,  s->memory_str,  0, 2));
+    window_add_widget(s->win, make_label(55, 8,  s->memory_str,  0, 2));
     window_add_widget(s->win, make_label(10, 28, "Storage:", 0, 2));
-    window_add_widget(s->win, make_label(50, 28, s->storage_str, 0, 2));
+    window_add_widget(s->win, make_label(55, 28, s->storage_str, 0, 2));
 
     monitor_refresh(s);
 }
