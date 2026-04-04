@@ -18,6 +18,8 @@ typedef bool (*win_callback_t)(window *win);
 typedef struct {
 	int x, y;
 	int w, h;
+	int min_w;
+	int min_h;
 	const char *title;
 	uint8_t title_color;
 	uint8_t bar_color;
@@ -30,6 +32,9 @@ typedef struct {
 struct window {
 	int x, y;
 	int w, h;
+	int min_w;
+	int min_h;
+	bool resizing;
 
 	const char *title;
 	uint8_t title_color;
@@ -73,6 +78,7 @@ void window_add_widget(window *win, widget wg);
 menu *window_add_menu(window *win, const char *title);
 void window_draw(window *win);
 bool window_update(window *win);
+void window_resize(window *win);
 void window_dragged(window *win);
 
 #endif

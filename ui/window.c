@@ -64,6 +64,8 @@ window *wm_register(const window_spec_t *spec) {
     win->y               = spec->y;
     win->w               = spec->w;
     win->h               = spec->h;
+    win->min_w			 = spec->min_w;
+    win->min_h			 = spec->min_h;
     win->title           = spec->title ? spec->title : "";
     win->title_color     = spec->title_color;
     win->bar_color       = spec->bar_color;
@@ -231,6 +233,13 @@ void window_draw(window *win) {
 	    draw_rect(win->x, wy, win->w, win->h, BLACK);
 
 		if (win->on_draw) win->on_draw(win, win->on_draw_userdata);
+
+		int gx = win->x + win->w - 10;
+		int gy = win->y + MENUBAR_H_SIZE + win->h - 10;
+		fill_rect(gx, gy, 10, 10, LIGHT_GRAY);
+		draw_rect(gx, gy, 10, 10, DARK_GRAY);
+		draw_line(gx+3, gy+8, gx+8, gy+3, DARK_GRAY);
+		draw_line(gx+6, gy+8, gx+8, gy+6, DARK_GRAY);
     }
 
     for (int i = 0; i < win->widget_count; i++)
@@ -254,6 +263,7 @@ bool window_update(window *win) {
         return true;
     }
 
+    window_resize(win);
     window_dragged(win);
 
     for (int i = 0; i < win->widget_count; i++)
@@ -262,8 +272,37 @@ bool window_update(window *win) {
     return true;
 }
 
+void window_resize(window *win) {
+	int gx = win->x + win->w - 10;
+	int gy = win->y + MENUBAR_H_SIZE + win->h - 10;
+	if (!win->resizing && mouse.left_clicked &&
+	    mouse.x >= gx && mouse.x < gx + 10 &&
+	    mouse.y >= gy && mouse.y < gy + 10) {
+	    win->resizing = true;
+	}
+
+	if (win->resizing) {
+	    if (mouse.left) {
+	        win->w += mouse.dx;
+	        win->h += mouse.dy;
+	        int min_w = win->min_w > 0 ? win->min_w : 60;
+	        int min_h = win->min_h > 0 ? win->min_h : 40;
+	        if (win->w < min_w) win->w = min_w;
+	        if (win->h < min_h) win->h = min_h;
+
+			int max_w = SCREEN_WIDTH - win->x;
+	        int max_h = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H - win->y;
+	        if (win->w > max_w) win->w = max_w;
+	        if (win->h > max_h) win->h = max_h;
+	    } else {
+	        win->resizing = false;
+	    }
+	}
+}
+
 void window_dragged(window *win) {
     if (!win || win->pinned_bottom) return;
+    if (win->resizing) return;
 
     int wy = win->y + MENUBAR_H_SIZE;
     (void)wy;
