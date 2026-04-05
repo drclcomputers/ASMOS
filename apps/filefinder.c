@@ -25,6 +25,7 @@ static void finder_init(void *state) {
         .y             = 20,
         .w             = 200,
         .h             = 150,
+        .resizable	   = true,
         .title         = "Settings",
         .title_color   = 15,
         .bar_color     = 12,

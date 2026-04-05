@@ -241,6 +241,7 @@ static void terminal_init(void *state) {
         .y             = 20,
         .w             = 210,
         .h             = 160,
+        .resizable 	   = true,
         .title         = "Terminal",
         .title_color   = WHITE,
         .bar_color     = DARK_GRAY,

@@ -18,8 +18,9 @@ typedef bool (*win_callback_t)(window *win);
 typedef struct {
 	int x, y;
 	int w, h;
-	int min_w;
-	int min_h;
+	int min_w, max_w;
+	int min_h, max_h;
+	bool resizable;
 	const char *title;
 	uint8_t title_color;
 	uint8_t bar_color;
@@ -32,9 +33,8 @@ typedef struct {
 struct window {
 	int x, y;
 	int w, h;
-	int min_w;
-	int min_h;
-	bool resizing;
+	int min_w, max_w;
+	int min_h, max_h;
 
 	const char *title;
 	uint8_t title_color;
@@ -45,6 +45,8 @@ struct window {
 	bool visible_buttons;
 	bool minimized;
 	bool dragging;
+	bool resizing;
+	bool resizable;
 	int show_order;
 	bool pinned_bottom;
 

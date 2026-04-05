@@ -67,14 +67,15 @@ static void monitor_init(void *state) {
     const window_spec_t spec = {
         .x             = 20,
         .y             = 20,
-        .w             = 160,
-        .h             = 80,
+        .w             = 155,
+        .h             = 60,
         .title         = "Monitor",
         .title_color   = 15,
         .bar_color     = 7,
         .content_color = 10,
         .visible       = true,
         .on_close      = monitor_close,
+        .resizable     = false,
     };
     s->win = wm_register(&spec);
     if (!s->win) return;
