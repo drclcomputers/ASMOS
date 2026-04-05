@@ -22,6 +22,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/shell/cli.o                  \
       \
       $(BUILD_DIR)/apps/filefinder.o            \
+	  $(BUILD_DIR)/apps/launcher.o              \
       $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \
       \
@@ -48,13 +49,14 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/ui/cursor.o                  \
 	  $(BUILD_DIR)/ui/desktop.o                 \
+	  $(BUILD_DIR)/ui/icons.o                   \
       $(BUILD_DIR)/ui/menubar.o                 \
 	  $(BUILD_DIR)/ui/modal.o                   \
       $(BUILD_DIR)/ui/ui.o                      \
       $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 
-KERNEL_SECTORS_LOADED = 110
+KERNEL_SECTORS_LOADED = 150
 
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \

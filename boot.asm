@@ -10,7 +10,7 @@ nop
 oem_name:           db "ASMOS   "      ; 8 bytes
 bytes_per_sector:   dw 512
 sectors_per_cluster:db 4               ; 4 * 512 = 2048 byte clusters
-reserved_sectors:   dw 110             ; boot sector + 3 extra = 4
+reserved_sectors:   dw 128             ; boot sector + 3 extra = 4
 fat_count:          db 2
 root_entry_count:   dw 512             ; 512 * 32 = 16384 bytes = 32 sectors
 total_sectors_16:   dw 0               ; 0 = use total_sectors_32
@@ -40,7 +40,7 @@ start:
     mov [BOOT_DRIVE], dl
 
     mov ah, 0x02
-    mov al, 110
+    mov al, 128
     mov ch, 0x00
     mov dh, 0x00
     mov cl, 0x02

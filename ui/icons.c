@@ -1,0 +1,209 @@
+#include "ui/icons.h"
+#include "lib/primitive_graphics.h"
+#include "lib/string.h"
+#include "lib/mem.h"
+#include "io/mouse.h"
+#include "interrupts/idt.h"
+#include "config/config.h"
+
+static void grid_pos_local(const icon_view_t *v, int slot, int *out_x, int *out_y) {
+    int rows_per_col = (v->area_h - ICON_START_Y) / ICON_SPACING_Y;
+    if (rows_per_col < 1) rows_per_col = 1;
+
+    int col = slot / rows_per_col;
+    int row = slot % rows_per_col;
+
+    *out_x = ICON_START_X + col * ICON_SPACING_X;
+    *out_y = ICON_START_Y + row * ICON_SPACING_Y;
+}
+
+static int next_slot(const icon_view_t *v) {
+    int slot = 0;
+    for (int i = 0; i < MAX_ICONS_PER_VIEW; i++)
+        if (v->icons[i].used) slot++;
+    return slot;
+}
+
+static inline int abs_x(const icon_view_t *v, int lx) { return v->origin_x + lx; }
+static inline int abs_y(const icon_view_t *v, int ly) { return v->origin_y + ly; }
+
+static void draw_default_icon(int ax, int ay, bool selected) {
+    uint8_t fill = selected ? LIGHT_BLUE : WHITE;
+    fill_rect(ax, ay, ICON_W, ICON_H, fill);
+    draw_rect(ax, ay, ICON_W, ICON_H, BLACK);
+
+    fill_rect(ax + 4, ay + 3, 8, 11, selected ? WHITE : LIGHT_GRAY);
+    draw_rect(ax + 4, ay + 3, 8, 11, DARK_GRAY);
+
+    draw_line(ax + 9, ay + 3, ax + 12, ay + 6, DARK_GRAY);
+    draw_line(ax + 9, ay + 3, ax + 9,  ay + 6, DARK_GRAY);
+    draw_line(ax + 9, ay + 6, ax + 12, ay + 6, DARK_GRAY);
+
+    draw_line(ax + 6, ay + 8,  ax + 10, ay + 8,  DARK_GRAY);
+    draw_line(ax + 6, ay + 10, ax + 10, ay + 10, DARK_GRAY);
+}
+
+void icon_view_init(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h) {
+    memset(v, 0, sizeof(icon_view_t));
+    v->origin_x        = origin_x;
+    v->origin_y        = origin_y;
+    v->area_w          = area_w;
+    v->area_h          = area_h;
+    v->_last_click_idx = -1;
+}
+
+void icon_view_set_origin(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h) {
+    v->origin_x = origin_x;
+    v->origin_y = origin_y;
+    v->area_w   = area_w;
+    v->area_h   = area_h;
+}
+
+int icon_view_add(icon_view_t *v, const char *label, icon_action_t on_launch, int x, int y) {
+    int idx = -1;
+    for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
+        if (!v->icons[i].used) { idx = i; break; }
+    }
+    if (idx < 0) return -1;
+
+    icon_t *ic = &v->icons[idx];
+    memset(ic, 0, sizeof(icon_t));
+
+    int li = 0;
+    while (label[li] && li < ICON_LABEL_MAX - 1) {
+        ic->label[li] = label[li];
+        li++;
+    }
+    ic->label[li] = '\0';
+
+    ic->on_launch = on_launch;
+    ic->used      = true;
+
+    if (x < 0 || y < 0) {
+        ic->used = true;
+        grid_pos_local(v, next_slot(v) - 1, &ic->x, &ic->y);
+    } else {
+        ic->x = x;
+        ic->y = y;
+    }
+
+    if (idx >= v->icon_count) v->icon_count = idx + 1;
+    return idx;
+}
+
+void icon_view_remove(icon_view_t *v, int idx) {
+    if (idx < 0 || idx >= MAX_ICONS_PER_VIEW) return;
+    memset(&v->icons[idx], 0, sizeof(icon_t));
+    while (v->icon_count > 0 && !v->icons[v->icon_count - 1].used)
+        v->icon_count--;
+}
+
+icon_t *icon_view_get(icon_view_t *v, int *count_out) {
+    if (count_out) *count_out = v->icon_count;
+    return v->icons;
+}
+
+void icon_view_draw(const icon_view_t *v) {
+    for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
+        const icon_t *ic = &v->icons[i];
+        if (!ic->used) continue;
+
+        int ax = abs_x(v, ic->x);
+        int ay = abs_y(v, ic->y);
+
+        if (ic->on_draw) {
+            ic->on_draw(ax, ay);
+        } else {
+            draw_default_icon(ax, ay, ic->selected);
+        }
+
+        int label_w = (int)strlen(ic->label) * 5;
+        int lx = ax + ICON_W / 2 - label_w / 2;
+        int ly = ay + ICON_H + 2;
+
+        draw_string(lx + 1, ly + 1, (char *)ic->label, BLACK, 2);
+        draw_string(lx,     ly,     (char *)ic->label, WHITE, 2);
+    }
+}
+
+void icon_view_update(icon_view_t *v, bool blocked) {
+    extern volatile uint32_t pit_ticks;
+
+    if (blocked) return;
+
+    for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
+        icon_t *ic = &v->icons[i];
+        if (!ic->used) continue;
+
+        int ax = abs_x(v, ic->x);
+        int ay = abs_y(v, ic->y);
+
+        bool hit = mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay && mouse.y < ay + ICON_H;
+
+        if (mouse.left_clicked && hit) {
+            for (int j = 0; j < MAX_ICONS_PER_VIEW; j++)
+                v->icons[j].selected = false;
+            ic->selected = true;
+
+            uint32_t now = pit_ticks;
+            if (v->_last_click_idx == i && (now - v->_last_click_tick) <= DBLCLICK_TICKS) {
+                if (ic->on_launch) ic->on_launch();
+                v->_last_click_idx  = -1;
+                v->_last_click_tick = 0;
+            } else {
+                v->_last_click_idx  = i;
+                v->_last_click_tick = now;
+            }
+            return;
+        }
+    }
+
+    if (mouse.left_clicked) {
+        bool inside_view = mouse.x >= v->origin_x
+                        && mouse.x <  v->origin_x + v->area_w
+                        && mouse.y >= v->origin_y
+                        && mouse.y <  v->origin_y + v->area_h;
+        if (!inside_view) return;
+
+        bool hit_any = false;
+        for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
+            if (!v->icons[i].used) continue;
+            int ax = abs_x(v, v->icons[i].x);
+            int ay = abs_y(v, v->icons[i].y);
+            if (mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay && mouse.y < ay + ICON_H) {
+                hit_any = true;
+                break;
+            }
+        }
+        if (!hit_any) {
+            for (int i = 0; i < MAX_ICONS_PER_VIEW; i++)
+                v->icons[i].selected = false;
+        }
+    }
+}
+
+static icon_view_t s_desktop_view;
+
+void desktop_icons_init(int origin_x, int origin_y, int area_w, int area_h) {
+    icon_view_init(&s_desktop_view, origin_x, origin_y, area_w, area_h);
+}
+
+int desktop_icon_add(const char *label, icon_action_t on_launch, int x, int y) {
+    return icon_view_add(&s_desktop_view, label, on_launch, x, y);
+}
+
+void desktop_icon_remove(int idx) {
+    icon_view_remove(&s_desktop_view, idx);
+}
+
+icon_t *desktop_icons_get(int *count_out) {
+    return icon_view_get(&s_desktop_view, count_out);
+}
+
+void desktop_icons_update(void) {
+    icon_view_update(&s_desktop_view, false);
+}
+
+void desktop_icons_draw(void) {
+    icon_view_draw(&s_desktop_view);
+}

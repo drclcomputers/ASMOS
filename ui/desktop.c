@@ -1,4 +1,5 @@
 #include "ui/desktop.h"
+#include "ui/icons.h"
 #include "ui/window.h"
 #include "ui/menubar.h"
 #include "os/os.h"
@@ -10,7 +11,7 @@
 #define WALLPAPER_STRIPES       2
 #define WALLPAPER_DOTS          3
 
-#define PATTERN_MAIN_COLOR 		BLUE
+#define PATTERN_MAIN_COLOR      BLUE
 #define PATTERN_SECONDARY_COLOR LIGHT_BLUE
 
 static menu *apps_menu;
@@ -19,35 +20,34 @@ static void launch_finder(void)   { extern app_descriptor finder_app;   os_launc
 static void launch_terminal(void) { extern app_descriptor terminal_app; os_launch_app(&terminal_app); }
 static void launch_monitor(void)  { extern app_descriptor monitor_app;  os_launch_app(&monitor_app); }
 
-void draw_wallpaper_pattern() {
+void draw_wallpaper_pattern(void) {
     switch (WALLPAPER_PATTERN) {
         case WALLPAPER_SOLID:
             clear_screen(PATTERN_MAIN_COLOR);
             break;
 
         case WALLPAPER_CHECKERBOARD:
-            for (int y = 0; y < SCREEN_HEIGHT; y += 10) {
+            for (int y = 0; y < SCREEN_HEIGHT; y += 10)
                 for (int x = 0; x < SCREEN_WIDTH; x += 10) {
-                    unsigned char color = ((x / 10) + (y / 10)) % 2 == 0 ? PATTERN_MAIN_COLOR : PATTERN_SECONDARY_COLOR;
+                    uint8_t color = ((x / 10) + (y / 10)) % 2 == 0
+                                    ? PATTERN_MAIN_COLOR : PATTERN_SECONDARY_COLOR;
                     fill_rect(x, y, 10, 10, color);
                 }
-            }
             break;
 
         case WALLPAPER_STRIPES:
             for (int y = 0; y < SCREEN_HEIGHT; y++) {
-                unsigned char color = (y / 5) % 2 == 0 ? PATTERN_MAIN_COLOR : PATTERN_SECONDARY_COLOR;
+                uint8_t color = (y / 5) % 2 == 0
+                                ? PATTERN_MAIN_COLOR : PATTERN_SECONDARY_COLOR;
                 draw_line(0, y, SCREEN_WIDTH - 1, y, color);
             }
             break;
 
         case WALLPAPER_DOTS:
             clear_screen(PATTERN_MAIN_COLOR);
-            for (int y = 5; y < SCREEN_HEIGHT; y += 10) {
-                for (int x = 5; x < SCREEN_WIDTH; x += 10) {
+            for (int y = 5; y < SCREEN_HEIGHT; y += 10)
+                for (int x = 5; x < SCREEN_WIDTH; x += 10)
                     draw_dot(x, y, PATTERN_SECONDARY_COLOR);
-                }
-            }
             break;
 
         default:
@@ -57,24 +57,36 @@ void draw_wallpaper_pattern() {
 }
 
 void desktop_init(void) {
+    int desk_y = MENUBAR_H;
+    int desk_h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H;
+
     static const window_spec_t spec = {
-        .x = 0, .y = MENUBAR_H,
+        .x = 0, .y = 0,
         .w = SCREEN_WIDTH,
         .h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H,
         .title = "", .visible = true,
     };
     window *win = wm_register(&spec);
-	if (!win) return;
-	win->visible_buttons = false;
-	win->pinned_bottom   = true;
-	win->show_order      = -1;
+    if (!win) return;
+    win->visible_buttons = false;
+    win->pinned_bottom   = true;
+    win->show_order      = -1;
 
     apps_menu = window_add_menu(win, "Apps");
     menu_add_item(apps_menu, "Finder",   launch_finder);
     menu_add_item(apps_menu, "Terminal", launch_terminal);
     menu_add_item(apps_menu, "Monitor",  launch_monitor);
+
+    desktop_icons_init(0, desk_y, SCREEN_WIDTH, desk_h);
+
+    desktop_icon_add("Terminal", launch_terminal, -1, -1);
+    desktop_icon_add("Finder",   launch_finder,   -1, -1);
+    desktop_icon_add("Monitor",  launch_monitor,  -1, -1);
 }
 
 void desktop_on_frame(void) {
     draw_wallpaper_pattern();
+
+    desktop_icons_update();
+    desktop_icons_draw();
 }
