@@ -10,6 +10,7 @@
 #define TASKBAR_H         10
 
 #define HEAP_START 0x164000
-#define HEAP_END   0x400000
+//#define HEAP_END   0x400000
+#define HEAP_END   0x464000
 
 #endif

@@ -1,4 +1,5 @@
 #include "os/os.h"
+#include "os/error.h"
 #include "lib/primitive_graphics.h"
 #include "lib/mem.h"
 #include "lib/alloc.h"
@@ -19,25 +20,43 @@ int running_app_count = 0;
 static bool gui_should_exit = false;
 
 void os_install_app(app_descriptor *desc) {
-    if (installed_app_count >= MAX_INSTALLED_APPS) return;
-    if (!desc) return;
+    if (!desc) {
+        ERR_WARN_REPORT(ERR_NULL_PTR, "os_install_app: desc");
+        return;
+    }
+    if (installed_app_count >= MAX_INSTALLED_APPS) {
+        ERR_WARN_REPORT(ERR_APP_MAX_RUNNING, "os_install_app: registry full");
+        return;
+    }
     installed_apps[installed_app_count++] = desc;
 }
 
 app_instance_t *os_launch_app(app_descriptor *desc) {
-    if (!desc) return NULL;
-    if (running_app_count >= MAX_RUNNING_APPS) return NULL;
+    if (!desc) {
+        ERR_WARN_REPORT(ERR_NULL_PTR, "os_launch_app: desc");
+        return NULL;
+    }
+    if (running_app_count >= MAX_RUNNING_APPS) {
+        ERR_WARN_REPORT(ERR_APP_MAX_RUNNING, "os_launch_app");
+        return NULL;
+    }
 
     app_instance_t *inst = NULL;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         if (!running_apps[i].running) { inst = &running_apps[i]; break; }
     }
-    if (!inst) return NULL;
+    if (!inst) {
+        ERR_WARN_REPORT(ERR_APP_MAX_RUNNING, "os_launch_app: no free slot");
+        return NULL;
+    }
 
     void *state = NULL;
     if (desc->state_size > 0) {
         state = kmalloc(desc->state_size);
-        if (!state) return NULL;
+        if (!state) {
+            ERR_WARN_REPORT(ERR_APP_ALLOC, desc->name ? desc->name : "?");
+            return NULL;
+        }
         memset(state, 0, desc->state_size);
     }
 
@@ -53,7 +72,8 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
 void os_quit_app(app_instance_t *inst) {
     if (!inst || !inst->running) return;
 
-    if (inst->desc->destroy) inst->desc->destroy(inst->state);
+    if (inst->desc && inst->desc->destroy)
+        inst->desc->destroy(inst->state);
 
     if (inst->state) {
         kfree(inst->state);
@@ -73,11 +93,13 @@ void os_quit_app(app_instance_t *inst) {
 }
 
 void os_quit_app_by_desc(app_descriptor *desc) {
+    if (!desc) return;
     app_instance_t *inst = os_find_instance(desc);
     if (inst) os_quit_app(inst);
 }
 
 app_instance_t *os_find_instance(app_descriptor *desc) {
+    if (!desc) return NULL;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         if (running_apps[i].running && running_apps[i].desc == desc)
             return &running_apps[i];
@@ -86,6 +108,7 @@ app_instance_t *os_find_instance(app_descriptor *desc) {
 }
 
 int os_find_instances(app_descriptor *desc, app_instance_t **out, int max) {
+    if (!desc || !out) return 0;
     int found = 0;
     for (int i = 0; i < MAX_RUNNING_APPS && found < max; i++)
         if (running_apps[i].running && running_apps[i].desc == desc)
@@ -94,6 +117,7 @@ int os_find_instances(app_descriptor *desc, app_instance_t **out, int max) {
 }
 
 app_descriptor *os_find_app(const char *name) {
+    if (!name) return NULL;
     for (int i = 0; i < installed_app_count; i++) {
         if (strcmp(installed_apps[i]->name, name) == 0)
             return installed_apps[i];
@@ -108,7 +132,8 @@ void os_run(void) {
         ps2_update();
 
         for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-            if (running_apps[i].running && running_apps[i].desc->on_frame)
+            if (running_apps[i].running && running_apps[i].desc &&
+                running_apps[i].desc->on_frame)
                 running_apps[i].desc->on_frame(running_apps[i].state);
         }
 

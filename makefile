@@ -13,6 +13,7 @@ BUILD_DIR = build
 OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/kernel.o                     \
       \
+	  $(BUILD_DIR)/os/error.o                   \
       $(BUILD_DIR)/os/os.o                      \
 	  \
 	  $(BUILD_DIR)/interrupts/interrupt.o  		\

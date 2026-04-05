@@ -20,10 +20,10 @@ static void fmt_bytes(char *dst, int dst_size, uint32_t used, uint32_t total) {
 
     int pos = 0;
     for (int i = 0; u[i] && pos < dst_size - 1; i++) dst[pos++] = u[i];
-    const char *sep = "B / ";
+    const char *sep = "KB / ";
     for (int i = 0; sep[i] && pos < dst_size - 1; i++) dst[pos++] = sep[i];
     for (int i = 0; t[i] && pos < dst_size - 1; i++) dst[pos++] = t[i];
-    const char *unit = "B";
+    const char *unit = "KB";
     for (int i = 0; unit[i] && pos < dst_size - 1; i++) dst[pos++] = unit[i];
     dst[pos] = '\0';
 }
@@ -34,13 +34,15 @@ static void update_label_text(window *win, int idx, char *new_text) {
 }
 
 static void monitor_refresh(monitor_state_t *s) {
-    uint32_t used  = heap_used();
-    uint32_t total = heap_used() + heap_remaining();
+    uint32_t used  = heap_used() / 1024;
+    uint32_t total = (heap_used() + heap_remaining()) / 1024;
     fmt_bytes(s->memory_str, (int)sizeof(s->memory_str), used, total);
     update_label_text(s->win, MEM_LABEL_IDX, s->memory_str);
 
     uint32_t stor_total = 0, stor_used = 0;
     if (fat16_get_usage(&stor_total, &stor_used)) {
+    	stor_total /= 1024;
+     	stor_used /= 1024;
         fmt_bytes(s->storage_str, (int)sizeof(s->storage_str), stor_used, stor_total);
     } else {
         strcpy(s->storage_str, "unavailable");
@@ -67,7 +69,7 @@ static void monitor_init(void *state) {
     const window_spec_t spec = {
         .x             = 20,
         .y             = 20,
-        .w             = 155,
+        .w             = 140,
         .h             = 60,
         .title         = "Monitor",
         .title_color   = 15,
