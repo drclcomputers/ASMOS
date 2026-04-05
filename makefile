@@ -22,7 +22,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/shell/cli.o                  \
       \
       $(BUILD_DIR)/apps/filefinder.o            \
-	  $(BUILD_DIR)/apps/launcher.o              \
       $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \
       \
@@ -107,3 +106,4 @@ bochs: all
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f *.bin os_image.bin
+	rm -f qemu.log

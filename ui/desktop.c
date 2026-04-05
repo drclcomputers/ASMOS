@@ -77,7 +77,7 @@ void desktop_init(void) {
     menu_add_item(apps_menu, "Terminal", launch_terminal);
     menu_add_item(apps_menu, "Monitor",  launch_monitor);
 
-    desktop_icons_init(0, desk_y, SCREEN_WIDTH, desk_h);
+    desktop_icons_init(5, desk_y, SCREEN_WIDTH, desk_h);
 
     desktop_icon_add("Terminal", launch_terminal, -1, -1);
     desktop_icon_add("Finder",   launch_finder,   -1, -1);
