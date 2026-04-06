@@ -1,6 +1,7 @@
 #include "lib/time.h"
 #include "lib/io.h"
 #include "interrupts/idt.h"
+#include "config/config.h"
 
 uint32_t time_seconds(void) {
     return pit_seconds;
@@ -113,6 +114,59 @@ time_full_t time_rtc(void) {
     t.day     = day;
     t.month   = month;
     t.year    = (year2 < 80) ? 2000 + year2 : 1980 + (year2 - 80);
+    return t;
+}
+
+static int days_in_month(uint8_t month, uint32_t year) {
+    int is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+
+    if (month == 2) {
+        return is_leap ? 29 : 28;
+    }
+    if (month == 4 || month == 6 || month == 9 || month == 11) {
+        return 30;
+    }
+    return 31;
+}
+
+time_full_t time_rtc_local(void) {
+    time_full_t t = time_rtc();
+
+    int32_t hours = (int32_t)t.hours + TIMEZONE_OFFSET;
+
+    if (hours < 0) {
+        hours += 24;
+
+        if (t.day == 1) {
+            if (t.month == 1) {
+                t.month = 12;
+                t.year--;
+            } else {
+                t.month--;
+            }
+            t.day = days_in_month(t.month, t.year);
+        } else {
+            t.day--;
+        }
+    } else if (hours >= 24) {
+        hours -= 24;
+
+        int max_day = days_in_month(t.month, t.year);
+        if (t.day == max_day) {
+            // Go to first day of next month
+            if (t.month == 12) {
+                t.month = 1;
+                t.year++;
+            } else {
+                t.month++;
+            }
+            t.day = 1;
+        } else {
+            t.day++;
+        }
+    }
+
+    t.hours = (uint8_t)hours;
     return t;
 }
 

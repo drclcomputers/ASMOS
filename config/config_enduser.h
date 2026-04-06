@@ -7,6 +7,8 @@
 #define START_IN_GUI 1
 #define WALLPAPER_PATTERN 1
 
+#define TIMEZONE_OFFSET 0
+
 #define BLACK         0
 #define BLUE          1
 #define GREEN         2

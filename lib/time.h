@@ -39,5 +39,6 @@ time_full_t time_to_full(uint32_t total_seconds);
 time_full_t time_rtc(void);
 uint16_t    time_from_rtc(void);
 uint16_t    date_from_rtc(void);
+time_full_t time_rtc_local(void);
 
 #endif

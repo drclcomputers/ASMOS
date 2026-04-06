@@ -21,6 +21,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/shell/cli.o                  \
       \
+	  $(BUILD_DIR)/apps/clock.o                 \
       $(BUILD_DIR)/apps/filefinder.o            \
       $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \

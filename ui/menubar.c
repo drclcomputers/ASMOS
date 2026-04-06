@@ -5,6 +5,7 @@
 #include "io/mouse.h"
 #include "config/config.h"
 #include "lib/time.h"
+#include "os/os.h"
 
 #define BAR_BG      LIGHT_GRAY
 #define BAR_FG      WHITE
@@ -16,6 +17,8 @@
 #define PADDING     4
 #define CLOCK_CHARS 8
 #define CLOCK_W     (CLOCK_CHARS * 5 + PADDING * 2)
+
+extern app_descriptor clock_app;
 
 void menubar_init(void) {
     memset(&g_menubar, 0, sizeof(menubar));
@@ -70,7 +73,7 @@ static void write_2digit(char *buf, uint8_t val) {
 }
 
 static void build_clock_str(char *out) {
-    time_full_t t = time_rtc();
+    time_full_t t = time_rtc_local();
     write_2digit(out + 0, t.hours);
     out[2] = ':';
     write_2digit(out + 3, t.minutes);
@@ -144,7 +147,10 @@ void menubar_draw(menubar *mb) {
 
 void menubar_update(menubar *mb) {
     if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
-    	if (mouse.x < 2 + CLOCK_W) return;
+		if (mouse.x < 2 + CLOCK_W) {
+			os_launch_app(&clock_app);
+			return;
+		}
 
         for (int i = 0; i < mb->menu_count; i++) {
             menu *m = &mb->menus[i];

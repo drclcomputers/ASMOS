@@ -17,6 +17,7 @@
 static menu *apps_menu;
 
 static void launch_finder(void)   { extern app_descriptor finder_app;   os_launch_app(&finder_app); }
+static void launch_clock(void)   { extern app_descriptor clock_app;   os_launch_app(&clock_app); }
 static void launch_terminal(void) { extern app_descriptor terminal_app; os_launch_app(&terminal_app); }
 static void launch_monitor(void)  { extern app_descriptor monitor_app;  os_launch_app(&monitor_app); }
 
@@ -74,6 +75,7 @@ void desktop_init(void) {
 
     apps_menu = window_add_menu(win, "Apps");
     menu_add_item(apps_menu, "Finder",   launch_finder);
+    menu_add_item(apps_menu, "Clock",   launch_clock);
     menu_add_item(apps_menu, "Terminal", launch_terminal);
     menu_add_item(apps_menu, "Monitor",  launch_monitor);
 

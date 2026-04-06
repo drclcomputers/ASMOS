@@ -11,6 +11,7 @@
 #include "lib/time.h"
 #include "ui/desktop.h"
 
+extern app_descriptor clock_app;
 extern app_descriptor finder_app;
 extern app_descriptor terminal_app;
 extern app_descriptor monitor_app;
@@ -72,6 +73,7 @@ void kmain(void) {
 
     error_set_gui_mode(true);
 
+    os_install_app(&clock_app);
     os_install_app(&finder_app);
     os_install_app(&terminal_app);
     os_install_app(&monitor_app);
