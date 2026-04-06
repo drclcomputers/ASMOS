@@ -3,17 +3,18 @@
 
 #include "lib/types.h"
 
-#define ICON_W          20
-#define ICON_H          20
-#define ICON_LABEL_MAX  16
-#define ICON_SPACING_X  36
-#define ICON_SPACING_Y  34
-#define ICON_START_X     8
-#define ICON_START_Y    14
+#define ICON_W         20
+#define ICON_H         20
+#define ICON_LABEL_MAX 16
+#define ICON_SPACING_X 36
+#define ICON_SPACING_Y 34
+#define ICON_START_X   8
+#define ICON_START_Y   14
+#define ICON_LABEL_DISPLAY_MAX 8
 
-#define MAX_ICONS_PER_VIEW  32
-
-#define DBLCLICK_TICKS  60
+#define MAX_ICONS_PER_VIEW 32
+#define DBLCLICK_TICKS 60
+#define DRAG_THRESHOLD 4
 
 typedef void (*icon_action_t)(void);
 
@@ -24,6 +25,9 @@ typedef struct {
     bool          selected;
     bool          used;
     void        (*on_draw)(int abs_x, int abs_y);
+
+    bool          dragging;
+    int           drag_off_x, drag_off_y;
 } icon_t;
 
 typedef struct {
@@ -35,6 +39,8 @@ typedef struct {
 
     int      _last_click_idx;
     uint32_t _last_click_tick;
+
+    int      _drag_idx;
 } icon_view_t;
 
 void icon_view_init(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h);
@@ -56,7 +62,7 @@ void desktop_icons_init(int origin_x, int origin_y, int area_w, int area_h);
 int desktop_icon_add(const char *label, icon_action_t on_launch, int x, int y);
 void desktop_icon_remove(int idx);
 icon_t *desktop_icons_get(int *count_out);
-void desktop_icons_update(void);
+void desktop_icons_update(bool window_captured);
 void desktop_icons_draw(void);
 
 #endif

@@ -27,7 +27,7 @@ static void wm_sort(void) {
 static void wm_clamp(window *win) {
     if (win->x < 0) win->x = 0;
     if (win->y < 0) win->y = 0;
-    if (win->x + win->w + 2 > SCREEN_WIDTH)  win->x = SCREEN_WIDTH  - win->w - 2;
+    if (win->x + win->w > SCREEN_WIDTH)  win->x = SCREEN_WIDTH  - win->w;
     if (win->y + win->h + MENUBAR_H_SIZE + TASKBAR_H > SCREEN_HEIGHT)
         win->y = SCREEN_HEIGHT - win->h - MENUBAR_H_SIZE - TASKBAR_H;
 }
@@ -191,7 +191,6 @@ void wm_draw_all(void) {
 void wm_update_all(void) {
     bool click_consumed = false;
 
-    // Taskbar restore
     if (mouse.left_clicked && mouse.y >= SCREEN_HEIGHT - TASKBAR_H) {
         int tx = 0;
         for (int i = 0; i < win_count; i++) {

@@ -10,6 +10,10 @@ uint32_t time_millis(void) {
     return pit_ticks * 10;
 }
 
+uint32_t pit_ticks_func(void) {
+	return time_millis() / 10;
+}
+
 void sleep_ms(uint32_t ms) {
     uint32_t ticks_needed = (ms + 9) / 10;
     uint32_t target       = pit_ticks + ticks_needed;

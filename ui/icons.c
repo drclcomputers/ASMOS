@@ -27,6 +27,21 @@ static int next_slot(const icon_view_t *v) {
 static inline int abs_x(const icon_view_t *v, int lx) { return v->origin_x + lx; }
 static inline int abs_y(const icon_view_t *v, int ly) { return v->origin_y + ly; }
 
+static void make_display_label(const char *label, char *out) {
+    int len = (int)strlen(label);
+    if (len <= ICON_LABEL_DISPLAY_MAX) {
+        strcpy(out, label);
+    } else {
+        int i;
+        for (i = 0; i < ICON_LABEL_DISPLAY_MAX; i++)
+            out[i] = label[i];
+        //out[i++] = '.';
+        //out[i++] = '.';
+        //out[i++] = '.';
+        out[i]   = '\0';
+    }
+}
+
 static void draw_default_icon(int ax, int ay, bool selected) {
     uint8_t fill = selected ? LIGHT_BLUE : WHITE;
     fill_rect(ax, ay, ICON_W, ICON_H, fill);
@@ -47,9 +62,10 @@ void icon_view_init(icon_view_t *v, int origin_x, int origin_y, int area_w, int 
     memset(v, 0, sizeof(icon_view_t));
     v->origin_x        = origin_x;
     v->origin_y        = origin_y;
-    v->area_w          = area_w;
-    v->area_h          = area_h;
+    v->area_w          = area_w - 15;
+    v->area_h          = area_h - TASKBAR_H;
     v->_last_click_idx = -1;
+    v->_drag_idx       = -1;
 }
 
 void icon_view_set_origin(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h) {
@@ -80,7 +96,6 @@ int icon_view_add(icon_view_t *v, const char *label, icon_action_t on_launch, in
     ic->used      = true;
 
     if (x < 0 || y < 0) {
-        ic->used = true;
         grid_pos_local(v, next_slot(v) - 1, &ic->x, &ic->y);
     } else {
         ic->x = x;
@@ -93,6 +108,7 @@ int icon_view_add(icon_view_t *v, const char *label, icon_action_t on_launch, in
 
 void icon_view_remove(icon_view_t *v, int idx) {
     if (idx < 0 || idx >= MAX_ICONS_PER_VIEW) return;
+    if (v->_drag_idx == idx) v->_drag_idx = -1;
     memset(&v->icons[idx], 0, sizeof(icon_t));
     while (v->icon_count > 0 && !v->icons[v->icon_count - 1].used)
         v->icon_count--;
@@ -104,6 +120,8 @@ icon_t *icon_view_get(icon_view_t *v, int *count_out) {
 }
 
 void icon_view_draw(const icon_view_t *v) {
+    char disp[ICON_LABEL_DISPLAY_MAX + 4];
+
     for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
         const icon_t *ic = &v->icons[i];
         if (!ic->used) continue;
@@ -111,25 +129,77 @@ void icon_view_draw(const icon_view_t *v) {
         int ax = abs_x(v, ic->x);
         int ay = abs_y(v, ic->y);
 
+        if (ic->dragging) {
+            draw_rect(ax, ay, ICON_W, ICON_H, DARK_GRAY);
+            continue;
+        }
+
         if (ic->on_draw) {
             ic->on_draw(ax, ay);
         } else {
             draw_default_icon(ax, ay, ic->selected);
         }
 
-        int label_w = (int)strlen(ic->label) * 5;
+        make_display_label(ic->label, disp);
+
+        int label_w = (int)strlen(disp) * 5;
         int lx = ax + ICON_W / 2 - label_w / 2;
         int ly = ay + ICON_H + 2;
 
-        draw_string(lx + 1, ly + 1, (char *)ic->label, BLACK, 2);
-        draw_string(lx,     ly,     (char *)ic->label, WHITE, 2);
+        draw_string(lx + 1, ly + 1, disp, BLACK, 2);
+        draw_string(lx, ly, disp, WHITE, 2);
+    }
+
+    if (v->_drag_idx >= 0) {
+        const icon_t *ic = &v->icons[v->_drag_idx];
+        int ax = mouse.x - ic->drag_off_x;
+        int ay = mouse.y - ic->drag_off_y;
+
+        if (ic->on_draw) {
+            ic->on_draw(ax, ay);
+        } else {
+            draw_default_icon(ax, ay, ic->selected);
+        }
+
+        make_display_label(ic->label, disp);
+        int label_w = (int)strlen(disp) * 5;
+        int lx = ax + ICON_W / 2 - label_w / 2;
+        int ly = ay + ICON_H + 2;
+
+        draw_string(lx + 1, ly + 1, disp, BLACK, 2);
+        draw_string(lx, ly, disp, WHITE, 2);
     }
 }
 
 void icon_view_update(icon_view_t *v, bool blocked) {
-    extern volatile uint32_t pit_ticks;
+    if (blocked) {
+        if (v->_drag_idx >= 0 && !mouse.left) {
+            v->icons[v->_drag_idx].dragging = false;
+            v->_drag_idx = -1;
+        }
+        return;
+    }
 
-    if (blocked) return;
+    if (v->_drag_idx >= 0) {
+        icon_t *ic = &v->icons[v->_drag_idx];
+
+        if (mouse.left) {
+            int new_lx = mouse.x - ic->drag_off_x - v->origin_x;
+            int new_ly = mouse.y - ic->drag_off_y - v->origin_y;
+
+            if (new_lx < 0) new_lx = 0;
+            if (new_ly < 0) new_ly = 0;
+            if (new_lx + ICON_W > v->area_w) new_lx = v->area_w - ICON_W;
+            if (new_ly + ICON_H > v->area_h) new_ly = v->area_h - ICON_H;
+
+            ic->x = new_lx;
+            ic->y = new_ly;
+        } else {
+            ic->dragging = false;
+            v->_drag_idx = -1;
+        }
+        return;
+    }
 
     for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
         icon_t *ic = &v->icons[i];
@@ -138,21 +208,40 @@ void icon_view_update(icon_view_t *v, bool blocked) {
         int ax = abs_x(v, ic->x);
         int ay = abs_y(v, ic->y);
 
-        bool hit = mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay && mouse.y < ay + ICON_H;
+        bool hit = mouse.x >= ax && mouse.x < ax + ICON_W
+                && mouse.y >= ay && mouse.y < ay + ICON_H;
 
-        if (mouse.left_clicked && hit) {
+        if (!hit) continue;
+
+        if (mouse.left_clicked) {
             for (int j = 0; j < MAX_ICONS_PER_VIEW; j++)
                 v->icons[j].selected = false;
             ic->selected = true;
 
             uint32_t now = pit_ticks;
-            if (v->_last_click_idx == i && (now - v->_last_click_tick) <= DBLCLICK_TICKS) {
+            if (v->_last_click_idx == i &&
+                (now - v->_last_click_tick) <= DBLCLICK_TICKS) {
                 if (ic->on_launch) ic->on_launch();
                 v->_last_click_idx  = -1;
                 v->_last_click_tick = 0;
             } else {
                 v->_last_click_idx  = i;
                 v->_last_click_tick = now;
+            }
+            return;
+        }
+
+        if (mouse.left && !mouse.left_clicked) {
+            int moved = mouse.dx * mouse.dx + mouse.dy * mouse.dy;
+            if (moved >= DRAG_THRESHOLD * DRAG_THRESHOLD ||
+                (mouse.dx != 0 || mouse.dy != 0)) {
+                ic->dragging    = true;
+                ic->drag_off_x  = mouse.x - ax;
+                ic->drag_off_y  = mouse.y - ay;
+                v->_drag_idx    = i;
+
+                v->_last_click_idx  = -1;
+                v->_last_click_tick = 0;
             }
             return;
         }
@@ -163,19 +252,7 @@ void icon_view_update(icon_view_t *v, bool blocked) {
                         && mouse.x <  v->origin_x + v->area_w
                         && mouse.y >= v->origin_y
                         && mouse.y <  v->origin_y + v->area_h;
-        if (!inside_view) return;
-
-        bool hit_any = false;
-        for (int i = 0; i < MAX_ICONS_PER_VIEW; i++) {
-            if (!v->icons[i].used) continue;
-            int ax = abs_x(v, v->icons[i].x);
-            int ay = abs_y(v, v->icons[i].y);
-            if (mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay && mouse.y < ay + ICON_H) {
-                hit_any = true;
-                break;
-            }
-        }
-        if (!hit_any) {
+        if (inside_view) {
             for (int i = 0; i < MAX_ICONS_PER_VIEW; i++)
                 v->icons[i].selected = false;
         }
@@ -200,7 +277,8 @@ icon_t *desktop_icons_get(int *count_out) {
     return icon_view_get(&s_desktop_view, count_out);
 }
 
-void desktop_icons_update(void) {
+void desktop_icons_update(bool window_captured) {
+    if(window_captured) return;
     icon_view_update(&s_desktop_view, false);
 }
 

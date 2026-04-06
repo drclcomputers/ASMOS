@@ -26,6 +26,7 @@ typedef struct {
 
 uint32_t    time_seconds(void);
 uint32_t    time_millis(void);
+uint32_t    pit_ticks_func(void);
 
 void        sleep_ms(uint32_t ms);
 void        sleep_s(uint32_t seconds);

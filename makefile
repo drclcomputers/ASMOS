@@ -55,7 +55,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 
-KERNEL_SECTORS_LOADED = 150
+KERNEL_SECTORS_LOADED = 200
 
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \

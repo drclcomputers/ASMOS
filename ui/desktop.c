@@ -84,9 +84,17 @@ void desktop_init(void) {
     desktop_icon_add("Monitor",  launch_monitor,  -1, -1);
 }
 
+static bool any_window_captured(void) {
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (w->dragging || w->resizing) return true;
+    }
+    return false;
+}
+
 void desktop_on_frame(void) {
     draw_wallpaper_pattern();
 
-    desktop_icons_update();
+    desktop_icons_update(any_window_captured());
     desktop_icons_draw();
 }
