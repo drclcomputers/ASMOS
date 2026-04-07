@@ -37,8 +37,7 @@ static bool in_titlebar(const window *win, int mx, int my) {
     return mx >= win->x && mx < win->x + win->w && my >= wy && my < wy + 16;
 }
 
-static void draw_titlebar_btn(int ax, int ay, int w, int h,
-                               const char *label, uint8_t bg) {
+static void draw_titlebar_btn(int ax, int ay, int w, int h, const char *label, uint8_t bg) {
     fill_rect(ax, ay, w, h, bg);
     draw_rect(ax, ay, w, h, BLACK);
     int tx = ax + w / 2 - (int)(strlen(label) * 3) + 1;

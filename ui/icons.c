@@ -5,6 +5,21 @@
 #include "io/mouse.h"
 #include "interrupts/idt.h"
 #include "config/config.h"
+#include "ui/window.h"
+
+
+static bool mouse_over_any_window(int mx, int my) {
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (!w->visible || w->minimized || w->pinned_bottom) continue;
+
+        int wy = w->y + MENUBAR_H;
+        if (mx >= w->x && mx < w->x + w->w &&
+            my >= wy    && my < wy  + w->h)
+            return true;
+    }
+    return false;
+}
 
 static void grid_pos_local(const icon_view_t *v, int slot, int *out_x, int *out_y) {
     int rows_per_col = (v->area_h - ICON_START_Y) / ICON_SPACING_Y;
@@ -35,10 +50,7 @@ static void make_display_label(const char *label, char *out) {
         int i;
         for (i = 0; i < ICON_LABEL_DISPLAY_MAX; i++)
             out[i] = label[i];
-        //out[i++] = '.';
-        //out[i++] = '.';
-        //out[i++] = '.';
-        out[i]   = '\0';
+        out[i] = '\0';
     }
 }
 
@@ -172,6 +184,14 @@ void icon_view_draw(const icon_view_t *v) {
 }
 
 void icon_view_update(icon_view_t *v, bool blocked) {
+    if (!blocked && mouse_over_any_window(mouse.x, mouse.y)) {
+        if (v->_drag_idx >= 0 && !mouse.left) {
+            v->icons[v->_drag_idx].dragging = false;
+            v->_drag_idx = -1;
+        }
+        return;
+    }
+
     if (blocked) {
         if (v->_drag_idx >= 0 && !mouse.left) {
             v->icons[v->_drag_idx].dragging = false;
@@ -278,7 +298,7 @@ icon_t *desktop_icons_get(int *count_out) {
 }
 
 void desktop_icons_update(bool window_captured) {
-    if(window_captured) return;
+    if (window_captured) return;
     icon_view_update(&s_desktop_view, false);
 }
 
