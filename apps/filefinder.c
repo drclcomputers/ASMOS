@@ -1,4 +1,6 @@
 #include "os/api.h"
+#include "ui/desktop_fs.h"
+#include "ui/desktop.h"
 
 #define FF_DEFAULT_W    200
 #define FF_DEFAULT_H    150
@@ -85,6 +87,10 @@ static void ff_reload(ff_inst_t *s);
 static void ff_draw_window(window *win, void *ud);
 static void ff_open_dir(uint16_t cluster, const char *path);
 
+void ff_open_dir_pub(uint16_t cluster, const char *path) {
+    ff_open_dir(cluster, path);
+}
+
 static void menu_new_file(void);
 static void menu_new_folder(void);
 static void menu_rename(void);
@@ -100,6 +106,11 @@ static void menu_sort_size(void);
 static void cancel_confirm(void *ud);
 static int  ff_hit(ff_inst_t *s, int mx, int my);
 static bool in_content(ff_inst_t *s, int mx, int my);
+
+static void maybe_notify_desktop(ff_inst_t *s) {
+    if (strcmp(s->path, desktop_fs_path()) == 0)
+        desktop_fs_set_dirty();
+}
 
 static ff_inst_t *inst_of(window *w) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
@@ -147,48 +158,25 @@ static bool validate_fat_name(const char *name_buf, bool is_dir, const char **er
         *err_msg = "Name cannot be empty.";
         return false;
     }
-
     const char *dot = strchr(name_buf, '.');
     int base_len, ext_len;
-
     if (dot) {
         base_len = (int)(dot - name_buf);
         ext_len  = (int)strlen(dot + 1);
-        if (is_dir && ext_len > 0) {
-            *err_msg = "Folder name: no extension allowed.";
-            return false;
-        }
-        if (ext_len > 3) {
-            *err_msg = "Extension too long (max 3).";
-            return false;
-        }
+        if (is_dir && ext_len > 0) { *err_msg = "Folder name: no extension allowed."; return false; }
+        if (ext_len > 3) { *err_msg = "Extension too long (max 3)."; return false; }
         for (int i = 0; i < ext_len; i++) {
-            if (!fat_char_ok(dot[1 + i])) {
-                *err_msg = "Invalid char in extension.";
-                return false;
-            }
+            if (!fat_char_ok(dot[1+i])) { *err_msg = "Invalid char in extension."; return false; }
         }
     } else {
         base_len = (int)strlen(name_buf);
         ext_len  = 0;
     }
-
-    if (base_len == 0) {
-        *err_msg = "Base name cannot be empty.";
-        return false;
-    }
-    if (base_len > 8) {
-        *err_msg = "Base name too long (max 8).";
-        return false;
-    }
-
+    if (base_len == 0) { *err_msg = "Base name cannot be empty."; return false; }
+    if (base_len > 8)  { *err_msg = "Base name too long (max 8)."; return false; }
     for (int i = 0; i < base_len; i++) {
-        if (!fat_char_ok(name_buf[i])) {
-            *err_msg = "Invalid character in name.";
-            return false;
-        }
+        if (!fat_char_ok(name_buf[i])) { *err_msg = "Invalid character in name."; return false; }
     }
-
     (void)ext_len;
     return true;
 }
@@ -199,8 +187,7 @@ static int item_sort_cmp(const ff_item_t *a, const ff_item_t *b, int sort) {
     bool ad = (a->entry.attr & ATTR_DIRECTORY) != 0;
     bool bd = (b->entry.attr & ATTR_DIRECTORY) != 0;
     if (ad != bd) return ad ? -1 : 1;
-    if (sort == SORT_SIZE)
-        return (int)a->entry.file_size - (int)b->entry.file_size;
+    if (sort == SORT_SIZE) return (int)a->entry.file_size - (int)b->entry.file_size;
     if (sort == SORT_DATE) {
         int dc = (int)b->entry.modify_date - (int)a->entry.modify_date;
         if (dc != 0) return dc;
@@ -214,8 +201,8 @@ static void ff_sort(ff_inst_t *s) {
         for (int j = i + 1; j < s->item_count; j++)
             if (item_sort_cmp(&s->items[i], &s->items[j], s->sort) > 0) {
                 ff_item_t tmp = s->items[i];
-                s->items[i]   = s->items[j];
-                s->items[j]   = tmp;
+                s->items[i]  = s->items[j];
+                s->items[j]  = tmp;
             }
 }
 
@@ -226,7 +213,7 @@ static void ff_layout(ff_inst_t *s) {
     int col = 0, row = 0;
     for (int i = 0; i < s->item_count; i++) {
         ff_item_t *it = &s->items[i];
-        if (it->pinned) continue;
+        if (it->pinned)   continue;
         if (it->dragging) continue;
         it->icon_x = 4 + col * ICON_CELL_W;
         it->icon_y = CONTENT_TOP + row * ICON_CELL_H;
@@ -272,36 +259,48 @@ static void ff_reload(ff_inst_t *s) {
 
 static void draw_folder_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
-    fill_rect(ax,     ay + 3,  ICON_SZ_W,     ICON_SZ_H - 3, bg);
-    draw_rect(ax,     ay + 3,  ICON_SZ_W,     ICON_SZ_H - 3, BLACK);
-    fill_rect(ax + 1, ay,      8,             4,             bg);
-    draw_rect(ax + 1, ay,      8,             4,             BLACK);
-    draw_line(ax,     ay + 3,  ax + 1,        ay,            BLACK);
-    draw_line(ax + 9, ay,      ax + 9,        ay + 3,        BLACK);
-    if (sel) {
-        fill_rect(ax + 2, ay + 5, ICON_SZ_W - 4, ICON_SZ_H - 9, BLACK);
-    }
+    fill_rect(ax,     ay+3, ICON_SZ_W,     ICON_SZ_H-3, bg);
+    draw_rect(ax,     ay+3, ICON_SZ_W,     ICON_SZ_H-3, BLACK);
+    fill_rect(ax+1,   ay,   8,             4,            bg);
+    draw_rect(ax+1,   ay,   8,             4,            BLACK);
+    draw_line(ax,     ay+3, ax+1,          ay,           BLACK);
+    draw_line(ax+9,   ay,   ax+9,          ay+3,         BLACK);
+    if (sel) fill_rect(ax+2, ay+5, ICON_SZ_W-4, ICON_SZ_H-9, BLACK);
 }
 
 static void draw_file_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
-    fill_rect(ax + 1, ay,      ICON_SZ_W - 5, ICON_SZ_H,    bg);
-    draw_rect(ax + 1, ay,      ICON_SZ_W - 5, ICON_SZ_H,    BLACK);
-    fill_rect(ax + ICON_SZ_W - 5, ay, 4, ICON_SZ_H,         BLACK);
-    draw_line(ax + ICON_SZ_W - 5, ay, ax + ICON_SZ_W - 1, ay + 4, BLACK);
-    fill_rect(ax + ICON_SZ_W - 4, ay, 3, 4,                bg);
+    fill_rect(ax+1, ay,      ICON_SZ_W-5, ICON_SZ_H,    bg);
+    draw_rect(ax+1, ay,      ICON_SZ_W-5, ICON_SZ_H,    BLACK);
+    fill_rect(ax+ICON_SZ_W-5, ay, 4, ICON_SZ_H,         BLACK);
+    draw_line(ax+ICON_SZ_W-5, ay, ax+ICON_SZ_W-1, ay+4, BLACK);
+    fill_rect(ax+ICON_SZ_W-4, ay, 3, 4,                 bg);
     if (!sel) {
-        draw_line(ax + 3, ay + 5,  ax + ICON_SZ_W - 6, ay + 5,  DARK_GRAY);
-        draw_line(ax + 3, ay + 8,  ax + ICON_SZ_W - 6, ay + 8,  DARK_GRAY);
-        draw_line(ax + 3, ay + 11, ax + ICON_SZ_W - 6, ay + 11, DARK_GRAY);
+        draw_line(ax+3, ay+5,  ax+ICON_SZ_W-6, ay+5,  DARK_GRAY);
+        draw_line(ax+3, ay+8,  ax+ICON_SZ_W-6, ay+8,  DARK_GRAY);
+        draw_line(ax+3, ay+11, ax+ICON_SZ_W-6, ay+11, DARK_GRAY);
     }
+}
+
+static void draw_app_icon(int ax, int ay, bool sel) {
+    uint8_t bg   = sel ? LIGHT_BLUE : CYAN;
+    uint8_t trim = sel ? WHITE : DARK_GRAY;
+    fill_rect(ax,   ay,   ICON_SZ_W, ICON_SZ_H, bg);
+    draw_rect(ax,   ay,   ICON_SZ_W, ICON_SZ_H, trim);
+    for (int r = 0; r < 5; r++) fill_rect(ax+5, ay+7+r, r+1, 1, trim);
 }
 
 static void draw_dotdot_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
-    fill_rect(ax, ay + 3, ICON_SZ_W, ICON_SZ_H - 3, bg);
-    draw_rect(ax, ay + 3, ICON_SZ_W, ICON_SZ_H - 3, BLACK);
-    draw_string(ax + 4, ay + 8, "..", BLACK, 2);
+    fill_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, bg);
+    draw_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, BLACK);
+    draw_string(ax+4, ay+8, "..", BLACK, 2);
+}
+
+static bool item_is_app(const ff_item_t *it) {
+    if (it->is_dotdot) return false;
+    if (it->entry.attr & ATTR_DIRECTORY) return false;
+    return (it->entry.ext[0]=='A' && it->entry.ext[1]=='P' && it->entry.ext[2]=='P');
 }
 
 static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
@@ -313,6 +312,8 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
         draw_dotdot_icon(ax, ay, it->selected);
     else if (it->entry.attr & ATTR_DIRECTORY)
         draw_folder_icon(ax, ay, it->selected);
+    else if (item_is_app(it))
+        draw_app_icon(ax, ay, it->selected);
     else
         draw_file_icon(ax, ay, it->selected);
 
@@ -321,22 +322,21 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     int ly = ay + ICON_SZ_H + 1;
 
     if (it->selected) {
-        fill_rect(lx - 1, ly - 1, lw + 2, CHAR_H + 2, BLACK);
+        fill_rect(lx-1, ly-1, lw+2, CHAR_H+2, BLACK);
         draw_string(lx, ly, it->label, WHITE, 2);
     } else {
-        draw_string(lx + 1, ly + 1, it->label, WHITE, 2);
-        draw_string(lx,     ly,     it->label, BLACK, 2);
+        draw_string(lx+1, ly+1, it->label, WHITE, 2);
+        draw_string(lx,   ly,   it->label, BLACK, 2);
     }
 
     if (s->mode == MODE_RENAME && i == s->rename_idx) {
-        fill_rect(ax - 1, ay + ICON_SZ_H + 1 - 1, ICON_CELL_W, CHAR_H + 2, WHITE);
-        draw_rect(ax - 1, ay + ICON_SZ_H + 1 - 1, ICON_CELL_W, CHAR_H + 2, BLACK);
-        draw_string(ax, ay + ICON_SZ_H + 1, s->rename_buf, BLACK, 2);
-
+        fill_rect(ax-1, ay+ICON_SZ_H+1-1, ICON_CELL_W, CHAR_H+2, WHITE);
+        draw_rect(ax-1, ay+ICON_SZ_H+1-1, ICON_CELL_W, CHAR_H+2, BLACK);
+        draw_string(ax, ay+ICON_SZ_H+1, s->rename_buf, BLACK, 2);
         extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 50) % 2 == 0) {
             int cx = ax + s->rename_len * CHAR_W;
-            draw_string(cx, ay + ICON_SZ_H + 1, "|", BLACK, 2);
+            draw_string(cx, ay+ICON_SZ_H+1, "|", BLACK, 2);
         }
     }
 }
@@ -353,11 +353,8 @@ static void ff_draw_window(window *win, void *ud) {
     int content_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H;
 
     fill_rect(wx, wy, ww, wh, WHITE);
-
-    draw_line(wx, wy + CONTENT_TOP - 1,
-              wx + ww - 1, wy + CONTENT_TOP - 1, DARK_GRAY);
-    draw_line(wx, wy + wh - STATUS_H - CONTENT_BOT,
-              wx + ww - 1, wy + wh - STATUS_H - CONTENT_BOT, DARK_GRAY);
+    draw_line(wx, wy+CONTENT_TOP-1, wx+ww-1, wy+CONTENT_TOP-1, DARK_GRAY);
+    draw_line(wx, wy+wh-STATUS_H-CONTENT_BOT, wx+ww-1, wy+wh-STATUS_H-CONTENT_BOT, DARK_GRAY);
 
     for (int i = 0; i < s->item_count; i++) {
         if (s->items[i].dragging) continue;
@@ -382,40 +379,37 @@ static void ff_draw_window(window *win, void *ud) {
     } else {
         sprintf(stat, "%d items", s->item_count - (s->dir_cluster != 0 ? 1 : 0));
     }
-    draw_string(wx + 3, wy + wh - STATUS_H - CONTENT_BOT + 2, stat, BLACK, 2);
+    draw_string(wx+3, wy+wh-STATUS_H-CONTENT_BOT+2, stat, BLACK, 2);
 
     if (s->mode == MODE_CONFIRM) {
-        int bx = wx + 4, by = wy + content_h / 2 - 16;
-        int bw = ww - 8;
+        int bx = wx+4, by = wy+content_h/2-16;
+        int bw = ww-8;
         fill_rect(bx, by, bw, 34, LIGHT_GRAY);
         draw_rect(bx, by, bw, 34, BLACK);
-        draw_string(bx + 4, by + 4, s->confirm_msg, BLACK, 2);
-        fill_rect(bx + 4,  by + 20, 28, 10, BLACK);
-        draw_rect(bx + 4,  by + 20, 28, 10, BLACK);
-        draw_string(bx + 8,  by + 22, "Yes", WHITE, 2);
-        fill_rect(bx + 36, by + 20, 28, 10, LIGHT_GRAY);
-        draw_rect(bx + 36, by + 20, 28, 10, BLACK);
-        draw_string(bx + 40, by + 22, "No",  BLACK, 2);
+        draw_string(bx+4, by+4, s->confirm_msg, BLACK, 2);
+        fill_rect(bx+4,  by+20, 28, 10, BLACK);
+        draw_rect(bx+4,  by+20, 28, 10, BLACK);
+        draw_string(bx+8,  by+22, "Yes", WHITE, 2);
+        fill_rect(bx+36, by+20, 28, 10, LIGHT_GRAY);
+        draw_rect(bx+36, by+20, 28, 10, BLACK);
+        draw_string(bx+40, by+22, "No",  BLACK, 2);
     }
 
     if (s->mode == MODE_NEWNAME) {
-        int bx = wx + 4, by = wy + content_h / 2 - 16;
-        int bw = ww - 8;
+        int bx = wx+4, by = wy+content_h/2-16;
+        int bw = ww-8;
         fill_rect(bx, by, bw, 34, LIGHT_GRAY);
         draw_rect(bx, by, bw, 34, BLACK);
         const char *prompt = s->newname_is_dir ? "Folder name:" : "File name:";
-        draw_string(bx + 4, by + 4, (char *)prompt, BLACK, 2);
-
-        fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
-        draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
-        draw_string(bx + 6, by + 15, s->newname_buf, BLACK, 2);
-
+        draw_string(bx+4, by+4, (char *)prompt, BLACK, 2);
+        fill_rect(bx+4, by+14, bw-8, 10, WHITE);
+        draw_rect(bx+4, by+14, bw-8, 10, BLACK);
+        draw_string(bx+6, by+15, s->newname_buf, BLACK, 2);
         extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 50) % 2 == 0) {
-            int cx = bx + 6 + s->newname_len * CHAR_W;
-            int max_cx = bx + bw - 8 - CHAR_W - 2;
-            if (cx < max_cx)
-                draw_string(cx, by + 15, "|", BLACK, 2);
+            int cx = bx+6+s->newname_len*CHAR_W;
+            int max_cx = bx+bw-8-CHAR_W-2;
+            if (cx < max_cx) draw_string(cx, by+15, "|", BLACK, 2);
         }
     }
 }
@@ -427,8 +421,8 @@ static int ff_hit(ff_inst_t *s, int mx, int my) {
         ff_item_t *it = &s->items[i];
         int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
         int ay = wy + it->icon_y;
-        if (mx >= ax && mx < ax + ICON_SZ_W &&
-            my >= ay && my < ay + ICON_SZ_H + CHAR_H + 2)
+        if (mx >= ax && mx < ax+ICON_SZ_W &&
+            my >= ay && my < ay+ICON_SZ_H+CHAR_H+2)
             return i;
     }
     return -1;
@@ -439,7 +433,7 @@ static bool in_content(ff_inst_t *s, int mx, int my) {
     int wy = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
     int ww = s->win->w - 2;
     int wh = s->win->h - 16 - CONTENT_TOP - CONTENT_BOT - STATUS_H;
-    return mx >= wx && mx < wx + ww && my >= wy && my < wy + wh;
+    return mx >= wx && mx < wx+ww && my >= wy && my < wy+wh;
 }
 
 static void do_delete(void *ud) {
@@ -462,6 +456,7 @@ static void do_delete(void *ud) {
     dir_context.current_cluster = saved;
     strcpy(s->status, ok ? "Deleted." : "Delete failed.");
     s->mode = MODE_NORMAL;
+    maybe_notify_desktop(s);
     ff_reload(s);
 }
 
@@ -500,8 +495,8 @@ static void menu_rename(void) {
 }
 
 static void menu_reload(void) {
-	ff_inst_t *s = active_finder(); if (!s) return;
-	ff_reload(s);
+    ff_inst_t *s = active_finder(); if (!s) return;
+    ff_reload(s);
 }
 
 static void menu_copy(void) {
@@ -540,7 +535,7 @@ static void menu_paste(void) {
     dir_context.current_cluster = s->dir_cluster;
 
     char src_path[270];
-    if (g_clip.path[0] == '/' && g_clip.path[1] == '\0')
+    if (g_clip.path[0]=='/' && g_clip.path[1]=='\0')
         sprintf(src_path, "/%s", g_clip.name);
     else
         sprintf(src_path, "%s/%s", g_clip.path, g_clip.name);
@@ -564,6 +559,7 @@ static void menu_paste(void) {
 
     dir_context.current_cluster = saved;
     strcpy(s->status, ok ? "Pasted." : "Paste failed.");
+    maybe_notify_desktop(s);
     ff_reload(s);
 }
 
@@ -617,7 +613,6 @@ static void ff_handle_newname(ff_inst_t *s) {
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
     }
-
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = s->dir_cluster;
     bool ok;
@@ -629,16 +624,14 @@ static void ff_handle_newname(ff_inst_t *s) {
         if (ok) fat16_close(&f);
     }
     dir_context.current_cluster = saved;
-
     if (!ok) {
         s->mode = MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Create Failed",
-                   "Name already exists or disk full.", NULL, NULL);
+        modal_show(MODAL_ERROR, "Create Failed", "Name already exists or disk full.", NULL, NULL);
         return;
     }
-
     strcpy(s->status, s->newname_is_dir ? "Folder created." : "File created.");
     s->mode = MODE_NORMAL;
+    maybe_notify_desktop(s);
     ff_reload(s);
 }
 
@@ -651,21 +644,18 @@ static void ff_handle_rename(ff_inst_t *s) {
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
     }
-
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = s->dir_cluster;
     bool ok = fat16_rename(s->items[s->rename_idx].name, s->rename_buf);
     dir_context.current_cluster = saved;
-
     if (!ok) {
         s->mode = MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Rename Failed",
-                   "Name already exists.", NULL, NULL);
+        modal_show(MODAL_ERROR, "Rename Failed", "Name already exists.", NULL, NULL);
         return;
     }
-
     strcpy(s->status, "Renamed.");
     s->mode = MODE_NORMAL;
+    maybe_notify_desktop(s);
     ff_reload(s);
 }
 
@@ -673,39 +663,38 @@ static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
     for (int i = win_count - 1; i >= 0; i--) {
         window *w = win_stack[i];
         if (!w->visible) continue;
-
         ff_inst_t *t = inst_of(w);
         if (!t || t == exclude) continue;
-
         if (in_content(t, mx, my)) return t;
     }
     return NULL;
 }
 
+static bool over_desktop(int mx, int my) {
+    if (my < MENUBAR_H) return false;
+    if (my >= SCREEN_HEIGHT - TASKBAR_H) return false;
+
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (!w->visible || w->minimized || w->pinned_bottom) continue;
+        int wy = w->y + MENUBAR_H;
+        if (mx >= w->x && mx < w->x + w->w &&
+            my >= wy    && my < wy  + w->h)
+            return false;
+    }
+    return true;
+}
 
 static bool is_ancestor_of(uint16_t src_cluster, uint16_t candidate_cluster) {
     if (src_cluster == candidate_cluster) return true;
-
     uint16_t cur = candidate_cluster;
     int depth = 0;
-    const int MAX_DEPTH = 64;
-
-    while (cur != 0 && depth < MAX_DEPTH) {
+    while (cur != 0 && depth < 64) {
         if (cur == src_cluster) return true;
-
-        uint16_t saved = dir_context.current_cluster;
-        dir_context.current_cluster = cur;
-
-        dir_entry_t entries[16];
-        int count = 0;
-        fat16_list_dir(cur, entries, 16, &count);
-        dir_context.current_cluster = saved;
-
         dir_entry_t dotdot;
         char name83[12];
         fat16_make_83("..", name83);
         if (!fat16_find_in_dir(cur, name83, &dotdot)) break;
-
         uint16_t parent = dotdot.cluster_lo;
         if (parent == cur) break;
         cur = parent;
@@ -721,15 +710,14 @@ static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
 
     if (it->entry.attr & ATTR_DIRECTORY) {
         if (is_ancestor_of(it->entry.cluster_lo, dst->dir_cluster)) {
-        	ff_reload(src);
-         	ff_reload(dst);
+            ff_reload(src); ff_reload(dst);
             strcpy(src->status, "Can't move into subfolder.");
             return false;
         }
     }
 
     char src_path[270];
-    if (src->path[0] == '/' && src->path[1] == '\0')
+    if (src->path[0]=='/' && src->path[1]=='\0')
         sprintf(src_path, "/%s", it->name);
     else
         sprintf(src_path, "%s/%s", src->path, it->name);
@@ -755,10 +743,34 @@ static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
     if (ok) {
         strcpy(src->status, "Moved.");
         strcpy(dst->status, "Item received.");
+        maybe_notify_desktop(src);
+        maybe_notify_desktop(dst);
         ff_reload(src);
         ff_reload(dst);
     } else {
         strcpy(src->status, "Move failed.");
+    }
+    return ok;
+}
+
+static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
+    ff_item_t *it = &src->items[drag_idx];
+    if (it->is_dotdot) return false;
+
+    if (src->dir_cluster == desktop_fs_cluster()) return false;
+
+    char src_path[270];
+    if (src->path[0]=='/' && src->path[1]=='\0')
+        sprintf(src_path, "/%s", it->name);
+    else
+        sprintf(src_path, "%s/%s", src->path, it->name);
+
+    bool ok = desktop_accept_drop(src_path, it->name);
+    if (ok) {
+        strcpy(src->status, "Moved to Desktop.");
+        ff_reload(src);
+    } else {
+        strcpy(src->status, "Drop to Desktop failed.");
     }
     return ok;
 }
@@ -769,12 +781,16 @@ static void ff_open_dir(uint16_t cluster, const char *path) {
     ff_inst_t *s = (ff_inst_t *)inst->state;
     s->dir_cluster = cluster;
     strncpy(s->path, path, 255); s->path[255] = '\0';
+     s->win->title = s->path;
     ff_reload(s);
 }
 
 static void ff_on_frame(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
     if (!s->win || !s->win->visible) return;
+
+    if (strcmp(s->path, desktop_fs_path()) == 0 && desktop_fs_is_dirty())
+        ff_reload(s);
 
     int wx       = s->win->x + 1;
     int wy_top   = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
@@ -786,7 +802,6 @@ static void ff_on_frame(void *state) {
             char *buf = (s->mode == MODE_NEWNAME) ? s->newname_buf : s->rename_buf;
             int  *len = (s->mode == MODE_NEWNAME) ? &s->newname_len : &s->rename_len;
             int   max = 12;
-
             if (kb.last_scancode == ENTER && *len > 0) {
                 if (s->mode == MODE_NEWNAME) ff_handle_newname(s);
                 else                         ff_handle_rename(s);
@@ -798,10 +813,7 @@ static void ff_on_frame(void *state) {
                 char c = kb.last_char;
                 bool allow = fat_char_ok(c) ||
                              (c == '.' && s->mode == MODE_NEWNAME && !s->newname_is_dir);
-                if (allow) {
-                    buf[(*len)++] = c;
-                    buf[*len]     = '\0';
-                }
+                if (allow) { buf[(*len)++] = c; buf[*len] = '\0'; }
             }
         }
         ff_draw_window(s->win, s);
@@ -812,20 +824,17 @@ static void ff_on_frame(void *state) {
         if (mouse.left_clicked) {
             int bx = wx + 4;
             int by = conf_by;
-            int bw = s->win->w - 10;
-            (void)bw;
-            if (mouse.x >= bx + 4  && mouse.x < bx + 32  &&
-                mouse.y >= by + 20 && mouse.y < by + 30) {
+            if (mouse.x >= bx+4  && mouse.x < bx+32 &&
+                mouse.y >= by+20 && mouse.y < by+30) {
                 if (s->confirm_action) s->confirm_action(s);
-            } else if (mouse.x >= bx + 36 && mouse.x < bx + 64 &&
-                       mouse.y >= by + 20 && mouse.y < by + 30) {
+            } else if (mouse.x >= bx+36 && mouse.x < bx+64 &&
+                       mouse.y >= by+20 && mouse.y < by+30) {
                 cancel_confirm(s);
             }
         }
         ff_draw_window(s->win, s);
         return;
     }
-
 
     if (s->drag_idx >= 0) {
         ff_item_t *it = &s->items[s->drag_idx];
@@ -845,18 +854,18 @@ static void ff_on_frame(void *state) {
                 ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
                 if (dst) {
                     ff_drop_move(s, s->drag_idx, dst);
-                    s->drag_idx = -1;
+                } else if (over_desktop(mouse.x, mouse.y)) {
+                    ff_drop_to_desktop(s, s->drag_idx);
                 } else {
                     it->dragging = false;
                     it->pinned   = false;
-                    s->drag_idx  = -1;
                     ff_layout(s);
                 }
             } else {
                 it->dragging = false;
                 it->pinned   = true;
-                s->drag_idx  = -1;
             }
+            s->drag_idx = -1;
         }
         ff_draw_window(s->win, s);
         return;
@@ -868,14 +877,14 @@ static void ff_on_frame(void *state) {
             if (!it->selected || it->is_dotdot) continue;
             int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
             int ay = wy_top + it->icon_y;
-            if (mouse.x >= ax && mouse.x < ax + ICON_SZ_W &&
-                mouse.y >= ay && mouse.y < ay + ICON_SZ_H) {
-	                if (mouse.dx != 0 || mouse.dy != 0) {
-	                    it->dragging   = true;
-	                    it->drag_off_x = mouse.x - (ax - ICON_SZ_W / 2);
-	                    it->drag_off_y = mouse.y - ay;
-	                    s->drag_idx    = i;
-	                    s->last_click_idx = -1;
+            if (mouse.x >= ax && mouse.x < ax+ICON_SZ_W &&
+                mouse.y >= ay && mouse.y < ay+ICON_SZ_H) {
+                if (mouse.dx != 0 || mouse.dy != 0) {
+                    it->dragging   = true;
+                    it->drag_off_x = mouse.x - (ax - ICON_SZ_W/2);
+                    it->drag_off_y = mouse.y - ay;
+                    s->drag_idx    = i;
+                    s->last_click_idx = -1;
                 }
                 break;
             }
@@ -906,9 +915,45 @@ static void ff_on_frame(void *state) {
                     uint16_t parent_cluster = dir_context.current_cluster;
                     dir_context.current_cluster = saved;
                     ff_open_dir(parent_cluster, parent);
-                } else if (it->entry.attr & ATTR_DIRECTORY) {
+                }
+                else if (item_is_app(it)) {
+                    char app_name[9];
+                    int ai = 0;
+                    for (int k = 0; it->name[k] && it->name[k] != '.' && ai < 8; k++)
+                        app_name[ai++] = it->name[k];
+                    app_name[ai] = '\0';
+                    char proper[9];
+                    for (int k = 0; app_name[k]; k++) {
+                        char c = app_name[k];
+                        if (k == 0 && c >= 'A' && c <= 'Z') proper[k] = c;
+                        else if (c >= 'A' && c <= 'Z') proper[k] = c - 'A' + 'a';
+                        else proper[k] = c;
+                    }
+                    proper[ai] = '\0';
+                    app_descriptor *desc = os_find_app(app_name);
+                    if (!desc) desc = os_find_app(proper);
+                    proper[0] = app_name[0];
+                    if (!desc) {
+                        for (int k = 0; k < ai; k++) {
+                            char c = app_name[k];
+                            proper[k] = (k == 0)
+                                ? (c >= 'a' && c <= 'z' ? c-32 : c)
+                                : (c >= 'A' && c <= 'Z' ? c+32 : c);
+                        }
+                        proper[ai] = '\0';
+                        desc = os_find_app(proper);
+                    }
+                    if (desc) {
+                        os_launch_app(desc);
+                    } else {
+                        char err_msg[256];
+                        sprintf(err_msg, "Could not find application '%s'.", app_name);
+                        modal_show(MODAL_ERROR, "App Not Found", err_msg, NULL, NULL);
+                    }
+                }
+                else if (it->entry.attr & ATTR_DIRECTORY) {
                     char child_path[270];
-                    if (s->path[0] == '/' && s->path[1] == '\0')
+                    if (s->path[0]=='/' && s->path[1]=='\0')
                         sprintf(child_path, "/%s", it->name);
                     else
                         sprintf(child_path, "%s/%s", s->path, it->name);
@@ -974,12 +1019,13 @@ static void ff_init(void *state) {
     menu_add_item(view_menu, "By Date", menu_sort_date);
     menu_add_item(view_menu, "By Size", menu_sort_size);
 
-    s->dir_cluster    = 0;
+    s->dir_cluster    = desktop_fs_cluster();
     s->sort           = SORT_NAME;
     s->drag_idx       = -1;
     s->last_click_idx = -1;
     s->mode           = MODE_NORMAL;
-    strcpy(s->path, "/");
+    strcpy(s->path, desktop_fs_path());
+    s->win->title = s->path;
 
     ff_reload(s);
 }

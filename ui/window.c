@@ -256,13 +256,28 @@ void window_draw(window *win) {
         return;
     }
 
-    if (win->visible_buttons) {
+        if (win->visible_buttons) {
         fill_rect(win->x, wy, win->w, 16, win->bar_color);
         draw_titlebar_btn(win->x + 3,  wy + 3, 10, 10, "X", RED);
         draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", LIGHT_BLUE);
 
-        int tx = win->x + win->w / 2 - (int)(strlen(win->title) * 2);
-        draw_string(tx, wy + 6, (char *)win->title, win->title_color, 2);
+        const char *title = win->title;
+        char title_buf[256];
+        int max_width = win->w - 60;
+        int max_chars = max_width / 4 - 2;
+
+         if (max_chars > 0 && (int)strlen(title) > max_chars) {
+            int title_len = (int)strlen(title);
+            int truncate_at = title_len - (max_chars - 3);
+            if (truncate_at < 0) truncate_at = 0;
+            strcpy(title_buf, "...");
+            strcat(title_buf, title + truncate_at);
+            title = title_buf;
+        }
+
+
+        int tx = win->x + win->w / 2 - (int)(strlen(title) * 2);
+        draw_string(tx, wy + 6, (char *)title, win->title_color, 2);
 
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
         draw_rect(win->x, wy,      win->w, win->h,      BLACK);
@@ -278,6 +293,7 @@ void window_draw(window *win) {
             draw_line(gx + 6, gy + 8, gx + 8, gy + 6, DARK_GRAY);
         }
     }
+
 
     for (int i = 0; i < win->widget_count; i++)
         widget_draw(&win->widgets[i], win->x, wy);

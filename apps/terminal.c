@@ -38,25 +38,25 @@ typedef struct {
     char    hist_draft[INPUT_CAP];
 
     bool    waiting_for_enter;
-} terminal_state_t;
+} asmterm_state_t;
 
-app_descriptor terminal_app;
+app_descriptor asmterm_app;
 
-static void term_push_line(terminal_state_t *s, const char *text);
-static void term_push_output(terminal_state_t *s, const char *text);
-static void term_execute(terminal_state_t *s);
-static void term_scroll_to_bottom(terminal_state_t *s);
+static void term_push_line(asmterm_state_t *s, const char *text);
+static void term_push_output(asmterm_state_t *s, const char *text);
+static void term_execute(asmterm_state_t *s);
+static void term_scroll_to_bottom(asmterm_state_t *s);
 
-static bool terminal_close(window *w) {
+static bool asmterm_close(window *w) {
     (void)w;
-    os_quit_app_by_desc(&terminal_app);
+    os_quit_app_by_desc(&asmterm_app);
     return true;
 }
-static void on_file_close(void) { terminal_close(NULL); }
+static void on_file_close(void) { asmterm_close(NULL); }
 
-static inline int line_idx(const terminal_state_t *s, int n) { return (s->line_head + n) % OUTPUT_LINES; }
+static inline int line_idx(const asmterm_state_t *s, int n) { return (s->line_head + n) % OUTPUT_LINES; }
 
-static void term_push_line(terminal_state_t *s, const char *text) {
+static void term_push_line(asmterm_state_t *s, const char *text) {
     int idx;
     if (s->line_count < OUTPUT_LINES) {
         idx = line_idx(s, s->line_count);
@@ -74,7 +74,7 @@ static void term_push_line(terminal_state_t *s, const char *text) {
     s->lines[idx][i] = '\0';
 }
 
-static void term_push_output(terminal_state_t *s, const char *text) {
+static void term_push_output(asmterm_state_t *s, const char *text) {
     char line_buf[OUTPUT_LINE_W];
     int  pos = 0;
     int  col = 0;
@@ -95,23 +95,23 @@ static void term_push_output(terminal_state_t *s, const char *text) {
     }
 }
 
-static void term_scroll_to_bottom(terminal_state_t *s) {
+static void term_scroll_to_bottom(asmterm_state_t *s) {
     int max_scroll = s->line_count - s->visible_rows;
     s->scroll_top  = (max_scroll > 0) ? max_scroll : 0;
 }
 
-static void term_scroll_up(terminal_state_t *s, int lines) {
+static void term_scroll_up(asmterm_state_t *s, int lines) {
     s->scroll_top -= lines;
     if (s->scroll_top < 0) s->scroll_top = 0;
 }
 
-static void term_scroll_down(terminal_state_t *s, int lines) {
+static void term_scroll_down(asmterm_state_t *s, int lines) {
     int max_scroll = s->line_count - s->visible_rows;
     s->scroll_top += lines;
     if (s->scroll_top > max_scroll) s->scroll_top = (max_scroll > 0) ? max_scroll : 0;
 }
 
-static void term_execute(terminal_state_t *s) {
+static void term_execute(asmterm_state_t *s) {
     if (s->input_len == 0) {
         term_push_line(s, "");
         term_scroll_to_bottom(s);
@@ -167,8 +167,8 @@ static void term_execute(terminal_state_t *s) {
     term_scroll_to_bottom(s);
 }
 
-void terminal_window_draw(window *win, void *userdata) {
-    terminal_state_t *s = (terminal_state_t *)userdata;
+void asmterm_window_draw(window *win, void *userdata) {
+    asmterm_state_t *s = (asmterm_state_t *)userdata;
     if (!win || !win->visible) return;
     if (win->dragging) return;
 
@@ -271,8 +271,8 @@ void terminal_window_draw(window *win, void *userdata) {
     }
 }
 
-static void terminal_init(void *state) {
-    terminal_state_t *s = (terminal_state_t *)state;
+static void asmterm_init(void *state) {
+    asmterm_state_t *s = (asmterm_state_t *)state;
 
     const window_spec_t spec = {
         .x             = 20,
@@ -280,16 +280,16 @@ static void terminal_init(void *state) {
         .w             = 210,
         .h             = 160,
         .resizable     = true,
-        .title         = "Terminal",
+        .title         = "asmterm",
         .title_color   = WHITE,
         .bar_color     = DARK_GRAY,
         .content_color = BLACK,
         .visible       = true,
-        .on_close      = terminal_close,
+        .on_close      = asmterm_close,
     };
     s->win = wm_register(&spec);
     if (!s->win) return;
-    s->win->on_draw = terminal_window_draw;
+    s->win->on_draw = asmterm_window_draw;
     s->win->on_draw_userdata = s;
 
     menu *file_menu = window_add_menu(s->win, "File");
@@ -310,12 +310,12 @@ static void terminal_init(void *state) {
     term_scroll_to_bottom(s);
 }
 
-static void terminal_on_frame(void *state) {
-    terminal_state_t *s = (terminal_state_t *)state;
+static void asmterm_on_frame(void *state) {
+    asmterm_state_t *s = (asmterm_state_t *)state;
     if (!s->win || !s->win->visible) return;
 
     if (s->should_exit) {
-        terminal_close(NULL);
+        asmterm_close(NULL);
         return;
     }
 
@@ -350,18 +350,18 @@ static void terminal_on_frame(void *state) {
     }
 
     if (!s->input_focused || !kb.key_pressed) {
-        terminal_window_draw(s->win, s->win->on_draw_userdata);
+        asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
     uint8_t sc = kb.last_scancode;
 
-    if (sc == F5) { term_scroll_up(s, s->visible_rows);   terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
-    if (sc == F6) { term_scroll_down(s, s->visible_rows); terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
+    if (sc == F5) { term_scroll_up(s, s->visible_rows);   asmterm_window_draw(s->win, s->win->on_draw_userdata); return; }
+    if (sc == F6) { term_scroll_down(s, s->visible_rows); asmterm_window_draw(s->win, s->win->on_draw_userdata); return; }
 
     if (sc == ENTER) {
         term_execute(s);
-        terminal_window_draw(s->win, s->win->on_draw_userdata);
+        asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
@@ -369,12 +369,12 @@ static void terminal_on_frame(void *state) {
         if (s->input_len > 0) {
             s->input[--s->input_len] = '\0';
         }
-        terminal_window_draw(s->win, s->win->on_draw_userdata);
+        asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
     if (sc == 0x48) {
-        if (s->hist_count == 0) { terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
+        if (s->hist_count == 0) { asmterm_window_draw(s->win, s->win->on_draw_userdata); return; }
 
         if (s->hist_pos == -1) {
             int di = 0;
@@ -394,12 +394,12 @@ static void terminal_on_frame(void *state) {
         }
         s->input[s->input_len] = '\0';
         s->input_scroll = 0;   /* resetează scroll-ul la history */
-        terminal_window_draw(s->win, s->win->on_draw_userdata);
+        asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
     if (sc == 0x50) {  /* săgeată jos — history */
-        if (s->hist_pos == -1) { terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
+        if (s->hist_pos == -1) { asmterm_window_draw(s->win, s->win->on_draw_userdata); return; }
 
         if (s->hist_pos < s->hist_count - 1) {
             s->hist_pos++;
@@ -420,7 +420,7 @@ static void terminal_on_frame(void *state) {
             s->input[s->input_len] = '\0';
         }
         s->input_scroll = 0;
-        terminal_window_draw(s->win, s->win->on_draw_userdata);
+        asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
@@ -432,21 +432,21 @@ static void terminal_on_frame(void *state) {
         }
     }
 
-    terminal_window_draw(s->win, s->win->on_draw_userdata);
+    asmterm_window_draw(s->win, s->win->on_draw_userdata);
 }
 
-static void terminal_destroy(void *state) {
-    terminal_state_t *s = (terminal_state_t *)state;
+static void asmterm_destroy(void *state) {
+    asmterm_state_t *s = (asmterm_state_t *)state;
     if (s->win) {
         wm_unregister(s->win);
         s->win = NULL;
     }
 }
 
-app_descriptor terminal_app = {
-    .name       = "Terminal",
-    .state_size = sizeof(terminal_state_t),
-    .init       = terminal_init,
-    .on_frame   = terminal_on_frame,
-    .destroy    = terminal_destroy,
+app_descriptor asmterm_app = {
+    .name       = "ASMTERM",
+    .state_size = sizeof(asmterm_state_t),
+    .init       = asmterm_init,
+    .on_frame   = asmterm_on_frame,
+    .destroy    = asmterm_destroy,
 };

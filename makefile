@@ -49,6 +49,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/ui/cursor.o                  \
 	  $(BUILD_DIR)/ui/desktop.o                 \
+	  $(BUILD_DIR)/ui/desktop_fs.o              \
 	  $(BUILD_DIR)/ui/icons.o                   \
       $(BUILD_DIR)/ui/menubar.o                 \
 	  $(BUILD_DIR)/ui/modal.o                   \

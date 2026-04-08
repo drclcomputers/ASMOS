@@ -10,10 +10,11 @@
 #include "interrupts/idt.h"
 #include "lib/time.h"
 #include "ui/desktop.h"
+#include "ui/desktop_fs.h"
 
 extern app_descriptor clock_app;
 extern app_descriptor finder_app;
-extern app_descriptor terminal_app;
+extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
 
 typedef struct __attribute__((packed)) {
@@ -68,6 +69,8 @@ void kmain(void) {
 
     if (!START_IN_GUI) cli_run();
 
+    desktop_fs_init();
+
     desktop_init();
     menubar_init();
 
@@ -75,7 +78,7 @@ void kmain(void) {
 
     os_install_app(&clock_app);
     os_install_app(&finder_app);
-    os_install_app(&terminal_app);
+    os_install_app(&asmterm_app);
     os_install_app(&monitor_app);
 
     os_run();
