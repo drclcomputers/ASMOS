@@ -147,10 +147,12 @@ void menubar_draw(menubar *mb) {
 
 void menubar_update(menubar *mb) {
     if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
-		if (mouse.x < 2 + CLOCK_W) {
-			os_launch_app(&clock_app);
-			return;
-		}
+        g_menubar_click_consumed = true;
+
+        if (mouse.x < 2 + CLOCK_W) {
+            os_launch_app(&clock_app);
+            return;
+        }
 
         for (int i = 0; i < mb->menu_count; i++) {
             menu *m = &mb->menus[i];
@@ -182,17 +184,21 @@ void menubar_update(menubar *mb) {
 
         if (mouse.x >= m->bar_x && mouse.x < m->bar_x + dw &&
             mouse.y >= dy) {
+            g_menubar_click_consumed = true;
+
             int idx = (mouse.y - dy) / MENU_ITEM_H;
             if (idx >= 0 && idx < m->item_count) {
                 menu_item *it = &m->items[idx];
                 if (it->label && !it->disabled && it->action) {
                     it->action();
                 }
-                menubar_close_all(mb);
             }
+            menubar_close_all(mb);
         } else {
+            g_menubar_click_consumed = true;
             menubar_close_all(mb);
         }
+        return;
     }
 
     if (mb->open_index >= 0 && mouse.y < MENUBAR_H_SIZE) {

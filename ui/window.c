@@ -1,6 +1,7 @@
 #include "ui/window.h"
 #include "ui/menubar.h"
 #include "os/error.h"
+#include "os/os.h"
 #include "lib/alloc.h"
 #include "lib/string.h"
 #include "lib/mem.h"
@@ -46,8 +47,9 @@ static void draw_titlebar_btn(int ax, int ay, int w, int h, const char *label, u
 }
 
 static bool clicked_titlebar_btn(int ax, int ay, int w, int h) {
-    return mouse.left_clicked
-        && mouse.x >= ax && mouse.x < ax + w
+    if (!mouse.left_clicked)       return false;
+    if (g_menubar_click_consumed)  return false;
+    return mouse.x >= ax && mouse.x < ax + w
         && mouse.y >= ay && mouse.y < ay + h;
 }
 
@@ -100,6 +102,11 @@ window *wm_register(const window_spec_t *spec) {
 
     win_stack[win_count++] = win;
     wm_sort();
+
+    if (spec->visible && !win->pinned_bottom) {
+        wm_focus(win);
+    }
+
     return win;
 }
 
@@ -114,6 +121,14 @@ void wm_unregister(window *win) {
         for (int j = i; j < win_count - 1; j++) win_stack[j] = win_stack[j + 1];
         win_stack[--win_count] = NULL;
         kfree(win);
+
+        for (int k = win_count - 1; k >= 0; k--) {
+            if (win_stack[k]->visible && !win_stack[k]->minimized
+                    && !win_stack[k]->pinned_bottom) {
+                wm_focus(win_stack[k]);
+                break;
+            }
+        }
         return;
     }
 }
@@ -207,16 +222,22 @@ void wm_update_all(void) {
         if (click_consumed) return;
     }
 
-    for (int i = win_count - 1; i >= 0; i--) {
-        window *win = win_stack[i];
-        if (!win->visible || win->minimized) continue;
-        int wy = win->y + MENUBAR_H_SIZE;
-        bool on_win = mouse.x >= win->x && mouse.x < win->x + win->w
-                   && mouse.y >= wy     && mouse.y < wy + win->h;
-        if (!click_consumed && mouse.left_clicked && on_win) {
-            wm_focus(win);
-            click_consumed = true;
-            break;
+    if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
+        return;
+    }
+
+    if (!g_menubar_click_consumed) {
+        for (int i = win_count - 1; i >= 0; i--) {
+            window *win = win_stack[i];
+            if (!win->visible || win->minimized) continue;
+            int wy = win->y + MENUBAR_H_SIZE;
+            bool on_win = mouse.x >= win->x && mouse.x < win->x + win->w
+                       && mouse.y >= wy     && mouse.y < wy + win->h;
+            if (!click_consumed && mouse.left_clicked && on_win) {
+                wm_focus(win);
+                click_consumed = true;
+                break;
+            }
         }
     }
 

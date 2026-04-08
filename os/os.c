@@ -19,6 +19,8 @@ int running_app_count = 0;
 
 static bool gui_should_exit = false;
 
+bool g_menubar_click_consumed = false;
+
 void os_install_app(app_descriptor *desc) {
     if (!desc) {
         ERR_WARN_REPORT(ERR_NULL_PTR, "os_install_app: desc");
@@ -66,6 +68,15 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
     running_app_count++;
 
     if (desc->init) desc->init(state);
+
+    for (int i = win_count - 1; i >= 0; i--) {
+        window *w = win_stack[i];
+        if (w->visible && !w->minimized && !w->pinned_bottom) {
+            wm_focus(w);
+            break;
+        }
+    }
+
     return inst;
 }
 
@@ -129,6 +140,8 @@ void os_run(void) {
     gui_should_exit = false;
 
     while (!gui_should_exit) {
+        g_menubar_click_consumed = false;
+
         ps2_update();
 
         for (int i = 0; i < MAX_RUNNING_APPS; i++) {

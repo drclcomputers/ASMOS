@@ -4,6 +4,7 @@
 #include "lib/types.h"
 #include "lib/alloc.h"
 #include "ui/menubar.h"
+#include "ui/window.h"
 
 #define MAX_INSTALLED_APPS 64
 #define MAX_RUNNING_APPS   32
@@ -43,5 +44,7 @@ extern app_instance_t  running_apps[MAX_RUNNING_APPS];
 extern int             running_app_count;
 
 extern menubar g_menubar;
+
+extern bool g_menubar_click_consumed;
 
 #endif

@@ -35,6 +35,7 @@ typedef struct {
     bool        selected;
     bool        dragging;
     int         drag_off_x, drag_off_y;
+    bool        pinned;
 } ff_item_t;
 
 typedef struct {
@@ -225,6 +226,7 @@ static void ff_layout(ff_inst_t *s) {
     int col = 0, row = 0;
     for (int i = 0; i < s->item_count; i++) {
         ff_item_t *it = &s->items[i];
+        if (it->pinned) continue;
         if (it->dragging) continue;
         it->icon_x = 4 + col * ICON_CELL_W;
         it->icon_y = CONTENT_TOP + row * ICON_CELL_H;
@@ -668,20 +670,63 @@ static void ff_handle_rename(ff_inst_t *s) {
 }
 
 static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &finder_app) continue;
-        ff_inst_t *t = (ff_inst_t *)a->state;
-        if (t == exclude || !t->win || !t->win->visible) continue;
+    for (int i = win_count - 1; i >= 0; i--) {
+        window *w = win_stack[i];
+        if (!w->visible) continue;
+
+        ff_inst_t *t = inst_of(w);
+        if (!t || t == exclude) continue;
+
         if (in_content(t, mx, my)) return t;
     }
     return NULL;
+}
+
+
+static bool is_ancestor_of(uint16_t src_cluster, uint16_t candidate_cluster) {
+    if (src_cluster == candidate_cluster) return true;
+
+    uint16_t cur = candidate_cluster;
+    int depth = 0;
+    const int MAX_DEPTH = 64;
+
+    while (cur != 0 && depth < MAX_DEPTH) {
+        if (cur == src_cluster) return true;
+
+        uint16_t saved = dir_context.current_cluster;
+        dir_context.current_cluster = cur;
+
+        dir_entry_t entries[16];
+        int count = 0;
+        fat16_list_dir(cur, entries, 16, &count);
+        dir_context.current_cluster = saved;
+
+        dir_entry_t dotdot;
+        char name83[12];
+        fat16_make_83("..", name83);
+        if (!fat16_find_in_dir(cur, name83, &dotdot)) break;
+
+        uint16_t parent = dotdot.cluster_lo;
+        if (parent == cur) break;
+        cur = parent;
+        depth++;
+    }
+    return false;
 }
 
 static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
     ff_item_t *it = &src->items[drag_idx];
     if (it->is_dotdot) return false;
     if (src->dir_cluster == dst->dir_cluster) return false;
+
+    if (it->entry.attr & ATTR_DIRECTORY) {
+        if (is_ancestor_of(it->entry.cluster_lo, dst->dir_cluster)) {
+        	ff_reload(src);
+         	ff_reload(dst);
+            strcpy(src->status, "Can't move into subfolder.");
+            return false;
+        }
+    }
 
     char src_path[270];
     if (src->path[0] == '/' && src->path[1] == '\0')
@@ -740,7 +785,7 @@ static void ff_on_frame(void *state) {
         if (kb.key_pressed) {
             char *buf = (s->mode == MODE_NEWNAME) ? s->newname_buf : s->rename_buf;
             int  *len = (s->mode == MODE_NEWNAME) ? &s->newname_len : &s->rename_len;
-            int   max = (s->mode == MODE_NEWNAME) ? 12 : 12;
+            int   max = 12;
 
             if (kb.last_scancode == ENTER && *len > 0) {
                 if (s->mode == MODE_NEWNAME) ff_handle_newname(s);
@@ -781,6 +826,7 @@ static void ff_on_frame(void *state) {
         return;
     }
 
+
     if (s->drag_idx >= 0) {
         ff_item_t *it = &s->items[s->drag_idx];
         if (mouse.left) {
@@ -795,14 +841,21 @@ static void ff_on_frame(void *state) {
             it->icon_x = new_ix;
             it->icon_y = new_iy;
         } else {
-            ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
-            if (dst) {
-                ff_drop_move(s, s->drag_idx, dst);
-                s->drag_idx = -1;
+            if (!in_content(s, mouse.x, mouse.y)) {
+                ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
+                if (dst) {
+                    ff_drop_move(s, s->drag_idx, dst);
+                    s->drag_idx = -1;
+                } else {
+                    it->dragging = false;
+                    it->pinned   = false;
+                    s->drag_idx  = -1;
+                    ff_layout(s);
+                }
             } else {
                 it->dragging = false;
+                it->pinned   = true;
                 s->drag_idx  = -1;
-                ff_layout(s);
             }
         }
         ff_draw_window(s->win, s);
@@ -817,12 +870,12 @@ static void ff_on_frame(void *state) {
             int ay = wy_top + it->icon_y;
             if (mouse.x >= ax && mouse.x < ax + ICON_SZ_W &&
                 mouse.y >= ay && mouse.y < ay + ICON_SZ_H) {
-                if (mouse.dx != 0 || mouse.dy != 0) {
-                    it->dragging   = true;
-                    it->drag_off_x = mouse.x - ax;
-                    it->drag_off_y = mouse.y - ay;
-                    s->drag_idx    = i;
-                    s->last_click_idx = -1;
+	                if (mouse.dx != 0 || mouse.dy != 0) {
+	                    it->dragging   = true;
+	                    it->drag_off_x = mouse.x - (ax - ICON_SZ_W / 2);
+	                    it->drag_off_y = mouse.y - ay;
+	                    s->drag_idx    = i;
+	                    s->last_click_idx = -1;
                 }
                 break;
             }
