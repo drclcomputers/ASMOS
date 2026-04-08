@@ -38,9 +38,29 @@ static void draw_textbox(widget *wg, int ax, int ay) {
     unsigned char border = tb->focused ? BLUE : wg->border_color;
     fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
     draw_rect(ax, ay, wg->w, wg->h, border);
-    draw_string(ax + 2, ay + 2, tb->buf, wg->fg_color, 2);
+
+    int char_w = 5;
+    int max_vis_chars = (wg->w - 4) / char_w;
+    if (max_vis_chars < 1) max_vis_chars = 1;
+
+    tb->scroll = tb->len - max_vis_chars;
+    if (tb->scroll < 0) tb->scroll = 0;
+
+    char vis_buf[256];
+    int to_copy = tb->len - tb->scroll;
+    if (to_copy > max_vis_chars) to_copy = max_vis_chars;
+    if (to_copy >= (int)sizeof(vis_buf)) to_copy = sizeof(vis_buf) - 1;
+
+    for (int i = 0; i < to_copy; i++) {
+        vis_buf[i] = tb->buf[tb->scroll + i];
+    }
+    vis_buf[to_copy] = '\0';
+
+    draw_string(ax + 2, ay + 2, vis_buf, wg->fg_color, 2);
+
     if (tb->focused) {
-        int cx = ax + 2 + tb->len * 5;
+        int visible_pos = tb->len - tb->scroll;
+        int cx = ax + 2 + visible_pos * char_w;
         if (cx < ax + wg->w - 4) draw_string(cx, ay + 2, "|", wg->fg_color, 2);
     }
 }

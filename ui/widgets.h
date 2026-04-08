@@ -42,6 +42,7 @@ typedef struct {
     char buf[1024];
     int  len;
     bool focused;
+    int  scroll;
 } widget_textbox;
 
 typedef struct {

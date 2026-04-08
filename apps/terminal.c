@@ -18,6 +18,8 @@
 typedef struct {
     window *win;
 
+    bool should_exit;
+
     char    lines[OUTPUT_LINES][OUTPUT_LINE_W];
     int     line_head;
     int     line_count;
@@ -27,6 +29,7 @@ typedef struct {
 
     char    input[INPUT_CAP];
     int     input_len;
+    int     input_scroll;
     bool    input_focused;
 
     char    history[HISTORY_DEPTH][INPUT_CAP];
@@ -78,7 +81,7 @@ static void term_push_output(terminal_state_t *s, const char *text) {
 
     while (text[pos]) {
         char c = text[pos++];
-        if (c == '\n' || col >= MAX_COLS) {
+        if (c == '\n' || col >= OUTPUT_LINE_W - 1) {
             line_buf[col] = '\0';
             term_push_line(s, line_buf);
             col = 0;
@@ -142,6 +145,10 @@ static void term_execute(terminal_state_t *s) {
 
     char outbuf[1024];
     outbuf[0] = '\0';
+    if(strcmp("exit", s->input) == 0) {
+    	s->should_exit = true;
+    	return;
+    }
     cmd_status_t status = cli_execute_command(s->input, outbuf, sizeof(outbuf));
 
     if (outbuf[0])
@@ -153,8 +160,9 @@ static void term_execute(terminal_state_t *s) {
         s->scroll_top = 0;
     }
 
-    s->input[0]  = '\0';
-    s->input_len = 0;
+    s->input[0]     = '\0';
+    s->input_len    = 0;
+    s->input_scroll = 0;
 
     term_scroll_to_bottom(s);
 }
@@ -170,9 +178,20 @@ void terminal_window_draw(window *win, void *userdata) {
     int wh = win->h - 16;
 
     int content_x = wx + TERM_X;
-    int text_area_w = ww - TERM_X * 2 - SCROLL_BAR_W;
 
     int output_h = wh - INPUT_H - 6;
+
+    int new_visible = output_h / LINE_H;
+    if (new_visible < 1) new_visible = 1;
+    if (new_visible != s->visible_rows) {
+        s->visible_rows = new_visible;
+        int max_scroll = s->line_count - s->visible_rows;
+        if (s->scroll_top > max_scroll)
+            s->scroll_top = (max_scroll > 0) ? max_scroll : 0;
+    }
+
+    int max_out_cols = (ww - SCROLL_BAR_W - TERM_X - 4) / CHAR_W;
+    if (max_out_cols < 1) max_out_cols = 1;
 
     for (int row = 0; row < s->visible_rows; row++) {
         int logical = s->scroll_top + row;
@@ -181,9 +200,12 @@ void terminal_window_draw(window *win, void *userdata) {
         int py = wy + TERM_Y + row * LINE_H;
         const char *line = s->lines[line_idx(s, logical)];
 
-        char draw_buf[MAX_COLS + 1];
+        char draw_buf[OUTPUT_LINE_W + 1];
+        int limit = max_out_cols;
+        if (limit > OUTPUT_LINE_W) limit = OUTPUT_LINE_W;
+
         int ci = 0;
-        while (line[ci] && ci < MAX_COLS) { draw_buf[ci] = line[ci]; ci++; }
+        while (line[ci] && ci < limit) { draw_buf[ci] = line[ci]; ci++; }
         draw_buf[ci] = '\0';
 
         draw_string(content_x, py, draw_buf, WHITE, 2);
@@ -209,9 +231,9 @@ void terminal_window_draw(window *win, void *userdata) {
     int divider_y = wy + wh - INPUT_H - 4;
     draw_line(wx + 2, divider_y, wx + ww - 2, divider_y, DARK_GRAY);
 
-    int input_y  = wy + wh - INPUT_H - 1;
-    int input_x  = wx + 2;
-    int input_w  = ww - 4;
+    int input_y = wy + wh - INPUT_H - 1;
+    int input_x = wx + 2;
+    int input_w = ww - 4;
 
     uint8_t input_bg     = BLACK;
     uint8_t input_border = s->input_focused ? CYAN : DARK_GRAY;
@@ -221,16 +243,32 @@ void terminal_window_draw(window *win, void *userdata) {
 
     draw_string(input_x + 2, input_y + 2, ">", CYAN, 2);
 
-    draw_string(input_x + 10, input_y + 2, s->input, WHITE, 2);
+    int text_area_x     = input_x + 10;
+    int text_area_w     = input_w - 12 - CHAR_W;
+    int max_vis_chars   = text_area_w / CHAR_W;
+    if (max_vis_chars < 1) max_vis_chars = 1;
+
+    s->input_scroll = s->input_len - max_vis_chars;
+    if (s->input_scroll < 0) s->input_scroll = 0;
+
+    char input_vis[256];
+    int to_copy = s->input_len - s->input_scroll;
+    if (to_copy > max_vis_chars) to_copy = max_vis_chars;
+    if (to_copy >= (int)sizeof(input_vis)) to_copy = sizeof(input_vis) - 1;
+
+    for (int i = 0; i < to_copy; i++) {
+        input_vis[i] = s->input[s->input_scroll + i];
+    }
+    input_vis[to_copy] = '\0';
+
+    draw_string(text_area_x, input_y + 2, input_vis, WHITE, 2);
 
     extern volatile uint32_t pit_ticks;
     if (s->input_focused && (pit_ticks / 50) % 2 == 0) {
-        int cx = input_x + 10 + s->input_len * CHAR_W;
-        if (cx < input_x + input_w - 4)
+        int cx = text_area_x + to_copy * CHAR_W;
+        if (cx < input_x + input_w - 2)
             draw_string(cx, input_y + 2, "|", CYAN, 2);
     }
-
-    (void)text_area_w;
 }
 
 static void terminal_init(void *state) {
@@ -241,7 +279,7 @@ static void terminal_init(void *state) {
         .y             = 20,
         .w             = 210,
         .h             = 160,
-        .resizable 	   = true,
+        .resizable     = true,
         .title         = "Terminal",
         .title_color   = WHITE,
         .bar_color     = DARK_GRAY,
@@ -252,29 +290,34 @@ static void terminal_init(void *state) {
     s->win = wm_register(&spec);
     if (!s->win) return;
     s->win->on_draw = terminal_window_draw;
-	s->win->on_draw_userdata = s;
+    s->win->on_draw_userdata = s;
 
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Close", on_file_close);
 
-    int content_h    = s->win->h - 16;
+    int content_h     = s->win->h - 16;
     int output_area_h = content_h - INPUT_H - 4;
-    s->visible_rows  = output_area_h / LINE_H;
+    s->visible_rows   = output_area_h / LINE_H;
     if (s->visible_rows < 1) s->visible_rows = 1;
 
     s->input_focused = true;
     s->hist_pos      = -1;
+    s->input_scroll  = 0;
 
     term_push_line(s, "ASMOS Terminal");
     term_push_line(s, "Type 'help' for commands.");
     term_push_line(s, "");
     term_scroll_to_bottom(s);
-    //terminal_window_draw(s->win, s->win->on_draw_userdata);
 }
 
 static void terminal_on_frame(void *state) {
     terminal_state_t *s = (terminal_state_t *)state;
     if (!s->win || !s->win->visible) return;
+
+    if (s->should_exit) {
+        terminal_close(NULL);
+        return;
+    }
 
     if (mouse.left_clicked) {
         int wx  = s->win->x;
@@ -350,11 +393,12 @@ static void terminal_on_frame(void *state) {
             s->input_len++;
         }
         s->input[s->input_len] = '\0';
+        s->input_scroll = 0;   /* resetează scroll-ul la history */
         terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
-    if (sc == 0x50) {
+    if (sc == 0x50) {  /* săgeată jos — history */
         if (s->hist_pos == -1) { terminal_window_draw(s->win, s->win->on_draw_userdata); return; }
 
         if (s->hist_pos < s->hist_count - 1) {
@@ -375,6 +419,7 @@ static void terminal_on_frame(void *state) {
             }
             s->input[s->input_len] = '\0';
         }
+        s->input_scroll = 0;
         terminal_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
