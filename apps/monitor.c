@@ -41,8 +41,8 @@ static void monitor_refresh(monitor_state_t *s) {
 
     uint32_t stor_total = 0, stor_used = 0;
     if (fat16_get_usage(&stor_total, &stor_used)) {
-    	stor_total /= 1024;
-     	stor_used /= 1024;
+        stor_total /= 1024;
+        stor_used  /= 1024;
         fmt_bytes(s->storage_str, (int)sizeof(s->storage_str), stor_used, stor_total);
     } else {
         strcpy(s->storage_str, "unavailable");
@@ -56,8 +56,15 @@ static bool monitor_close(window *w) {
     return true;
 }
 
-static void on_file_close() {
-	monitor_close(NULL);
+static void on_file_close(void) {
+    monitor_close(NULL);
+}
+
+static void on_about(void) {
+    modal_show(MODAL_INFO,
+               "About Monitor",
+               "Monitor v1.0\nASMOS System App\nAuthor: You",
+               NULL, NULL);
 }
 
 static void monitor_init(void *state) {
@@ -84,6 +91,8 @@ static void monitor_init(void *state) {
 
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Close", on_file_close);
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "About Monitor", on_about);
 
     window_add_widget(s->win, make_label(10, 8,  "Memory:",  0, 2));
     window_add_widget(s->win, make_label(55, 8,  s->memory_str,  0, 2));

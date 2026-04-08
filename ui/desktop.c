@@ -8,8 +8,10 @@
 #include "lib/string.h"
 #include "lib/mem.h"
 #include "io/mouse.h"
+#include "io/keyboard.h"
 #include "interrupts/idt.h"
 #include "ui/modal.h"
+#include "fs/fat16.h"
 
 #define WALLPAPER_SOLID         0
 #define WALLPAPER_CHECKERBOARD  1
@@ -42,7 +44,7 @@ void draw_wallpaper_pattern(void) {
                 for (int x = 5; x < SCREEN_WIDTH; x += 10)
                     draw_dot(x, y, PATTERN_SECONDARY_COLOR);
             break;
-        default: /* SOLID */
+        default:
             clear_screen(PATTERN_MAIN_COLOR);
             break;
     }
@@ -66,7 +68,60 @@ static int  s_last_click_idx  = -1;
 static uint32_t s_last_click_tick = 0;
 #define DBLCLICK_TICKS 60
 
-typedef struct { const char *name; void (*launch)(void); } app_entry_t;
+typedef struct {
+    char  path[256];
+    char  name[13];
+    bool  is_dir;
+    bool  is_cut;
+    bool  valid;
+} desk_clip_t;
+
+static desk_clip_t s_clip = { .valid = false };
+
+static bool fat_char_ok(char c) {
+    if (c >= 'A' && c <= 'Z') return true;
+    if (c >= 'a' && c <= 'z') return true;
+    if (c >= '0' && c <= '9') return true;
+    const char *ok = "!#$%&'()-@^_`{}~";
+    for (int i = 0; ok[i]; i++) if (c == ok[i]) return true;
+    return false;
+}
+
+static bool validate_fat_name(const char *name_buf, bool is_dir, const char **err_msg) {
+    if (!name_buf || name_buf[0] == '\0') { *err_msg = "Name cannot be empty."; return false; }
+    const char *dot = strchr(name_buf, '.');
+    int base_len, ext_len;
+    if (dot) {
+        base_len = (int)(dot - name_buf);
+        ext_len  = (int)strlen(dot + 1);
+        if (is_dir && ext_len > 0) { *err_msg = "Folder name: no extension allowed."; return false; }
+        if (ext_len > 3) { *err_msg = "Extension too long (max 3)."; return false; }
+        for (int i = 0; i < ext_len; i++)
+            if (!fat_char_ok(dot[1+i])) { *err_msg = "Invalid char in extension."; return false; }
+    } else {
+        base_len = (int)strlen(name_buf);
+        ext_len  = 0;
+    }
+    if (base_len == 0) { *err_msg = "Base name cannot be empty."; return false; }
+    if (base_len > 8)  { *err_msg = "Base name too long (max 8).";  return false; }
+    for (int i = 0; i < base_len; i++)
+        if (!fat_char_ok(name_buf[i])) { *err_msg = "Invalid character in name."; return false; }
+    (void)ext_len;
+    return true;
+}
+
+#define DESK_MODE_NORMAL   0
+#define DESK_MODE_CONFIRM  1
+#define DESK_MODE_NEWNAME  2
+
+static int  s_mode = DESK_MODE_NORMAL;
+
+static char s_newname_buf[13];
+static int  s_newname_len  = 0;
+static bool s_newname_is_dir = false;
+
+static char s_confirm_msg[80];
+static void (*s_confirm_action)(void) = NULL;
 
 extern app_descriptor finder_app;
 extern app_descriptor clock_app;
@@ -75,43 +130,37 @@ extern app_descriptor monitor_app;
 
 static void launch_finder(void)   { os_launch_app(&finder_app);   }
 static void launch_clock(void)    { os_launch_app(&clock_app);    }
-static void launch_asmterm(void) { os_launch_app(&asmterm_app); }
+static void launch_asmterm(void)  { os_launch_app(&asmterm_app);  }
 static void launch_monitor(void)  { os_launch_app(&monitor_app);  }
 
 static void open_item(desktop_item_t *it) {
     if (it->kind == DESKTOP_ITEM_APP) {
         char app_name[64];
         int ai = 0;
-        for (int k = 0; it->name[k] && ai < 63; k++) {
-            app_name[ai++] = it->name[k];
-        }
+        for (int k = 0; it->name[k] && ai < 63; k++) app_name[ai++] = it->name[k];
         app_name[ai] = '\0';
 
         char proper[64];
         for (int k = 0; app_name[k]; k++) {
             char c = app_name[k];
-            if (k == 0 && c >= 'A' && c <= 'Z') proper[k] = c;
-            else if (c >= 'A' && c <= 'Z') proper[k] = c - 'A' + 'a';
-            else proper[k] = c;
+            proper[k] = (k == 0 && c >= 'A' && c <= 'Z') ? c
+                      : (c >= 'A' && c <= 'Z')            ? c - 'A' + 'a'
+                                                          : c;
         }
         proper[ai] = '\0';
 
         app_descriptor *desc = os_find_app(app_name);
-
         if (!desc) desc = os_find_app(proper);
-
         proper[0] = app_name[0];
         if (!desc) {
             for (int k = 0; k < ai; k++) {
                 char c = app_name[k];
-                proper[k] = (k == 0)
-                    ? (c >= 'a' && c <= 'z' ? c-32 : c)
-                    : (c >= 'A' && c <= 'Z' ? c+32 : c);
+                proper[k] = (k == 0) ? (c >= 'a' && c <= 'z' ? c-32 : c)
+                                     : (c >= 'A' && c <= 'Z' ? c+32 : c);
             }
             proper[ai] = '\0';
             desc = os_find_app(proper);
         }
-
         if (desc) {
             os_launch_app(desc);
         } else {
@@ -131,9 +180,11 @@ static void open_item(desktop_item_t *it) {
             sprintf(path, "%s/%s", desktop_fs_path(), it->name);
             ff_open_dir_pub(de.cluster_lo, path);
         }
+    } else {
+        extern void ff_open_dir_pub(uint16_t cluster, const char *path);
+        ff_open_dir_pub(desktop_fs_cluster(), desktop_fs_path());
     }
 }
-
 
 static void draw_file_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
@@ -166,7 +217,6 @@ static void draw_app_icon(int ax, int ay, bool sel) {
     uint8_t trim = sel ? WHITE : DARK_GRAY;
     fill_rect(ax,   ay,   ICO_W,   ICO_H,   bg);
     draw_rect(ax,   ay,   ICO_W,   ICO_H,   trim);
-    /* small "▶" triangle */
     for (int r = 0; r < 7; r++) {
         int w = r + 1;
         fill_rect(ax + 5, ay + 6 + r, w, 1, trim);
@@ -188,7 +238,6 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
         default:                draw_file_icon  (ax, ay, it->selected); break;
     }
 
-    /* label */
     char disp[ICO_LABEL_MAX + 1];
     int  nlen = (int)strlen(it->name);
     int  dlen = nlen < ICO_LABEL_MAX ? nlen : ICO_LABEL_MAX;
@@ -214,18 +263,6 @@ static int desktop_hit(int mx, int my) {
             return i;
     }
     return -1;
-}
-
-static bool over_any_window(int mx, int my) {
-    for (int i = 0; i < win_count; i++) {
-        window *w = win_stack[i];
-        if (!w->visible || w->minimized || w->pinned_bottom) continue;
-        int wy = w->y + MENUBAR_H;
-        if (mx >= w->x && mx < w->x + w->w &&
-            my >= wy    && my < wy  + w->h)
-            return true;
-    }
-    return false;
 }
 
 bool desktop_accept_drop(const char *src_path, const char *src_name) {
@@ -258,18 +295,184 @@ bool desktop_accept_drop(const char *src_path, const char *src_name) {
     return ok;
 }
 
+static int selected_idx(void) {
+    desktop_item_t *items = desktop_fs_items();
+    int count = desktop_fs_count();
+    for (int i = 0; i < count; i++)
+        if (items[i].used && items[i].selected) return i;
+    return -1;
+}
+
+static void do_delete(void) {
+    int sel = selected_idx();
+    if (sel < 0) { s_mode = DESK_MODE_NORMAL; return; }
+    desktop_fs_delete(sel);
+    s_mode = DESK_MODE_NORMAL;
+}
+
+static void cancel_action(void) { s_mode = DESK_MODE_NORMAL; }
+
+static void menu_new_file(void) {
+    s_newname_buf[0] = '\0';
+    s_newname_len    = 0;
+    s_newname_is_dir = false;
+    s_mode = DESK_MODE_NEWNAME;
+}
+
+static void menu_new_folder(void) {
+    s_newname_buf[0] = '\0';
+    s_newname_len    = 0;
+    s_newname_is_dir = true;
+    s_mode = DESK_MODE_NEWNAME;
+}
+
+static void menu_reload(void) {
+    desktop_fs_set_dirty();
+}
+
+static void menu_copy(void) {
+    int sel = selected_idx();
+    if (sel < 0) return;
+    desktop_item_t *it = &desktop_fs_items()[sel];
+    strncpy(s_clip.name, it->name, 12); s_clip.name[12] = '\0';
+    strncpy(s_clip.path, desktop_fs_path(), 255); s_clip.path[255] = '\0';
+    s_clip.is_dir = (it->kind == DESKTOP_ITEM_DIR);
+    s_clip.is_cut = false;
+    s_clip.valid  = true;
+}
+
+static void menu_cut(void) {
+    int sel = selected_idx();
+    if (sel < 0) return;
+    desktop_item_t *it = &desktop_fs_items()[sel];
+    strncpy(s_clip.name, it->name, 12); s_clip.name[12] = '\0';
+    strncpy(s_clip.path, desktop_fs_path(), 255); s_clip.path[255] = '\0';
+    s_clip.is_dir = (it->kind == DESKTOP_ITEM_DIR);
+    s_clip.is_cut = true;
+    s_clip.valid  = true;
+}
+
+static void menu_paste(void) {
+    if (!s_clip.valid) return;
+
+    char src_path[270];
+    if (s_clip.path[0]=='/' && s_clip.path[1]=='\0')
+        sprintf(src_path, "/%s", s_clip.name);
+    else
+        sprintf(src_path, "%s/%s", s_clip.path, s_clip.name);
+
+    uint16_t saved = dir_context.current_cluster;
+    dir_context.current_cluster = desktop_fs_cluster();
+
+    dir_entry_t de;
+    if (fat16_find(s_clip.name, &de)) {
+        dir_context.current_cluster = saved;
+        modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL, NULL);
+        return;
+    }
+
+    bool ok;
+    if (s_clip.is_cut) {
+        ok = s_clip.is_dir ? fat16_move_dir(src_path, s_clip.name)
+                           : fat16_move_file(src_path, s_clip.name);
+        if (ok) s_clip.valid = false;
+    } else {
+        ok = s_clip.is_dir ? fat16_copy_dir(src_path, s_clip.name)
+                           : fat16_copy_file(src_path, s_clip.name);
+    }
+
+    dir_context.current_cluster = saved;
+    if (!ok) modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL, NULL);
+    desktop_fs_set_dirty();
+}
+
+static void menu_delete(void) {
+    int sel = selected_idx();
+    if (sel < 0) return;
+    desktop_item_t *it = &desktop_fs_items()[sel];
+    sprintf(s_confirm_msg, "Delete %s?", it->name);
+    s_confirm_action = do_delete;
+    s_mode = DESK_MODE_CONFIRM;
+}
+
+static void menu_sort_name(void) {
+    desktop_fs_set_dirty();
+}
+
+static void menu_about_desktop(void) {
+    modal_show(MODAL_INFO,
+               "About Desktop",
+               "Desktop v1.0 \n ASMOS Shell \n Author: ",
+               NULL, NULL);
+}
+
+static void handle_newname(void) {
+    const char *err = NULL;
+    if (!validate_fat_name(s_newname_buf, s_newname_is_dir, &err)) {
+        s_mode = DESK_MODE_NORMAL;
+        modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
+        return;
+    }
+    uint16_t saved = dir_context.current_cluster;
+    dir_context.current_cluster = desktop_fs_cluster();
+    bool ok;
+    if (s_newname_is_dir) {
+        ok = fat16_mkdir(s_newname_buf);
+    } else {
+        fat16_file_t f;
+        ok = fat16_create(s_newname_buf, &f);
+        if (ok) fat16_close(&f);
+    }
+    dir_context.current_cluster = saved;
+    s_mode = DESK_MODE_NORMAL;
+    if (!ok)
+        modal_show(MODAL_ERROR, "Create Failed", "Name exists or disk full.", NULL, NULL);
+    desktop_fs_set_dirty();
+}
+
+#define CHAR_W 5
+#define CHAR_H 6
+
+static void draw_newname_dialog(void) {
+    int bx = 60, by = 80, bw = 200, bh = 36;
+    fill_rect(bx+3, by+3, bw, bh, BLACK);
+    fill_rect(bx, by, bw, bh, LIGHT_GRAY);
+    draw_rect(bx, by, bw, bh, BLACK);
+    const char *prompt = s_newname_is_dir ? "Folder name:" : "File name:";
+    draw_string(bx+4, by+4, (char*)prompt, BLACK, 2);
+    fill_rect(bx+4, by+14, bw-8, 12, WHITE);
+    draw_rect(bx+4, by+14, bw-8, 12, BLACK);
+    draw_string(bx+6, by+16, s_newname_buf, BLACK, 2);
+    extern volatile uint32_t pit_ticks;
+    if ((pit_ticks / 50) % 2 == 0) {
+        int cx = bx + 6 + s_newname_len * CHAR_W;
+        if (cx < bx + bw - 10) draw_string(cx, by+16, "|", BLACK, 2);
+    }
+}
+
+static void draw_confirm_dialog(void) {
+    int bx = 60, by = 80, bw = 200, bh = 38;
+    fill_rect(bx+3, by+3, bw, bh, BLACK);
+    fill_rect(bx, by, bw, bh, LIGHT_GRAY);
+    draw_rect(bx, by, bw, bh, BLACK);
+    draw_string(bx+4, by+6, s_confirm_msg, BLACK, 2);
+
+    fill_rect(bx+4,  by+22, 30, 10, BLACK);
+    draw_string(bx+8,  by+24, "Yes", WHITE, 2);
+
+    fill_rect(bx+38, by+22, 30, 10, LIGHT_GRAY);
+    draw_rect(bx+38, by+22, 30, 10, BLACK);
+    draw_string(bx+42, by+24, "No",  BLACK, 2);
+}
+
 static menu *s_apps_menu;
 
 static void menu_launch_finder(void)   { launch_finder();   }
 static void menu_launch_clock(void)    { launch_clock();    }
-static void menu_launch_asmterm(void) { launch_asmterm(); }
+static void menu_launch_asmterm(void)  { launch_asmterm();  }
 static void menu_launch_monitor(void)  { launch_monitor();  }
 
-
 void desktop_init(void) {
-    int desk_y = MENUBAR_H;
-    int desk_h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H;
-
     static const window_spec_t spec = {
         .x = 0, .y = 0,
         .w = SCREEN_WIDTH,
@@ -288,26 +491,39 @@ void desktop_init(void) {
     menu_add_item(s_apps_menu, "ASMTerm", menu_launch_asmterm);
     menu_add_item(s_apps_menu, "Monitor",  menu_launch_monitor);
 
-    (void)desk_y; (void)desk_h;
+    menu *file_menu = window_add_menu(win, "File");
+    menu_add_item(file_menu, "New File",   menu_new_file);
+    menu_add_item(file_menu, "New Folder", menu_new_folder);
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "Reload",     menu_reload);
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "About Desktop", menu_about_desktop);
+
+    menu *edit_menu = window_add_menu(win, "Edit");
+    menu_add_item(edit_menu, "Copy",   menu_copy);
+    menu_add_item(edit_menu, "Cut",    menu_cut);
+    menu_add_item(edit_menu, "Paste",  menu_paste);
+    menu_add_separator(edit_menu);
+    menu_add_item(edit_menu, "Delete", menu_delete);
+
+    menu *view_menu = window_add_menu(win, "View");
+    menu_add_item(view_menu, "Reload", menu_sort_name);
 
     desktop_fs_init();
 }
 
 static bool any_window_captured(void) {
-    for (int i = 0; i < win_count; i++) {
+    for (int i = 0; i < win_count; i++)
         if (win_stack[i]->dragging || win_stack[i]->resizing) return true;
-    }
     return false;
 }
 
-static void draw(int count, desktop_item_t *items) {
-	for (int i = 0; i < count; i++) {
+static void draw_items(int count, desktop_item_t *items) {
+    for (int i = 0; i < count; i++) {
         if (!items[i].used) continue;
-        bool is_being_dragged = (i == s_drag_idx);
-        if (!is_being_dragged)
-            draw_desktop_item(&items[i], false);
+        if (i == s_drag_idx) continue;
+        draw_desktop_item(&items[i], false);
     }
-
     if (s_drag_idx >= 0 && s_drag_idx < count)
         draw_desktop_item(&items[s_drag_idx], false);
 }
@@ -321,11 +537,45 @@ void desktop_on_frame(void) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
 
-    bool blocked = any_window_captured();
+    if (s_mode == DESK_MODE_NEWNAME) {
+        draw_items(count, items);
+
+        extern volatile uint32_t pit_ticks;
+        (void)pit_ticks;
+
+        if (kb.key_pressed) {
+            if (kb.last_scancode == ENTER && s_newname_len > 0) {
+                handle_newname();
+            } else if (kb.last_scancode == ESC) {
+                s_mode = DESK_MODE_NORMAL;
+            } else if (kb.last_scancode == BACKSPACE) {
+                if (s_newname_len > 0) s_newname_buf[--s_newname_len] = '\0';
+            } else if (kb.last_char >= 32 && kb.last_char < 127 && s_newname_len < 12) {
+                char c = kb.last_char;
+                bool allow = fat_char_ok(c) || (c == '.' && !s_newname_is_dir);
+                if (allow) { s_newname_buf[s_newname_len++] = c; s_newname_buf[s_newname_len] = '\0'; }
+            }
+        }
+        draw_newname_dialog();
+        return;
+    }
+
+    if (s_mode == DESK_MODE_CONFIRM) {
+        draw_items(count, items);
+        draw_confirm_dialog();
+        if (mouse.left_clicked) {
+            int bx = 60, by = 80;
+            if (mouse.x >= bx+4 && mouse.x < bx+34 && mouse.y >= by+22 && mouse.y < by+32) {
+                if (s_confirm_action) s_confirm_action();
+            } else {
+                cancel_action();
+            }
+        }
+        return;
+    }
 
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
-
         if (mouse.left) {
             int new_x = mouse.x - DESK_ORIGIN_X - s_drag_off_x;
             int new_y = mouse.y - DESK_ORIGIN_Y - s_drag_off_y;
@@ -360,27 +610,26 @@ void desktop_on_frame(void) {
         }
     }
 
-    if (mouse.left_clicked) {
-        int hit = desktop_hit(mouse.x, mouse.y);
-        if (hit >= 0) {
-            for (int i = 0; i < count; i++) items[i].selected = false;
-            items[hit].selected = true;
+    if (mouse.left_clicked && mouse.y >= MENUBAR_H) {
+	    int hit = desktop_hit(mouse.x, mouse.y);
+	    if (hit >= 0) {
+	        for (int i = 0; i < count; i++) items[i].selected = false;
+	        items[hit].selected = true;
 
-            uint32_t now = pit_ticks;
-            if (hit == s_last_click_idx &&
-                (now - s_last_click_tick) <= DBLCLICK_TICKS) {
-                open_item(&items[hit]);
-                s_last_click_idx  = -1;
-                s_last_click_tick = 0;
-            } else {
-                s_last_click_idx  = hit;
-                s_last_click_tick = now;
-            }
-        } else {
-            for (int i = 0; i < count; i++) items[i].selected = false;
-            s_last_click_idx = -1;
-        }
-    }
+	        uint32_t now = pit_ticks;
+	        if (hit == s_last_click_idx && (now - s_last_click_tick) <= DBLCLICK_TICKS) {
+	            open_item(&items[hit]);
+	            s_last_click_idx  = -1;
+	            s_last_click_tick = 0;
+	        } else {
+	            s_last_click_idx  = hit;
+	            s_last_click_tick = now;
+	        }
+	    } else {
+	        for (int i = 0; i < count; i++) items[i].selected = false;
+	        s_last_click_idx = -1;
+	    }
+	}
 
-    draw(count, items);
+    draw_items(count, items);
 }

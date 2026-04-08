@@ -48,10 +48,10 @@ static void format_time(char *out, char *out2) {
 }
 
 static void clock_refresh(clock_state_t *s) {
-	char t[32], d[32];
-	format_time(t, d);
-	strcpy(s->time, t);
-	strcpy(s->date, d);
+    char t[32], d[32];
+    format_time(t, d);
+    strcpy(s->time, t);
+    strcpy(s->date, d);
 }
 
 static bool clock_close(window *w) {
@@ -60,8 +60,15 @@ static bool clock_close(window *w) {
     return true;
 }
 
-static void on_file_close() {
-	clock_close(NULL);
+static void on_file_close(void) {
+    clock_close(NULL);
+}
+
+static void on_about(void) {
+    modal_show(MODAL_INFO,
+               "About Clock",
+               "Clock v1.0\nASMOS System App\nAuthor: You",
+               NULL, NULL);
 }
 
 static void clock_init(void *state) {
@@ -85,6 +92,8 @@ static void clock_init(void *state) {
 
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Close", on_file_close);
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "About Clock", on_about);
 
     window_add_widget(s->win, make_label(15, 6,  s->time,  WHITE, 1));
     window_add_widget(s->win, make_label(8, 16, "----------", WHITE, 1));

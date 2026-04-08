@@ -54,6 +54,13 @@ static bool asmterm_close(window *w) {
 }
 static void on_file_close(void) { asmterm_close(NULL); }
 
+static void on_about(void) {
+    modal_show(MODAL_INFO,
+               "About ASMTerm",
+               "ASMTerm v1.0\nASMOS Terminal\nAuthor: You",
+               NULL, NULL);
+}
+
 static inline int line_idx(const asmterm_state_t *s, int n) { return (s->line_head + n) % OUTPUT_LINES; }
 
 static void term_push_line(asmterm_state_t *s, const char *text) {
@@ -146,8 +153,8 @@ static void term_execute(asmterm_state_t *s) {
     char outbuf[1024];
     outbuf[0] = '\0';
     if(strcmp("exit", s->input) == 0) {
-    	s->should_exit = true;
-    	return;
+        s->should_exit = true;
+        return;
     }
     cmd_status_t status = cli_execute_command(s->input, outbuf, sizeof(outbuf));
 
@@ -294,6 +301,8 @@ static void asmterm_init(void *state) {
 
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Close", on_file_close);
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "About ASMTerm", on_about);
 
     int content_h     = s->win->h - 16;
     int output_area_h = content_h - INPUT_H - 4;
@@ -393,12 +402,12 @@ static void asmterm_on_frame(void *state) {
             s->input_len++;
         }
         s->input[s->input_len] = '\0';
-        s->input_scroll = 0;   /* resetează scroll-ul la history */
+        s->input_scroll = 0;
         asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;
     }
 
-    if (sc == 0x50) {  /* săgeată jos — history */
+    if (sc == 0x50) {
         if (s->hist_pos == -1) { asmterm_window_draw(s->win, s->win->on_draw_userdata); return; }
 
         if (s->hist_pos < s->hist_count - 1) {
