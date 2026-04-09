@@ -69,14 +69,6 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
 
     if (desc->init) desc->init(state);
 
-    for (int i = win_count - 1; i >= 0; i--) {
-        window *w = win_stack[i];
-        if (w->visible && !w->minimized && !w->pinned_bottom) {
-            wm_focus(w);
-            break;
-        }
-    }
-
     return inst;
 }
 
@@ -159,8 +151,14 @@ void os_run(void) {
 
         desktop_on_frame();
 
+        // Clear click after apps have processed it to prevent window manager from re-focusing
+        mouse.left_clicked = false;
+
+        wm_sync_menubar(&g_menubar);
+        menubar_layout(&g_menubar);
+
         if (!modal_active()) {
-            wm_update_all();
+        	wm_update_all();
         }
 
         wm_draw_all();

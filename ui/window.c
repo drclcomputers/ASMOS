@@ -231,9 +231,9 @@ void wm_update_all(void) {
             window *win = win_stack[i];
             if (!win->visible || win->minimized) continue;
             int wy = win->y + MENUBAR_H_SIZE;
-            bool on_win = mouse.x >= win->x && mouse.x < win->x + win->w
-                       && mouse.y >= wy     && mouse.y < wy + win->h;
-            if (!click_consumed && mouse.left_clicked && on_win) {
+            bool on_titlebar = mouse.x >= win->x && mouse.x < win->x + win->w
+                            && mouse.y >= wy     && mouse.y < wy + 16;
+            if (!click_consumed && mouse.left_clicked && on_titlebar) {
                 wm_focus(win);
                 click_consumed = true;
                 break;

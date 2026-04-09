@@ -148,6 +148,7 @@ void menubar_draw(menubar *mb) {
 void menubar_update(menubar *mb) {
     if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
         g_menubar_click_consumed = true;
+        mouse.left_clicked = false;
 
         if (mouse.x < 2 + CLOCK_W) {
             os_launch_app(&clock_app);
@@ -185,6 +186,7 @@ void menubar_update(menubar *mb) {
         if (mouse.x >= m->bar_x && mouse.x < m->bar_x + dw &&
             mouse.y >= dy) {
             g_menubar_click_consumed = true;
+            mouse.left_clicked = false;
 
             int idx = (mouse.y - dy) / MENU_ITEM_H;
             if (idx >= 0 && idx < m->item_count) {
@@ -196,6 +198,7 @@ void menubar_update(menubar *mb) {
             menubar_close_all(mb);
         } else {
             g_menubar_click_consumed = true;
+            mouse.left_clicked = false;
             menubar_close_all(mb);
         }
         return;
