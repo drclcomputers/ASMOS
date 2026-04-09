@@ -8,7 +8,7 @@
 #define CROSSHAIR_CURSOR 2
 #define TEXT_CURSOR      3
 
-extern int CHOSEN_CURSOR = 0;
+int CHOSEN_CURSOR = 0;
 
 static const uint16_t cursor_fill[4][8] = {
     {   // 0: ARROW_CURSOR

@@ -35,7 +35,7 @@ static void wm_clamp(window *win) {
 
 static bool in_titlebar(const window *win, int mx, int my) {
     int wy = win->y + MENUBAR_H_SIZE;
-    return mx >= win->x && mx < win->x + win->w && my >= wy && my < wy + 16;
+    return mx >= win->x && mx < win->x + win->w && my >= wy && my < wy + TITLEBAR_H;
 }
 
 static void draw_titlebar_btn(int ax, int ay, int w, int h, const char *label, uint8_t bg) {
@@ -231,9 +231,9 @@ void wm_update_all(void) {
             window *win = win_stack[i];
             if (!win->visible || win->minimized) continue;
             int wy = win->y + MENUBAR_H_SIZE;
-            bool on_titlebar = mouse.x >= win->x && mouse.x < win->x + win->w
-                            && mouse.y >= wy     && mouse.y < wy + 16;
-            if (!click_consumed && mouse.left_clicked && on_titlebar) {
+            bool on_win = mouse.x >= win->x && mouse.x <= win->x + win->w
+                            && mouse.y >= wy     && mouse.y <= wy + win->h;
+            if (!click_consumed && mouse.left_clicked && on_win) {
                 wm_focus(win);
                 click_consumed = true;
                 break;

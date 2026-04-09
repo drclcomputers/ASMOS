@@ -7,7 +7,6 @@
 #include "config/config.h"
 #include "ui/window.h"
 
-
 static bool mouse_over_any_window(int mx, int my) {
     for (int i = 0; i < win_count; i++) {
         window *w = win_stack[i];
@@ -68,6 +67,54 @@ static void draw_default_icon(int ax, int ay, bool selected) {
 
     draw_line(ax + 6, ay + 8,  ax + 10, ay + 8,  DARK_GRAY);
     draw_line(ax + 6, ay + 10, ax + 10, ay + 10, DARK_GRAY);
+}
+
+void draw_file_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : WHITE;
+    fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
+    draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);
+    fill_rect(ax+ICO_W-5, ay, 4, ICO_H,         BLACK);
+    draw_line(ax+ICO_W-5, ay, ax+ICO_W-1, ay+4, BLACK);
+    fill_rect(ax+ICO_W-4, ay, 3, 4,             bg);
+    if (!sel) {
+        draw_line(ax+3, ay+5,  ax+ICO_W-6, ay+5,  DARK_GRAY);
+        draw_line(ax+3, ay+8,  ax+ICO_W-6, ay+8,  DARK_GRAY);
+        draw_line(ax+3, ay+11, ax+ICO_W-6, ay+11, DARK_GRAY);
+    }
+}
+
+void draw_folder_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : WHITE;
+    fill_rect(ax,     ay+3, ICO_W,   ICO_H-3, bg);
+    draw_rect(ax,     ay+3, ICO_W,   ICO_H-3, BLACK);
+    fill_rect(ax+1,   ay,   8,       4,        bg);
+    draw_rect(ax+1,   ay,   8,       4,        BLACK);
+    draw_line(ax,     ay+3, ax+1,    ay,       BLACK);
+    draw_line(ax+9,   ay,   ax+9,    ay+3,     BLACK);
+    if (sel)
+        fill_rect(ax+2, ay+5, ICO_W-4, ICO_H-9, BLACK);
+}
+
+void draw_app_icon(int ax, int ay, bool sel) {
+    uint8_t bg      = sel ? LIGHT_BLUE : WHITE;
+    uint8_t title   = sel ? DARK_GRAY : BLUE;
+    uint8_t content = sel ? WHITE : DARK_GRAY;
+
+    fill_rect(ax+1, ay+1, ICO_W-2, ICO_H-2, bg);
+    draw_rect(ax+1, ay+1, ICO_W-2, ICO_H-2, BLACK);
+
+    fill_rect(ax+2, ay+2, ICO_W-4, 3, title);
+
+    draw_line(ax+3, ay+7,  ax+ICO_W-4, ay+7,  content);
+    draw_line(ax+3, ay+10, ax+ICO_W-4, ay+10, content);
+    draw_line(ax+3, ay+13, ax+ICO_W-4, ay+13, content);
+}
+
+void draw_dotdot_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
+    fill_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, bg);
+    draw_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, BLACK);
+    draw_string(ax+4, ay+8, "..", BLACK, 2);
 }
 
 void icon_view_init(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h) {

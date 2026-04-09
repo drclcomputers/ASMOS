@@ -151,14 +151,14 @@ void os_run(void) {
 
         desktop_on_frame();
 
-        //mouse.left_clicked = false;
-
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);
 
         if (!modal_active()) {
         	wm_update_all();
         }
+
+        //mouse.left_clicked = false;
 
         wm_draw_all();
         menubar_draw(&g_menubar);

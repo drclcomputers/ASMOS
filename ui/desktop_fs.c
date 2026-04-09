@@ -36,7 +36,7 @@ static void grid_slot(int n, int *out_x, int *out_y) {
 }
 
 static void create_default_shortcuts(void) {
-    static const char *defaults[] = { "ASMTERM", "FINDER", "MONITOR", NULL };
+    static const char *defaults[] = { "FINDER", NULL };
 
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = s_cluster;
@@ -101,7 +101,6 @@ void desktop_fs_reload(void) {
 
     int slot = 0;
     for (int i = 0; i < raw_count && s_count < DESKTOP_MAX_ITEMS; i++) {
-        /* skip hidden / volume / dot entries */
         if (raw[i].name[0] == '.') continue;
         if (raw[i].attr & ATTR_VOLUME_ID) continue;
         if (raw[i].attr & ATTR_HIDDEN) continue;

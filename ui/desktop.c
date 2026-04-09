@@ -2,6 +2,7 @@
 #include "ui/desktop_fs.h"
 #include "ui/window.h"
 #include "ui/menubar.h"
+#include "ui/icons.h"
 #include "os/os.h"
 #include "config/config.h"
 #include "lib/primitive_graphics.h"
@@ -51,13 +52,6 @@ void draw_wallpaper_pattern(void) {
             break;
     }
 }
-
-#define ICO_W         20
-#define ICO_H         20
-#define ICO_LABEL_W    5
-#define ICO_LABEL_H    6
-#define ICO_CELL_H    34
-#define ICO_LABEL_MAX  8
 
 #define DESK_ORIGIN_X  0
 #define DESK_ORIGIN_Y  MENUBAR_H
@@ -127,11 +121,13 @@ extern app_descriptor finder_app;
 extern app_descriptor clock_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
+extern app_descriptor teditor_app;
 
 static void launch_finder(void)   { os_launch_app(&finder_app);   }
 static void launch_clock(void)    { os_launch_app(&clock_app);    }
 static void launch_asmterm(void)  { os_launch_app(&asmterm_app);  }
 static void launch_monitor(void)  { os_launch_app(&monitor_app);  }
+static void launch_teditor(void)  { os_launch_app(&teditor_app); }
 
 static void open_item(desktop_item_t *it) {
     if (it->kind == DESKTOP_ITEM_APP) {
@@ -183,43 +179,6 @@ static void open_item(desktop_item_t *it) {
     } else {
         extern void ff_open_dir_pub(uint16_t cluster, const char *path);
         ff_open_dir_pub(desktop_fs_cluster(), desktop_fs_path());
-    }
-}
-
-static void draw_file_icon(int ax, int ay, bool sel) {
-    uint8_t bg = sel ? DARK_GRAY : WHITE;
-    fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
-    draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);
-    fill_rect(ax+ICO_W-5, ay, 4, ICO_H,         BLACK);
-    draw_line(ax+ICO_W-5, ay, ax+ICO_W-1, ay+4, BLACK);
-    fill_rect(ax+ICO_W-4, ay, 3, 4,             bg);
-    if (!sel) {
-        draw_line(ax+3, ay+5,  ax+ICO_W-6, ay+5,  DARK_GRAY);
-        draw_line(ax+3, ay+8,  ax+ICO_W-6, ay+8,  DARK_GRAY);
-        draw_line(ax+3, ay+11, ax+ICO_W-6, ay+11, DARK_GRAY);
-    }
-}
-
-static void draw_folder_icon(int ax, int ay, bool sel) {
-    uint8_t bg = sel ? DARK_GRAY : WHITE;
-    fill_rect(ax,     ay+3, ICO_W,   ICO_H-3, bg);
-    draw_rect(ax,     ay+3, ICO_W,   ICO_H-3, BLACK);
-    fill_rect(ax+1,   ay,   8,       4,        bg);
-    draw_rect(ax+1,   ay,   8,       4,        BLACK);
-    draw_line(ax,     ay+3, ax+1,    ay,       BLACK);
-    draw_line(ax+9,   ay,   ax+9,    ay+3,     BLACK);
-    if (sel)
-        fill_rect(ax+2, ay+5, ICO_W-4, ICO_H-9, BLACK);
-}
-
-static void draw_app_icon(int ax, int ay, bool sel) {
-    uint8_t bg   = sel ? LIGHT_BLUE : CYAN;
-    uint8_t trim = sel ? WHITE : DARK_GRAY;
-    fill_rect(ax,   ay,   ICO_W,   ICO_H,   bg);
-    draw_rect(ax,   ay,   ICO_W,   ICO_H,   trim);
-    for (int r = 0; r < 7; r++) {
-        int w = r + 1;
-        fill_rect(ax + 5, ay + 6 + r, w, 1, trim);
     }
 }
 
@@ -463,6 +422,7 @@ static void menu_launch_finder(void)   { launch_finder();   }
 static void menu_launch_clock(void)    { launch_clock();    }
 static void menu_launch_asmterm(void)  { launch_asmterm();  }
 static void menu_launch_monitor(void)  { launch_monitor();  }
+static void menu_launch_teditor(void)  { launch_teditor();  }
 
 void desktop_init(void) {
     static const window_spec_t spec = {
@@ -482,6 +442,7 @@ void desktop_init(void) {
     menu_add_item(s_apps_menu, "Clock",    menu_launch_clock);
     menu_add_item(s_apps_menu, "ASMTerm", menu_launch_asmterm);
     menu_add_item(s_apps_menu, "Monitor",  menu_launch_monitor);
+    menu_add_item(s_apps_menu, "TEditor", menu_launch_teditor);
 
     menu *file_menu = window_add_menu(win, "File");
     menu_add_item(file_menu, "New File",   menu_new_file);

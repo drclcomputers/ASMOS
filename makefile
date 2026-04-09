@@ -25,6 +25,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/apps/filefinder.o            \
       $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \
+	  $(BUILD_DIR)/apps/teditor.o 				\
       \
 	  $(BUILD_DIR)/config/config_enduser.o      \
       $(BUILD_DIR)/config/config.o              \

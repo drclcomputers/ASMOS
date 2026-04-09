@@ -43,6 +43,20 @@ typedef struct {
     int      _drag_idx;
 } icon_view_t;
 
+#define ICO_W         20
+#define ICO_H         20
+#define ICO_LABEL_W    5
+#define ICO_LABEL_H    6
+#define ICO_CELL_H    34
+#define ICO_LABEL_MAX  8
+#define ICON_SZ_W       20
+#define ICON_SZ_H       20
+
+void draw_file_icon(int ax, int ay, bool sel);
+void draw_folder_icon(int ax, int ay, bool sel);
+void draw_app_icon(int ax, int ay, bool sel);
+void draw_dotdot_icon(int ax, int ay, bool sel);
+
 void icon_view_init(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h);
 
 void icon_view_set_origin(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h);

@@ -78,7 +78,13 @@ static void draw_wrapped(const char *msg, int x, int y, int max_chars,
 
     while (start < msg_len && line_num < 3) {
         int end = start + max_chars;
-        if (end >= msg_len) {
+
+        int nl_pos = start;
+        while (nl_pos < start + max_chars && nl_pos < msg_len && msg[nl_pos] != '\n') nl_pos++;
+
+        if (nl_pos < msg_len && msg[nl_pos] == '\n') {
+            end = nl_pos;
+        } else if (end >= msg_len) {
             end = msg_len;
         } else {
             int tmp = end;
@@ -95,9 +101,10 @@ static void draw_wrapped(const char *msg, int x, int y, int max_chars,
         line_num++;
 
         start = end;
-        while (msg[start] == ' ') start++;
+        while (start < msg_len && (msg[start] == ' ' || msg[start] == '\n')) start++;
     }
 }
+
 
 void modal_show(modal_type type, const char *title, const char *message,
                 modal_cb on_confirm, modal_cb on_cancel) {

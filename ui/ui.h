@@ -8,5 +8,6 @@
 #include "ui/modal.h"
 #include "ui/widgets.h"
 #include "ui/window.h"
+#include "ui/icons.h"
 
 #endif

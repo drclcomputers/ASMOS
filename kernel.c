@@ -16,6 +16,7 @@ extern app_descriptor clock_app;
 extern app_descriptor finder_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
+extern app_descriptor teditor_app;
 
 typedef struct __attribute__((packed)) {
     uint64_t base;
@@ -80,6 +81,7 @@ void kmain(void) {
     os_install_app(&finder_app);
     os_install_app(&asmterm_app);
     os_install_app(&monitor_app);
+    os_install_app(&teditor_app);
 
     os_run();
 }

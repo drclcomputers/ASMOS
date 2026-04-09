@@ -8,8 +8,6 @@
 #define FF_DEFAULT_Y    20
 #define FF_CASCADE      16
 
-#define ICON_SZ_W       20
-#define ICON_SZ_H       20
 #define ICON_CELL_W     44
 #define ICON_CELL_H     30
 #define CONTENT_TOP     6
@@ -27,6 +25,7 @@
 #define MODE_RENAME     1
 #define MODE_CONFIRM    2
 #define MODE_NEWNAME    3
+#define MODE_INFO       4
 
 typedef struct {
     dir_entry_t entry;
@@ -67,6 +66,13 @@ typedef struct {
     int         last_click_idx;
 
     char        status[48];
+
+    char        info_name[13];
+    char        info_path[270];
+    char        info_type[32];
+    char        info_size[32];
+    char        info_date[32];
+    char        info_time[32];
 } ff_inst_t;
 
 typedef struct {
@@ -100,6 +106,7 @@ static void menu_copy(void);
 static void menu_cut(void);
 static void menu_paste(void);
 static void menu_delete(void);
+static void menu_get_info(void);
 static void menu_sort_name(void);
 static void menu_sort_date(void);
 static void menu_sort_size(void);
@@ -257,46 +264,6 @@ static void ff_reload(ff_inst_t *s) {
     s->status[0] = '\0';
 }
 
-static void draw_folder_icon(int ax, int ay, bool sel) {
-    uint8_t bg = sel ? DARK_GRAY : WHITE;
-    fill_rect(ax,     ay+3, ICON_SZ_W,     ICON_SZ_H-3, bg);
-    draw_rect(ax,     ay+3, ICON_SZ_W,     ICON_SZ_H-3, BLACK);
-    fill_rect(ax+1,   ay,   8,             4,            bg);
-    draw_rect(ax+1,   ay,   8,             4,            BLACK);
-    draw_line(ax,     ay+3, ax+1,          ay,           BLACK);
-    draw_line(ax+9,   ay,   ax+9,          ay+3,         BLACK);
-    if (sel) fill_rect(ax+2, ay+5, ICON_SZ_W-4, ICON_SZ_H-9, BLACK);
-}
-
-static void draw_file_icon(int ax, int ay, bool sel) {
-    uint8_t bg = sel ? DARK_GRAY : WHITE;
-    fill_rect(ax+1, ay,      ICON_SZ_W-5, ICON_SZ_H,    bg);
-    draw_rect(ax+1, ay,      ICON_SZ_W-5, ICON_SZ_H,    BLACK);
-    fill_rect(ax+ICON_SZ_W-5, ay, 4, ICON_SZ_H,         BLACK);
-    draw_line(ax+ICON_SZ_W-5, ay, ax+ICON_SZ_W-1, ay+4, BLACK);
-    fill_rect(ax+ICON_SZ_W-4, ay, 3, 4,                 bg);
-    if (!sel) {
-        draw_line(ax+3, ay+5,  ax+ICON_SZ_W-6, ay+5,  DARK_GRAY);
-        draw_line(ax+3, ay+8,  ax+ICON_SZ_W-6, ay+8,  DARK_GRAY);
-        draw_line(ax+3, ay+11, ax+ICON_SZ_W-6, ay+11, DARK_GRAY);
-    }
-}
-
-static void draw_app_icon(int ax, int ay, bool sel) {
-    uint8_t bg   = sel ? LIGHT_BLUE : CYAN;
-    uint8_t trim = sel ? WHITE : DARK_GRAY;
-    fill_rect(ax,   ay,   ICON_SZ_W, ICON_SZ_H, bg);
-    draw_rect(ax,   ay,   ICON_SZ_W, ICON_SZ_H, trim);
-    for (int r = 0; r < 5; r++) fill_rect(ax+5, ay+7+r, r+1, 1, trim);
-}
-
-static void draw_dotdot_icon(int ax, int ay, bool sel) {
-    uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
-    fill_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, bg);
-    draw_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, BLACK);
-    draw_string(ax+4, ay+8, "..", BLACK, 2);
-}
-
 static bool item_is_app(const ff_item_t *it) {
     if (it->is_dotdot) return false;
     if (it->entry.attr & ATTR_DIRECTORY) return false;
@@ -338,6 +305,125 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
             int cx = ax + s->rename_len * CHAR_W;
             draw_string(cx, ay+ICON_SZ_H+1, "|", BLACK, 2);
         }
+    }
+}
+
+static void ff_draw_info_overlay(ff_inst_t *s, int wx, int wy, int ww, int wh) {
+    int pw = ww - 16;
+    int ph = wh - 20;
+    int px = wx + 8;
+    int py = wy + 10;
+
+    fill_rect(px+3, py+3, pw, ph, BLACK);
+
+    fill_rect(px, py, pw, ph, LIGHT_GRAY);
+    draw_rect(px, py, pw, ph, BLACK);
+
+    fill_rect(px, py, pw, 12, DARK_GRAY);
+    draw_string(px + 4, py + 3, "Get Info", WHITE, 2);
+
+    fill_rect(px + pw - 14, py + 2, 10, 8, RED);
+    draw_rect(px + pw - 14, py + 2, 10, 8, BLACK);
+    draw_string(px + pw - 12, py + 3, "X", WHITE, 2);
+
+    draw_line(px, py + 13, px + pw - 1, py + 13, BLACK);
+
+    int row_y = py + 17;
+    int lx    = px + 4;
+    int vx    = px + 50;
+    int line_h = 10;
+
+    draw_string(lx, row_y, "Name:", DARK_GRAY, 2);
+    draw_string(vx, row_y, s->info_name, BLACK, 2);
+    row_y += line_h;
+
+    draw_string(lx, row_y, "Path:", DARK_GRAY, 2);
+    int max_path_chars = (pw - 54) / CHAR_W;
+    int plen = (int)strlen(s->info_path);
+    if (plen <= max_path_chars) {
+        draw_string(vx, row_y, s->info_path, BLACK, 2);
+    } else {
+        char trunc[64];
+        strcpy(trunc, "...");
+        int start = plen - (max_path_chars - 3);
+        if (start < 0) start = 0;
+        strcat(trunc, s->info_path + start);
+        draw_string(vx, row_y, trunc, BLACK, 2);
+    }
+    row_y += line_h;
+
+    draw_string(lx, row_y, "Type:", DARK_GRAY, 2);
+    draw_string(vx, row_y, s->info_type, BLACK, 2);
+    row_y += line_h;
+
+    draw_string(lx, row_y, "Size:", DARK_GRAY, 2);
+    draw_string(vx, row_y, s->info_size, BLACK, 2);
+    row_y += line_h;
+
+    draw_string(lx, row_y, "Date:", DARK_GRAY, 2);
+    draw_string(vx, row_y, s->info_date, BLACK, 2);
+    row_y += line_h;
+
+    draw_string(lx, row_y, "Time:", DARK_GRAY, 2);
+    draw_string(vx, row_y, s->info_time, BLACK, 2);
+
+    int btn_x = px + pw/2 - 20;
+    int btn_y = py + ph - 14;
+    fill_rect(btn_x, btn_y, 40, 10, LIGHT_BLUE);
+    draw_rect(btn_x, btn_y, 40, 10, BLACK);
+    draw_string(btn_x + 13, btn_y + 2, "OK", WHITE, 2);
+}
+
+static void ff_populate_info(ff_inst_t *s, int sel) {
+    ff_item_t *it = &s->items[sel];
+    strncpy(s->info_name, it->name, 12);
+    s->info_name[12] = '\0';
+
+    if (s->path[0]=='/' && s->path[1]=='\0')
+        sprintf(s->info_path, "/%s", it->name);
+    else
+        sprintf(s->info_path, "%s/%s", s->path, it->name);
+
+    if (it->is_dotdot) {
+        strcpy(s->info_type, "Parent Dir");
+        strcpy(s->info_size, "—");
+    } else if (it->entry.attr & ATTR_DIRECTORY) {
+        strcpy(s->info_type, "Folder");
+        strcpy(s->info_size, "—");
+    } else if (item_is_app(it)) {
+        strcpy(s->info_type, "Application");
+        sprintf(s->info_size, "%u B", it->entry.file_size);
+    } else {
+        const char *ext = "";
+        const char *dot = strchr(it->name, '.');
+        if (dot) ext = dot + 1;
+
+        if (strcmp(ext, "TXT") == 0 || strcmp(ext, "txt") == 0)
+            strcpy(s->info_type, "Text File");
+        else if (strlen(ext) == 0)
+            strcpy(s->info_type, "File");
+        else {
+            strcpy(s->info_type, ext);
+            strcat(s->info_type, " File");
+        }
+        sprintf(s->info_size, "%u B", it->entry.file_size);
+    }
+
+    uint16_t fat_date = it->entry.modify_date;
+    uint16_t fat_time = it->entry.modify_time;
+    uint16_t year  = ((fat_date >> 9) & 0x7F) + 1980;
+    uint8_t  month = (fat_date >> 5) & 0x0F;
+    uint8_t  day   = fat_date & 0x1F;
+    uint8_t  hour  = (fat_time >> 11) & 0x1F;
+    uint8_t  min   = (fat_time >> 5)  & 0x3F;
+    uint8_t  sec   = (fat_time & 0x1F) * 2;
+
+    if (fat_date == 0) {
+        strcpy(s->info_date, "Unknown");
+        strcpy(s->info_time, "Unknown");
+    } else {
+        sprintf(s->info_date, "%d/%d/%d", year, month, day);
+        sprintf(s->info_time, "%d:%d:%d", hour, min, sec);
     }
 }
 
@@ -411,6 +497,10 @@ static void ff_draw_window(window *win, void *ud) {
             int max_cx = bx+bw-8-CHAR_W-2;
             if (cx < max_cx) draw_string(cx, by+15, "|", BLACK, 2);
         }
+    }
+
+    if (s->mode == MODE_INFO) {
+        ff_draw_info_overlay(s, wx, wy, ww, wh);
     }
 }
 
@@ -492,6 +582,16 @@ static void menu_rename(void) {
     s->rename_buf[12] = '\0';
     s->rename_len = (int)strlen(s->rename_buf);
     s->mode = MODE_RENAME;
+}
+
+static void menu_get_info(void) {
+    ff_inst_t *s = active_finder(); if (!s) return;
+    int sel = -1;
+    for (int i = 0; i < s->item_count; i++)
+        if (s->items[i].selected) { sel = i; break; }
+    if (sel < 0) { strcpy(s->status, "Nothing selected."); return; }
+    ff_populate_info(s, sel);
+    s->mode = MODE_INFO;
 }
 
 static void menu_reload(void) {
@@ -781,7 +881,7 @@ static void ff_open_dir(uint16_t cluster, const char *path) {
     ff_inst_t *s = (ff_inst_t *)inst->state;
     s->dir_cluster = cluster;
     strncpy(s->path, path, 255); s->path[255] = '\0';
-     s->win->title = s->path;
+    s->win->title = s->path;
     ff_reload(s);
 }
 
@@ -796,6 +896,39 @@ static void ff_on_frame(void *state) {
     int wy_top   = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
     int wh_cont  = s->win->h - 16 - CONTENT_TOP - CONTENT_BOT - STATUS_H;
     int conf_by  = wy_top + wh_cont / 2 - 16;
+
+    if (s->mode == MODE_INFO) {
+        if (mouse.left_clicked) {
+            int wx2  = s->win->x + 1;
+            int wy2  = s->win->y + MENUBAR_H + 16;
+            int ww2  = s->win->w - 2;
+            int wh2  = s->win->h - 16;
+            int pw   = ww2 - 16;
+            int ph   = wh2 - 20;
+            int px   = wx2 + 8;
+            int py   = wy2 + 10;
+
+            int cx = px + pw - 14;
+            int cy = py + 2;
+            if (mouse.x >= cx && mouse.x < cx+10 &&
+                mouse.y >= cy && mouse.y < cy+8) {
+                s->mode = MODE_NORMAL;
+                ff_draw_window(s->win, s);
+                return;
+            }
+
+            int btn_x = px + pw/2 - 20;
+            int btn_y = py + ph - 14;
+            if (mouse.x >= btn_x && mouse.x < btn_x+40 &&
+                mouse.y >= btn_y && mouse.y < btn_y+10) {
+                s->mode = MODE_NORMAL;
+                ff_draw_window(s->win, s);
+                return;
+            }
+        }
+        ff_draw_window(s->win, s);
+        return;
+    }
 
     if (s->mode == MODE_NEWNAME || s->mode == MODE_RENAME) {
         if (kb.key_pressed) {
@@ -1003,6 +1136,7 @@ static void ff_init(void *state) {
     menu_add_item(file_menu, "New File",   menu_new_file);
     menu_add_item(file_menu, "New Folder", menu_new_folder);
     menu_add_item(file_menu, "Rename",     menu_rename);
+    menu_add_item(file_menu, "Get Info",   menu_get_info);
     menu_add_item(file_menu, "Reload",     menu_reload);
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "Close",      menu_close);

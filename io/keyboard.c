@@ -50,7 +50,6 @@ void kb_init(void) {
         inb(0x60);
 }
 
-// call once per frame BEFORE ps2_poll_all to reset per-frame flags
 void kb_update(void) {
     kb.last_char     = 0;
     kb.last_scancode = 0;
@@ -69,11 +68,11 @@ void kb_process_byte(uint8_t raw) {
     bool ext  = extended;
     extended  = false;
 
-    if (ext) return;
+    //if (ext) return;
 
-    if (sc == LSHIFT || sc == RSHIFT) { kb.shift   = !released; return; }
-    if (sc == LCTRL)                  { kb.ctrl    = !released; return; }
-    if (sc == LALT)                   { kb.alt     = !released; return; }
+    if (sc == LSHIFT || sc == RSHIFT) { kb.shift = !released; return; }
+    if (sc == LCTRL)                  { kb.ctrl = !released; return; }
+    if (sc == LALT)                   { kb.alt = !released; return; }
 
     if (sc == CAPSLOCK && !released) {
         kb.capslock = !kb.capslock;
