@@ -151,8 +151,7 @@ void os_run(void) {
 
         desktop_on_frame();
 
-        // Clear click after apps have processed it to prevent window manager from re-focusing
-        mouse.left_clicked = false;
+        //mouse.left_clicked = false;
 
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);
