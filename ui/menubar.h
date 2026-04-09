@@ -34,13 +34,13 @@ typedef struct {
 
 extern menubar g_menubar;
 
-void  menubar_init(void);
+void menubar_init(void);
 menu *menubar_add_menu(menubar *mb, char *title);
-void  menu_add_item(menu *m, char *label, MenuAction action);
-void  menu_add_separator(menu *m);
-void  menubar_layout(menubar *mb);
-void  menubar_draw(menubar *mb);
-void  menubar_update(menubar *mb);
-void  menubar_close_all(menubar *mb);
+void menu_add_item(menu *m, char *label, MenuAction action);
+void menu_add_separator(menu *m);
+void menubar_layout(menubar *mb);
+void menubar_draw(menubar *mb);
+void menubar_update(menubar *mb);
+void menubar_close_all(menubar *mb);
 
 #endif

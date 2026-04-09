@@ -174,7 +174,6 @@ bool desktop_fs_delete(int idx) {
     if (it->kind == DESKTOP_ITEM_DIR) {
         ok = fat16_rm_rf(it->name);
     } else {
-        /* Re-add .APP for shortcuts */
         char fname[DESKTOP_NAME_MAX];
         if (it->kind == DESKTOP_ITEM_APP) {
             int fi = 0;

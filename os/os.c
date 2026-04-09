@@ -144,6 +144,13 @@ void os_run(void) {
 
         ps2_update();
 
+        wm_sync_menubar(&g_menubar);
+        menubar_layout(&g_menubar);
+
+        if (!modal_active()) {
+            menubar_update(&g_menubar);
+        }
+
         for (int i = 0; i < MAX_RUNNING_APPS; i++) {
             if (running_apps[i].running && running_apps[i].desc &&
                 running_apps[i].desc->on_frame)
@@ -152,11 +159,7 @@ void os_run(void) {
 
         desktop_on_frame();
 
-        wm_sync_menubar(&g_menubar);
-        menubar_layout(&g_menubar);
-
         if (!modal_active()) {
-            menubar_update(&g_menubar);
             wm_update_all();
         }
 

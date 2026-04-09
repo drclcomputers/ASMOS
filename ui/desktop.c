@@ -11,7 +11,9 @@
 #include "io/keyboard.h"
 #include "interrupts/idt.h"
 #include "ui/modal.h"
-#include "fs/fat16.h"
+
+extern menubar g_menubar;
+extern bool g_menubar_click_consumed;
 
 #define WALLPAPER_SOLID         0
 #define WALLPAPER_CHECKERBOARD  1
@@ -66,6 +68,7 @@ static int  s_drag_off_y =  0;
 
 static int  s_last_click_idx  = -1;
 static uint32_t s_last_click_tick = 0;
+
 #define DBLCLICK_TICKS 60
 
 typedef struct {
@@ -119,9 +122,6 @@ static int  s_mode = DESK_MODE_NORMAL;
 static char s_newname_buf[13];
 static int  s_newname_len  = 0;
 static bool s_newname_is_dir = false;
-
-static char s_confirm_msg[80];
-static void (*s_confirm_action)(void) = NULL;
 
 extern app_descriptor finder_app;
 extern app_descriptor clock_app;
@@ -299,18 +299,15 @@ static int selected_idx(void) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
     for (int i = 0; i < count; i++)
-        if (items[i].used && items[i].selected) return i;
+        if (items[i].selected) return i;
     return -1;
 }
 
 static void do_delete(void) {
     int sel = selected_idx();
-    if (sel < 0) { s_mode = DESK_MODE_NORMAL; return; }
+    if (sel < 0) return;
     desktop_fs_delete(sel);
-    s_mode = DESK_MODE_NORMAL;
 }
-
-static void cancel_action(void) { s_mode = DESK_MODE_NORMAL; }
 
 static void menu_new_file(void) {
     s_newname_buf[0] = '\0';
@@ -339,6 +336,7 @@ static void menu_copy(void) {
     s_clip.is_dir = (it->kind == DESKTOP_ITEM_DIR);
     s_clip.is_cut = false;
     s_clip.valid  = true;
+    modal_show(MODAL_INFO, "Copy", "Item copied.", NULL, NULL);
 }
 
 static void menu_cut(void) {
@@ -350,10 +348,14 @@ static void menu_cut(void) {
     s_clip.is_dir = (it->kind == DESKTOP_ITEM_DIR);
     s_clip.is_cut = true;
     s_clip.valid  = true;
+    modal_show(MODAL_INFO, "Cut", "Item cut.", NULL, NULL);
 }
 
 static void menu_paste(void) {
-    if (!s_clip.valid) return;
+    if (!s_clip.valid) {
+        modal_show(MODAL_ERROR, "Paste Failed", "Nothing to paste.", NULL, NULL);
+        return;
+    }
 
     char src_path[270];
     if (s_clip.path[0]=='/' && s_clip.path[1]=='\0')
@@ -382,17 +384,22 @@ static void menu_paste(void) {
     }
 
     dir_context.current_cluster = saved;
-    if (!ok) modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL, NULL);
-    desktop_fs_set_dirty();
+
+    if (ok) {
+        modal_show(MODAL_INFO, "Paste", "Item pasted successfully.", NULL, NULL);
+        desktop_fs_set_dirty();
+    } else {
+        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL, NULL);
+    }
 }
 
 static void menu_delete(void) {
     int sel = selected_idx();
     if (sel < 0) return;
     desktop_item_t *it = &desktop_fs_items()[sel];
-    sprintf(s_confirm_msg, "Delete %s?", it->name);
-    s_confirm_action = do_delete;
-    s_mode = DESK_MODE_CONFIRM;
+    char msg[256];
+    sprintf(msg, "Delete %s?", it->name);
+    modal_show(MODAL_CONFIRM, "Confirm Delete", msg, do_delete, NULL);
 }
 
 static void menu_sort_name(void) {
@@ -448,21 +455,6 @@ static void draw_newname_dialog(void) {
         int cx = bx + 6 + s_newname_len * CHAR_W;
         if (cx < bx + bw - 10) draw_string(cx, by+16, "|", BLACK, 2);
     }
-}
-
-static void draw_confirm_dialog(void) {
-    int bx = 60, by = 80, bw = 200, bh = 38;
-    fill_rect(bx+3, by+3, bw, bh, BLACK);
-    fill_rect(bx, by, bw, bh, LIGHT_GRAY);
-    draw_rect(bx, by, bw, bh, BLACK);
-    draw_string(bx+4, by+6, s_confirm_msg, BLACK, 2);
-
-    fill_rect(bx+4,  by+22, 30, 10, BLACK);
-    draw_string(bx+8,  by+24, "Yes", WHITE, 2);
-
-    fill_rect(bx+38, by+22, 30, 10, LIGHT_GRAY);
-    draw_rect(bx+38, by+22, 30, 10, BLACK);
-    draw_string(bx+42, by+24, "No",  BLACK, 2);
 }
 
 static menu *s_apps_menu;
@@ -560,20 +552,6 @@ void desktop_on_frame(void) {
         return;
     }
 
-    if (s_mode == DESK_MODE_CONFIRM) {
-        draw_items(count, items);
-        draw_confirm_dialog();
-        if (mouse.left_clicked) {
-            int bx = 60, by = 80;
-            if (mouse.x >= bx+4 && mouse.x < bx+34 && mouse.y >= by+22 && mouse.y < by+32) {
-                if (s_confirm_action) s_confirm_action();
-            } else {
-                cancel_action();
-            }
-        }
-        return;
-    }
-
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
         if (mouse.left) {
@@ -610,14 +588,15 @@ void desktop_on_frame(void) {
         }
     }
 
-    if (mouse.left_clicked && mouse.y >= MENUBAR_H) {
+    if (mouse.left_clicked && mouse.y >= MENUBAR_H && g_menubar.open_index < 0 && !g_menubar_click_consumed) {
 	    int hit = desktop_hit(mouse.x, mouse.y);
 	    if (hit >= 0) {
 	        for (int i = 0; i < count; i++) items[i].selected = false;
 	        items[hit].selected = true;
 
 	        uint32_t now = pit_ticks;
-	        if (hit == s_last_click_idx && (now - s_last_click_tick) <= DBLCLICK_TICKS) {
+	        if (hit == s_last_click_idx &&
+	            (now - s_last_click_tick) <= DBLCLICK_TICKS) {
 	            open_item(&items[hit]);
 	            s_last_click_idx  = -1;
 	            s_last_click_tick = 0;
