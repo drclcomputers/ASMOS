@@ -36,7 +36,7 @@ static void grid_slot(int n, int *out_x, int *out_y) {
 }
 
 static void create_default_shortcuts(void) {
-    static const char *defaults[] = { "FINDER", NULL };
+    static const char *defaults[] = { "FILEF", "ASMDRAW", NULL };
 
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = s_cluster;

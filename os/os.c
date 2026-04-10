@@ -163,7 +163,7 @@ void os_run(void) {
         	wm_update_all();
         }
 
-        mouse.left_clicked = false;
+        // mouse.left_clicked = false;
 
         wm_draw_all();
         menubar_draw(&g_menubar);

@@ -120,7 +120,7 @@ static void monitor_destroy(void *state) {
 }
 
 app_descriptor monitor_app = {
-    .name       = "Monitor",
+    .name       = "MONITOR",
     .state_size = sizeof(monitor_state_t),
     .init       = monitor_init,
     .on_frame   = monitor_on_frame,

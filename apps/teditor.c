@@ -751,7 +751,7 @@ static void teditor_destroy(void *state) {
 }
 
 app_descriptor teditor_app = {
-    .name       = "TEditor",
+    .name       = "TEDITOR",
     .state_size = sizeof(teditor_state_t),
     .init       = teditor_init,
     .on_frame   = teditor_on_frame,

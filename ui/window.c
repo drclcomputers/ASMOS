@@ -264,7 +264,7 @@ void window_draw(window *win) {
         const char *title = win->title;
         char title_buf[256];
         int max_width = win->w - 60;
-        int max_chars = max_width / 4 - 2;
+        int max_chars = max_width / 3 - 2;
 
          if (max_chars > 0 && (int)strlen(title) > max_chars) {
             int title_len = (int)strlen(title);

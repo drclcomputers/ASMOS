@@ -120,7 +120,7 @@ static void clock_destroy(void *state) {
 }
 
 app_descriptor clock_app = {
-    .name       = "Clock",
+    .name       = "CLOCK",
     .state_size = sizeof(clock_state_t),
     .init       = clock_init,
     .on_frame   = clock_on_frame,

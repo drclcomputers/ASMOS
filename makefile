@@ -21,9 +21,11 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/shell/cli.o                  \
       \
+	  $(BUILD_DIR)/apps/asmdraw.o               \
+	  $(BUILD_DIR)/apps/asmterm.o               \
+	  $(BUILD_DIR)/apps/calculator.o            \
 	  $(BUILD_DIR)/apps/clock.o                 \
       $(BUILD_DIR)/apps/filefinder.o            \
-      $(BUILD_DIR)/apps/terminal.o              \
 	  $(BUILD_DIR)/apps/monitor.o               \
 	  $(BUILD_DIR)/apps/teditor.o 				\
       \
@@ -58,7 +60,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 
-KERNEL_SECTORS_LOADED = 200
+KERNEL_SECTORS_LOADED = 300
 
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \

@@ -117,17 +117,21 @@ static char s_newname_buf[13];
 static int  s_newname_len  = 0;
 static bool s_newname_is_dir = false;
 
-extern app_descriptor finder_app;
+extern app_descriptor asmdraw_app;
+extern app_descriptor calculator_app;
 extern app_descriptor clock_app;
-extern app_descriptor asmterm_app;
+extern app_descriptor filefinder_app;
 extern app_descriptor monitor_app;
+extern app_descriptor asmterm_app;
 extern app_descriptor teditor_app;
 
-static void launch_finder(void)   { os_launch_app(&finder_app);   }
-static void launch_clock(void)    { os_launch_app(&clock_app);    }
-static void launch_asmterm(void)  { os_launch_app(&asmterm_app);  }
-static void launch_monitor(void)  { os_launch_app(&monitor_app);  }
-static void launch_teditor(void)  { os_launch_app(&teditor_app); }
+static void launch_asmdraw(void)    { os_launch_app(&asmdraw_app);    }
+static void launch_calculator(void) { os_launch_app(&calculator_app); }
+static void launch_clock(void)      { os_launch_app(&clock_app);      }
+static void launch_filefinder(void) { os_launch_app(&filefinder_app); }
+static void launch_monitor(void)    { os_launch_app(&monitor_app);    }
+static void launch_teditor(void)    { os_launch_app(&teditor_app);    }
+static void launch_asmterm(void)    { os_launch_app(&asmterm_app);    }
 
 static void open_item(desktop_item_t *it) {
     if (it->kind == DESKTOP_ITEM_APP) {
@@ -418,12 +422,6 @@ static void draw_newname_dialog(void) {
 
 static menu *s_apps_menu;
 
-static void menu_launch_finder(void)   { launch_finder();   }
-static void menu_launch_clock(void)    { launch_clock();    }
-static void menu_launch_asmterm(void)  { launch_asmterm();  }
-static void menu_launch_monitor(void)  { launch_monitor();  }
-static void menu_launch_teditor(void)  { launch_teditor();  }
-
 void desktop_init(void) {
     static const window_spec_t spec = {
         .x = 0, .y = 0,
@@ -438,11 +436,13 @@ void desktop_init(void) {
     win->show_order      = -1;
 
     s_apps_menu = window_add_menu(win, "Apps");
-    menu_add_item(s_apps_menu, "Finder",   menu_launch_finder);
-    menu_add_item(s_apps_menu, "Clock",    menu_launch_clock);
-    menu_add_item(s_apps_menu, "ASMTerm", menu_launch_asmterm);
-    menu_add_item(s_apps_menu, "Monitor",  menu_launch_monitor);
-    menu_add_item(s_apps_menu, "TEditor", menu_launch_teditor);
+    menu_add_item(s_apps_menu, "FileFinder",     launch_filefinder);
+    menu_add_item(s_apps_menu, "Clock",      launch_clock);
+    menu_add_item(s_apps_menu, "Calculator", launch_calculator);
+    menu_add_item(s_apps_menu, "ASMTerm",    launch_asmterm);
+    menu_add_item(s_apps_menu, "ASMDraw",    launch_asmdraw);
+    menu_add_item(s_apps_menu, "Monitor",    launch_monitor);
+    menu_add_item(s_apps_menu, "TEditor",    launch_teditor);
 
     menu *file_menu = window_add_menu(win, "File");
     menu_add_item(file_menu, "New File",   menu_new_file);

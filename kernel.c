@@ -12,8 +12,10 @@
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 
+extern app_descriptor asmdraw_app;
+extern app_descriptor calculator_app;
 extern app_descriptor clock_app;
-extern app_descriptor finder_app;
+extern app_descriptor filefinder_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
 extern app_descriptor teditor_app;
@@ -77,8 +79,10 @@ void kmain(void) {
 
     error_set_gui_mode(true);
 
+    os_install_app(&asmdraw_app);
+    os_install_app(&calculator_app);
     os_install_app(&clock_app);
-    os_install_app(&finder_app);
+    os_install_app(&filefinder_app);
     os_install_app(&asmterm_app);
     os_install_app(&monitor_app);
     os_install_app(&teditor_app);
