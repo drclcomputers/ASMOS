@@ -4,6 +4,7 @@
 #include "lib/mem.h"
 #include "lib/alloc.h"
 #include "lib/string.h"
+#include "lib/time.h"
 #include "ui/ui.h"
 #include "ui/modal.h"
 #include "io/ps2.h"
@@ -131,7 +132,11 @@ app_descriptor *os_find_app(const char *name) {
 void os_run(void) {
     gui_should_exit = false;
 
+    uint32_t last_frame_time = time_millis();
+
     while (!gui_should_exit) {
+    	uint32_t frame_start = time_millis();
+
         g_menubar_click_consumed = false;
 
         ps2_update();
@@ -158,7 +163,7 @@ void os_run(void) {
         	wm_update_all();
         }
 
-        //mouse.left_clicked = false;
+        mouse.left_clicked = false;
 
         wm_draw_all();
         menubar_draw(&g_menubar);
@@ -168,6 +173,12 @@ void os_run(void) {
 
         draw_cursor(mouse.x, mouse.y);
         blit();
+
+        uint32_t frame_end = time_millis();
+        uint32_t frame_duration = frame_end - frame_start;
+        if (frame_duration < FRAME_TIME_MS) {
+            sleep_ms(FRAME_TIME_MS - frame_duration);
+        }
     }
 
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {

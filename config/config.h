@@ -13,4 +13,7 @@
 //#define HEAP_END   0x400000
 #define HEAP_END   0x464000
 
+#define TARGET_FPS 60
+#define FRAME_TIME_MS (1000 / TARGET_FPS)
+
 #endif
