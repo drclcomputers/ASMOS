@@ -42,6 +42,16 @@ void menu_add_item(menu *m, char *label, MenuAction action) {
     it->disabled = false;
 }
 
+void menu_add_item_ud(menu *m, char *label, MenuActionUD action, void *userdata) {
+    if (m->item_count >= MAX_MENU_ITEMS) return;
+    menu_item *it = &m->items[m->item_count++];
+    it->label     = label;
+    it->action    = NULL;
+    it->action_ud = action;
+    it->userdata  = userdata;
+    it->disabled  = false;
+}
+
 void menu_add_separator(menu *m) {
     if (m->item_count >= MAX_MENU_ITEMS) return;
     menu_item *it  = &m->items[m->item_count++];
@@ -191,9 +201,10 @@ void menubar_update(menubar *mb) {
             int idx = (mouse.y - dy) / MENU_ITEM_H;
             if (idx >= 0 && idx < m->item_count) {
                 menu_item *it = &m->items[idx];
-                if (it->label && !it->disabled && it->action) {
-                    it->action();
-                }
+                if (it->label && !it->disabled) {
+				    if (it->action_ud) it->action_ud(it->userdata);
+				    else if (it->action) it->action();
+				}
             }
             menubar_close_all(mb);
         } else {

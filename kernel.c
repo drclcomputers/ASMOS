@@ -1,18 +1,23 @@
 #include "io/ps2.h"
 #include "fs/fat16.h"
-#include "ui/menubar.h"
+
+#include "shell/cli.h"
 #include "os/os.h"
 #include "os/error.h"
-#include "shell/cli.h"
+#include "os/app_registry.h"
+
 #include "config/config.h"
 #include "config/runtime_config.h"
+
 #include "lib/alloc.h"
 #include "lib/primitive_graphics.h"
-#include "interrupts/idt.h"
 #include "lib/time.h"
 #include "lib/speaker.h"
+#include "interrupts/idt.h"
+
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
+#include "ui/menubar.h"
 
 extern app_descriptor asmdraw_app;
 extern app_descriptor calculator_app;
@@ -94,14 +99,8 @@ void kmain(void) {
     if (g_cfg.sound_enabled) speaker_init();
     error_set_gui_mode(true);
 
-    os_install_app(&asmdraw_app);
-    os_install_app(&calculator_app);
-    os_install_app(&clock_app);
-    os_install_app(&filef_app);
-    os_install_app(&asmterm_app);
-    os_install_app(&monitor_app);
-    os_install_app(&settings_app);
-    os_install_app(&teditor_app);
+    for (int i = 0; i < app_registry_count; i++)
+    	os_install_app(app_registry[i].desc);
 
     os_run();
 }

@@ -6,6 +6,7 @@
 #include "ui/modal.h"
 
 #include "os/os.h"
+#include "os/app_registry.h"
 
 #include "config/config.h"
 #include "config/runtime_config.h"
@@ -121,23 +122,9 @@ static char s_newname_buf[13];
 static int  s_newname_len  = 0;
 static bool s_newname_is_dir = false;
 
-extern app_descriptor asmdraw_app;
-extern app_descriptor asmterm_app;
-extern app_descriptor calculator_app;
-extern app_descriptor clock_app;
-extern app_descriptor filef_app;
-extern app_descriptor monitor_app;
-extern app_descriptor settings_app;
-extern app_descriptor teditor_app;
-
-static void launch_asmdraw(void)    { os_launch_app(&asmdraw_app);    }
-static void launch_asmterm(void)    { os_launch_app(&asmterm_app);    }
-static void launch_calculator(void) { os_launch_app(&calculator_app); }
-static void launch_clock(void)      { os_launch_app(&clock_app);      }
-static void launch_filef(void)      { os_launch_app(&filef_app);      }
-static void launch_monitor(void)    { os_launch_app(&monitor_app);    }
-static void launch_settings(void)   { os_launch_app(&settings_app);    }
-static void launch_teditor(void)    { os_launch_app(&teditor_app);    }
+static void launch_app_ud(void *userdata) {
+    os_launch_app((app_descriptor *)userdata);
+}
 
 static void open_item(desktop_item_t *it) {
     if (it->kind == DESKTOP_ITEM_APP) {
@@ -459,14 +446,13 @@ void desktop_init(void) {
     win->show_order      = -1;
 
     s_apps_menu = window_add_menu(win, "Apps");
-    menu_add_item(s_apps_menu, "FileF",      launch_filef);
-    menu_add_item(s_apps_menu, "Clock",      launch_clock);
-    menu_add_item(s_apps_menu, "Calculator", launch_calculator);
-    menu_add_item(s_apps_menu, "ASMTerm",    launch_asmterm);
-    menu_add_item(s_apps_menu, "ASMDraw",    launch_asmdraw);
-    menu_add_item(s_apps_menu, "Monitor",    launch_monitor);
-    menu_add_item(s_apps_menu, "Settings",   launch_settings);
-    menu_add_item(s_apps_menu, "TEditor",    launch_teditor);
+	for (int i = 0; i < app_registry_count; i++) {
+	    if (app_registry[i].menu_label)
+	        menu_add_item_ud(s_apps_menu,
+	                         (char *)app_registry[i].menu_label,
+	                         launch_app_ud,
+	                         app_registry[i].desc);
+	}
 
     menu *file_menu = window_add_menu(win, "File");
     menu_add_item(file_menu, "New File",   menu_new_file);

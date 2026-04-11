@@ -10,11 +10,14 @@
 #define MENU_ITEM_MIN_W  60
 
 typedef void (*MenuAction)(void);
+typedef void (*MenuActionUD)(void *userdata);
 
 typedef struct {
-    char      *label;
-    MenuAction action;
-    bool       disabled;
+    char         *label;
+    MenuAction   action;
+    MenuActionUD action_ud;
+    void         *userdata;
+    bool         disabled;
 } menu_item;
 
 typedef struct {
@@ -37,6 +40,7 @@ extern menubar g_menubar;
 void menubar_init(void);
 menu *menubar_add_menu(menubar *mb, char *title);
 void menu_add_item(menu *m, char *label, MenuAction action);
+void menu_add_item_ud(menu *m, char *label, MenuActionUD action, void *userdata);
 void menu_add_separator(menu *m);
 void menubar_layout(menubar *mb);
 void menubar_draw(menubar *mb);

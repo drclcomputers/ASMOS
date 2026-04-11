@@ -18,7 +18,6 @@ static int serial_is_transmit_empty(void) {
 }
 
 void serial_putc(char c) {
-    /* Wait for transmit buffer empty */
     while (!serial_is_transmit_empty()) { asm volatile("nop"); }
     outb(COM1_PORT + 0, (unsigned char)c);
 }

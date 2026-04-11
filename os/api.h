@@ -29,6 +29,9 @@
 // Time
 #include "lib/time.h"
 
+// Speaker
+#include "lib/speaker.h"
+
 // Error
 #include "os/error.h"
 

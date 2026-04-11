@@ -13,6 +13,7 @@ BUILD_DIR = build
 OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/kernel.o                     \
       \
+	  $(BUILD_DIR)/os/app_registry.o            \
 	  $(BUILD_DIR)/os/error.o                   \
       $(BUILD_DIR)/os/os.o                      \
 	  \
@@ -23,6 +24,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
 	  $(BUILD_DIR)/apps/asmdraw.o               \
 	  $(BUILD_DIR)/apps/asmterm.o               \
+	  $(BUILD_DIR)/apps/asmusic.o               \
 	  $(BUILD_DIR)/apps/calculator.o            \
 	  $(BUILD_DIR)/apps/clock.o                 \
       $(BUILD_DIR)/apps/filef.o                 \
