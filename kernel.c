@@ -9,6 +9,7 @@
 #include "lib/primitive_graphics.h"
 #include "interrupts/idt.h"
 #include "lib/time.h"
+#include "lib/speaker.h"
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 
@@ -54,9 +55,14 @@ void kmain(void) {
     detect_heap_end();
     idt_init();
     ps2_init();
+    speaker_init();
 
     boot_banner();
     sleep_s(1);
+
+    speaker_beep(523, 120);   // C
+    speaker_beep(659, 120);   // E
+    speaker_beep(784, 180);   // G
 
     boot_check_heap();
     fat16_mount();

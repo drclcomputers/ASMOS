@@ -5,6 +5,7 @@
 #include "lib/alloc.h"
 #include "lib/string.h"
 #include "lib/time.h"
+#include "lib/speaker.h"
 #include "ui/ui.h"
 #include "ui/modal.h"
 #include "io/ps2.h"
@@ -140,6 +141,8 @@ void os_run(void) {
         g_menubar_click_consumed = false;
 
         ps2_update();
+
+        speaker_update();
 
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);

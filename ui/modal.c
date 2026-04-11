@@ -2,6 +2,7 @@
 #include "lib/primitive_graphics.h"
 #include "lib/string.h"
 #include "lib/mem.h"
+#include "lib/speaker.h"
 #include "io/mouse.h"
 #include "config/config.h"
 
@@ -106,14 +107,22 @@ static void draw_wrapped(const char *msg, int x, int y, int max_chars,
 }
 
 
-void modal_show(modal_type type, const char *title, const char *message,
-                modal_cb on_confirm, modal_cb on_cancel) {
+void modal_show(modal_type type, const char *title, const char *message, modal_cb on_confirm, modal_cb on_cancel) {
     s.active     = true;
     s.type       = type;
     s.title      = title   ? title   : "";
     s.message    = message ? message : "";
     s.on_confirm = on_confirm;
     s.on_cancel  = on_cancel;
+
+    if (type == MODAL_ERROR) {
+        speaker_beep(120, 80);
+        speaker_beep(100, 80);
+        speaker_beep(80,  150);
+    } else if (type == MODAL_WARNING) {
+        speaker_beep(440, 60);
+        speaker_beep(330, 120);
+    }
 }
 
 bool modal_active(void) { return s.active; }

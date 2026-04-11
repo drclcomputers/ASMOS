@@ -46,6 +46,8 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/lib/math.o                   \
       $(BUILD_DIR)/lib/mem.o                    \
       $(BUILD_DIR)/lib/primitive_graphics.o     \
+	  $(BUILD_DIR)/lib/serial.o                 \
+	  $(BUILD_DIR)/lib/speaker.o                \
       $(BUILD_DIR)/lib/string.o                 \
 	  $(BUILD_DIR)/lib/time.o                   \
       $(BUILD_DIR)/lib/types.o                  \
@@ -103,7 +105,9 @@ $(BUILD_DIR):
 
 qemu: all
 	qemu-system-i386 -drive format=raw,file=os_image.bin \
-	                 -m 4M -machine pc
+	                 -m 4M -machine pc \
+	                 -audiodev coreaudio,id=snd0 \
+	                 -machine pcspk-audiodev=snd0
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q

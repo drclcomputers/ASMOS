@@ -11,6 +11,8 @@ typedef signed char        int8_t;
 typedef signed short       int16_t;
 typedef signed int         int32_t;
 
+typedef uint32_t uintptr_t;
+
 typedef _Bool bool;
 #define true 1
 #define false 0
