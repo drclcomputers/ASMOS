@@ -3,16 +3,22 @@
 #include "ui/window.h"
 #include "ui/menubar.h"
 #include "ui/icons.h"
+#include "ui/modal.h"
+
 #include "os/os.h"
+
 #include "config/config.h"
+#include "config/runtime_config.h"
+
 #include "lib/primitive_graphics.h"
 #include "lib/string.h"
 #include "lib/mem.h"
 #include "lib/io.h"
+#include "lib/time.h"
+
 #include "io/mouse.h"
 #include "io/keyboard.h"
 #include "interrupts/idt.h"
-#include "ui/modal.h"
 
 extern menubar g_menubar;
 extern bool g_menubar_click_consumed;
@@ -22,34 +28,31 @@ extern bool g_menubar_click_consumed;
 #define WALLPAPER_STRIPES       2
 #define WALLPAPER_DOTS          3
 
-#define PATTERN_MAIN_COLOR      BLUE
-#define PATTERN_SECONDARY_COLOR LIGHT_BLUE
-
 void draw_wallpaper_pattern(void) {
-    switch (WALLPAPER_PATTERN) {
+    uint8_t main_col = g_cfg.wallpaper_main_color;
+    uint8_t sec_col  = g_cfg.wallpaper_secondary_color;
+
+    switch (g_cfg.wallpaper_pattern) {
         case WALLPAPER_CHECKERBOARD:
             for (int y = 0; y < SCREEN_HEIGHT; y += 10)
                 for (int x = 0; x < SCREEN_WIDTH; x += 10) {
-                    uint8_t color = ((x/10)+(y/10)) % 2 == 0
-                                    ? PATTERN_MAIN_COLOR : PATTERN_SECONDARY_COLOR;
+                    uint8_t color = ((x/10)+(y/10)) % 2 == 0 ? main_col : sec_col;
                     fill_rect(x, y, 10, 10, color);
                 }
             break;
         case WALLPAPER_STRIPES:
-            for (int y = 0; y < SCREEN_HEIGHT; y++) {
-                uint8_t color = (y/5) % 2 == 0
-                                ? PATTERN_MAIN_COLOR : PATTERN_SECONDARY_COLOR;
-                draw_line(0, y, SCREEN_WIDTH-1, y, color);
-            }
+            for (int y = 0; y < SCREEN_HEIGHT; y++)
+                draw_line(0, y, SCREEN_WIDTH-1, y,
+                          (y/5) % 2 == 0 ? main_col : sec_col);
             break;
         case WALLPAPER_DOTS:
-            clear_screen(PATTERN_MAIN_COLOR);
+            clear_screen(main_col);
             for (int y = 5; y < SCREEN_HEIGHT; y += 10)
                 for (int x = 5; x < SCREEN_WIDTH; x += 10)
-                    draw_dot(x, y, PATTERN_SECONDARY_COLOR);
+                    draw_dot(x, y, sec_col);
             break;
         default:
-            clear_screen(PATTERN_MAIN_COLOR);
+            clear_screen(main_col);
             break;
     }
 }
@@ -119,20 +122,22 @@ static int  s_newname_len  = 0;
 static bool s_newname_is_dir = false;
 
 extern app_descriptor asmdraw_app;
+extern app_descriptor asmterm_app;
 extern app_descriptor calculator_app;
 extern app_descriptor clock_app;
 extern app_descriptor filef_app;
 extern app_descriptor monitor_app;
-extern app_descriptor asmterm_app;
+extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 
 static void launch_asmdraw(void)    { os_launch_app(&asmdraw_app);    }
+static void launch_asmterm(void)    { os_launch_app(&asmterm_app);    }
 static void launch_calculator(void) { os_launch_app(&calculator_app); }
 static void launch_clock(void)      { os_launch_app(&clock_app);      }
-static void launch_filef(void) { os_launch_app(&filef_app); }
+static void launch_filef(void)      { os_launch_app(&filef_app);      }
 static void launch_monitor(void)    { os_launch_app(&monitor_app);    }
+static void launch_settings(void)   { os_launch_app(&settings_app);    }
 static void launch_teditor(void)    { os_launch_app(&teditor_app);    }
-static void launch_asmterm(void)    { os_launch_app(&asmterm_app);    }
 
 static void open_item(desktop_item_t *it) {
     if (it->kind == DESKTOP_ITEM_APP) {
@@ -145,8 +150,7 @@ static void open_item(desktop_item_t *it) {
         for (int k = 0; app_name[k]; k++) {
             char c = app_name[k];
             proper[k] = (k == 0 && c >= 'A' && c <= 'Z') ? c
-                      : (c >= 'A' && c <= 'Z')            ? c - 'A' + 'a'
-                                                          : c;
+                      : (c >= 'A' && c <= 'Z')            ? c - 'A' + 'a' : c;
         }
         proper[ai] = '\0';
 
@@ -273,10 +277,6 @@ static void do_delete(void) {
     desktop_fs_delete(sel);
 }
 
-static void do_shutdown(void) {
-    cpu_shutdown();
-}
-
 static void menu_new_file(void) {
     s_newname_buf[0] = '\0';
     s_newname_len    = 0;
@@ -381,9 +381,22 @@ static void menu_about_desktop(void) {
                NULL, NULL);
 }
 
+static void do_shutdown(void) {
+	sleep_s(2);
+	cpu_shutdown();
+}
 static void menu_shutdown(void) {
     modal_show(MODAL_CONFIRM, "Shut Down",
                "Shut down ASMOS?", do_shutdown, NULL);
+}
+
+static void do_restart(void) {
+	sleep_s(2);
+	cpu_reset();
+}
+static void menu_restart(void) {
+    modal_show(MODAL_CONFIRM, "Restart",
+               "Restart ASMOS?", do_restart, NULL);
 }
 
 static void handle_newname(void) {
@@ -446,12 +459,13 @@ void desktop_init(void) {
     win->show_order      = -1;
 
     s_apps_menu = window_add_menu(win, "Apps");
-    menu_add_item(s_apps_menu, "FileF",     launch_filef);
+    menu_add_item(s_apps_menu, "FileF",      launch_filef);
     menu_add_item(s_apps_menu, "Clock",      launch_clock);
     menu_add_item(s_apps_menu, "Calculator", launch_calculator);
     menu_add_item(s_apps_menu, "ASMTerm",    launch_asmterm);
     menu_add_item(s_apps_menu, "ASMDraw",    launch_asmdraw);
     menu_add_item(s_apps_menu, "Monitor",    launch_monitor);
+    menu_add_item(s_apps_menu, "Settings",   launch_settings);
     menu_add_item(s_apps_menu, "TEditor",    launch_teditor);
 
     menu *file_menu = window_add_menu(win, "File");
@@ -461,6 +475,7 @@ void desktop_init(void) {
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "About Desktop", menu_about_desktop);
     menu_add_separator(file_menu);
+    menu_add_item(file_menu, "Restart", menu_restart);
     menu_add_item(file_menu, "Shut Down", menu_shutdown);
 
     menu *edit_menu = window_add_menu(win, "Edit");

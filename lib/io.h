@@ -13,5 +13,6 @@ void cpu_idle(void);
 void cpu_sleep_ms(uint32_t ms);
 
 void cpu_shutdown(void);
+void cpu_reset(void);
 
 #endif

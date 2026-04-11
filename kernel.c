@@ -5,6 +5,7 @@
 #include "os/error.h"
 #include "shell/cli.h"
 #include "config/config.h"
+#include "config/runtime_config.h"
 #include "lib/alloc.h"
 #include "lib/primitive_graphics.h"
 #include "interrupts/idt.h"
@@ -19,6 +20,7 @@ extern app_descriptor clock_app;
 extern app_descriptor filef_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
+extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 
 typedef struct __attribute__((packed)) {
@@ -55,21 +57,26 @@ void kmain(void) {
     detect_heap_end();
     idt_init();
     ps2_init();
-    if (SOUND) speaker_init();
 
+    sleep_s(1);
     boot_banner();
     sleep_s(1);
-
-    if (PLAY_BOOTCHIME) {
-	    speaker_beep(523, 120);
-	    speaker_beep(659, 120);
-	    speaker_beep(784, 180);
-    }
 
     boot_check_heap();
     fat16_mount();
     boot_check_ata();
     boot_check_fat();
+
+    cfg_init_defaults();
+    if (!cfg_load()) {
+        cfg_save();
+    }
+
+    if (g_cfg.play_bootchime && g_cfg.sound_enabled) {
+        speaker_beep(523, 120);
+        speaker_beep(659, 120);
+        speaker_beep(784, 180);
+    }
 
     sleep_s(2);
 
@@ -78,13 +85,13 @@ void kmain(void) {
         while (d--) __asm__ volatile ("nop");
     }
 
-    if (!START_IN_GUI) cli_run();
+    if (!g_cfg.start_in_gui) cli_run();
 
     desktop_fs_init();
 
     desktop_init();
     menubar_init();
-
+    if (g_cfg.sound_enabled) speaker_init();
     error_set_gui_mode(true);
 
     os_install_app(&asmdraw_app);
@@ -93,6 +100,7 @@ void kmain(void) {
     os_install_app(&filef_app);
     os_install_app(&asmterm_app);
     os_install_app(&monitor_app);
+    os_install_app(&settings_app);
     os_install_app(&teditor_app);
 
     os_run();

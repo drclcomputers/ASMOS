@@ -41,3 +41,12 @@ void cpu_shutdown(void) {
     __asm__ volatile ("cli");
     for (;;) __asm__ volatile ("hlt");
 }
+
+void cpu_reset(void) {
+    uint8_t v;
+    do { v = inb(0x64); } while (v & 0x02);
+    outb(0x64, 0xFE);
+    struct __attribute__((packed)) { uint16_t limit; uint32_t base; } idt = { 0, 0 };
+    __asm__ volatile ("lidt %0; int $0x00" : : "m"(idt));
+    for (;;) __asm__ volatile ("hlt");
+}

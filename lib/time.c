@@ -1,7 +1,7 @@
 #include "lib/time.h"
 #include "lib/io.h"
 #include "interrupts/idt.h"
-#include "config/config.h"
+#include "config/runtime_config.h"
 
 uint32_t time_seconds(void) {
     return pit_seconds;
@@ -132,7 +132,7 @@ static int days_in_month(uint8_t month, uint32_t year) {
 time_full_t time_rtc_local(void) {
     time_full_t t = time_rtc();
 
-    int32_t hours = (int32_t)t.hours + TIMEZONE_OFFSET;
+    int32_t hours = (int32_t)t.hours + (int8_t)g_cfg.timezone_offset;
 
     if (hours < 0) {
         hours += 24;

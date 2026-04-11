@@ -1,14 +1,17 @@
 #include "shell/cli.h"
+
 #include "lib/string.h"
 #include "lib/mem.h"
 #include "lib/alloc.h"
 #include "lib/primitive_graphics.h"
+#include "lib/time.h"
+
 #include "io/keyboard.h"
 #include "io/ps2.h"
+
 #include "fs/fat16.h"
 #include "os/os.h"
 #include "config/config.h"
-#include "lib/time.h"
 
 #define CLI_BUFFER_SIZE 256
 #define CHAR_WIDTH      4
@@ -504,9 +507,11 @@ cmd_status_t cli_execute_command(const char *cmd, char *out_buffer, size_t max_l
         cmd_rmdir(argument, out_buffer, max_len);
     } else if (strcmp(command, "gui") == 0) {
         append_output(out_buffer, max_len, "Starting GUI...\n\n");
+        sleep_s(1);
         return CMD_STATUS_GUI;
     } else if (strcmp(command, "exit") == 0) {
         append_output(out_buffer, max_len, "Exiting...\n");
+        sleep_s(1);
         return CMD_STATUS_EXIT;
     } else if (command[0] != '\0') {
         append_output(out_buffer, max_len, "Unknown command: ");
