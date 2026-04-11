@@ -85,7 +85,7 @@ typedef struct {
 
 static ff_clip_t g_clip = { .valid = false };
 
-app_descriptor filefinder_app;
+app_descriptor filef_app;
 
 static int  s_cascade = 0;
 
@@ -122,7 +122,7 @@ static void maybe_notify_desktop(ff_inst_t *s) {
 static ff_inst_t *inst_of(window *w) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &filefinder_app) continue;
+        if (!a->running || a->desc != &filef_app) continue;
         ff_inst_t *s = (ff_inst_t *)a->state;
         if (s->win == w) return s;
     }
@@ -692,7 +692,7 @@ static bool ff_close_cb(window *w) {
     if (!s) return true;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         if (running_apps[i].running &&
-            running_apps[i].desc  == &filefinder_app &&
+            running_apps[i].desc  == &filef_app &&
             running_apps[i].state == s) {
             os_quit_app(&running_apps[i]);
             return true;
@@ -876,7 +876,7 @@ static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
 }
 
 static void ff_open_dir(uint16_t cluster, const char *path) {
-    app_instance_t *inst = os_launch_app(&filefinder_app);
+    app_instance_t *inst = os_launch_app(&filef_app);
     if (!inst) return;
     ff_inst_t *s = (ff_inst_t *)inst->state;
     s->dir_cluster = cluster;
@@ -1169,7 +1169,7 @@ static void ff_destroy(void *state) {
     if (s->win) { wm_unregister(s->win); s->win = NULL; }
 }
 
-app_descriptor filefinder_app = {
+app_descriptor filef_app = {
     .name       = "FILEF",
     .state_size = sizeof(ff_inst_t),
     .init       = ff_init,

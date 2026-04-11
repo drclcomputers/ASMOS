@@ -16,7 +16,7 @@
 extern app_descriptor asmdraw_app;
 extern app_descriptor calculator_app;
 extern app_descriptor clock_app;
-extern app_descriptor filefinder_app;
+extern app_descriptor filef_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
 extern app_descriptor teditor_app;
@@ -55,14 +55,16 @@ void kmain(void) {
     detect_heap_end();
     idt_init();
     ps2_init();
-    speaker_init();
+    if (SOUND) speaker_init();
 
     boot_banner();
     sleep_s(1);
 
-    speaker_beep(523, 120);   // C
-    speaker_beep(659, 120);   // E
-    speaker_beep(784, 180);   // G
+    if (PLAY_BOOTCHIME) {
+	    speaker_beep(523, 120);
+	    speaker_beep(659, 120);
+	    speaker_beep(784, 180);
+    }
 
     boot_check_heap();
     fat16_mount();
@@ -88,7 +90,7 @@ void kmain(void) {
     os_install_app(&asmdraw_app);
     os_install_app(&calculator_app);
     os_install_app(&clock_app);
-    os_install_app(&filefinder_app);
+    os_install_app(&filef_app);
     os_install_app(&asmterm_app);
     os_install_app(&monitor_app);
     os_install_app(&teditor_app);

@@ -6,6 +6,8 @@
 
 #define START_IN_GUI 1
 #define WALLPAPER_PATTERN 1
+#define PLAY_BOOTCHIME 1
+#define SOUND 0
 
 #define TIMEZONE_OFFSET 0
 

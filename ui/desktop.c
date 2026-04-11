@@ -121,7 +121,7 @@ static bool s_newname_is_dir = false;
 extern app_descriptor asmdraw_app;
 extern app_descriptor calculator_app;
 extern app_descriptor clock_app;
-extern app_descriptor filefinder_app;
+extern app_descriptor filef_app;
 extern app_descriptor monitor_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor teditor_app;
@@ -129,7 +129,7 @@ extern app_descriptor teditor_app;
 static void launch_asmdraw(void)    { os_launch_app(&asmdraw_app);    }
 static void launch_calculator(void) { os_launch_app(&calculator_app); }
 static void launch_clock(void)      { os_launch_app(&clock_app);      }
-static void launch_filefinder(void) { os_launch_app(&filefinder_app); }
+static void launch_filef(void) { os_launch_app(&filef_app); }
 static void launch_monitor(void)    { os_launch_app(&monitor_app);    }
 static void launch_teditor(void)    { os_launch_app(&teditor_app);    }
 static void launch_asmterm(void)    { os_launch_app(&asmterm_app);    }
@@ -446,7 +446,7 @@ void desktop_init(void) {
     win->show_order      = -1;
 
     s_apps_menu = window_add_menu(win, "Apps");
-    menu_add_item(s_apps_menu, "FileFinder",     launch_filefinder);
+    menu_add_item(s_apps_menu, "FileF",     launch_filef);
     menu_add_item(s_apps_menu, "Clock",      launch_clock);
     menu_add_item(s_apps_menu, "Calculator", launch_calculator);
     menu_add_item(s_apps_menu, "ASMTerm",    launch_asmterm);
