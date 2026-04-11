@@ -8,6 +8,7 @@
 #include "lib/primitive_graphics.h"
 #include "lib/string.h"
 #include "lib/mem.h"
+#include "lib/io.h"
 #include "io/mouse.h"
 #include "io/keyboard.h"
 #include "interrupts/idt.h"
@@ -272,6 +273,10 @@ static void do_delete(void) {
     desktop_fs_delete(sel);
 }
 
+static void do_shutdown(void) {
+    cpu_shutdown();
+}
+
 static void menu_new_file(void) {
     s_newname_buf[0] = '\0';
     s_newname_len    = 0;
@@ -376,6 +381,11 @@ static void menu_about_desktop(void) {
                NULL, NULL);
 }
 
+static void menu_shutdown(void) {
+    modal_show(MODAL_CONFIRM, "Shut Down",
+               "Shut down ASMOS?", do_shutdown, NULL);
+}
+
 static void handle_newname(void) {
     const char *err = NULL;
     if (!validate_fat_name(s_newname_buf, s_newname_is_dir, &err)) {
@@ -447,10 +457,11 @@ void desktop_init(void) {
     menu *file_menu = window_add_menu(win, "File");
     menu_add_item(file_menu, "New File",   menu_new_file);
     menu_add_item(file_menu, "New Folder", menu_new_folder);
-    menu_add_separator(file_menu);
     menu_add_item(file_menu, "Reload",     menu_reload);
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "About Desktop", menu_about_desktop);
+    menu_add_separator(file_menu);
+    menu_add_item(file_menu, "Shut Down", menu_shutdown);
 
     menu *edit_menu = window_add_menu(win, "Edit");
     menu_add_item(edit_menu, "Copy",   menu_copy);

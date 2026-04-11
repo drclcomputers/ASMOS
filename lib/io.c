@@ -34,3 +34,10 @@ void cpu_sleep_ms(uint32_t ms) {
         asm volatile ("nop");
     }
 }
+
+void cpu_shutdown(void) {
+    outw(0x604, 0x2000);
+    outw(0xB004, 0x2000);
+    __asm__ volatile ("cli");
+    for (;;) __asm__ volatile ("hlt");
+}
