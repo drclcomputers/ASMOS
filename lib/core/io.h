@@ -1,7 +1,7 @@
 #ifndef IO_H
 #define IO_H
 
-#include "lib/core.h"
+#include "lib/core/types.h"
 
 unsigned char  inb(unsigned short port);
 unsigned short inw(unsigned short port);

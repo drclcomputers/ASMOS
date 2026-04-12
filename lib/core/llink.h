@@ -1,7 +1,7 @@
 #ifndef LLIST_H
 #define LLIST_H
 
-#include "lib/core.h"
+#include "lib/core/types.h"
 
 typedef struct list_node {
     struct list_node *prev;
