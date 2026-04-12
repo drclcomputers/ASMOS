@@ -190,7 +190,16 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     switch (it->kind) {
         case DESKTOP_ITEM_DIR:  draw_folder_icon(ax, ay, it->selected); break;
         case DESKTOP_ITEM_APP:  draw_app_icon   (ax, ay, it->selected); break;
-        default:                draw_file_icon  (ax, ay, it->selected); break;
+        case DESKTOP_ITEM_FILE: {
+		    const char *dot = strchr(it->name, '.');
+		    const char *ext = dot ? dot + 1 : "";
+		    if (strcmp(ext, "BMP") == 0) draw_bmp_icon(ax, ay, it->selected);
+		    else if (strcmp(ext, "TXT") == 0) draw_txt_icon(ax, ay, it->selected);
+		    else if (strcmp(ext, "CFG") == 0) draw_cfg_icon(ax, ay, it->selected);
+		    else draw_unknown_icon(ax, ay, it->selected);
+		    break;
+		}
+        default: draw_file_icon  (ax, ay, it->selected); break;
     }
 
     char disp[ICO_LABEL_MAX + 1];

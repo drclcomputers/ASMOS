@@ -308,7 +308,7 @@ static void asmusic_init(void *state) {
         .resizable     = false,
         .title         = "ASMusic",
         .title_color   = WHITE,
-        .bar_color     = BLACK,
+        .bar_color     = DARK_GRAY,
         .content_color = BLACK,
         .visible       = true,
         .on_close      = asmusic_close,

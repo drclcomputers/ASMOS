@@ -71,6 +71,7 @@ static void draw_default_icon(int ax, int ay, bool selected) {
     draw_line(ax + 6, ay + 10, ax + 10, ay + 10, DARK_GRAY);
 }
 
+// Icon types img
 void draw_file_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
     fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
@@ -118,6 +119,61 @@ void draw_dotdot_icon(int ax, int ay, bool sel) {
     draw_rect(ax, ay+3, ICON_SZ_W, ICON_SZ_H-3, BLACK);
     draw_string(ax+4, ay+8, "..", BLACK, 2);
 }
+
+void draw_bmp_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : WHITE;
+    fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
+    draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);
+    fill_rect(ax+ICO_W-5, ay, 4, ICO_H,         BLACK);
+    draw_line(ax+ICO_W-5, ay, ax+ICO_W-1, ay+4, BLACK);
+    fill_rect(ax+ICO_W-4, ay, 3, 4,             bg);
+    fill_rect(ax+3, ay+3, ICO_W-8, 5, sel ? DARK_GRAY : LIGHT_BLUE);
+    fill_rect(ax+3, ay+8, ICO_W-8, 4, sel ? DARK_GRAY : LIGHT_GREEN);
+    draw_dot(ax+4, ay+4, sel ? WHITE : LIGHT_YELLOW);
+}
+
+void draw_txt_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : WHITE;
+    fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
+    draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);
+    fill_rect(ax+ICO_W-5, ay, 4, ICO_H,         BLACK);
+    draw_line(ax+ICO_W-5, ay, ax+ICO_W-1, ay+4, BLACK);
+    fill_rect(ax+ICO_W-4, ay, 3, 4,             bg);
+    uint8_t line_col = sel ? WHITE : BLACK;
+    draw_line(ax+3, ay+4,  ax+ICO_W-7, ay+4,  line_col);
+    draw_line(ax+3, ay+7,  ax+ICO_W-7, ay+7,  line_col);
+    draw_line(ax+3, ay+10, ax+ICO_W-7, ay+10, line_col);
+    draw_line(ax+3, ay+13, ax+ICO_W-9, ay+13, line_col);
+}
+
+void draw_cfg_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
+    fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
+    draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);
+    fill_rect(ax+ICO_W-5, ay, 4, ICO_H,         BLACK);
+    draw_line(ax+ICO_W-5, ay, ax+ICO_W-1, ay+4, BLACK);
+    fill_rect(ax+ICO_W-4, ay, 3, 4,             bg);
+    int cx = ax + (ICO_W-5)/2 + 1;
+    int cy = ay + ICO_H/2 + 1;
+    uint8_t gc = sel ? WHITE : DARK_GRAY;
+    draw_line(cx-1, cy-4, cx+1, cy-4, gc);
+    draw_line(cx-1, cy+3, cx+1, cy+3, gc);
+    draw_line(cx-4, cy-1, cx-4, cy+1, gc);
+    draw_line(cx+3, cy-1, cx+3, cy+1, gc);
+    fill_rect(cx-2, cy-2, 5, 5, gc);
+    fill_rect(cx-1, cy-1, 3, 3, bg);
+}
+
+void draw_unknown_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : WHITE;
+    fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
+    draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);
+    fill_rect(ax+ICO_W-5, ay, 4, ICO_H,         BLACK);
+    draw_line(ax+ICO_W-5, ay, ax+ICO_W-1, ay+4, BLACK);
+    fill_rect(ax+ICO_W-4, ay, 3, 4,             bg);
+    draw_string(ax+5, ay+7, "?", sel ? WHITE : DARK_GRAY, 2);
+}
+
 
 void icon_view_init(icon_view_t *v, int origin_x, int origin_y, int area_w, int area_h) {
     memset(v, 0, sizeof(icon_view_t));

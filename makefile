@@ -6,7 +6,7 @@ CFLAGS  = -std=gnu11 -ffreestanding -m32 -O2 -Wall -Wextra \
           -fno-stack-protector -fno-pie -nostdlib \
           -fno-builtin-memset -fno-builtin-memcpy \
           -I. -c
-LDFLAGS = -m elf_i386 -Ttext 0x8000 --oformat binary
+LDFLAGS = -m elf_i386 -T linker.ld --oformat binary
 
 BUILD_DIR = build
 

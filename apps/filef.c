@@ -17,7 +17,7 @@
 #define CHAR_H          6
 #define LABEL_CHARS     8
 
-#define MAX_ENTRIES     64
+#define MAX_ENTRIES     128
 #define SORT_NAME       0
 #define SORT_DATE       1
 #define SORT_SIZE       2
@@ -275,14 +275,33 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     int ax = base_x + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
     int ay = base_y + it->icon_y;
 
-    if (it->is_dotdot)
+    if (it->is_dotdot) {
         draw_dotdot_icon(ax, ay, it->selected);
-    else if (it->entry.attr & ATTR_DIRECTORY)
+    } else if (it->entry.attr & ATTR_DIRECTORY) {
         draw_folder_icon(ax, ay, it->selected);
-    else if (item_is_app(it))
+    } else if (item_is_app(it)) {
         draw_app_icon(ax, ay, it->selected);
-    else
-        draw_file_icon(ax, ay, it->selected);
+    } else {
+        char ext[4] = {0};
+        ext[0] = it->entry.ext[0];
+        ext[1] = it->entry.ext[1];
+        ext[2] = it->entry.ext[2];
+        ext[3] = '\0';
+        for (int j = 2; j >= 0; j--) {
+            if (ext[j] == ' ') ext[j] = '\0';
+            else break;
+        }
+
+        if (strcmp(ext, "BMP") == 0) {
+            draw_bmp_icon(ax, ay, it->selected);
+        } else if (strcmp(ext, "TXT") == 0) {
+            draw_txt_icon(ax, ay, it->selected);
+        } else if (strcmp(ext, "CFG") == 0) {
+            draw_cfg_icon(ax, ay, it->selected);
+        } else {
+            draw_unknown_icon(ax, ay, it->selected);
+        }
+    }
 
     int lw = (int)strlen(it->label) * CHAR_W;
     int lx = ax + ICON_SZ_W / 2 - lw / 2;
@@ -422,8 +441,8 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
         strcpy(s->info_date, "Unknown");
         strcpy(s->info_time, "Unknown");
     } else {
-        sprintf(s->info_date, "%d/%d/%d", year, month, day);
-        sprintf(s->info_time, "%d:%d:%d", hour, min, sec);
+        sprintf(s->info_date, "%04d/%02d/%02d", year, month, day);
+        sprintf(s->info_time, "%02d:%02d:%02d", hour, min, sec);
     }
 }
 
