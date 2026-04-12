@@ -24,8 +24,29 @@ uint32_t str_to_uint32(const char* str);
 int str_to_int(const char* str);
 char* int_to_str(int num, char* str);
 void uint32_to_hex_str(uint32_t num, char* str, bool uppercase);
+long str_to_long(const char *s, char **end, int base);
+unsigned long str_to_ulong(const char *s, char **end, int base);
+double str_to_double(const char *s, char **end);
 
 int vsprintf(char *str, const char *format, va_list args);
 int sprintf(char *str, const char *format, ...);
+
+char *strdup(const char *s);
+char *strndup(const char *s, size_t n);
+int strcasecmp(const char *a, const char *b);
+int strncasecmp(const char *a, const char *b, size_t n);
+
+int isalpha(int c);
+int isdigit(int c);
+int isspace(int c);
+int isupper(int c);
+int islower(int c);
+int isalnum(int c);
+int isprint(int c);
+int ispunct(int c);
+int isxdigit(int c);
+int iscntrl(int c);
+int toupper(int c);
+int tolower(int c);
 
 #endif

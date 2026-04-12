@@ -197,6 +197,55 @@ void uint32_to_hex_str(uint32_t num, char* str, bool uppercase) {
     str[j] = '\0';
 }
 
+long str_to_long(const char *s, char **end, int base) {
+    while (*s == ' ') s++;
+    int sign = 1;
+    if (*s == '-') { sign = -1; s++; }
+    else if (*s == '+') s++;
+    if (base == 0) {
+        if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+        else if (s[0] == '0') { base = 8; s++; }
+        else base = 10;
+    } else if (base == 16 && s[0] == '0' && (s[1]=='x'||s[1]=='X')) {
+        s += 2;
+    }
+    long result = 0;
+    const char *start = s;
+    while (*s) {
+        int digit;
+        if (*s >= '0' && *s <= '9')      digit = *s - '0';
+        else if (*s >= 'a' && *s <= 'f') digit = *s - 'a' + 10;
+        else if (*s >= 'A' && *s <= 'F') digit = *s - 'A' + 10;
+        else break;
+        if (digit >= base) break;
+        result = result * base + digit;
+        s++;
+    }
+    if (end) *end = (s == start) ? (char *)start : (char *)s;
+    return result * sign;
+}
+
+unsigned long str_to_ulong(const char *s, char **end, int base) {
+    return (unsigned long)strtol(s, end, base);
+}
+
+double str_to_double(const char *s, char **end) {
+    while (*s == ' ') s++;
+    double sign = 1.0;
+    if (*s == '-') { sign = -1.0; s++; }
+    else if (*s == '+') s++;
+    double result = 0.0;
+    while (*s >= '0' && *s <= '9') { result = result * 10.0 + (*s - '0'); s++; }
+    if (*s == '.') {
+        s++;
+        double frac = 0.1;
+        while (*s >= '0' && *s <= '9') { result += (*s - '0') * frac; frac *= 0.1; s++; }
+    }
+    if (end) *end = (char *)s;
+    return result * sign;
+}
+
+
 int vsprintf(char *str, const char *format, va_list args) {
     char *ptr = str;
     char temp_buf[32];
@@ -415,3 +464,51 @@ int sprintf(char *str, const char *format, ...) {
     va_end(args);
     return written;
 }
+
+char *strdup(const char *s) {
+    if (!s) return NULL;
+    int len = (int)strlen(s) + 1;
+    char *p = (char *)kmalloc(len);
+    if (p) memcpy(p, s, len);
+    return p;
+}
+char *strndup(const char *s, size_t n) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    if (len > n) len = n;
+    char *p = (char *)kmalloc(len + 1);
+    if (p) { memcpy(p, s, len); p[len] = '\0'; }
+    return p;
+}
+int  strcasecmp(const char *a, const char *b) {
+    while (*a && *b) {
+        int ca = tolower((unsigned char)*a);
+        int cb = tolower((unsigned char)*b);
+        if (ca != cb) return ca - cb;
+        a++; b++;
+    }
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+int  strncasecmp(const char *a, const char *b, size_t n) {
+    while (n && *a && *b) {
+        int ca = tolower((unsigned char)*a);
+        int cb = tolower((unsigned char)*b);
+        if (ca != cb) return ca - cb;
+        a++; b++; n--;
+    }
+    if (!n) return 0;
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+
+int isalpha(int c)  { return (c>='a'&&c<='z')||(c>='A'&&c<='Z'); }
+int isdigit(int c)  { return c>='0'&&c<='9'; }
+int isspace(int c)  { return c==' '||c=='\t'||c=='\n'||c=='\r'||c=='\f'||c=='\v'; }
+int isupper(int c)  { return c>='A'&&c<='Z'; }
+int islower(int c)  { return c>='a'&&c<='z'; }
+int isalnum(int c)  { return isalpha(c)||isdigit(c); }
+int isprint(int c)  { return c>=32&&c<127; }
+int ispunct(int c)  { return isprint(c)&&!isalnum(c)&&c!=' '; }
+int isxdigit(int c) { return isdigit(c)||(c>='a'&&c<='f')||(c>='A'&&c<='F'); }
+int iscntrl(int c)  { return c<32||c==127; }
+int toupper(int c)  { return islower(c)?c-32:c; }
+int tolower(int c)  { return isupper(c)?c+32:c; }

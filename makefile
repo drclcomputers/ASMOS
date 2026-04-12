@@ -46,6 +46,8 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/lib/alloc.o                  \
       $(BUILD_DIR)/lib/io.o                     \
+	  $(BUILD_DIR)/lib/libc_compat.o            \
+	  $(BUILD_DIR)/lib/libcore.o                \
       $(BUILD_DIR)/lib/math.o                   \
       $(BUILD_DIR)/lib/mem.o                    \
       $(BUILD_DIR)/lib/primitive_graphics.o     \
