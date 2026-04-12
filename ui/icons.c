@@ -1,11 +1,13 @@
 #include "ui/icons.h"
-#include "lib/primitive_graphics.h"
+#include "ui/window.h"
+
+#include "lib/graphics.h"
 #include "lib/string.h"
-#include "lib/mem.h"
+#include "lib/memory.h"
+
 #include "io/mouse.h"
 #include "interrupts/idt.h"
 #include "config/config.h"
-#include "ui/window.h"
 
 static bool mouse_over_any_window(int mx, int my) {
     for (int i = 0; i < win_count; i++) {

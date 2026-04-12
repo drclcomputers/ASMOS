@@ -1,7 +1,7 @@
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 #define ESC       0x01
 #define BACKSPACE 0x0E

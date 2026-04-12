@@ -1,7 +1,7 @@
 #ifndef ICONS_H
 #define ICONS_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 #define ICON_W         20
 #define ICON_H         20

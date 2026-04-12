@@ -1,7 +1,7 @@
 #ifndef SPEAKER_H
 #define SPEAKER_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 void speaker_init(void);
 void speaker_beep(uint32_t frequency_hz, uint32_t duration_ms);

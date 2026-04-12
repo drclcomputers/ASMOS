@@ -1,6 +1,6 @@
 #include "fs/ata.h"
-#include "lib/io.h"
-#include "lib/mem.h"
+#include "lib/core.h"
+#include "lib/memory.h"
 
 static bool ata_wait_drq(void) {
     uint32_t timeout = 0x100000;

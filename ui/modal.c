@@ -1,8 +1,10 @@
 #include "ui/modal.h"
-#include "lib/primitive_graphics.h"
+
+#include "lib/graphics.h"
 #include "lib/string.h"
-#include "lib/mem.h"
-#include "lib/speaker.h"
+#include "lib/memory.h"
+#include "lib/device.h"
+
 #include "io/mouse.h"
 #include "config/config.h"
 

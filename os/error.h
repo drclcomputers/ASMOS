@@ -1,7 +1,7 @@
 #ifndef ERROR_H
 #define ERROR_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 typedef enum {
     ERR_INFO    = 0,

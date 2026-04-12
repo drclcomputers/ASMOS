@@ -1,5 +1,5 @@
-#include "lib/speaker.h"
-#include "lib/io.h"
+#include "lib/device/speaker.h"
+#include "lib/core.h"
 #include "lib/time.h"
 
 #define PIT_CHANNEL2   0x42

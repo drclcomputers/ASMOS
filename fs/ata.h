@@ -1,7 +1,7 @@
 #ifndef ATA_H
 #define ATA_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 #define ATA_PRIMARY_BASE    0x1F0
 #define ATA_PRIMARY_CTRL    0x3F6

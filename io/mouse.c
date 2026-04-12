@@ -1,5 +1,5 @@
 #include "io/mouse.h"
-#include "lib/io.h"
+#include "lib/core.h"
 #include "config/config.h"
 
 #define PS2_DATA   0x60

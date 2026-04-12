@@ -2,12 +2,11 @@
 #include "os/error.h"
 #include "os/app_registry.h"
 
-#include "lib/primitive_graphics.h"
-#include "lib/mem.h"
-#include "lib/alloc.h"
+#include "lib/graphics.h"
+#include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
-#include "lib/speaker.h"
+#include "lib/device.h"
 
 #include "ui/ui.h"
 #include "ui/modal.h"

@@ -1,7 +1,7 @@
 #ifndef WIDGETS_H
 #define WIDGETS_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 #include "lib/string.h"
 
 #define MAX_MENU_ITEMS 12

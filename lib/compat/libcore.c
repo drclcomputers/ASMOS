@@ -1,6 +1,8 @@
-#include "libcore.h"
-#include "math.h"
-#include "types.h"
+#include "lib/compat/libcore.h"
+#include "lib/memory.h"
+#include "lib/math.h"
+#include "lib/core.h"
+#include "os/os.h"
 
 void exit(int code) {
     (void)code;
@@ -9,7 +11,6 @@ void exit(int code) {
 }
 
 void abort(void) {
-    fprintf(stderr, "abort() called\n");
     exit(1);
 }
 

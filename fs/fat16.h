@@ -1,7 +1,7 @@
 #ifndef FAT16_H
 #define FAT16_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 typedef struct __attribute__((packed)) {
     uint8_t  jmp[3];

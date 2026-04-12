@@ -1,6 +1,8 @@
 #ifndef LIBCORE_H
 #define LIBCORE_H
 
+#include "lib/core.h"
+
 void exit(int code);
 void abort(void);
 char *getenv(const char *name);

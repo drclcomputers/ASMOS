@@ -1,7 +1,7 @@
 #include "io/ps2.h"
 #include "io/keyboard.h"
 #include "io/mouse.h"
-#include "lib/io.h"
+#include "lib/core.h"
 
 void ps2_init(void) {
 	mouse_init();

@@ -1,7 +1,7 @@
 #include "config/runtime_config.h"
 #include "config/config.h"
 #include "fs/fat16.h"
-#include "lib/mem.h"
+#include "lib/memory.h"
 #include "lib/string.h"
 
 os_config_t g_cfg;

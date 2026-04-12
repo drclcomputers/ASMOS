@@ -1,7 +1,7 @@
 #ifndef IDT_H
 #define IDT_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 #define PIC1_CMD    0x20
 #define PIC1_DATA   0x21

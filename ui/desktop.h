@@ -1,7 +1,7 @@
 #ifndef DESKTOP_H
 #define DESKTOP_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 void draw_wallpaper_pattern(void);
 void desktop_init(void);

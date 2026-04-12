@@ -1,4 +1,4 @@
-#include "fonts.h"
+#include "fonts/fonts.h"
 
 unsigned char font1_data[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Space (32)

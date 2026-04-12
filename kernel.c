@@ -9,10 +9,10 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 
-#include "lib/alloc.h"
-#include "lib/primitive_graphics.h"
+#include "lib/memory.h"
+#include "lib/graphics.h"
 #include "lib/time.h"
-#include "lib/speaker.h"
+#include "lib/device.h"
 #include "interrupts/idt.h"
 
 #include "ui/desktop.h"

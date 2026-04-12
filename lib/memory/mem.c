@@ -1,5 +1,5 @@
-#include "lib/mem.h"
-#include "lib/types.h"
+#include "lib/memory/mem.h"
+#include "lib/core.h"
 
 void* memset(void* dst, int c, size_t n) {
     uint8_t* p = (uint8_t*)dst;

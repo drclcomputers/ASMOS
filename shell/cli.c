@@ -1,9 +1,8 @@
 #include "shell/cli.h"
 
 #include "lib/string.h"
-#include "lib/mem.h"
-#include "lib/alloc.h"
-#include "lib/primitive_graphics.h"
+#include "lib/memory.h"
+#include "lib/graphics.h"
 #include "lib/time.h"
 
 #include "io/keyboard.h"

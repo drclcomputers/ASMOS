@@ -1,12 +1,10 @@
-#include "lib/libc_compat.h"
-#include "lib/alloc.h"
-#include "lib/mem.h"
+#include "lib/compat/libc_compat.h"
+#include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
 #include "fs/fat16.h"
 #include "os/os.h"
 
-/* ── stdin / stdout / stderr ──────────────────────────────────────── */
 
 static FILE s_stdout = { .is_open = true, .is_write = true,  .is_stderr = false };
 static FILE s_stderr = { .is_open = true, .is_write = true,  .is_stderr = true  };
@@ -33,7 +31,7 @@ static void term_puts(const char *s) {
 const char *libc_term_get_buf(void)  { return s_term_buf; }
 void        libc_term_clear_buf(void){ s_term_len = 0; s_term_buf[0] = '\0'; }
 
-/* ── FILE I/O ─────────────────────────────────────────────────────── */
+// FILE I/O
 
 FILE *fopen(const char *path, const char *mode) {
     FILE *f = (FILE *)kmalloc(sizeof(FILE));
@@ -200,7 +198,7 @@ int rename(const char *old, const char *newname) {
     return fat16_rename(old, base) ? 0 : -1;
 }
 
-/* ── memory ───────────────────────────────────────────────────────── */
+// memory
 
 void *malloc(size_t size)            { return kmalloc((uint32_t)size); }
 void  free(void *ptr)                { kfree(ptr); }
@@ -219,4 +217,27 @@ void *realloc(void *ptr, size_t size) {
     memcpy(newp, ptr, size);
     kfree(ptr);
     return newp;
+}
+
+void clearerr(FILE *f) {
+    if (f) { f->eof = false; f->error = false; }
+}
+
+int puts(const char *s) {
+    if (!s) return EOF;
+    int n = (int)fwrite(s, 1, strlen(s), stdout);
+    fputc('\n', stdout);
+    return n + 1;
+}
+
+int putchar(int c) {
+    return fputc(c, stdout);
+}
+
+int getchar(void) {
+    return EOF;
+}
+
+int vprintf(const char *fmt, va_list ap) {
+    return vfprintf(stdout, fmt, ap);
 }

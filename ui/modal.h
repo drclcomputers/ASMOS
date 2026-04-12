@@ -1,7 +1,7 @@
 #ifndef MODAL_H
 #define MODAL_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 typedef void (*modal_cb)(void);
 

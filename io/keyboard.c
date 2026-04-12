@@ -1,5 +1,5 @@
 #include "io/keyboard.h"
-#include "lib/io.h"
+#include "lib/core.h"
 
 #define KEY_RELEASE 0x80
 

@@ -1,7 +1,7 @@
 #include "ui/desktop_fs.h"
 #include "fs/fat16.h"
 #include "lib/string.h"
-#include "lib/mem.h"
+#include "lib/memory.h"
 
 static desktop_item_t s_items[DESKTOP_MAX_ITEMS];
 static int            s_count   = 0;

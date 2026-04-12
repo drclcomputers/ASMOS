@@ -1,7 +1,7 @@
 #ifndef CLI_H
 #define CLI_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 typedef enum {
     CMD_STATUS_OK = 0,

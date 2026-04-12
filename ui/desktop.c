@@ -11,10 +11,10 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 
-#include "lib/primitive_graphics.h"
+#include "lib/graphics.h"
 #include "lib/string.h"
-#include "lib/mem.h"
-#include "lib/io.h"
+#include "lib/memory.h"
+#include "lib/core.h"
 #include "lib/time.h"
 
 #include "io/mouse.h"

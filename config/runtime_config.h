@@ -1,7 +1,7 @@
 #ifndef RUNTIME_CONFIG_H
 #define RUNTIME_CONFIG_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 
 // Magic number to validate the config file
 #define CFG_MAGIC       0x4153434F   // "ASCO"

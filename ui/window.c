@@ -1,13 +1,15 @@
 #include "ui/window.h"
 #include "ui/menubar.h"
+
 #include "os/error.h"
 #include "os/os.h"
-#include "lib/alloc.h"
+
+#include "lib/memory.h"
 #include "lib/string.h"
-#include "lib/mem.h"
+#include "lib/graphics.h"
+
 #include "io/mouse.h"
 #include "config/config.h"
-#include "lib/primitive_graphics.h"
 
 window *win_stack[MAX_WINDOWS];
 int     win_count = 0;

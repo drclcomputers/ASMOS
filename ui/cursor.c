@@ -1,6 +1,6 @@
 #include "ui/cursor.h"
-#include "lib/primitive_graphics.h"
-#include "lib/types.h"
+#include "lib/graphics.h"
+#include "lib/core.h"
 #include "config/config.h"
 
 #define ARROW_CURSOR     0

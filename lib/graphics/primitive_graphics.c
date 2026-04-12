@@ -1,8 +1,8 @@
-#include "lib/primitive_graphics.h"
+#include "lib/graphics/primitive_graphics.h"
 #include "lib/math.h"
 #include "fonts/fonts.h"
-#include "lib/types.h"
-#include "lib/mem.h"
+#include "lib/core.h"
+#include "lib/memory.h"
 
 void draw_dot(int x, int y, unsigned char color) {
     if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return;

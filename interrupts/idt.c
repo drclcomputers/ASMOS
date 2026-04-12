@@ -1,6 +1,6 @@
 #include "interrupts/idt.h"
-#include "lib/io.h"
-#include "lib/mem.h"
+#include "lib/core.h"
+#include "lib/memory.h"
 
 typedef struct __attribute__((packed)) {
     uint16_t offset_lo;

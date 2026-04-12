@@ -32,7 +32,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/apps/settings.o              \
 	  $(BUILD_DIR)/apps/teditor.o 				\
       \
-      $(BUILD_DIR)/config/config.o              \
+	  $(BUILD_DIR)/config/config.o              \
 	  $(BUILD_DIR)/config/runtime_config.o      \
       \
       $(BUILD_DIR)/fonts/fonts.o                \
@@ -44,18 +44,25 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/io/mouse.o                   \
       $(BUILD_DIR)/io/keyboard.o                \
       \
-      $(BUILD_DIR)/lib/alloc.o                  \
-      $(BUILD_DIR)/lib/io.o                     \
-	  $(BUILD_DIR)/lib/libc_compat.o            \
-	  $(BUILD_DIR)/lib/libcore.o                \
-      $(BUILD_DIR)/lib/math.o                   \
-      $(BUILD_DIR)/lib/mem.o                    \
-      $(BUILD_DIR)/lib/primitive_graphics.o     \
-	  $(BUILD_DIR)/lib/serial.o                 \
-	  $(BUILD_DIR)/lib/speaker.o                \
-      $(BUILD_DIR)/lib/string.o                 \
-	  $(BUILD_DIR)/lib/time.o                   \
-      $(BUILD_DIR)/lib/types.o                  \
+      $(BUILD_DIR)/lib/core/io.o                \
+	  $(BUILD_DIR)/lib/core/types.o             \
+      \
+      $(BUILD_DIR)/lib/memory/mem.o             \
+      $(BUILD_DIR)/lib/memory/alloc.o           \
+      \
+      $(BUILD_DIR)/lib/string/string.o          \
+      \
+      $(BUILD_DIR)/lib/math/math.o              \
+      \
+      $(BUILD_DIR)/lib/time/time.o              \
+      \
+      $(BUILD_DIR)/lib/device/speaker.o         \
+      $(BUILD_DIR)/lib/device/serial.o          \
+      \
+      $(BUILD_DIR)/lib/graphics/primitive_graphics.o \
+      \
+      $(BUILD_DIR)/lib/compat/libcore.o         \
+      $(BUILD_DIR)/lib/compat/libc_compat.o     \
       \
       $(BUILD_DIR)/ui/cursor.o                  \
 	  $(BUILD_DIR)/ui/desktop.o                 \
@@ -63,7 +70,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/ui/icons.o                   \
       $(BUILD_DIR)/ui/menubar.o                 \
 	  $(BUILD_DIR)/ui/modal.o                   \
-      $(BUILD_DIR)/ui/ui.o                      \
       $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 

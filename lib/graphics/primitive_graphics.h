@@ -1,8 +1,8 @@
 #ifndef PRIMITIVE_GRAPHICS_H
 #define PRIMITIVE_GRAPHICS_H
 
-#include "lib/types.h"
-#include "lib/mem.h"
+#include "lib/core.h"
+#include "lib/memory.h"
 #include "lib/math.h"
 #include "config/config.h"
 

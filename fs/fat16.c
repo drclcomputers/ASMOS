@@ -1,6 +1,6 @@
 #include "fs/fat16.h"
 #include "fs/ata.h"
-#include "lib/mem.h"
+#include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
 

@@ -1,7 +1,7 @@
 #ifndef MENUBAR_H_
 #define MENUBAR_H_
 
-#include "lib/types.h"
+#include "lib/core.h"
 #include "lib/string.h"
 
 #define MAX_MENUS        8

@@ -1,8 +1,6 @@
-#ifndef MATH_H
-#define MATH_H
+#ifndef LIB_MATH_H
+#define LIB_MATH_H
 
-int abs(int x);
-int max(int a, int b);
-int min(int a, int b);
+#include "lib/math/math.h"
 
 #endif

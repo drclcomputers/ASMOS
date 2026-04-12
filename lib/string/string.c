@@ -1,5 +1,7 @@
-#include "lib/string.h"
-#include "lib/types.h"
+#include "lib/string/string.h"
+#include "lib/core.h"
+#include "lib/memory/alloc.h"
+#include "lib/memory/mem.h"
 
 // String functions
 size_t strlen(const char* s) {
@@ -226,7 +228,7 @@ long str_to_long(const char *s, char **end, int base) {
 }
 
 unsigned long str_to_ulong(const char *s, char **end, int base) {
-    return (unsigned long)strtol(s, end, base);
+    return (unsigned long)str_to_long(s, end, base);
 }
 
 double str_to_double(const char *s, char **end) {
@@ -499,6 +501,37 @@ int  strncasecmp(const char *a, const char *b, size_t n) {
     if (!n) return 0;
     return tolower((unsigned char)*a) - tolower((unsigned char)*b);
 }
+size_t strlcpy(char *dst, const char *src, size_t dstsz) {
+    if (!dstsz) return strlen(src);
+    size_t i = 0;
+    while (i < dstsz - 1 && src[i]) { dst[i] = src[i]; i++; }
+    dst[i] = '\0';
+    while (src[i]) i++;
+    return i;
+}
+size_t strlcat(char *dst, const char *src, size_t dstsz) {
+    size_t dlen = strlen(dst);
+    if (dlen >= dstsz) return dstsz + strlen(src);
+    return dlen + strlcpy(dst + dlen, src, dstsz - dlen);
+}
+char *strtok_r(char *str, const char *delim, char **saveptr) {
+    if (str) *saveptr = str;
+    if (!*saveptr) return NULL;
+
+    while (**saveptr && strchr(delim, **saveptr)) (*saveptr)++;
+    if (!**saveptr) { *saveptr = NULL; return NULL; }
+
+    char *tok = *saveptr;
+    while (**saveptr && !strchr(delim, **saveptr)) (*saveptr)++;
+
+    if (**saveptr) {
+        **saveptr = '\0';
+        (*saveptr)++;
+    } else {
+        *saveptr = NULL;
+    }
+    return tok;
+}
 
 int isalpha(int c)  { return (c>='a'&&c<='z')||(c>='A'&&c<='Z'); }
 int isdigit(int c)  { return c>='0'&&c<='9'; }
@@ -512,3 +545,58 @@ int isxdigit(int c) { return isdigit(c)||(c>='a'&&c<='f')||(c>='A'&&c<='F'); }
 int iscntrl(int c)  { return c<32||c==127; }
 int toupper(int c)  { return islower(c)?c-32:c; }
 int tolower(int c)  { return isupper(c)?c+32:c; }
+
+
+void *memchr(const void *s, int c, size_t n) {
+    const uint8_t *p = (const uint8_t *)s;
+    uint8_t        b = (uint8_t)c;
+    while (n--) {
+        if (*p == b) return (void *)p;
+        p++;
+    }
+    return NULL;
+}
+void *memmem(const void *haystack, size_t hlen,
+             const void *needle,   size_t nlen) {
+    if (nlen == 0) return (void *)haystack;
+    if (hlen < nlen) return NULL;
+    const uint8_t *h = (const uint8_t *)haystack;
+    const uint8_t *n = (const uint8_t *)needle;
+    for (size_t i = 0; i <= hlen - nlen; i++) {
+        if (h[i] == n[0] && memcmp(h + i, n, nlen) == 0)
+            return (void *)(h + i);
+    }
+    return NULL;
+}
+
+const char *path_basename(const char *path) {
+    if (!path || !*path) return path;
+    const char *last = strrchr(path, '/');
+    return last ? last + 1 : path;
+}
+void path_dirname(const char *path, char *dir, size_t dir_sz) {
+    if (!path || !dir || dir_sz == 0) return;
+    const char *last = strrchr(path, '/');
+    if (!last || last == path) {
+        strlcpy(dir, "/", dir_sz);
+    } else {
+        size_t len = (size_t)(last - path);
+        if (len >= dir_sz) len = dir_sz - 1;
+        memcpy(dir, path, len);
+        dir[len] = '\0';
+    }
+}
+void path_join(const char *base, const char *rel, char *out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    strlcpy(out, base, out_sz);
+    size_t blen = strlen(out);
+    if (blen > 0 && out[blen - 1] != '/' && rel && rel[0] != '/') {
+        strlcat(out, "/", out_sz);
+    }
+    if (rel) strlcat(out, rel, out_sz);
+}
+const char *path_ext(const char *path) {
+    const char *base = path_basename(path);
+    const char *dot  = strrchr(base, '.');
+    return (dot && dot != base) ? dot + 1 : "";
+}

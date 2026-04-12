@@ -1,7 +1,7 @@
 #ifndef DESKTOP_FS_H
 #define DESKTOP_FS_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 #include "fs/fat16.h"
 
 #define DESKTOP_PATH        "/DESKTOP"

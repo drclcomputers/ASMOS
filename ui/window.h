@@ -1,8 +1,9 @@
 #ifndef WINDOW_H
 #define WINDOW_H
 
-#include "lib/types.h"
+#include "lib/core.h"
 #include "lib/string.h"
+
 #include "ui/menubar.h"
 #include "ui/widgets.h"
 #include "config/config.h"

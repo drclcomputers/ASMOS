@@ -1,5 +1,5 @@
-#include "lib/time.h"
-#include "lib/io.h"
+#include "lib/time/time.h"
+#include "lib/core.h"
 #include "interrupts/idt.h"
 #include "config/runtime_config.h"
 

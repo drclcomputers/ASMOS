@@ -1,8 +1,8 @@
 #ifndef OS_H
 #define OS_H
 
-#include "lib/types.h"
-#include "lib/alloc.h"
+#include "lib/core.h"
+#include "lib/memory.h"
 #include "ui/menubar.h"
 #include "ui/window.h"
 

@@ -4,41 +4,36 @@
 // Apps include ONLY this header. It exposes everything an app legitimately needs while hiding kernel internals (ATA, PS/2 init, memory layout, etc.)
 // if it's not in this header, apps don't touch it.
 
-// Types
-#include "lib/types.h"
+// Foundation Layer (Core types and utilities)
+#include "lib/core.h"
 
-// String and Memory Utilities
+// Memory & String Utilities
+#include "lib/memory.h"
 #include "lib/string.h"
-#include "lib/mem.h"
-#include "lib/alloc.h"
 #include "lib/math.h"
 
-// Graphics
-#include "lib/primitive_graphics.h"
+// Graphics & Visual
+#include "lib/graphics.h"
 
-// UI
+// Device Control
+#include "lib/time.h"
+#include "lib/device.h"
+
+// Input & Interaction
+#include "io/keyboard.h"
+#include "io/mouse.h"
+
+// User Interface
 #include "ui/ui.h"
 
-// Input
-#include "io/mouse.h"
-#include "io/keyboard.h"
-
-// Filesystem
+// Storage & Filesystem
 #include "fs/fat16.h"
 
-// Time
-#include "lib/time.h"
-
-// Speaker
-#include "lib/speaker.h"
-
-// Error
+// OS Services
 #include "os/error.h"
-
-// OS services
 #include "os/os.h"
 
-// Shell CLI
+// Shell / CLI
 #include "shell/cli.h"
 
 #endif

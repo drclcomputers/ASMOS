@@ -1,10 +1,12 @@
 #include "ui/menubar.h"
-#include "lib/primitive_graphics.h"
+
+#include "lib/graphics.h"
 #include "lib/string.h"
-#include "lib/mem.h"
+#include "lib/memory.h"
+#include "lib/time.h"
+
 #include "io/mouse.h"
 #include "config/config.h"
-#include "lib/time.h"
 #include "os/os.h"
 
 #define BAR_BG      LIGHT_GRAY
