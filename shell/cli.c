@@ -415,9 +415,9 @@ void cmd_df(char *out, size_t max) {
         return;
     }
 
-    uint32_t total_kb = total_bytes / 1024;
-    uint32_t used_kb = used_bytes / 1024;
-    uint32_t free_kb = (total_bytes - used_bytes) / 1024;
+    uint32_t total_kb = total_bytes;
+    uint32_t used_kb = used_bytes;
+    uint32_t free_kb = (total_bytes - used_bytes);
 
     char buf[128];
     sprintf(buf, "Storage Total: %u KB\nStorage Used:  %u KB\nStorage Free:  %u KB\n\n", total_kb, used_kb, free_kb);
