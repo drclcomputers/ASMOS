@@ -558,8 +558,8 @@ bool fat16_create(const char *path, fat16_file_t *f) {
 int fat16_read(fat16_file_t *f, void *buf, int len) {
     if (!f->open) return -1;
     uint8_t local_buf[512];
-    uint8_t *out   = (uint8_t *)buf;
-    int total      = 0;
+    uint8_t *out = (uint8_t *)buf;
+    int total = 0;
     uint32_t filesize = f->entry.file_size;
     while (len > 0 && f->cur_offset < filesize) {
         if (f->cur_cluster < 2 || f->cur_cluster >= FAT16_RESERVED) break;
@@ -574,11 +574,11 @@ int fat16_read(fat16_file_t *f, void *buf, int len) {
         int can_read  = 512 - (int)offset_in_sector;
         int remaining = (int)(filesize - f->cur_offset);
         if (can_read > remaining) can_read = remaining;
-        if (can_read > len)       can_read = len;
+        if (can_read > len) can_read = len;
         memcpy(out, local_buf + offset_in_sector, can_read);
-        out           += can_read;
-        total         += can_read;
-        len           -= can_read;
+        out += can_read;
+        total += can_read;
+        len -= can_read;
         f->cur_offset += can_read;
         if (f->cur_offset % cluster_bytes == 0) {
             uint16_t next  = fat_get(f->cur_cluster);
@@ -594,13 +594,22 @@ int fat16_write(fat16_file_t *f, const void *buf, int len) {
     int total = 0;
     while (len > 0) {
         if (f->cur_cluster < 2 || f->cur_cluster >= FAT16_RESERVED) {
-            uint16_t prev  = f->cur_cluster;
-            f->cur_cluster = fat_alloc();
-            if (f->cur_cluster == 0) break;
-            if (prev >= 2 && prev < FAT16_RESERVED)
-                fat_set(prev, f->cur_cluster);
-            else
-                f->entry.cluster_lo = f->cur_cluster;
+            uint16_t new_cluster = fat_alloc();
+            if (new_cluster == 0) break;
+            if (f->cur_offset > 0) {
+                uint16_t temp_cluster = f->entry.cluster_lo;
+                while (temp_cluster >= 2 && temp_cluster < FAT16_RESERVED) {
+                    uint16_t next = fat_get(temp_cluster);
+                    if (next == 0 || next >= FAT16_EOC) {
+                        fat_set(temp_cluster, new_cluster);
+                        break;
+                    }
+                    temp_cluster = next;
+                }
+            } else {
+                f->entry.cluster_lo = new_cluster;
+            }
+            f->cur_cluster = new_cluster;
         }
         uint32_t cluster_bytes     = fs.bpb.sectors_per_cluster * 512;
         uint32_t offset_in_cluster = f->cur_offset % cluster_bytes;
@@ -621,10 +630,12 @@ int fat16_write(fat16_file_t *f, const void *buf, int len) {
         len           -= can_write;
         f->cur_offset += can_write;
         if (f->cur_offset > f->entry.file_size) f->entry.file_size = f->cur_offset;
-        if (f->cur_offset % cluster_bytes == 0) {
-            uint16_t next  = fat_get(f->cur_cluster);
-            f->cur_cluster = (next >= FAT16_EOC) ? 0xFFFF : next;
+        if (f->cur_offset % cluster_bytes == 0 && len > 0) {
+            f->cur_cluster = 0;
         }
+    }
+    if (f->cur_cluster >= 2 && f->cur_cluster < FAT16_RESERVED) {
+        fat_set(f->cur_cluster, FAT16_EOC);
     }
     f->entry.modify_time = now_fat_time();
     f->entry.modify_date = now_fat_date();

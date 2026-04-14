@@ -293,6 +293,12 @@ static void asmdraw_draw(window *win, void *ud) {
 }
 
 static void asmdraw_save(asmdraw_state_t *s, const char *path) {
+    update_canvas_size(s);
+    if (s->canvas_w <= 0 || s->canvas_h <= 0) {
+        draw_set_status(s, "Invalid canvas size.");
+        return;
+    }
+
     dir_entry_t de;
     if (fat16_find(path, &de)) fat16_delete(path);
     fat16_file_t f;
@@ -348,9 +354,9 @@ static void commit_fname(asmdraw_state_t *s) {
     if (!has_dot && s->fname_len > 0 && s->fname_len <= 8) {
         if (s->fname_len + 4 < 64) {
             s->fname_buf[s->fname_len++] = '.';
-            s->fname_buf[s->fname_len++] = 'B';
-            s->fname_buf[s->fname_len++] = 'M';
             s->fname_buf[s->fname_len++] = 'P';
+            s->fname_buf[s->fname_len++] = 'I';
+            s->fname_buf[s->fname_len++] = 'C';
             s->fname_buf[s->fname_len]   = '\0';
         }
     }

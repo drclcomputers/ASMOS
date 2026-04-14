@@ -120,7 +120,7 @@ void draw_dotdot_icon(int ax, int ay, bool sel) {
     draw_string(ax+4, ay+8, "..", BLACK, 2);
 }
 
-void draw_bmp_icon(int ax, int ay, bool sel) {
+void draw_pic_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
     fill_rect(ax+1, ay,      ICO_W-5, ICO_H,    bg);
     draw_rect(ax+1, ay,      ICO_W-5, ICO_H,    BLACK);

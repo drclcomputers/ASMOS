@@ -56,7 +56,7 @@ void draw_file_icon(int ax, int ay, bool sel);
 void draw_folder_icon(int ax, int ay, bool sel);
 void draw_app_icon(int ax, int ay, bool sel);
 void draw_dotdot_icon(int ax, int ay, bool sel);
-void draw_bmp_icon(int ax, int ay, bool sel);
+void draw_pic_icon(int ax, int ay, bool sel);
 void draw_txt_icon(int ax, int ay, bool sel);
 void draw_cfg_icon(int ax, int ay, bool sel);
 void draw_unknown_icon(int ax, int ay, bool sel);

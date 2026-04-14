@@ -292,11 +292,11 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
             else break;
         }
 
-        if (strcmp(ext, "BMP") == 0) {
-            draw_bmp_icon(ax, ay, it->selected);
-        } else if (strcmp(ext, "TXT") == 0) {
+        if (strcmp(ext, "PIC") == 0 || strcmp(ext, "pic") == 0) {
+            draw_pic_icon(ax, ay, it->selected);
+        } else if (strcmp(ext, "TXT") == 0 || strcmp(ext, "txt") == 0) {
             draw_txt_icon(ax, ay, it->selected);
-        } else if (strcmp(ext, "CFG") == 0) {
+        } else if (strcmp(ext, "CFG") == 0 || strcmp(ext, "cfg") == 0) {
             draw_cfg_icon(ax, ay, it->selected);
         } else {
             draw_unknown_icon(ax, ay, it->selected);
