@@ -1,6 +1,6 @@
 #include "os/api.h"
 
-#define UPDATE_INTERVAL 2000
+#define UPDATE_INTERVAL TARGET_FPS
 #define MEM_LABEL_IDX 1
 #define STOR_LABEL_IDX 3
 
