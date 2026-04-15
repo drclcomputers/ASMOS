@@ -10,6 +10,10 @@
 
 int CHOSEN_CURSOR = 0;
 
+void cursortype(int chosencursor) {
+	CHOSEN_CURSOR = chosencursor;
+}
+
 static const uint16_t cursor_fill[4][8] = {
     {   // 0: ARROW_CURSOR
         0b110000000,
@@ -97,6 +101,7 @@ static const uint16_t cursor_border[4][8] = {
 };
 
 void draw_cursor(int x, int y) {
+	if (CHOSEN_CURSOR < 0 || CHOSEN_CURSOR > 3) CHOSEN_CURSOR = 0;
     for (int row = 0; row < 8; row++) {
         for (int col = 0; col < 9; col++) {
             int px = x + col;
