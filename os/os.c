@@ -30,12 +30,26 @@ int             running_app_count = 0;
  * task_trampoline_c calls it once per scheduler turn, then calls
  * task_yield() to hand control back to the kernel task.
  */
+
+static uint32_t last_logic_frame = 0;
+
 static void app_task_entry(void *state)
 {
     app_instance_t *inst = (app_instance_t *)state;
     if (!inst || !inst->running) return;
-    if (inst->desc && inst->desc->on_frame)
-        inst->desc->on_frame(inst->state);
+
+    static uint32_t last_run_time[MAX_RUNNING_APPS];
+    uint32_t now = time_millis();
+
+    int idx = -1;
+    for(int i=0; i<MAX_RUNNING_APPS; i++) if(&running_apps[i] == inst) idx = i;
+
+    if (idx != -1 && (now - last_run_time[idx] >= FRAME_TIME_MS)) {
+        if (inst->desc && inst->desc->on_frame) {
+            inst->desc->on_frame(inst->state);
+            last_run_time[idx] = now;
+        }
+    }
 }
 
 void os_install_app(app_descriptor *desc)

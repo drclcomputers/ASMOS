@@ -56,8 +56,8 @@ static uint32_t build_initial_stack(uint8_t *stack_base, int slot)
 {
     uint32_t *sp = (uint32_t *)(stack_base + TASK_STACK_SIZE);
 
-    *--sp = 0;
     *--sp = (uint32_t)slot;
+    *--sp = 0;
     *--sp = (uint32_t)task_trampoline;
     *--sp = 0x00000202;
     *--sp = 0;
@@ -189,13 +189,9 @@ void scheduler_kernel_task(void *unused)
     draw_cursor(mouse.x, mouse.y);
     blit();
 
-    // 2. Cooperative Sleeping (The Idle Loop)
     while ((time_millis() - frame_start) < FRAME_TIME_MS) {
-        // REMOVED: ps2_update()
-        // We leave the mouse data in the hardware buffer
-        // so the NEXT frame's ps2_update() can catch the click.
 
-        task_yield(); // Still yield to let apps like the Clock run!
+        task_yield();
     }
 }
 
