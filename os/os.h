@@ -25,6 +25,7 @@ typedef struct {
     app_descriptor *desc;
     void           *state;
     bool            running;
+    int             task_slot;
 } app_instance_t;
 
 void            os_install_app(app_descriptor *desc);
@@ -44,7 +45,8 @@ extern app_instance_t  running_apps[MAX_RUNNING_APPS];
 extern int             running_app_count;
 
 extern menubar g_menubar;
+extern bool    g_menubar_click_consumed;
 
-extern bool g_menubar_click_consumed;
+extern bool gui_should_exit;
 
 #endif

@@ -16,6 +16,8 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/os/app_registry.o            \
 	  $(BUILD_DIR)/os/error.o                   \
       $(BUILD_DIR)/os/os.o                      \
+	  $(BUILD_DIR)/os/scheduler.o               \
+      $(BUILD_DIR)/os/task_switch.o             \
 	  \
 	  $(BUILD_DIR)/interrupts/interrupt.o  		\
       $(BUILD_DIR)/interrupts/idt.o        		\
@@ -95,6 +97,10 @@ $(BUILD_DIR)/loader.o: loader.asm | $(BUILD_DIR)
 	$(AS) -f elf32 $< -o $@
 
 $(BUILD_DIR)/interrupts/interrupt.o: interrupts/interrupt.asm | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(AS) -f elf32 $< -o $@
+
+$(BUILD_DIR)/os/task_switch.o: os/task_switch.asm | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
 
