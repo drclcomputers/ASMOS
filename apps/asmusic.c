@@ -42,8 +42,8 @@ static const char *NOTE_NAME[ROWS] = {
     "B4","A4","G4","F4","E4","D4",
 };
 
-#define NUM_BPMS 8
-static const uint16_t BPM_VALUES[NUM_BPMS] = { 60, 80, 90, 100, 120, 140, 160, 180 };
+#define NUM_BPMS 21
+static const uint16_t BPM_VALUES[NUM_BPMS] = { 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 150, 160, 170, 180 };
 
 typedef struct {
     window  *win;
@@ -329,35 +329,49 @@ static void asmusic_init(void *state) {
     menu_add_item(file_menu, "Close",       menu_close_asmusic);
     menu_add_item(file_menu, "About",       on_about_asmusic);
 
-    s->bpm_idx        = 4;
+    s->bpm_idx        = 9;
     s->ticks_per_step = bpm_to_ticks(BPM_VALUES[s->bpm_idx]);
     s->playing        = false;
     s->cur_col        = 0;
     s->tick_accum     = 0;
     s->note_on        = false;
 
-    // Pre-fill a simple C-major arpeggio as a demo pattern
-    int demo_c5 = 5;
-    int demo_e5 = 3;
-    int demo_g5 = 1;
-    int demo_a4 = 7;
-    s->grid[demo_c5][0]  = true;
-    s->grid[demo_e5][2]  = true;
-    s->grid[demo_g5][4]  = true;
-    s->grid[demo_e5][6]  = true;
-    s->grid[demo_c5][8]  = true;
-    s->grid[demo_a4][10] = true;
-    s->grid[demo_g5][12] = true;
-    s->grid[demo_e5][14] = true;
+    // Linkin Park "In the End" inspired riff - 16 step pattern
+    int demo_e5 = 3;  // E5
+    int demo_g5 = 1;  // G5
+    int demo_a5 = 0;  // A5
+    int demo_b4 = 6;  // B4
+    int demo_a4 = 7;  // A4
+    int demo_e4 = 10; // E4
+
+    s->grid[demo_e5][0]  = true;  // E5
+    s->grid[demo_g5][1]  = true;  // G5
+    s->grid[demo_b4][2]  = true;  // B4
+    s->grid[demo_a4][3]  = true;  // A4
+    s->grid[demo_e5][4]  = true;  // E5
+    s->grid[demo_g5][5]  = true;  // G5
+    s->grid[demo_a5][6]  = true;  // A5
+    s->grid[demo_g5][7]  = true;  // G5
+    s->grid[demo_e5][8]  = true;  // E5
+    s->grid[demo_b4][9]  = true;  // B4
+    s->grid[demo_e4][10] = true;  // E4
+    s->grid[demo_g5][11] = true;  // G5
+    s->grid[demo_a4][12] = true;  // A4
+    s->grid[demo_g5][13] = true;  // G5
+    s->grid[demo_b4][14] = true;  // B4
+    s->grid[demo_e5][15] = true;  // E5
+
 }
 
 static void asmusic_on_frame(void *state) {
     asmusic_state_t *s = (asmusic_state_t *)state;
     if (!s->win || !s->win->visible) return;
 
-    if (s->status_timer > 0) s->status_timer--;
-
     asmusic_tick_playback(s);
+
+    if (s->win->minimized) return;
+
+    if (s->status_timer > 0) s->status_timer--;
 
     if (mouse.left_clicked) {
         int cx = win_cx(s);
