@@ -415,18 +415,18 @@ void cmd_df(char *out, size_t max) {
         return;
     }
 
-    uint32_t total_kb = total_bytes;
-    uint32_t used_kb = used_bytes;
-    uint32_t free_kb = (total_bytes - used_bytes);
+    uint32_t total_b = total_bytes;
+    uint32_t used_b = used_bytes;
+    uint32_t free_b = (total_bytes - used_bytes);
 
     char buf[128];
-    sprintf(buf, "Storage Total: %u KB\nStorage Used:  %u KB\nStorage Free:  %u KB\n\n", total_kb, used_kb, free_kb);
+    sprintf(buf, "Storage Total: %u B\nStorage Used:  %u b\nStorage Free:  %u B\n\n", total_b, used_b, free_b);
     append_output(out, max, buf);
 }
 
 void cmd_mem(char *out, size_t max) {
     char buf[128];
-    sprintf(buf, "Heap used:  %u KB\nHeap free:  %u KB\n\n", heap_used() / 1024, heap_remaining() / 1024);
+    sprintf(buf, "Heap used:  %u B\nHeap free:  %u B\n\n", heap_used() / 1024, heap_remaining() / 1024);
     append_output(out, max, buf);
 }
 
