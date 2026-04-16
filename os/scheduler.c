@@ -59,11 +59,11 @@ static uint32_t build_initial_stack(uint8_t *stack_base, int slot)
     *--sp = 0;
     *--sp = (uint32_t)slot;
     *--sp = (uint32_t)task_trampoline;
-    *--sp = 0;
-    *--sp = 0;
-    *--sp = 0;
-    *--sp = 0;
     *--sp = 0x00000202;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
 
     return (uint32_t)sp;
 }
@@ -156,15 +156,14 @@ void task_yield(void)
 void scheduler_kernel_task(void *unused)
 {
     (void)unused;
-
     extern menubar g_menubar;
     extern bool    g_menubar_click_consumed;
 
     uint32_t frame_start = time_millis();
 
+    // 1. Core Kernel Logic (Runs once per 16ms)
     g_menubar_click_consumed = false;
-
-    ps2_update();
+    ps2_update();    // Only poll here! This ensures logic sees the state.
     speaker_update();
 
     wm_sync_menubar(&g_menubar);
@@ -190,9 +189,14 @@ void scheduler_kernel_task(void *unused)
     draw_cursor(mouse.x, mouse.y);
     blit();
 
-    uint32_t elapsed = time_millis() - frame_start;
-    if (elapsed < FRAME_TIME_MS)
-        sleep_ms(FRAME_TIME_MS - elapsed);
+    // 2. Cooperative Sleeping (The Idle Loop)
+    while ((time_millis() - frame_start) < FRAME_TIME_MS) {
+        // REMOVED: ps2_update()
+        // We leave the mouse data in the hardware buffer
+        // so the NEXT frame's ps2_update() can catch the click.
+
+        task_yield(); // Still yield to let apps like the Clock run!
+    }
 }
 
 void scheduler_init(void)

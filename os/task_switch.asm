@@ -73,7 +73,7 @@ task_trampoline:
     ;
     ; We adjust esp by 4 so that from task_trampoline_c's perspective
     ; the call looks normal (ret-addr at [esp], first arg at [esp+4]):
-    add  esp, 4
+    ; add  esp, 4
 
     ; Now the stack looks exactly like a normal cdecl call frame:
     ;   [esp+0] = fake ret-addr (0)

@@ -184,11 +184,7 @@ void os_run(void)
 
     scheduler_init();   /* builds kernel task in slot 0 */
 
-    uint32_t dummy_esp = 0;
-
-    __asm__ volatile ("mov %%esp, %0" : "=r"(scheduler_exit_esp));
-
-    task_switch(&dummy_esp, tasks[0].saved_esp);
+    task_switch(&scheduler_exit_esp, tasks[0].saved_esp);
 
     for (int i = 0; i < MAX_RUNNING_APPS; i++)
         if (running_apps[i].running)
