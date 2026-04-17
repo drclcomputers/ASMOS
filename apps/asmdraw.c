@@ -465,6 +465,7 @@ static void asmdraw_init(void *state) {
         .w             = ASMDRAW_DEFAULT_W,
         .h             = ASMDRAW_DEFAULT_H,
         .min_h		   = ASMDRAW_DEFAULT_H,
+        .min_w		   = ASMDRAW_DEFAULT_W / 2,
         .resizable     = true,
         .title         = "ASMDraw",
         .title_color   = WHITE,

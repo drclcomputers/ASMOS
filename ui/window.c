@@ -265,20 +265,28 @@ void window_draw(window *win) {
 
         const char *title = win->title;
         char title_buf[256];
-        int max_width = win->w - 60;
-        int max_chars = max_width / 3 - 2;
 
-         if (max_chars > 0 && (int)strlen(title) > max_chars) {
-            int title_len = (int)strlen(title);
-            int truncate_at = title_len - (max_chars - 3);
-            if (truncate_at < 0) truncate_at = 0;
-            strcpy(title_buf, "...");
-            strcat(title_buf, title + truncate_at);
+        int char_pixel_w = 6;
+
+        int max_width = win->w - 30;
+        int max_chars = max_width / char_pixel_w;
+
+        if (max_chars > 3 && (int)strlen(title) > max_chars) {
+            int keep_chars = max_chars - 3;
+            strncpy(title_buf, title, keep_chars);
+            title_buf[keep_chars] = '\0';
+            strcat(title_buf, "...");
             title = title_buf;
         }
 
+        int button_offset = 28;
+        int title_area_center = (button_offset + win->w) / 2;
+        int tx = win->x + title_area_center - (int)(strlen(title) * (char_pixel_w / 2));
 
-        int tx = win->x + win->w / 2 - (int)(strlen(title) * 2);
+        if (tx < win->x + button_offset + 5) {
+            tx = win->x + button_offset + 5;
+        }
+
         draw_string(tx, wy + 6, (char *)title, win->title_color, 2);
 
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);

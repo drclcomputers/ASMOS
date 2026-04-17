@@ -494,6 +494,8 @@ static void teditor_init(void *state) {
         .y             = teditor_DEFAULT_Y,
         .w             = teditor_DEFAULT_W,
         .h             = teditor_DEFAULT_H,
+        .min_h 		   = 70,
+        .min_w		   = 160,
         .resizable     = true,
         .title         = "TEditor",
         .title_color   = WHITE,

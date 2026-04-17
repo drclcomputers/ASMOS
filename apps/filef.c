@@ -11,11 +11,13 @@
 #define ICON_CELL_W     44
 #define ICON_CELL_H     30
 #define CONTENT_TOP     6
-#define CONTENT_BOT     10
+#define CONTENT_BOT     4
 #define STATUS_H        8
 #define CHAR_W          5
 #define CHAR_H          6
 #define LABEL_CHARS     8
+
+#define SCROLLBAR_W     4
 
 #define MAX_ENTRIES     128
 #define SORT_NAME       0
@@ -74,12 +76,8 @@ typedef struct {
     char        info_date[32];
     char        info_time[32];
 
-    int         scroll_x;
     int         scroll_y;
-    int         content_w;
-    int         content_h;
-    int         v_scroll_idx;
-    int         h_scroll_idx;
+    int         content_h_total;
     int         last_win_w;
     int         last_win_h;
 } ff_inst_t;
@@ -222,10 +220,14 @@ static void ff_sort(ff_inst_t *s) {
             }
 }
 
+static int content_clip_bottom(ff_inst_t *s) {
+    int wh = s->win->h - 16;
+    return (s->win->y + MENUBAR_H + 16) + wh - STATUS_H - CONTENT_BOT;
+}
+
 static void ff_layout(ff_inst_t *s) {
-    int ww   = s->win->w - 2;
-    int wh   = s->win->h - 16 - CONTENT_TOP - CONTENT_BOT - STATUS_H;
-    int cols = (ww - 16) / ICON_CELL_W;
+    int ww   = s->win->w - 2 - SCROLLBAR_W - 2;
+    int cols = (ww - 4) / ICON_CELL_W;
     if (cols < 1) cols = 1;
     int col = 0, row = 0;
     int max_row = -1;
@@ -241,29 +243,7 @@ static void ff_layout(ff_inst_t *s) {
         if (col >= cols) { col = 0; row++; }
     }
 
-    s->content_w = cols * ICON_CELL_W + 8;
-    s->content_h = CONTENT_TOP + (max_row + 1) * ICON_CELL_H;
-
-    if (s->v_scroll_idx >= 0) {
-        widget *v = &s->win->widgets[s->v_scroll_idx];
-        v->x = s->win->w - 14;
-        v->y = CONTENT_TOP;
-        v->h = wh - 12;
-        v->as.scrollbar.viewport = v->h;
-        v->as.scrollbar.max = s->content_h > v->h ? s->content_h - v->h : 0;
-        if (s->scroll_y > v->as.scrollbar.max) s->scroll_y = v->as.scrollbar.max;
-        v->as.scrollbar.value = s->scroll_y;
-    }
-    if (s->h_scroll_idx >= 0) {
-        widget *h = &s->win->widgets[s->h_scroll_idx];
-        h->x = 0;
-        h->y = wh - 12;
-        h->w = s->win->w - 14;
-        h->as.scrollbar.viewport = h->w;
-        h->as.scrollbar.max = s->content_w > h->w ? s->content_w - h->w : 0;
-        if (s->scroll_x > h->as.scrollbar.max) s->scroll_x = h->as.scrollbar.max;
-        h->as.scrollbar.value = s->scroll_x;
-    }
+    s->content_h_total = CONTENT_TOP + (max_row >= 0 ? (max_row + 1) * ICON_CELL_H : 0);
 }
 
 static void ff_reload(ff_inst_t *s) {
@@ -299,6 +279,7 @@ static void ff_reload(ff_inst_t *s) {
     ff_layout(s);
     s->drag_idx = -1;
     s->status[0] = '\0';
+    s->scroll_y = 0;
 }
 
 static bool item_is_app(const ff_item_t *it) {
@@ -307,10 +288,15 @@ static bool item_is_app(const ff_item_t *it) {
     return (it->entry.ext[0]=='A' && it->entry.ext[1]=='P' && it->entry.ext[2]=='P');
 }
 
-static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
+static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y, int clip_bottom) {
     ff_item_t *it = &s->items[i];
     int ax = base_x + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
     int ay = base_y + it->icon_y;
+
+    int content_top_y = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
+
+    if (ay < content_top_y) return;
+    if (ay + ICON_SZ_H + CHAR_H + 2 > clip_bottom) return;
 
     if (it->is_dotdot) {
         draw_dotdot_icon(ax, ay, it->selected);
@@ -328,7 +314,6 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
             if (ext[j] == ' ') ext[j] = '\0';
             else break;
         }
-
         if (strcmp(ext, "PIC") == 0 || strcmp(ext, "pic") == 0) {
             draw_pic_icon(ax, ay, it->selected);
         } else if (strcmp(ext, "TXT") == 0 || strcmp(ext, "txt") == 0) {
@@ -371,10 +356,8 @@ static void ff_draw_info_overlay(ff_inst_t *s, int wx, int wy, int ww, int wh) {
     int py = wy + 10;
 
     fill_rect(px+3, py+3, pw, ph, BLACK);
-
     fill_rect(px, py, pw, ph, LIGHT_GRAY);
     draw_rect(px, py, pw, ph, BLACK);
-
     fill_rect(px, py, pw, 12, DARK_GRAY);
     draw_string(px + 4, py + 3, "Get Info", WHITE, 2);
 
@@ -442,10 +425,10 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
 
     if (it->is_dotdot) {
         strcpy(s->info_type, "Parent Dir");
-        strcpy(s->info_size, "—");
+        strcpy(s->info_size, "-");
     } else if (it->entry.attr & ATTR_DIRECTORY) {
         strcpy(s->info_type, "Folder");
-        strcpy(s->info_size, "—");
+        strcpy(s->info_size, "-");
     } else if (item_is_app(it)) {
         strcpy(s->info_type, "Application");
         sprintf(s->info_size, "%u B", it->entry.file_size);
@@ -453,7 +436,6 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
         const char *ext = "";
         const char *dot = strchr(it->name, '.');
         if (dot) ext = dot + 1;
-
         if (strcmp(ext, "TXT") == 0 || strcmp(ext, "txt") == 0)
             strcpy(s->info_type, "Text File");
         else if (strlen(ext) == 0)
@@ -483,6 +465,33 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
     }
 }
 
+static void ff_draw_scrollbar(ff_inst_t *s, int wx, int wy, int ww, int wh) {
+    int view_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - 1;
+    if (view_h < 1) view_h = 1;
+
+    int sb_x = wx + ww - SCROLLBAR_W - 1;
+    int sb_y = wy + CONTENT_TOP;
+    int sb_h = view_h;
+
+    fill_rect(sb_x, sb_y, SCROLLBAR_W, sb_h, LIGHT_GRAY);
+
+    if (s->content_h_total > view_h) {
+        int max_scroll = s->content_h_total - view_h;
+        if (max_scroll < 1) max_scroll = 1;
+
+        int thumb_h = (view_h * sb_h) / s->content_h_total;
+        if (thumb_h < 6) thumb_h = 6;
+        if (thumb_h > sb_h) thumb_h = sb_h;
+
+        int thumb_range = sb_h - thumb_h;
+        int thumb_y = sb_y;
+        if (thumb_range > 0)
+            thumb_y += (s->scroll_y * thumb_range) / max_scroll;
+
+        fill_rect(sb_x + 1, thumb_y + 1, SCROLLBAR_W - 2, thumb_h - 2, DARK_GRAY);
+    }
+}
+
 static void ff_draw_window(window *win, void *ud) {
     ff_inst_t *s = (ff_inst_t *)ud;
     if (!s) return;
@@ -495,19 +504,27 @@ static void ff_draw_window(window *win, void *ud) {
     int content_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H;
 
     fill_rect(wx, wy, ww, wh, WHITE);
-    draw_line(wx, wy+CONTENT_TOP-1, wx+ww-1, wy+CONTENT_TOP-1, DARK_GRAY);
-    draw_line(wx, wy+wh-STATUS_H-CONTENT_BOT, wx+ww-1, wy+wh-STATUS_H-CONTENT_BOT, DARK_GRAY);
+
+    draw_line(wx, wy + CONTENT_TOP - 1, wx + ww - 1, wy + CONTENT_TOP - 1, LIGHT_GRAY);
+
+    int stat_y = wy + wh - STATUS_H - CONTENT_BOT;
+    fill_rect(wx, stat_y, ww, STATUS_H + CONTENT_BOT, LIGHT_GRAY);
+    draw_line(wx, stat_y, wx + ww - 1, stat_y, LIGHT_GRAY);
+
+    char stat[64];
+    if (s->status[0]) {
+        strncpy(stat, s->status, 63); stat[63] = '\0';
+    } else {
+        sprintf(stat, "%d item%s", s->item_count - (s->dir_cluster != 0 ? 1 : 0),
+                (s->item_count - (s->dir_cluster != 0 ? 1 : 0)) == 1 ? "" : "s");
+    }
+    draw_string(wx + 3, stat_y + 1, stat, DARK_GRAY, 2);
+
+    int clip_bottom = stat_y;
 
     for (int i = 0; i < s->item_count; i++) {
         if (s->items[i].dragging) continue;
-
-        int ix = wx + s->items[i].icon_x - s->scroll_x;
-        int iy = content_y + s->items[i].icon_y - CONTENT_TOP - s->scroll_y;
-
-        if (iy + ICON_CELL_H < content_y || iy > content_y + content_h - 12) continue;
-        if (ix + ICON_CELL_W < wx || ix > wx + ww - 12) continue;
-
-        ff_draw_item(s, i, wx - s->scroll_x, content_y - s->scroll_y);
+        ff_draw_item(s, i, wx, content_y - s->scroll_y, clip_bottom);
     }
 
     if (s->drag_idx >= 0) {
@@ -516,49 +533,43 @@ static void ff_draw_window(window *win, void *ud) {
         int ay = mouse.y - it->drag_off_y;
         int save_x = it->icon_x, save_y = it->icon_y;
         it->icon_x = ax - wx;
-        it->icon_y = ay - content_y;
-        ff_draw_item(s, s->drag_idx, wx, content_y);
+        it->icon_y = ay - content_y + s->scroll_y;
+        ff_draw_item(s, s->drag_idx, wx, content_y - s->scroll_y, clip_bottom);
         it->icon_x = save_x;
         it->icon_y = save_y;
     }
 
-    char stat[64];
-    if (s->status[0]) {
-        strncpy(stat, s->status, 63); stat[63] = '\0';
-    } else {
-        sprintf(stat, "%d items", s->item_count - (s->dir_cluster != 0 ? 1 : 0));
-    }
-    draw_string(wx+3, wy+wh-STATUS_H-CONTENT_BOT+2, stat, BLACK, 2);
+    ff_draw_scrollbar(s, wx, wy, ww, wh);
 
     if (s->mode == MODE_CONFIRM) {
-        int bx = wx+4, by = wy+content_h/2-16;
-        int bw = ww-8;
+        int bx = wx + 4, by = wy + content_h / 2 - 16;
+        int bw = ww - 8;
         fill_rect(bx, by, bw, 34, LIGHT_GRAY);
         draw_rect(bx, by, bw, 34, BLACK);
-        draw_string(bx+4, by+4, s->confirm_msg, BLACK, 2);
-        fill_rect(bx+4,  by+20, 28, 10, BLACK);
-        draw_rect(bx+4,  by+20, 28, 10, BLACK);
-        draw_string(bx+8,  by+22, "Yes", WHITE, 2);
-        fill_rect(bx+36, by+20, 28, 10, LIGHT_GRAY);
-        draw_rect(bx+36, by+20, 28, 10, BLACK);
-        draw_string(bx+40, by+22, "No",  BLACK, 2);
+        draw_string(bx + 4, by + 4, s->confirm_msg, BLACK, 2);
+        fill_rect(bx + 4,  by + 20, 28, 10, BLACK);
+        draw_rect(bx + 4,  by + 20, 28, 10, BLACK);
+        draw_string(bx + 8,  by + 22, "Yes", WHITE, 2);
+        fill_rect(bx + 36, by + 20, 28, 10, LIGHT_GRAY);
+        draw_rect(bx + 36, by + 20, 28, 10, BLACK);
+        draw_string(bx + 40, by + 22, "No", BLACK, 2);
     }
 
     if (s->mode == MODE_NEWNAME) {
-        int bx = wx+4, by = wy+content_h/2-16;
-        int bw = ww-8;
+        int bx = wx + 4, by = wy + content_h / 2 - 16;
+        int bw = ww - 8;
         fill_rect(bx, by, bw, 34, LIGHT_GRAY);
         draw_rect(bx, by, bw, 34, BLACK);
         const char *prompt = s->newname_is_dir ? "Folder name:" : "File name:";
-        draw_string(bx+4, by+4, (char *)prompt, BLACK, 2);
-        fill_rect(bx+4, by+14, bw-8, 10, WHITE);
-        draw_rect(bx+4, by+14, bw-8, 10, BLACK);
-        draw_string(bx+6, by+15, s->newname_buf, BLACK, 2);
+        draw_string(bx + 4, by + 4, (char *)prompt, BLACK, 2);
+        fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
+        draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
+        draw_string(bx + 6, by + 15, s->newname_buf, BLACK, 2);
         extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 50) % 2 == 0) {
-            int cx = bx+6+s->newname_len*CHAR_W;
-            int max_cx = bx+bw-8-CHAR_W-2;
-            if (cx < max_cx) draw_string(cx, by+15, "|", BLACK, 2);
+            int cx = bx + 6 + s->newname_len * CHAR_W;
+            int max_cx = bx + bw - 8 - CHAR_W - 2;
+            if (cx < max_cx) draw_string(cx, by + 15, "|", BLACK, 2);
         }
     }
 
@@ -567,14 +578,19 @@ static void ff_draw_window(window *win, void *ud) {
     }
 }
 
+static int content_view_h(ff_inst_t *s) {
+    int wh = s->win->h - 16;
+    return wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - 1;
+}
+
 static int ff_hit(ff_inst_t *s, int mx, int my) {
     if (!in_content(s, mx, my)) return -1;
-    int wx        = s->win->x + 1;
-    int wy        = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
+    int wx = s->win->x + 1;
+    int wy = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
     for (int i = 0; i < s->item_count; i++) {
         ff_item_t *it = &s->items[i];
-        int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2 - s->scroll_x;
-        int ay = wy + it->icon_y - CONTENT_TOP - s->scroll_y;
+        int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
+        int ay = wy + it->icon_y - s->scroll_y;
         if (mx >= ax && mx < ax + ICON_SZ_W &&
             my >= ay && my < ay + ICON_SZ_H + CHAR_H + 4)
             return i;
@@ -585,9 +601,9 @@ static int ff_hit(ff_inst_t *s, int mx, int my) {
 static bool in_content(ff_inst_t *s, int mx, int my) {
     int wx = s->win->x + 1;
     int wy = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
-    int ww = s->win->w - 2;
-    int wh = s->win->h - 16 - CONTENT_TOP - CONTENT_BOT - STATUS_H;
-    return (mx >= wx && mx < wx + ww - 12 && my >= wy && my < wy + wh - 12);
+    int ww = s->win->w - 2 - SCROLLBAR_W - 2;
+    int wh = content_view_h(s);
+    return (mx >= wx && mx < wx + ww && my >= wy && my < wy + wh);
 }
 
 static void do_delete(void *ud) {
@@ -751,6 +767,12 @@ static void menu_sort_size(void) {
     s->sort = SORT_SIZE; ff_sort(s); ff_layout(s);
 }
 
+static void menu_about_filef(void) {
+    modal_show(MODAL_INFO, "About FileF",
+               "FileF v1.1\nASMOS File Manager\nDrag, drop, copy & move files.",
+               NULL, NULL);
+}
+
 static bool ff_close_cb(window *w) {
     ff_inst_t *s = inst_of(w);
     if (!s) return true;
@@ -837,7 +859,6 @@ static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
 static bool over_desktop(int mx, int my) {
     if (my < MENUBAR_H) return false;
     if (my >= SCREEN_HEIGHT - TASKBAR_H) return false;
-
     for (int i = 0; i < win_count; i++) {
         window *w = win_stack[i];
         if (!w->visible || w->minimized || w->pinned_bottom) continue;
@@ -920,7 +941,6 @@ static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
 static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
     ff_item_t *it = &src->items[drag_idx];
     if (it->is_dotdot) return false;
-
     if (src->dir_cluster == desktop_fs_cluster()) return false;
 
     char src_path[270];
@@ -949,6 +969,15 @@ static void ff_open_dir(uint16_t cluster, const char *path) {
     ff_reload(s);
 }
 
+static void ff_scroll(ff_inst_t *s, int delta) {
+    int view_h = content_view_h(s);
+    int max_scroll = s->content_h_total - view_h;
+    if (max_scroll < 0) max_scroll = 0;
+    s->scroll_y += delta;
+    if (s->scroll_y < 0) s->scroll_y = 0;
+    if (s->scroll_y > max_scroll) s->scroll_y = max_scroll;
+}
+
 static void ff_on_frame(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
     if (!s->win || !s->win->visible) return;
@@ -957,13 +986,11 @@ static void ff_on_frame(void *state) {
         s->last_win_w = s->win->w;
         s->last_win_h = s->win->h;
         ff_layout(s);
-    }
 
-    if (s->v_scroll_idx >= 0) {
-        s->scroll_y = s->win->widgets[s->v_scroll_idx].as.scrollbar.value;
-    }
-    if (s->h_scroll_idx >= 0) {
-        s->scroll_x = s->win->widgets[s->h_scroll_idx].as.scrollbar.value;
+        int view_h = content_view_h(s);
+        int max_scroll = s->content_h_total - view_h;
+        if (max_scroll < 0) max_scroll = 0;
+        if (s->scroll_y > max_scroll) s->scroll_y = max_scroll;
     }
 
     if (strcmp(s->path, desktop_fs_path()) == 0 && desktop_fs_is_dirty())
@@ -971,8 +998,32 @@ static void ff_on_frame(void *state) {
 
     int wx       = s->win->x + 1;
     int wy_top   = s->win->y + MENUBAR_H + 16 + CONTENT_TOP;
-    int wh_cont  = s->win->h - 16 - CONTENT_TOP - CONTENT_BOT - STATUS_H;
+    int wh_cont  = content_view_h(s);
     int conf_by  = wy_top + wh_cont / 2 - 16;
+
+    {
+        int ww  = s->win->w - 2;
+        int wy  = s->win->y + MENUBAR_H + 16;
+        int sb_x = wx + ww - SCROLLBAR_W - 1;
+        int sb_y = wy + CONTENT_TOP;
+        int sb_h = wh_cont;
+
+        if ((mouse.left_clicked || mouse.left) &&
+            mouse.x >= sb_x && mouse.x < sb_x + SCROLLBAR_W + 1 &&
+            mouse.y >= sb_y && mouse.y < sb_y + sb_h &&
+            s->content_h_total > wh_cont) {
+            int max_scroll = s->content_h_total - wh_cont;
+            int new_scroll = ((mouse.y - sb_y) * max_scroll) / sb_h;
+            if (new_scroll < 0) new_scroll = 0;
+            if (new_scroll > max_scroll) new_scroll = max_scroll;
+            s->scroll_y = new_scroll;
+        }
+    }
+
+    if (kb.key_pressed) {
+        if (kb.last_scancode == F5) ff_scroll(s, -wh_cont);
+        if (kb.last_scancode == F6) ff_scroll(s,  wh_cont);
+    }
 
     if (s->mode == MODE_INFO) {
         if (mouse.left_clicked) {
@@ -987,17 +1038,16 @@ static void ff_on_frame(void *state) {
 
             int cx = px + pw - 14;
             int cy = py + 2;
-            if (mouse.x >= cx && mouse.x < cx+10 &&
-                mouse.y >= cy && mouse.y < cy+8) {
+            if (mouse.x >= cx && mouse.x < cx + 10 &&
+                mouse.y >= cy && mouse.y < cy + 8) {
                 s->mode = MODE_NORMAL;
                 ff_draw_window(s->win, s);
                 return;
             }
-
-            int btn_x = px + pw/2 - 20;
+            int btn_x = px + pw / 2 - 20;
             int btn_y = py + ph - 14;
-            if (mouse.x >= btn_x && mouse.x < btn_x+40 &&
-                mouse.y >= btn_y && mouse.y < btn_y+10) {
+            if (mouse.x >= btn_x && mouse.x < btn_x + 40 &&
+                mouse.y >= btn_y && mouse.y < btn_y + 10) {
                 s->mode = MODE_NORMAL;
                 ff_draw_window(s->win, s);
                 return;
@@ -1034,11 +1084,11 @@ static void ff_on_frame(void *state) {
         if (mouse.left_clicked) {
             int bx = wx + 4;
             int by = conf_by;
-            if (mouse.x >= bx+4  && mouse.x < bx+32 &&
-                mouse.y >= by+20 && mouse.y < by+30) {
+            if (mouse.x >= bx + 4  && mouse.x < bx + 32 &&
+                mouse.y >= by + 20 && mouse.y < by + 30) {
                 if (s->confirm_action) s->confirm_action(s);
-            } else if (mouse.x >= bx+36 && mouse.x < bx+64 &&
-                       mouse.y >= by+20 && mouse.y < by+30) {
+            } else if (mouse.x >= bx + 36 && mouse.x < bx + 64 &&
+                       mouse.y >= by + 20 && mouse.y < by + 30) {
                 cancel_confirm(s);
             }
         }
@@ -1049,10 +1099,12 @@ static void ff_on_frame(void *state) {
     if (s->drag_idx >= 0) {
         ff_item_t *it = &s->items[s->drag_idx];
         if (mouse.left) {
-            int new_ix = mouse.x - it->drag_off_x - wx + s->scroll_x;
-            int new_iy = mouse.y - it->drag_off_y - wy_top + s->scroll_y;
-            it->icon_x = new_ix;
+            int new_ix = mouse.x - it->drag_off_x - wx + s->scroll_y;
+            int new_ix2 = mouse.x - it->drag_off_x - wx;
+            int new_iy  = mouse.y - it->drag_off_y - wy_top + s->scroll_y;
+            it->icon_x = new_ix2;
             it->icon_y = new_iy;
+            (void)new_ix;
         } else {
             if (!in_content(s, mouse.x, mouse.y)) {
                 ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
@@ -1079,13 +1131,13 @@ static void ff_on_frame(void *state) {
         for (int i = 0; i < s->item_count; i++) {
             ff_item_t *it = &s->items[i];
             if (!it->selected || it->is_dotdot) continue;
-            int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2 - s->scroll_x;
-            int ay = wy_top + it->icon_y - CONTENT_TOP - s->scroll_y;
-            if (mouse.x >= ax && mouse.x < ax+ICON_SZ_W &&
-                mouse.y >= ay && mouse.y < ay+ICON_SZ_H) {
+            int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
+            int ay = wy_top + it->icon_y - s->scroll_y;
+            if (mouse.x >= ax && mouse.x < ax + ICON_SZ_W &&
+                mouse.y >= ay && mouse.y < ay + ICON_SZ_H) {
                 if (mouse.dx != 0 || mouse.dy != 0) {
                     it->dragging   = true;
-                    it->drag_off_x = mouse.x - (ax - ICON_SZ_W/2);
+                    it->drag_off_x = mouse.x - (ax - ICON_SZ_W / 2);
                     it->drag_off_y = mouse.y - ay;
                     s->drag_idx    = i;
                     s->last_click_idx = -1;
@@ -1141,8 +1193,8 @@ static void ff_on_frame(void *state) {
                         for (int k = 0; k < ai; k++) {
                             char c = app_name[k];
                             proper[k] = (k == 0)
-                                ? (c >= 'a' && c <= 'z' ? c-32 : c)
-                                : (c >= 'A' && c <= 'Z' ? c+32 : c);
+                                ? (c >= 'a' && c <= 'z' ? c - 32 : c)
+                                : (c >= 'A' && c <= 'Z' ? c + 32 : c);
                         }
                         proper[ai] = '\0';
                         desc = os_find_app(proper);
@@ -1157,7 +1209,7 @@ static void ff_on_frame(void *state) {
                 }
                 else if (it->entry.attr & ATTR_DIRECTORY) {
                     char child_path[270];
-                    if (s->path[0]=='/' && s->path[1]=='\0')
+                    if (s->path[0] == '/' && s->path[1] == '\0')
                         sprintf(child_path, "/%s", it->name);
                     else
                         sprintf(child_path, "%s/%s", s->path, it->name);
@@ -1179,12 +1231,9 @@ static void ff_on_frame(void *state) {
 
 static void ff_init(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
-    s->v_scroll_idx = -1;
-    s->h_scroll_idx = -1;
-    s->scroll_x = 0;
-    s->scroll_y = 0;
-    s->last_win_w = FF_DEFAULT_W;
-    s->last_win_h = FF_DEFAULT_H;
+    s->scroll_y    = 0;
+    s->last_win_w  = FF_DEFAULT_W;
+    s->last_win_h  = FF_DEFAULT_H;
 
     int x = FF_DEFAULT_X + (s_cascade % 6) * FF_CASCADE;
     int y = FF_DEFAULT_Y + (s_cascade % 6) * FF_CASCADE;
@@ -1195,6 +1244,8 @@ static void ff_init(void *state) {
         .y             = y,
         .w             = FF_DEFAULT_W,
         .h             = FF_DEFAULT_H,
+        .min_w		   = 60,
+        .min_h		   = 70,
         .resizable     = true,
         .title         = "Finder",
         .title_color   = WHITE,
@@ -1216,6 +1267,8 @@ static void ff_init(void *state) {
     menu_add_item(file_menu, "Get Info",   menu_get_info);
     menu_add_item(file_menu, "Reload",     menu_reload);
     menu_add_separator(file_menu);
+    menu_add_item(file_menu, "About FileF", menu_about_filef);
+    menu_add_separator(file_menu);
     menu_add_item(file_menu, "Close",      menu_close);
 
     menu *edit_menu = window_add_menu(s->win, "Edit");
@@ -1229,15 +1282,6 @@ static void ff_init(void *state) {
     menu_add_item(view_menu, "By Name", menu_sort_name);
     menu_add_item(view_menu, "By Date", menu_sort_date);
     menu_add_item(view_menu, "By Size", menu_sort_size);
-
-    int wh_cont = s->win->h - 16 - CONTENT_TOP - CONTENT_BOT - STATUS_H;
-    widget vscroll = make_vscrollbar(s->win->w - 14, CONTENT_TOP, wh_cont - 12, LIGHT_GRAY, DARK_GRAY, BLACK, 0, wh_cont - 12, NULL);
-    window_add_widget(s->win, vscroll);
-    s->v_scroll_idx = s->win->widget_count - 1;
-
-    widget hscroll = make_hscrollbar(0, wh_cont - 12, s->win->w - 14, LIGHT_GRAY, DARK_GRAY, BLACK, 0, s->win->w - 14, NULL);
-    window_add_widget(s->win, hscroll);
-    s->h_scroll_idx = s->win->widget_count - 1;
 
     s->dir_cluster    = desktop_fs_cluster();
     s->sort           = SORT_NAME;

@@ -286,6 +286,8 @@ static void asmterm_init(void *state) {
         .y             = 20,
         .w             = 210,
         .h             = 160,
+        .min_w		   = 60,
+        .min_h		   = 60,
         .resizable     = true,
         .title         = "ASMTerm",
         .title_color   = WHITE,
