@@ -3,7 +3,7 @@
 
 KERNEL_OFFSET   equ 0x8000
 KERNEL_SEGMENT  equ 0x0800       ; 0x0800:0x0000 = physical 0x8000
-SECTORS_TO_LOAD equ 300
+SECTORS_TO_LOAD equ 1000
 
 
 jmp short start
@@ -13,7 +13,7 @@ nop
 oem_name:           db "ASMOS   "
 bytes_per_sector:   dw 512
 sectors_per_cluster:db 4
-reserved_sectors:   dw 300
+reserved_sectors:   dw 1000
 fat_count:          db 2
 root_entry_count:   dw 512
 total_sectors_16:   dw 0

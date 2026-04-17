@@ -158,8 +158,10 @@ static void term_execute(asmterm_state_t *s) {
     }
     cmd_status_t status = cli_execute_command(s->input, outbuf, sizeof(outbuf));
 
-    if (outbuf[0])
+    if (outbuf[0]) {
         term_push_output(s, outbuf);
+        term_buf_push_text(outbuf);
+    }
 
     if (status == CMD_STATUS_CLEAR) {
         s->line_count = 0;

@@ -24,6 +24,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/shell/cli.o                  \
       \
+	  $(BUILD_DIR)/apps/asmasm.o				\
 	  $(BUILD_DIR)/apps/asmdraw.o               \
 	  $(BUILD_DIR)/apps/asmterm.o               \
 	  $(BUILD_DIR)/apps/asmusic.o               \
@@ -75,7 +76,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/ui/widgets.o                 \
       $(BUILD_DIR)/ui/window.o
 
-KERNEL_SECTORS_LOADED = 300
+KERNEL_SECTORS_LOADED = 1000
 
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \

@@ -29,4 +29,42 @@ void cmd_write(const char *args, char *out, size_t max);
 void cmd_echo(const char *text, char *out, size_t max);
 void cmd_clock(char *out, size_t max);
 
+/* ─── Terminal ring buffer API ───────────────────────────────────────────────
+ *
+ * ASMTerm and other apps write lines into a global ring buffer so that any
+ * code can read recently-printed output programmatically.
+ *
+ * Usage:
+ *   term_buf_push("some output line");      // called by output consumers
+ *   int n = term_buf_count();               // how many lines are stored
+ *   const char *line = term_buf_get(i);     // get line i (0 = oldest)
+ *   term_buf_clear();                       // clear the ring
+ *
+ * The buffer holds up to TERM_BUF_LINES lines of up to TERM_BUF_LINE_W chars.
+ * When full, the oldest line is overwritten.
+ *
+ * term_buf_read_all(dst, max) copies all stored lines (newline-separated)
+ * into dst, returning the number of bytes written.  Handy for piping output
+ * into a file or another command.
+ */
+
+#define TERM_BUF_LINES   256
+#define TERM_BUF_LINE_W  128
+
+void term_buf_push(const char *line);
+
+void term_buf_push_text(const char *text);
+
+int  term_buf_count(void);
+
+const char *term_buf_get(int i);
+
+void term_buf_clear(void);
+
+int  term_buf_read_all(char *dst, int max);
+
+int  term_buf_read_new(char *dst, int max, int *cursor);
+
+bool term_buf_save(const char *path);
+
 #endif

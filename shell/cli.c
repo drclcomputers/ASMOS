@@ -33,6 +33,119 @@ static cli_state_t cli = {
     .line_height = 7
 };
 
+typedef struct {
+    char lines[TERM_BUF_LINES][TERM_BUF_LINE_W];
+    int  head;
+    int  count;
+} term_ring_t;
+
+static term_ring_t s_ring = { .head = 0, .count = 0 };
+
+void term_buf_push(const char *line) {
+    if (!line) return;
+
+    int slot;
+    if (s_ring.count < TERM_BUF_LINES) {
+        slot = (s_ring.head + s_ring.count) % TERM_BUF_LINES;
+        s_ring.count++;
+    } else {
+        slot       = s_ring.head;
+        s_ring.head = (s_ring.head + 1) % TERM_BUF_LINES;
+    }
+
+    strncpy(s_ring.lines[slot], line, TERM_BUF_LINE_W - 1);
+    s_ring.lines[slot][TERM_BUF_LINE_W - 1] = '\0';
+}
+
+void term_buf_push_text(const char *text) {
+    if (!text) return;
+    char line[TERM_BUF_LINE_W];
+    int li = 0;
+    for (const char *p = text; ; p++) {
+        if (*p == '\n' || *p == '\0') {
+            line[li] = '\0';
+            if (li > 0) term_buf_push(line);
+            li = 0;
+            if (*p == '\0') break;
+        } else if (li < TERM_BUF_LINE_W - 1) {
+            line[li++] = *p;
+        }
+    }
+}
+
+int term_buf_count(void) {
+    return s_ring.count;
+}
+
+const char *term_buf_get(int i) {
+    if (i < 0 || i >= s_ring.count) return NULL;
+    int slot = (s_ring.head + i) % TERM_BUF_LINES;
+    return s_ring.lines[slot];
+}
+
+void term_buf_clear(void) {
+    s_ring.head  = 0;
+    s_ring.count = 0;
+}
+
+int term_buf_read_all(char *dst, int max) {
+    if (!dst || max <= 0) return 0;
+    int written = 0;
+    for (int i = 0; i < s_ring.count && written < max - 1; i++) {
+        const char *line = term_buf_get(i);
+        if (!line) continue;
+        int len = (int)strlen(line);
+        int space = max - 1 - written;
+        if (len > space) len = space;
+        memcpy(dst + written, line, len);
+        written += len;
+        if (written < max - 1) {
+            dst[written++] = '\n';
+        }
+    }
+    dst[written] = '\0';
+    return written;
+}
+
+int term_buf_read_new(char *dst, int max, int *cursor) {
+    if (!dst || max <= 0 || !cursor) return 0;
+    int written = 0;
+    while (*cursor < s_ring.count && written < max - 1) {
+        const char *line = term_buf_get(*cursor);
+        if (line) {
+            int len = (int)strlen(line);
+            int space = max - 1 - written;
+            if (len > space) len = space;
+            memcpy(dst + written, line, len);
+            written += len;
+            if (written < max - 1) dst[written++] = '\n';
+        }
+        (*cursor)++;
+    }
+    dst[written] = '\0';
+    return written;
+}
+
+bool term_buf_save(const char *path) {
+    if (!path) return false;
+    dir_entry_t de;
+    if (fat16_find(path, &de)) fat16_delete(path);
+    fat16_file_t f;
+    if (!fat16_create(path, &f)) return false;
+    char line_buf[TERM_BUF_LINE_W + 1];
+    bool ok = true;
+    for (int i = 0; i < s_ring.count; i++) {
+        const char *line = term_buf_get(i);
+        if (!line) continue;
+        int len = (int)strlen(line);
+        strncpy(line_buf, line, TERM_BUF_LINE_W);
+        line_buf[len] = '\n';
+        if (fat16_write(&f, line_buf, len + 1) != len + 1) { ok = false; break; }
+    }
+    fat16_close(&f);
+    return ok;
+}
+
 static void append_output(char *buffer, size_t max_len, const char *text) {
     size_t current_len = strlen(buffer);
     size_t text_len = strlen(text);
@@ -95,6 +208,8 @@ void cmd_help(char *out, size_t max) {
     append_output(out, max, "df           - Show disk usage\n");
     append_output(out, max, "mem          - Show memory usage\n");
     append_output(out, max, "clock        - Show system time\n");
+    append_output(out, max, "tee <f>      - Save terminal buffer to file\n");
+    append_output(out, max, "history      - Show command history from buffer\n");
     append_output(out, max, "gui          - Start the GUI\n");
     append_output(out, max, "exit         - Exit CLI\n\n");
 }
@@ -446,6 +561,37 @@ void cmd_clock(char *out, size_t max) {
     append_output(out, max, buf);
 }
 
+static void cmd_tee(const char *filename, char *out, size_t max) {
+    if (!filename || filename[0] == '\0') {
+        append_output(out, max, "Usage: tee <filename>\n\n");
+        return;
+    }
+    if (term_buf_save(filename)) {
+        char tmp[128];
+        sprintf(tmp, "Saved %d lines to %s\n\n", term_buf_count(), filename);
+        append_output(out, max, tmp);
+    } else {
+        append_output(out, max, "Error: could not save buffer\n\n");
+    }
+}
+
+static void cmd_history(char *out, size_t max) {
+    int n = term_buf_count();
+    if (n == 0) { append_output(out, max, "(empty)\n\n"); return; }
+    char tmp[16];
+    sprintf(tmp, "%d lines:\n", n);
+    append_output(out, max, tmp);
+    int start = n > 20 ? n - 20 : 0;
+    for (int i = start; i < n; i++) {
+        const char *line = term_buf_get(i);
+        if (line) {
+            append_output(out, max, line);
+            append_output(out, max, "\n");
+        }
+    }
+    append_output(out, max, "\n");
+}
+
 static void parse_command(const char *input, char *cmd, char *arg) {
     cmd[0] = '\0'; arg[0] = '\0';
     int i = 0;
@@ -470,9 +616,16 @@ cmd_status_t cli_execute_command(const char *cmd, char *out_buffer, size_t max_l
     out_buffer[0] = '\0';
     parse_command(cmd, command, argument);
 
+    {
+        char echo_line[256];
+        sprintf(echo_line, "> %s", cmd);
+        term_buf_push(echo_line);
+    }
+
     if (strcmp(command, "help") == 0) {
         cmd_help(out_buffer, max_len);
     } else if (strcmp(command, "clear") == 0) {
+        term_buf_clear();
         return CMD_STATUS_CLEAR;
     } else if (strcmp(command, "pwd") == 0) {
         cmd_pwd(out_buffer, max_len);
@@ -504,6 +657,10 @@ cmd_status_t cli_execute_command(const char *cmd, char *out_buffer, size_t max_l
         cmd_mkdir(argument, out_buffer, max_len);
     } else if (strcmp(command, "rmdir") == 0) {
         cmd_rmdir(argument, out_buffer, max_len);
+    } else if (strcmp(command, "tee") == 0) {
+        cmd_tee(argument, out_buffer, max_len);
+    } else if (strcmp(command, "history") == 0) {
+        cmd_history(out_buffer, max_len);
     } else if (strcmp(command, "gui") == 0) {
         append_output(out_buffer, max_len, "Starting GUI...\n\n");
         sleep_s(1);
@@ -517,6 +674,8 @@ cmd_status_t cli_execute_command(const char *cmd, char *out_buffer, size_t max_l
         append_output(out_buffer, max_len, command);
         append_output(out_buffer, max_len, "\n\n");
     }
+
+    if (out_buffer[0]) term_buf_push_text(out_buffer);
 
     return CMD_STATUS_OK;
 }

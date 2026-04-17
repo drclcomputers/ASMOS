@@ -1,5 +1,6 @@
 #include "os/app_registry.h"
 
+extern app_descriptor asmasm_app;
 extern app_descriptor asmdraw_app;
 extern app_descriptor asmterm_app;
 extern app_descriptor asmusic_app;
@@ -11,6 +12,7 @@ extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 
 registered_app_t app_registry[] = {
+	{ &asmasm_app, 	   "ASMembler"  },
 	{ &asmdraw_app,    "ASMDraw"    },
 	{ &asmterm_app,    "ASMTerm"    },
     { &asmusic_app,    "ASMusic"    },
