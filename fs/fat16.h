@@ -4,44 +4,44 @@
 #include "lib/core.h"
 
 typedef struct __attribute__((packed)) {
-    uint8_t  jmp[3];
-    uint8_t  oem[8];
+    uint8_t jmp[3];
+    uint8_t oem[8];
     uint16_t bytes_per_sector;
-    uint8_t  sectors_per_cluster;
+    uint8_t sectors_per_cluster;
     uint16_t reserved_sectors;
-    uint8_t  fat_count;
+    uint8_t fat_count;
     uint16_t root_entry_count;
     uint16_t total_sectors_16;
-    uint8_t  media_type;
+    uint8_t media_type;
     uint16_t sectors_per_fat;
     uint16_t sectors_per_track;
     uint16_t head_count;
     uint32_t hidden_sectors;
     uint32_t total_sectors_32;
-    uint8_t  drive_number;
-    uint8_t  reserved;
-    uint8_t  boot_sig;
+    uint8_t drive_number;
+    uint8_t reserved;
+    uint8_t boot_sig;
     uint32_t volume_id;
-    uint8_t  volume_label[11];
-    uint8_t  fs_type[8];
+    uint8_t volume_label[11];
+    uint8_t fs_type[8];
 } bpb_t;
 
-#define ATTR_READ_ONLY  0x01
-#define ATTR_HIDDEN     0x02
-#define ATTR_SYSTEM     0x04
-#define ATTR_VOLUME_ID  0x08
-#define ATTR_DIRECTORY  0x10
-#define ATTR_ARCHIVE    0x20
+#define ATTR_READ_ONLY 0x01
+#define ATTR_HIDDEN 0x02
+#define ATTR_SYSTEM 0x04
+#define ATTR_VOLUME_ID 0x08
+#define ATTR_DIRECTORY 0x10
+#define ATTR_ARCHIVE 0x20
 
-#define DIR_ENTRY_FREE      0xE5
-#define DIR_ENTRY_END       0x00
+#define DIR_ENTRY_FREE 0xE5
+#define DIR_ENTRY_END 0x00
 
 typedef struct __attribute__((packed)) {
-    uint8_t  name[8];
-    uint8_t  ext[3];
-    uint8_t  attr;
-    uint8_t  reserved;
-    uint8_t  create_time_ms;
+    uint8_t name[8];
+    uint8_t ext[3];
+    uint8_t attr;
+    uint8_t reserved;
+    uint8_t create_time_ms;
     uint16_t create_time;
     uint16_t create_date;
     uint16_t access_date;
@@ -52,34 +52,34 @@ typedef struct __attribute__((packed)) {
     uint32_t file_size;
 } dir_entry_t;
 
-#define FAT16_FREE      0x0000
-#define FAT16_RESERVED  0xFFF0
-#define FAT16_BAD       0xFFF7
-#define FAT16_EOC       0xFFF8
+#define FAT16_FREE 0x0000
+#define FAT16_RESERVED 0xFFF0
+#define FAT16_BAD 0xFFF7
+#define FAT16_EOC 0xFFF8
 
 typedef struct {
-    bpb_t    bpb;
+    bpb_t bpb;
     uint32_t fat_lba;
     uint32_t root_lba;
     uint32_t data_lba;
     uint32_t cluster_count;
-    bool     mounted;
+    bool mounted;
 } fat16_fs_t;
 
 typedef struct {
     dir_entry_t entry;
-    uint32_t    dir_entry_lba;
-    int         dir_entry_idx;
-    uint16_t    cur_cluster;
-    uint32_t    cur_offset;
-    bool        open;
-    uint16_t    parent_cluster;
-    uint16_t    dir_cluster;
+    uint32_t dir_entry_lba;
+    int dir_entry_idx;
+    uint16_t cur_cluster;
+    uint32_t cur_offset;
+    bool open;
+    uint16_t parent_cluster;
+    uint16_t dir_cluster;
 } fat16_file_t;
 
 typedef struct {
     uint16_t current_cluster;
-    char     path[256];
+    char path[256];
 } fat16_dir_context_t;
 
 extern fat16_fs_t fs;
@@ -100,9 +100,11 @@ bool fat16_pwd(char *buf, int buflen);
 // dirs
 
 bool fat16_mkdir(const char *path);
-bool fat16_find_in_dir(uint16_t dir_cluster, const char *name83, dir_entry_t *out);
+bool fat16_find_in_dir(uint16_t dir_cluster, const char *name83,
+                       dir_entry_t *out);
 bool fat16_find(const char *path, dir_entry_t *out);
-bool fat16_list_dir(uint16_t dir_cluster, dir_entry_t *buf, int max, int *count);
+bool fat16_list_dir(uint16_t dir_cluster, dir_entry_t *buf, int max,
+                    int *count);
 bool is_dir_empty(uint16_t cluster);
 void fat16_wipe_cluster(uint16_t cluster);
 
@@ -110,8 +112,8 @@ void fat16_wipe_cluster(uint16_t cluster);
 
 bool fat16_open(const char *path, fat16_file_t *f);
 bool fat16_create(const char *path, fat16_file_t *f);
-int  fat16_read(fat16_file_t *f, void *buf, int len);
-int  fat16_write(fat16_file_t *f, const void *buf, int len);
+int fat16_read(fat16_file_t *f, void *buf, int len);
+int fat16_write(fat16_file_t *f, const void *buf, int len);
 bool fat16_seek(fat16_file_t *f, uint32_t offset);
 int fat16_tell(fat16_file_t *f);
 bool fat16_close(fat16_file_t *f);

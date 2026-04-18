@@ -12,7 +12,8 @@ typedef enum {
     MODAL_CONFIRM,
 } modal_type;
 
-void modal_show(modal_type type, const char *title, const char *message, modal_cb on_confirm, modal_cb on_cancel);
+void modal_show(modal_type type, const char *title, const char *message,
+                modal_cb on_confirm, modal_cb on_cancel);
 bool modal_active(void);
 void modal_update(void);
 void modal_draw(void);

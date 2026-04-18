@@ -1,29 +1,31 @@
-#include "io/ps2.h"
 #include "fs/fat16.h"
+#include "io/ps2.h"
 
-#include "shell/cli.h"
-#include "os/os.h"
-#include "os/error.h"
 #include "os/app_registry.h"
+#include "os/error.h"
+#include "os/os.h"
+#include "shell/cli.h"
 
 #include "config/config.h"
 #include "config/runtime_config.h"
 
-#include "lib/memory.h"
-#include "lib/graphics.h"
-#include "lib/time.h"
-#include "lib/device.h"
 #include "interrupts/idt.h"
+#include "lib/device.h"
+#include "lib/graphics.h"
+#include "lib/memory.h"
+#include "lib/time.h"
 
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 #include "ui/menubar.h"
 
+extern app_descriptor asmasm_app;
 extern app_descriptor asmdraw_app;
+extern app_descriptor asmterm_app;
+extern app_descriptor asmusic_app;
 extern app_descriptor calculator_app;
 extern app_descriptor clock_app;
 extern app_descriptor filef_app;
-extern app_descriptor asmterm_app;
 extern app_descriptor monitor_app;
 extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
@@ -36,12 +38,13 @@ typedef struct __attribute__((packed)) {
 
 static void detect_heap_end(void) {
     uint16_t count = *(volatile uint16_t *)0x500;
-    uint8_t *ptr   = (uint8_t *)0x504;
-    uint32_t best  = HEAP_END;
+    uint8_t *ptr = (uint8_t *)0x504;
+    uint32_t best = HEAP_END;
 
     for (uint16_t i = 0; i < count; i++, ptr += 20) {
         e820_entry_t *e = (e820_entry_t *)ptr;
-        if (e->type != 1) continue;
+        if (e->type != 1)
+            continue;
         if (e->base <= HEAP_START && e->base + e->length > HEAP_START) {
             uint64_t end64 = e->base + e->length;
             best = (end64 > 0xFFFFFFFFULL) ? 0xFFFFFFFFU : (uint32_t)end64;
@@ -87,20 +90,23 @@ void kmain(void) {
 
     {
         volatile uint32_t d = 0x1000000;
-        while (d--) __asm__ volatile ("nop");
+        while (d--)
+            __asm__ volatile("nop");
     }
 
-    if (!g_cfg.start_in_gui) cli_run();
+    if (!g_cfg.start_in_gui)
+        cli_run();
 
     desktop_fs_init();
 
     desktop_init();
     menubar_init();
-    if (g_cfg.sound_enabled) speaker_init();
+    if (g_cfg.sound_enabled)
+        speaker_init();
     error_set_gui_mode(true);
 
     for (int i = 0; i < app_registry_count; i++)
-    	os_install_app(app_registry[i].desc);
+        os_install_app(app_registry[i].desc);
 
     os_run();
 }

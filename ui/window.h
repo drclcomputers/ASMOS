@@ -4,9 +4,9 @@
 #include "lib/core.h"
 #include "lib/string.h"
 
+#include "config/config.h"
 #include "ui/menubar.h"
 #include "ui/widgets.h"
-#include "config/config.h"
 
 #define TITLEBAR_H 16
 
@@ -19,51 +19,51 @@ typedef struct window window;
 typedef bool (*win_callback_t)(window *win);
 
 typedef struct {
-	int x, y;
-	int w, h;
-	int min_w, max_w;
-	int min_h, max_h;
-	bool resizable;
-	const char *title;
-	uint8_t title_color;
-	uint8_t bar_color;
-	uint8_t content_color;
-	bool visible;
-	win_callback_t on_close;
-	win_callback_t on_minimize;
+    int x, y;
+    int w, h;
+    int min_w, max_w;
+    int min_h, max_h;
+    bool resizable;
+    const char *title;
+    uint8_t title_color;
+    uint8_t bar_color;
+    uint8_t content_color;
+    bool visible;
+    win_callback_t on_close;
+    win_callback_t on_minimize;
 } window_spec_t;
 
 struct window {
-	int x, y;
-	int w, h;
-	int min_w, max_w;
-	int min_h, max_h;
+    int x, y;
+    int w, h;
+    int min_w, max_w;
+    int min_h, max_h;
 
-	const char *title;
-	uint8_t title_color;
-	uint8_t bar_color;
-	uint8_t content_color;
+    const char *title;
+    uint8_t title_color;
+    uint8_t bar_color;
+    uint8_t content_color;
 
-	bool visible;
-	bool visible_buttons;
-	bool minimized;
-	bool dragging;
-	bool resizing;
-	bool resizable;
-	int show_order;
-	bool pinned_bottom;
+    bool visible;
+    bool visible_buttons;
+    bool minimized;
+    bool dragging;
+    bool resizing;
+    bool resizable;
+    int show_order;
+    bool pinned_bottom;
 
-	win_callback_t on_close;
-	win_callback_t on_minimize;
+    win_callback_t on_close;
+    win_callback_t on_minimize;
 
-	void (*on_draw)(struct window *win, void *userdata);
-	void *on_draw_userdata;
+    void (*on_draw)(struct window *win, void *userdata);
+    void *on_draw_userdata;
 
-	widget widgets[MAX_WIN_WIDGETS];
-	int widget_count;
+    widget widgets[MAX_WIN_WIDGETS];
+    int widget_count;
 
-	menu win_menus[MAX_WIN_MENUS];
-	int win_menu_count;
+    menu win_menus[MAX_WIN_MENUS];
+    int win_menu_count;
 };
 
 extern window *win_stack[MAX_WINDOWS];

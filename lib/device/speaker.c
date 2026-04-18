@@ -2,25 +2,28 @@
 #include "lib/core.h"
 #include "lib/time.h"
 
-#define PIT_CHANNEL2   0x42
-#define PIT_CMD        0x43
-#define SPEAKER_PORT   0x61
+#define PIT_CHANNEL2 0x42
+#define PIT_CMD 0x43
+#define SPEAKER_PORT 0x61
 
-#define PIT_BASE_HZ    1193182
+#define PIT_BASE_HZ 1193182
 
-static bool     s_playing   = false;
+static bool s_playing = false;
 static uint32_t s_stop_tick = 0;
 
-void speaker_init(void) {
-    speaker_tone_stop();
-}
+void speaker_init(void) { speaker_tone_stop(); }
 
 void speaker_tone_start(uint32_t frequency_hz) {
-    if (frequency_hz == 0) { speaker_tone_stop(); return; }
+    if (frequency_hz == 0) {
+        speaker_tone_stop();
+        return;
+    }
 
     uint32_t divisor = PIT_BASE_HZ / frequency_hz;
-    if (divisor > 0xFFFF) divisor = 0xFFFF;
-    if (divisor < 1)      divisor = 1;
+    if (divisor > 0xFFFF)
+        divisor = 0xFFFF;
+    if (divisor < 1)
+        divisor = 1;
 
     outb(PIT_CMD, 0xB6);
     outb(PIT_CHANNEL2, (uint8_t)(divisor & 0xFF));
@@ -44,7 +47,7 @@ void speaker_beep(uint32_t frequency_hz, uint32_t duration_ms) {
 
 void speaker_beep_async(uint32_t frequency_hz, uint32_t duration_ms) {
     speaker_tone_start(frequency_hz);
-    s_playing   = true;
+    s_playing = true;
     s_stop_tick = time_millis() + duration_ms;
 }
 

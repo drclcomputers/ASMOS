@@ -1,18 +1,16 @@
 #include "ui/cursor.h"
-#include "lib/graphics.h"
-#include "lib/core.h"
 #include "config/config.h"
+#include "lib/core.h"
+#include "lib/graphics.h"
 
-#define ARROW_CURSOR     0
-#define POINTER_CURSOR   1
+#define ARROW_CURSOR 0
+#define POINTER_CURSOR 1
 #define CROSSHAIR_CURSOR 2
-#define TEXT_CURSOR      3
+#define TEXT_CURSOR 3
 
 int CHOSEN_CURSOR = 0;
 
-void cursortype(int chosencursor) {
-	CHOSEN_CURSOR = chosencursor;
-}
+void cursortype(int chosencursor) { CHOSEN_CURSOR = chosencursor; }
 
 static const uint16_t cursor_fill[4][8] = {
     {   // 0: ARROW_CURSOR
@@ -101,7 +99,8 @@ static const uint16_t cursor_border[4][8] = {
 };
 
 void draw_cursor(int x, int y) {
-	if (CHOSEN_CURSOR < 0 || CHOSEN_CURSOR > 3) CHOSEN_CURSOR = 0;
+    if (CHOSEN_CURSOR < 0 || CHOSEN_CURSOR > 3)
+        CHOSEN_CURSOR = 0;
     for (int row = 0; row < 8; row++) {
         for (int col = 0; col < 9; col++) {
             int px = x + col;

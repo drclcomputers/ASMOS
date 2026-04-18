@@ -1,20 +1,20 @@
 #include "os/scheduler.h"
-#include "os/os.h"
 #include "os/error.h"
+#include "os/os.h"
 
+#include "lib/device.h"
+#include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
-#include "lib/graphics.h"
 #include "lib/time.h"
-#include "lib/device.h"
 
-#include "ui/ui.h"
-#include "io/ps2.h"
 #include "config/config.h"
+#include "io/ps2.h"
+#include "ui/ui.h"
 
-task_t   tasks[MAX_TASKS];
-int      task_count    = 0;
-int      current_task  = 0;
+task_t tasks[MAX_TASKS];
+int task_count = 0;
+int current_task = 0;
 
 uint32_t scheduler_exit_esp = 0;
 
@@ -52,8 +52,7 @@ extern void task_trampoline(void);
  *   [esp+4] = slot               ← first argument
  */
 
-static uint32_t build_initial_stack(uint8_t *stack_base, int slot)
-{
+static uint32_t build_initial_stack(uint8_t *stack_base, int slot) {
     uint32_t *sp = (uint32_t *)(stack_base + TASK_STACK_SIZE);
 
     *--sp = (uint32_t)slot;
@@ -68,15 +67,15 @@ static uint32_t build_initial_stack(uint8_t *stack_base, int slot)
     return (uint32_t)sp;
 }
 
-void task_trampoline_c(int slot)
-{
+void task_trampoline_c(int slot) {
     task_t *t = &tasks[slot];
 
     if (slot == 0) {
         extern bool gui_should_exit;
 
         while (!gui_should_exit) {
-            if (t->entry) t->entry(t->app_state);
+            if (t->entry)
+                t->entry(t->app_state);
             task_yield();
         }
 
@@ -84,64 +83,76 @@ void task_trampoline_c(int slot)
 
         task_switch(&t->saved_esp, scheduler_exit_esp);
 
-        for (;;) { __asm__ volatile ("hlt"); }
+        for (;;) {
+            __asm__ volatile("hlt");
+        }
 
     } else {
         while (t->alive) {
-            if (t->entry) t->entry(t->app_state);
+            if (t->entry)
+                t->entry(t->app_state);
             task_yield();
         }
-        while (1) task_yield();
+        while (1)
+            task_yield();
     }
 }
 
-int scheduler_add_task(void (*entry)(void *), void *state)
-{
+int scheduler_add_task(void (*entry)(void *), void *state) {
     /* Slot 0 is reserved for the kernel task */
     int slot = -1;
     for (int i = 1; i < MAX_TASKS; i++) {
-        if (!tasks[i].alive) { slot = i; break; }
+        if (!tasks[i].alive) {
+            slot = i;
+            break;
+        }
     }
-    if (slot < 0) return -1;
+    if (slot < 0)
+        return -1;
 
     uint8_t *stack = (uint8_t *)kmalloc(TASK_STACK_SIZE);
-    if (!stack) return -1;
+    if (!stack)
+        return -1;
     memset(stack, 0, TASK_STACK_SIZE);
 
-    task_t *t     = &tasks[slot];
+    task_t *t = &tasks[slot];
     t->stack_base = stack;
-    t->entry      = entry;
-    t->app_state  = state;
-    t->alive      = true;
-    t->saved_esp  = build_initial_stack(stack, slot);
+    t->entry = entry;
+    t->app_state = state;
+    t->alive = true;
+    t->saved_esp = build_initial_stack(stack, slot);
 
-    if (slot >= task_count) task_count = slot + 1;
+    if (slot >= task_count)
+        task_count = slot + 1;
 
     return slot;
 }
 
-void scheduler_remove_task(int slot)
-{
-    if (slot < 1 || slot >= MAX_TASKS) return;
+void scheduler_remove_task(int slot) {
+    if (slot < 1 || slot >= MAX_TASKS)
+        return;
     task_t *t = &tasks[slot];
-    t->alive  = false;
+    t->alive = false;
     if (t->stack_base) {
         kfree(t->stack_base);
         t->stack_base = NULL;
     }
 }
 
-void task_yield(void)
-{
-    int old  = current_task;
+void task_yield(void) {
+    int old = current_task;
     int next = old;
 
     for (int i = 1; i <= task_count; i++) {
         int c = (old + i) % task_count;
-        if (tasks[c].alive) { next = c; break; }
+        if (tasks[c].alive) {
+            next = c;
+            break;
+        }
     }
 
-    if (next == old) return;
+    if (next == old)
+        return;
 
     current_task = next;
     task_switch(&tasks[old].saved_esp, tasks[next].saved_esp);
@@ -153,17 +164,16 @@ void task_yield(void)
  * After this returns, task_trampoline_c calls task_yield() so every
  * app task gets exactly one on_frame call per kernel frame.
  */
-void scheduler_kernel_task(void *unused)
-{
+void scheduler_kernel_task(void *unused) {
     (void)unused;
     extern menubar g_menubar;
-    extern bool    g_menubar_click_consumed;
+    extern bool g_menubar_click_consumed;
 
     uint32_t frame_start = time_millis();
 
     // 1. Core Kernel Logic (Runs once per 16ms)
     g_menubar_click_consumed = false;
-    ps2_update();    // Only poll here! This ensures logic sees the state.
+    ps2_update(); // Only poll here! This ensures logic sees the state.
     speaker_update();
 
     wm_sync_menubar(&g_menubar);
@@ -195,16 +205,15 @@ void scheduler_kernel_task(void *unused)
     }
 }
 
-void scheduler_init(void)
-{
+void scheduler_init(void) {
     memset(tasks, 0, sizeof(tasks));
-    task_count    = 1;
-    current_task  = 0;
+    task_count = 1;
+    current_task = 0;
 
-    task_t *kt    = &tasks[0];
+    task_t *kt = &tasks[0];
     kt->stack_base = s_kernel_stack;
-    kt->entry      = scheduler_kernel_task;
-    kt->app_state  = NULL;
-    kt->alive      = true;
-    kt->saved_esp  = build_initial_stack(s_kernel_stack, 0);
+    kt->entry = scheduler_kernel_task;
+    kt->app_state = NULL;
+    kt->alive = true;
+    kt->saved_esp = build_initial_stack(s_kernel_stack, 0);
 }

@@ -1,10 +1,10 @@
 #ifndef PRIMITIVE_GRAPHICS_H
 #define PRIMITIVE_GRAPHICS_H
 
-#include "lib/core.h"
-#include "lib/memory.h"
-#include "lib/math.h"
 #include "config/config.h"
+#include "lib/core.h"
+#include "lib/math.h"
+#include "lib/memory.h"
 
 void draw_dot(int x, int y, unsigned char color);
 void draw_line(int x0, int y0, int x1, int y1, unsigned char color);

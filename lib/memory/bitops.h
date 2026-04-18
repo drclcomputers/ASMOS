@@ -27,7 +27,8 @@ static inline uint32_t bits_get(uint32_t val, uint8_t lo, uint8_t width) {
     return (val >> lo) & ((1u << width) - 1);
 }
 
-static inline uint32_t bits_set(uint32_t val, uint8_t lo, uint8_t width, uint32_t field) {
+static inline uint32_t bits_set(uint32_t val, uint8_t lo, uint8_t width,
+                                uint32_t field) {
     uint32_t mask = ((1u << width) - 1) << lo;
     return (val & ~mask) | ((field << lo) & mask);
 }
@@ -40,24 +41,54 @@ static inline uint32_t popcount32(uint32_t v) {
 }
 
 static inline uint32_t ctz32(uint32_t v) {
-    if (v == 0) return 32;
+    if (v == 0)
+        return 32;
     uint32_t n = 0;
-    if (!(v & 0x0000FFFFu)) { n += 16; v >>= 16; }
-    if (!(v & 0x000000FFu)) { n +=  8; v >>=  8; }
-    if (!(v & 0x0000000Fu)) { n +=  4; v >>=  4; }
-    if (!(v & 0x00000003u)) { n +=  2; v >>=  2; }
-    if (!(v & 0x00000001u)) { n +=  1; }
+    if (!(v & 0x0000FFFFu)) {
+        n += 16;
+        v >>= 16;
+    }
+    if (!(v & 0x000000FFu)) {
+        n += 8;
+        v >>= 8;
+    }
+    if (!(v & 0x0000000Fu)) {
+        n += 4;
+        v >>= 4;
+    }
+    if (!(v & 0x00000003u)) {
+        n += 2;
+        v >>= 2;
+    }
+    if (!(v & 0x00000001u)) {
+        n += 1;
+    }
     return n;
 }
 
 static inline uint32_t clz32(uint32_t v) {
-    if (v == 0) return 32;
+    if (v == 0)
+        return 32;
     uint32_t n = 0;
-    if (!(v & 0xFFFF0000u)) { n += 16; v <<= 16; }
-    if (!(v & 0xFF000000u)) { n +=  8; v <<=  8; }
-    if (!(v & 0xF0000000u)) { n +=  4; v <<=  4; }
-    if (!(v & 0xC0000000u)) { n +=  2; v <<=  2; }
-    if (!(v & 0x80000000u)) { n +=  1; }
+    if (!(v & 0xFFFF0000u)) {
+        n += 16;
+        v <<= 16;
+    }
+    if (!(v & 0xFF000000u)) {
+        n += 8;
+        v <<= 8;
+    }
+    if (!(v & 0xF0000000u)) {
+        n += 4;
+        v <<= 4;
+    }
+    if (!(v & 0xC0000000u)) {
+        n += 2;
+        v <<= 2;
+    }
+    if (!(v & 0x80000000u)) {
+        n += 1;
+    }
     return n;
 }
 
@@ -66,10 +97,8 @@ static inline uint16_t bswap16(uint16_t v) {
 }
 
 static inline uint32_t bswap32(uint32_t v) {
-    return ((v & 0x000000FFu) << 24) |
-           ((v & 0x0000FF00u) <<  8) |
-           ((v & 0x00FF0000u) >>  8) |
-           ((v & 0xFF000000u) >> 24);
+    return ((v & 0x000000FFu) << 24) | ((v & 0x0000FF00u) << 8) |
+           ((v & 0x00FF0000u) >> 8) | ((v & 0xFF000000u) >> 24);
 }
 
 static inline uint32_t rotl32(uint32_t v, uint8_t n) {
@@ -86,7 +115,7 @@ static inline uint32_t bitmask(uint8_t lo, uint8_t width) {
 
 static inline uint64_t bswap64(uint64_t v) {
     return ((uint64_t)bswap32((uint32_t)(v & 0xFFFFFFFFu)) << 32) |
-            (uint64_t)bswap32((uint32_t)(v >> 32));
+           (uint64_t)bswap32((uint32_t)(v >> 32));
 }
 
 static inline uint64_t rotl64(uint64_t v, uint8_t n) {

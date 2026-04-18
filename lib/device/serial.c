@@ -13,12 +13,12 @@ void serial_init(void) {
     outb(COM1_PORT + 4, 0x0B);
 }
 
-static int serial_is_transmit_empty(void) {
-    return inb(COM1_PORT + 5) & 0x20;
-}
+static int serial_is_transmit_empty(void) { return inb(COM1_PORT + 5) & 0x20; }
 
 void serial_putc(char c) {
-    while (!serial_is_transmit_empty()) { asm volatile("nop"); }
+    while (!serial_is_transmit_empty()) {
+        asm volatile("nop");
+    }
     outb(COM1_PORT + 0, (unsigned char)c);
 }
 

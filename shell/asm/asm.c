@@ -1,394 +1,16 @@
-#include "shell/cli.h"
+#include "shell/asm/asm.h"
+#include "shell/binrun.h"
 
-#include "lib/graphics.h"
+#include "fs/fat16.h"
 #include "lib/memory.h"
 #include "lib/string.h"
-#include "lib/time.h"
-
-#include "io/keyboard.h"
-#include "io/ps2.h"
-
-#include "config/config.h"
-#include "fs/fat16.h"
-#include "os/os.h"
-#include "os/scheduler.h"
-
-#define CLI_BUFFER_SIZE 256
-#define CHAR_SPACING 5
-#define CHAR_HEIGHT 6
-#define CMD_OUTPUT_MAX 2048
-
-typedef struct {
-    char buffer[CLI_BUFFER_SIZE];
-    int buffer_pos;
-    int cursor_x;
-    int cursor_y;
-    int line_height;
-} cli_state_t;
-
-static cli_state_t s_cli = {
-    .buffer_pos = 0, .cursor_x = 0, .cursor_y = 0, .line_height = 7};
-
-typedef struct {
-    char lines[TERM_BUF_LINES][TERM_BUF_LINE_W];
-    int head;
-    int count;
-} term_ring_t;
-
-static term_ring_t s_ring = {.head = 0, .count = 0};
-
-void term_buf_push(const char *line) {
-    if (!line)
-        return;
-    int slot;
-    if (s_ring.count < TERM_BUF_LINES) {
-        slot = (s_ring.head + s_ring.count) % TERM_BUF_LINES;
-        s_ring.count++;
-    } else {
-        slot = s_ring.head;
-        s_ring.head = (s_ring.head + 1) % TERM_BUF_LINES;
-    }
-    strncpy(s_ring.lines[slot], line, TERM_BUF_LINE_W - 1);
-    s_ring.lines[slot][TERM_BUF_LINE_W - 1] = '\0';
-}
-
-void term_buf_push_text(const char *text) {
-    if (!text)
-        return;
-    char line[TERM_BUF_LINE_W];
-    int li = 0;
-    for (const char *p = text;; p++) {
-        if (*p == '\n' || *p == '\0') {
-            line[li] = '\0';
-            if (li > 0)
-                term_buf_push(line);
-            li = 0;
-            if (*p == '\0')
-                break;
-        } else if (li < TERM_BUF_LINE_W - 1) {
-            line[li++] = *p;
-        }
-    }
-}
-
-int term_buf_count(void) { return s_ring.count; }
-
-const char *term_buf_get(int i) {
-    if (i < 0 || i >= s_ring.count)
-        return NULL;
-    return s_ring.lines[(s_ring.head + i) % TERM_BUF_LINES];
-}
-
-void term_buf_clear(void) {
-    s_ring.head = 0;
-    s_ring.count = 0;
-}
-
-int term_buf_read_all(char *dst, int max) {
-    if (!dst || max <= 0)
-        return 0;
-    int written = 0;
-    for (int i = 0; i < s_ring.count && written < max - 1; i++) {
-        const char *line = term_buf_get(i);
-        if (!line)
-            continue;
-        int len = (int)strlen(line);
-        int space = max - 1 - written;
-        if (len > space)
-            len = space;
-        memcpy(dst + written, line, len);
-        written += len;
-        if (written < max - 1)
-            dst[written++] = '\n';
-    }
-    dst[written] = '\0';
-    return written;
-}
-
-int term_buf_read_new(char *dst, int max, int *cursor) {
-    if (!dst || max <= 0 || !cursor)
-        return 0;
-    int written = 0;
-    while (*cursor < s_ring.count && written < max - 1) {
-        const char *line = term_buf_get(*cursor);
-        if (line) {
-            int len = (int)strlen(line);
-            int space = max - 1 - written;
-            if (len > space)
-                len = space;
-            memcpy(dst + written, line, len);
-            written += len;
-            if (written < max - 1)
-                dst[written++] = '\n';
-        }
-        (*cursor)++;
-    }
-    dst[written] = '\0';
-    return written;
-}
-
-bool term_buf_save(const char *path) {
-    if (!path)
-        return false;
-    dir_entry_t de;
-    if (fat16_find(path, &de))
-        fat16_delete(path);
-    fat16_file_t f;
-    if (!fat16_create(path, &f))
-        return false;
-    char lb[TERM_BUF_LINE_W + 1];
-    bool ok = true;
-    for (int i = 0; i < s_ring.count; i++) {
-        const char *line = term_buf_get(i);
-        if (!line)
-            continue;
-        int len = (int)strlen(line);
-        strncpy(lb, line, TERM_BUF_LINE_W);
-        lb[len] = '\n';
-        if (fat16_write(&f, lb, len + 1) != len + 1) {
-            ok = false;
-            break;
-        }
-    }
-    fat16_close(&f);
-    return ok;
-}
-
-static void cli_draw_char(char c) {
-    if (c == '\n' || c == '\r') {
-        s_cli.cursor_y += s_cli.line_height;
-        s_cli.cursor_x = 0;
-        if (s_cli.cursor_y + CHAR_HEIGHT >= SCREEN_HEIGHT) {
-            int lh = s_cli.line_height;
-            int bytes = SCREEN_WIDTH;
-            uint8_t *buf = (uint8_t *)BACKBUF;
-            int src_row = lh;
-            int keep = SCREEN_HEIGHT - lh;
-            if (keep > 0)
-                memmove(buf, buf + src_row * bytes, (size_t)(keep * bytes));
-            memset(buf + keep * bytes, 0, (size_t)(lh * bytes));
-            s_cli.cursor_y = SCREEN_HEIGHT - lh;
-        }
-        return;
-    }
-    if (c < 32 || c > 126)
-        return;
-    draw_char(s_cli.cursor_x, s_cli.cursor_y, c, WHITE, 2);
-    s_cli.cursor_x += CHAR_SPACING;
-    if (s_cli.cursor_x >= SCREEN_WIDTH - CHAR_SPACING)
-        cli_draw_char('\n');
-}
-
-static void cli_print(const char *str) {
-    while (str && *str)
-        cli_draw_char(*str++);
-    blit();
-}
-
-static void cli_println(const char *str) {
-    cli_print(str);
-    cli_draw_char('\n');
-    blit();
-}
-
-static void shell_draw_prompt(void) {
-    char pwd[256];
-    if (fat16_pwd(pwd, sizeof(pwd)))
-        cli_print(pwd);
-    cli_print("> ");
-}
-
-static void bsc_print(const char *str) {
-    if (!str)
-        return;
-    cli_print(str);
-    term_buf_push_text(str);
-}
-
-static void bsc_putchar(char c) {
-    cli_draw_char(c);
-    blit();
-}
-
-static int bsc_readline(char *buf, int maxchars) {
-    if (!buf || maxchars <= 0)
-        return 0;
-    int len = 0;
-    buf[0] = '\0';
-    while (1) {
-        task_yield();
-        if (!kb.key_pressed)
-            continue;
-        uint8_t sc = kb.last_scancode;
-        char ch = kb.last_char;
-        if (sc == ENTER) {
-            cli_draw_char('\n');
-            blit();
-            break;
-        }
-        if (sc == BACKSPACE) {
-            if (len > 0) {
-                len--;
-                buf[len] = '\0';
-                s_cli.cursor_x -= CHAR_SPACING;
-                if (s_cli.cursor_x < 0)
-                    s_cli.cursor_x = 0;
-                draw_char(s_cli.cursor_x, s_cli.cursor_y, ' ', BLACK, 2);
-                blit();
-            }
-            continue;
-        }
-        if (ch >= 32 && ch < 127 && len < maxchars - 1) {
-            buf[len++] = ch;
-            buf[len] = '\0';
-            cli_draw_char(ch);
-            blit();
-        }
-    }
-    return len;
-}
-
-static int bsc_getchar(void) {
-    while (1) {
-        task_yield();
-        if (!kb.key_pressed)
-            continue;
-        char ch = kb.last_char;
-        if (ch >= 32 && ch < 127)
-            return (int)(unsigned char)ch;
-        if (kb.last_scancode == ENTER)
-            return '\n';
-        if (kb.last_scancode == BACKSPACE)
-            return '\b';
-    }
-}
-
-static void bsc_itoa(int val, char *buf) {
-    if (!buf)
-        return;
-    int_to_str(val, buf);
-}
-
-static const bin_syscall_t s_bsc = {
-    .sc_print = bsc_print,
-    .sc_putchar = bsc_putchar,
-    .sc_readline = bsc_readline,
-    .sc_getchar = bsc_getchar,
-    .sc_itoa = bsc_itoa,
-};
-
-#define BINRUN_MAX_SIZE 65536
-
-typedef struct {
-    uint8_t *buf;
-    uint32_t size;
-    const bin_syscall_t *sc;
-    int task_slot;
-} bin_task_ctx_t;
-
-static void bin_task_entry(void *arg) {
-    bin_task_ctx_t *ctx = (bin_task_ctx_t *)arg;
-
-    typedef void (*bin_fn_t)(const bin_syscall_t *);
-    bin_fn_t entry = (bin_fn_t)(void *)ctx->buf;
-    entry(ctx->sc);
-
-    kfree(ctx->buf);
-    ctx->buf = NULL;
-
-    int slot = ctx->task_slot;
-    kfree(ctx);
-
-    if (slot >= 1 && slot < MAX_TASKS)
-        tasks[slot].alive = false;
-
-    while (1)
-        task_yield();
-}
-
-void cmd_run(const char *path, char *out, size_t max) {
-    if (!path || path[0] == '\0') {
-        const char *u = "Usage: run <file.bin>\n"
-                        "  Executes a flat 32-bit binary.\n"
-                        "  syscall table ptr arrives at [esp+4] (cdecl arg).\n"
-                        "  Save it with: mov ebx, [esp+4]\n"
-                        "  Offsets: SC_PRINT=0 SC_PUTCHAR=4\n"
-                        "           SC_READLINE=8 SC_GETCHAR=12 SC_ITOA=16\n\n";
-        size_t i = 0;
-        while (u[i] && i < max - 1)
-            out[i] = u[i++];
-        out[i] = '\0';
-        return;
-    }
-
-    fat16_file_t f;
-    if (!fat16_open(path, &f)) {
-        sprintf(out, "run: cannot open '%s'\n", path);
-        return;
-    }
-    uint32_t file_size = f.entry.file_size;
-    fat16_close(&f);
-
-    if (file_size == 0) {
-        sprintf(out, "run: '%s' is empty\n", path);
-        return;
-    }
-    if (file_size > BINRUN_MAX_SIZE) {
-        sprintf(out, "run: '%s' too large (%u bytes)\n", path, file_size);
-        return;
-    }
-
-    uint8_t *buf = (uint8_t *)kmalloc(file_size);
-    if (!buf) {
-        sprintf(out, "run: out of memory\n");
-        return;
-    }
-
-    if (!fat16_open(path, &f)) {
-        kfree(buf);
-        sprintf(out, "run: re-open failed\n");
-        return;
-    }
-    int got = fat16_read(&f, buf, (int)file_size);
-    fat16_close(&f);
-
-    if (got != (int)file_size) {
-        kfree(buf);
-        sprintf(out, "run: read error (%d of %u)\n", got, file_size);
-        return;
-    }
-
-    bin_task_ctx_t *ctx = (bin_task_ctx_t *)kmalloc(sizeof(bin_task_ctx_t));
-    if (!ctx) {
-        kfree(buf);
-        sprintf(out, "run: out of memory\n");
-        return;
-    }
-    ctx->buf = buf;
-    ctx->size = file_size;
-    ctx->sc = &s_bsc;
-    ctx->task_slot = -1;
-
-    int slot = scheduler_add_task(bin_task_entry, ctx);
-    if (slot < 0) {
-        kfree(buf);
-        kfree(ctx);
-        sprintf(out, "run: no free task slots\n");
-        return;
-    }
-    ctx->task_slot = slot;
-
-    sprintf(out, "run: launched '%s' (%u bytes) as task %d\n", path, file_size,
-            slot);
-}
 
 #define ASM_MAX_LABELS 256
 #define ASM_MAX_FIXUPS 512
-#define ASM_MAX_OUTPUT 65536
 #define ASM_MAX_LINE 256
 #define ASM_MAX_TOKENS 16
 
-static uint8_t a_out[ASM_MAX_OUTPUT];
+static uint8_t a_out[ASM_OUT_MAX];
 static int a_out_len;
 static uint32_t a_org;
 static int a_bits;
@@ -419,7 +41,7 @@ static char a_tokens[ASM_MAX_TOKENS][ASM_MAX_LINE];
 static int a_tok_count;
 
 static void a_emit_b(uint8_t b) {
-    if (a_out_len < ASM_MAX_OUTPUT)
+    if (a_out_len < ASM_OUT_MAX)
         a_out[a_out_len++] = b;
 }
 static void a_emit_w(uint16_t w) {
@@ -470,6 +92,8 @@ static bool a_label_get(const char *n, uint32_t *out) {
 }
 
 static void a_fixup_add(fix_t type, int off, uint32_t base, const char *lbl) {
+    if (!lbl || !lbl[0])
+        return;
     if (a_fixup_count >= ASM_MAX_FIXUPS) {
         a_error("too many forward refs");
         return;
@@ -676,11 +300,9 @@ static bool a_eval(const char *expr, uint32_t *out, bool *is_fwd,
             }
             ep--;
         }
-
         if (best) {
             char lhs[ASM_MAX_LINE], rhs[ASM_MAX_LINE];
-            int ll = (int)(best - expr);
-            int rl = (int)strlen(best + 1);
+            int ll = (int)(best - expr), rl = (int)strlen(best + 1);
             if (ll >= ASM_MAX_LINE)
                 ll = ASM_MAX_LINE - 1;
             if (rl >= ASM_MAX_LINE)
@@ -689,19 +311,14 @@ static bool a_eval(const char *expr, uint32_t *out, bool *is_fwd,
             lhs[ll] = '\0';
             memcpy(rhs, best + 1, rl);
             rhs[rl] = '\0';
-
             uint32_t lv = 0, rv = 0;
             bool lf = false, rf = false;
             char ln[64] = "", rn[64] = "";
-
             if (!a_eval(lhs, &lv, &lf, ln))
                 return false;
             if (!a_eval(rhs, &rv, &rf, rn))
                 return false;
-
             *out = (bop == '+') ? lv + rv : lv - rv;
-
-            /* Forward ref: prefer the lhs label name */
             if (lf && ln[0]) {
                 *is_fwd = true;
                 if (fwd_label)
@@ -722,7 +339,6 @@ static bool a_eval(const char *expr, uint32_t *out, bool *is_fwd,
         *out = a_org;
         return true;
     }
-
     if (expr[0] == '$') {
         *out = a_cur();
         return true;
@@ -746,17 +362,13 @@ static bool a_eval(const char *expr, uint32_t *out, bool *is_fwd,
         while (a_is_ident(*p) && li < 63)
             lname[li++] = *p++;
         lname[li] = '\0';
-
-        if (li == 0) {
+        if (li == 0)
             return true;
-        }
-
         uint32_t addr;
         if (a_label_get(lname, &addr)) {
             *out = addr;
             return true;
         }
-
         *is_fwd = true;
         if (fwd_label) {
             strncpy(fwd_label, lname, 63);
@@ -1343,24 +955,8 @@ static void a_line(void) {
             if (t[0] == '"' || t[0] == '\'') {
                 int len = (int)strlen(t);
                 for (int j = 1; j < len - 1; j++) {
-                    if (t[j] == '\\') {
-                        j++;
-                        switch (t[j]) {
-                        case '0':
-                            a_emit_b(0);
-                            break;
-                        case 'n':
-                            a_emit_b('\n');
-                            break;
-                        case 't':
-                            a_emit_b('\t');
-                            break;
-                        default:
-                            a_emit_b((uint8_t)t[j]);
-                            break;
-                        }
-                    } else
-                        a_emit_b((uint8_t)t[j]);
+                    char c = t[j];
+                    a_emit_b(c == ASM_NUL_SENTINEL ? 0 : (uint8_t)c);
                 }
             } else {
                 uint32_t v;
@@ -1378,7 +974,7 @@ static void a_line(void) {
             bool fwd;
             char fl[64];
             a_eval(a_tokens[i], &v, &fwd, fl);
-            if (fwd) {
+            if (fwd && fl[0]) {
                 a_fixup_add(FIX_ABS32, a_out_len, a_cur() + 2, fl);
                 a_emit_w(0);
             } else
@@ -1392,7 +988,7 @@ static void a_line(void) {
             bool fwd;
             char fl[64];
             a_eval(a_tokens[i], &v, &fwd, fl);
-            if (fwd) {
+            if (fwd && fl[0]) {
                 a_fixup_add(FIX_ABS32, a_out_len, a_cur() + 4, fl);
                 a_emit_d(0);
             } else
@@ -1596,7 +1192,6 @@ static void a_line(void) {
         }
         return;
     }
-
     if (strcmp(mn, "ret") == 0 && a_tok_count >= 2) {
         uint32_t v;
         bool fwd;
@@ -1606,7 +1201,6 @@ static void a_line(void) {
         a_emit_w((uint16_t)v);
         return;
     }
-
     if (strcmp(mn, "enter") == 0 && a_tok_count >= 3) {
         uint32_t sz, lv;
         bool f1, f2;
@@ -1712,7 +1306,6 @@ static void a_line(void) {
         a_mov(&d, &s);
         return;
     }
-
     if (strcmp(mn, "lea") == 0 && a_tok_count >= 3) {
         op_t d, s;
         a_parse_op(a_tokens[1], &d);
@@ -1725,7 +1318,6 @@ static void a_line(void) {
             a_error("lea: bad operands");
         return;
     }
-
     if (strcmp(mn, "xchg") == 0 && a_tok_count >= 3) {
         op_t a, b;
         a_parse_op(a_tokens[1], &a);
@@ -1801,7 +1393,6 @@ static void a_line(void) {
             a_rm(op.size == 8 ? 0xFE : 0xFF, &op, grp);
         return;
     }
-
     if ((strcmp(mn, "neg") == 0 || strcmp(mn, "not") == 0) &&
         a_tok_count >= 2) {
         int grp = strcmp(mn, "not") == 0 ? 2 : 3;
@@ -1810,7 +1401,6 @@ static void a_line(void) {
         a_rm(op.size == 8 ? 0xF6 : 0xF7, &op, grp);
         return;
     }
-
     if (strcmp(mn, "mul") == 0 && a_tok_count >= 2) {
         op_t op;
         a_parse_op(a_tokens[1], &op);
@@ -1920,7 +1510,6 @@ static void a_line(void) {
         }
         return;
     }
-
     if ((strcmp(mn, "movzx") == 0 || strcmp(mn, "movsx") == 0) &&
         a_tok_count >= 3) {
         op_t d, s;
@@ -1956,7 +1545,9 @@ static void a_line(void) {
     a_error(tmp);
 }
 
-static bool do_assemble(const char *src, char *status, int smax) {
+static bool do_assemble_src(const char *src_text, uint8_t *out_buf,
+                            int *out_len, int buf_max, char *err_msg,
+                            int err_max) {
     a_out_len = 0;
     a_org = 0;
     a_bits = 32;
@@ -1968,24 +1559,10 @@ static bool do_assemble(const char *src, char *status, int smax) {
     memset(a_fixups, 0, sizeof(a_fixups));
     memset(a_out, 0, sizeof(a_out));
 
-    fat16_file_t f;
-    if (!fat16_open(src, &f)) {
-        sprintf(status, "cannot open '%s'", src);
-        return false;
-    }
-    static char fbuf[32768];
-    int flen = fat16_read(&f, fbuf, sizeof(fbuf) - 1);
-    fat16_close(&f);
-    if (flen <= 0) {
-        strncpy(status, "file is empty", smax);
-        return false;
-    }
-    fbuf[flen] = '\0';
-
     for (a_pass = 0; a_pass < 2 && !a_had_error; a_pass++) {
         a_out_len = 0;
         a_fixup_count = 0;
-        char *ptr = fbuf;
+        const char *ptr = src_text;
         a_line_no = 0;
         while (*ptr && !a_had_error) {
             a_line_no++;
@@ -2004,21 +1581,49 @@ static bool do_assemble(const char *src, char *status, int smax) {
         if (a_pass == 1)
             a_fixup_apply();
     }
+
     if (a_had_error) {
-        strncpy(status, a_err, smax);
+        strncpy(err_msg, a_err, err_max - 1);
+        err_msg[err_max - 1] = '\0';
         return false;
     }
-    sprintf(status, "assembled %d bytes", a_out_len);
+
+    int copy = a_out_len;
+    if (copy > buf_max) {
+        strncpy(err_msg, "output too large", err_max - 1);
+        return false;
+    }
+    memcpy(out_buf, a_out, copy);
+    *out_len = copy;
     return true;
+}
+
+bool asm_assemble_file(const char *src_path, uint8_t *out_buf, int *out_len,
+                       int buf_max, char *err_msg, int err_max) {
+    fat16_file_t f;
+    if (!fat16_open(src_path, &f)) {
+        snprintf(err_msg, err_max, "cannot open '%s'", src_path);
+        return false;
+    }
+    static char fbuf[32768];
+    int flen = fat16_read(&f, fbuf, sizeof(fbuf) - 1);
+    fat16_close(&f);
+    if (flen <= 0) {
+        strncpy(err_msg, "file is empty", err_max - 1);
+        return false;
+    }
+    fbuf[flen] = '\0';
+    return do_assemble_src(fbuf, out_buf, out_len, buf_max, err_msg, err_max);
+}
+
+bool asm_assemble_str(const char *src, uint8_t *out_buf, int *out_len,
+                      int buf_max, char *err_msg, int err_max) {
+    return do_assemble_src(src, out_buf, out_len, buf_max, err_msg, err_max);
 }
 
 void cmd_asmasm(const char *args, char *out, size_t max) {
     if (!args || args[0] == '\0') {
-        const char *u = "Usage: asm <source.asm> [output.bin]\n\n";
-        size_t i = 0;
-        while (u[i] && i < max - 1)
-            out[i] = u[i++];
-        out[i] = '\0';
+        strncpy(out, "Usage: asm <source.asm> [output.bin]\n", max - 1);
         return;
     }
     char src[64] = "", dst[64] = "";
@@ -2045,14 +1650,16 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
             strcat(dst, ".BIN");
     }
 
-    char status[128];
-    bool ok = do_assemble(src, status, sizeof(status));
-    if (!ok) {
-        sprintf(out, "asm: error: %s\n", status);
+    static uint8_t obuf[ASM_OUT_MAX];
+    int olen = 0;
+    char errmsg[128];
+    if (!asm_assemble_file(src, obuf, &olen, ASM_OUT_MAX, errmsg,
+                           sizeof(errmsg))) {
+        snprintf(out, max, "asm: error: %s\n", errmsg);
         return;
     }
-    if (a_out_len == 0) {
-        strcpy(out, "asm: nothing to write\n");
+    if (olen == 0) {
+        strncpy(out, "asm: nothing to write\n", max - 1);
         return;
     }
 
@@ -2061,558 +1668,10 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
         fat16_delete(dst);
     fat16_file_t wf;
     if (!fat16_create(dst, &wf)) {
-        sprintf(out, "asm: cannot create '%s'\n", dst);
+        snprintf(out, max, "asm: cannot create '%s'\n", dst);
         return;
     }
-    fat16_write(&wf, a_out, a_out_len);
+    fat16_write(&wf, obuf, olen);
     fat16_close(&wf);
-    sprintf(out, "asm: %s -> %s (%d bytes)\n", src, dst, a_out_len);
-}
-
-static void append_output(char *buffer, size_t max_len, const char *text) {
-    size_t cl = strlen(buffer), tl = strlen(text);
-    if (cl + tl + 1 < max_len)
-        strcpy(buffer + cl, text);
-}
-
-void cmd_help(char *out, size_t max) {
-    append_output(out, max, "Available commands:\n");
-    append_output(out, max, "help          - This message\n");
-    append_output(out, max, "clear         - Clear screen\n");
-    append_output(out, max, "pwd           - Working directory\n");
-    append_output(out, max, "cd <d>        - Change directory\n");
-    append_output(out, max, "ls            - List directory\n");
-    append_output(out, max, "cat <f>       - Print file\n");
-    append_output(out, max, "touch <f>     - Create empty file\n");
-    append_output(out, max, "rm [-r] <f>   - Delete file/dir\n");
-    append_output(out, max, "write <f> <t> - Write text to file\n");
-    append_output(out, max, "echo <t>      - Print text\n");
-    append_output(out, max, "cp <s> <d>    - Copy file/dir\n");
-    append_output(out, max, "mv <s> <d>    - Move/rename\n");
-    append_output(out, max, "mkdir <d>     - Create directory\n");
-    append_output(out, max, "rmdir <d>     - Remove empty dir\n");
-    append_output(out, max, "df            - Disk usage\n");
-    append_output(out, max, "mem           - Memory usage\n");
-    append_output(out, max, "clock         - System time\n");
-    append_output(out, max, "tee <f>       - Save terminal buffer to file\n");
-    append_output(out, max, "history       - Recent terminal output\n");
-    append_output(out, max, "asm <f> [out] - Assemble .ASM -> .BIN\n");
-    append_output(out, max,
-                  "run <f>       - Execute flat .BIN (interactive)\n");
-    append_output(out, max, "gui           - Start GUI\n");
-    append_output(out, max, "exit          - Exit CLI\n\n");
-}
-
-void cmd_pwd(char *out, size_t max) {
-    char pwd[256];
-    if (fat16_pwd(pwd, sizeof(pwd))) {
-        append_output(out, max, pwd);
-        append_output(out, max, "\n\n");
-    }
-}
-
-void cmd_cd(const char *path, char *out, size_t max) {
-    if (!path || path[0] == '\0') {
-        append_output(out, max, "Usage: cd <path>\n\n");
-        return;
-    }
-    if (!fat16_chdir(path))
-        append_output(out, max, "Error: directory not found\n\n");
-}
-
-void cmd_ls(char *out, size_t max) {
-    dir_entry_t entries[32];
-    int count = 0;
-    if (!fat16_list_dir(dir_context.current_cluster, entries, 32, &count)) {
-        append_output(out, max, "Error listing files\n\n");
-        return;
-    }
-    append_output(out, max, "Files:\n");
-    for (int i = 0; i < count; i++) {
-        char nb[16];
-        int j = 0;
-        for (int k = 0; k < 8 && entries[i].name[k] != ' '; k++)
-            nb[j++] = entries[i].name[k];
-        if (entries[i].ext[0] != ' ') {
-            nb[j++] = '.';
-            for (int k = 0; k < 3 && entries[i].ext[k] != ' '; k++)
-                nb[j++] = entries[i].ext[k];
-        }
-        nb[j] = '\0';
-        append_output(out, max, "  ");
-        append_output(out, max, nb);
-        if (entries[i].attr & ATTR_DIRECTORY)
-            append_output(out, max, " [DIR]\n");
-        else {
-            char ss[32];
-            sprintf(ss, " (%ub)\n", entries[i].file_size);
-            append_output(out, max, ss);
-        }
-    }
-    append_output(out, max, "\n");
-}
-
-void cmd_cat(const char *filename, char *out, size_t max) {
-    if (!filename || filename[0] == '\0') {
-        append_output(out, max, "Usage: cat <filename>\n\n");
-        return;
-    }
-    fat16_file_t file;
-    if (!fat16_open(filename, &file)) {
-        append_output(out, max, "Error: file not found\n\n");
-        return;
-    }
-    char buf[512];
-    char tmp[513];
-    int n;
-    while ((n = fat16_read(&file, buf, 512)) > 0) {
-        int ti = 0;
-        for (int i = 0; i < n; i++)
-            if (buf[i] == '\n' || (buf[i] >= 32 && buf[i] < 127))
-                tmp[ti++] = buf[i];
-        tmp[ti] = '\0';
-        append_output(out, max, tmp);
-    }
-    fat16_close(&file);
-    append_output(out, max, "\n\n");
-}
-
-void cmd_write(const char *args, char *out, size_t max) {
-    if (!args || args[0] == '\0') {
-        append_output(out, max, "Usage: write <file> <text>\n\n");
-        return;
-    }
-    int i = 0;
-    while (args[i] == ' ')
-        i++;
-    int fs = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    if (i == fs) {
-        append_output(out, max, "Usage: write <file> <text>\n\n");
-        return;
-    }
-    char fn[64];
-    int fl = i - fs;
-    if (fl >= 64)
-        fl = 63;
-    memcpy(fn, &args[fs], fl);
-    fn[fl] = '\0';
-    while (args[i] == ' ')
-        i++;
-    if (args[i] == '\0') {
-        append_output(out, max, "Usage: write <file> <text>\n\n");
-        return;
-    }
-    fat16_file_t file;
-    dir_entry_t entry;
-    if (fat16_find(fn, &entry)) {
-        if (!fat16_open(fn, &file)) {
-            append_output(out, max, "Error: cannot open\n\n");
-            return;
-        }
-    } else {
-        if (!fat16_create(fn, &file)) {
-            append_output(out, max, "Error: cannot create\n\n");
-            return;
-        }
-    }
-    int tl = 0;
-    while (args[i + tl] != '\0')
-        tl++;
-    int written = fat16_write(&file, &args[i], tl);
-    fat16_close(&file);
-    char tmp[64];
-    sprintf(tmp, "Wrote %d bytes\n\n", written);
-    append_output(out, max, tmp);
-}
-
-void cmd_touch(const char *filename, char *out, size_t max) {
-    if (!filename || filename[0] == '\0') {
-        append_output(out, max, "Usage: touch <filename>\n\n");
-        return;
-    }
-    fat16_file_t file;
-    if (!fat16_create(filename, &file)) {
-        append_output(out, max, "Error: exists or invalid\n\n");
-        return;
-    }
-    fat16_close(&file);
-    append_output(out, max, "Created: ");
-    append_output(out, max, filename);
-    append_output(out, max, "\n\n");
-}
-
-void cmd_rm(const char *args, char *out, size_t max) {
-    if (!args || args[0] == '\0') {
-        append_output(out, max, "Usage: rm [-r] <filename>\n\n");
-        return;
-    }
-    if (strncmp(args, "-r ", 3) == 0) {
-        if (!fat16_rm_rf(args + 3)) {
-            append_output(out, max, "Error: delete failed\n\n");
-            return;
-        }
-        append_output(out, max, "Deleted (recursive): ");
-        append_output(out, max, args + 3);
-        append_output(out, max, "\n\n");
-    } else {
-        if (!fat16_delete(args)) {
-            append_output(out, max, "Error: file not found\n\n");
-            return;
-        }
-        append_output(out, max, "Deleted: ");
-        append_output(out, max, args);
-        append_output(out, max, "\n\n");
-    }
-}
-
-void cmd_mkdir(const char *dirname, char *out, size_t max) {
-    if (!dirname || dirname[0] == '\0') {
-        append_output(out, max, "Usage: mkdir <dirname>\n\n");
-        return;
-    }
-    if (!fat16_mkdir(dirname)) {
-        append_output(out, max, "Error: could not create '");
-        append_output(out, max, dirname);
-        append_output(out, max, "'\n\n");
-        return;
-    }
-    append_output(out, max, "Created: ");
-    append_output(out, max, dirname);
-    append_output(out, max, "\n\n");
-}
-
-void cmd_rmdir(const char *dirname, char *out, size_t max) {
-    if (!dirname || dirname[0] == '\0') {
-        append_output(out, max, "Usage: rmdir <dirname>\n\n");
-        return;
-    }
-    if (!fat16_rmdir(dirname)) {
-        append_output(out, max, "Error: '");
-        append_output(out, max, dirname);
-        append_output(out, max, "' not found/not empty\n\n");
-        return;
-    }
-    append_output(out, max, "Removed: ");
-    append_output(out, max, dirname);
-    append_output(out, max, "\n\n");
-}
-
-void cmd_cp(const char *args, char *out, size_t max) {
-    if (!args || args[0] == '\0') {
-        append_output(out, max, "Usage: cp <src> <dest>\n\n");
-        return;
-    }
-    int i = 0;
-    while (args[i] == ' ')
-        i++;
-    int ss = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int sl = i - ss;
-    while (args[i] == ' ')
-        i++;
-    int ds = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int dl = i - ds;
-    if (!sl || !dl) {
-        append_output(out, max, "Usage: cp <src> <dest>\n\n");
-        return;
-    }
-    char src[64], dst[64];
-    if (sl >= 64)
-        sl = 63;
-    if (dl >= 64)
-        dl = 63;
-    memcpy(src, &args[ss], sl);
-    src[sl] = '\0';
-    memcpy(dst, &args[ds], dl);
-    dst[dl] = '\0';
-    dir_entry_t e;
-    if (!fat16_find(src, &e)) {
-        append_output(out, max, "Error: source not found\n\n");
-        return;
-    }
-    bool ok = (e.attr & ATTR_DIRECTORY) ? fat16_copy_dir(src, dst)
-                                        : fat16_copy_file(src, dst);
-    if (ok) {
-        char tmp[150];
-        sprintf(tmp, "Copied: %s -> %s\n\n", src, dst);
-        append_output(out, max, tmp);
-    } else
-        append_output(out, max, "Error: copy failed\n\n");
-}
-
-void cmd_mv(const char *args, char *out, size_t max) {
-    if (!args || args[0] == '\0') {
-        append_output(out, max, "Usage: mv <src> <dest>\n\n");
-        return;
-    }
-    int i = 0;
-    while (args[i] == ' ')
-        i++;
-    int ss = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int sl = i - ss;
-    while (args[i] == ' ')
-        i++;
-    int ds = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int dl = i - ds;
-    if (!sl || !dl) {
-        append_output(out, max, "Usage: mv <src> <dest>\n\n");
-        return;
-    }
-    char src[64], dst[64];
-    if (sl >= 64)
-        sl = 63;
-    if (dl >= 64)
-        dl = 63;
-    memcpy(src, &args[ss], sl);
-    src[sl] = '\0';
-    memcpy(dst, &args[ds], dl);
-    dst[dl] = '\0';
-    dir_entry_t e;
-    if (!fat16_find(src, &e)) {
-        append_output(out, max, "Error: source not found\n\n");
-        return;
-    }
-    bool ok = (e.attr & ATTR_DIRECTORY) ? fat16_move_dir(src, dst)
-                                        : fat16_move_file(src, dst);
-    if (ok) {
-        char tmp[150];
-        sprintf(tmp, "Moved: %s -> %s\n\n", src, dst);
-        append_output(out, max, tmp);
-    } else
-        append_output(out, max, "Error: move failed\n\n");
-}
-
-void cmd_df(char *out, size_t max) {
-    uint32_t tot = 0, used = 0;
-    if (!fat16_get_usage(&tot, &used)) {
-        append_output(out, max, "Error reading storage\n\n");
-        return;
-    }
-    char buf[128];
-    sprintf(buf, "Total: %u B  Used: %u B  Free: %u B\n\n", tot, used,
-            tot - used);
-    append_output(out, max, buf);
-}
-
-void cmd_mem(char *out, size_t max) {
-    char buf[128];
-    sprintf(buf, "Heap used: %u KB  free: %u KB\n\n", heap_used() / 1024,
-            heap_remaining() / 1024);
-    append_output(out, max, buf);
-}
-
-void cmd_echo(const char *text, char *out, size_t max) {
-    if (!text || text[0] == '\0') {
-        append_output(out, max, "\n");
-        return;
-    }
-    append_output(out, max, text);
-    append_output(out, max, "\n\n");
-}
-
-void cmd_clock(char *out, size_t max) {
-    time_full_t t = time_rtc();
-    char buf[64];
-    sprintf(buf, "%04d-%02d-%02d  %02d:%02d:%02d\n\n", t.year, t.month, t.day,
-            t.hours, t.minutes, t.seconds);
-    append_output(out, max, buf);
-}
-
-static void cmd_tee(const char *filename, char *out, size_t max) {
-    if (!filename || filename[0] == '\0') {
-        append_output(out, max, "Usage: tee <filename>\n\n");
-        return;
-    }
-    if (term_buf_save(filename)) {
-        char tmp[128];
-        sprintf(tmp, "Saved %d lines to %s\n\n", term_buf_count(), filename);
-        append_output(out, max, tmp);
-    } else
-        append_output(out, max, "Error: could not save buffer\n\n");
-}
-
-static void cmd_history(char *out, size_t max) {
-    int n = term_buf_count();
-    if (n == 0) {
-        append_output(out, max, "(empty)\n\n");
-        return;
-    }
-    char tmp[20];
-    sprintf(tmp, "%d lines:\n", n);
-    append_output(out, max, tmp);
-    int start = n > 20 ? n - 20 : 0;
-    for (int i = start; i < n; i++) {
-        const char *line = term_buf_get(i);
-        if (line) {
-            append_output(out, max, line);
-            append_output(out, max, "\n");
-        }
-    }
-    append_output(out, max, "\n");
-}
-
-static void parse_command(const char *input, char *cmd, char *arg) {
-    cmd[0] = '\0';
-    arg[0] = '\0';
-    int i = 0;
-    while (input[i] == ' ')
-        i++;
-    int ci = 0;
-    while (input[i] && input[i] != ' ' && ci < 63)
-        cmd[ci++] = input[i++];
-    cmd[ci] = '\0';
-    while (input[i] == ' ')
-        i++;
-    int ai = 0;
-    while (input[i] && ai < 255)
-        arg[ai++] = input[i++];
-    arg[ai] = '\0';
-}
-
-cmd_status_t cli_execute_command(const char *cmd, char *out_buffer,
-                                 size_t max_len) {
-    char command[64];
-    char argument[CMD_OUTPUT_MAX - 64 - 2];
-    out_buffer[0] = '\0';
-    parse_command(cmd, command, argument);
-
-    {
-        char el[256];
-        sprintf(el, "> %s", cmd);
-        term_buf_push(el);
-    }
-
-    if (strcmp(command, "help") == 0)
-        cmd_help(out_buffer, max_len);
-    else if (strcmp(command, "clear") == 0) {
-        term_buf_clear();
-        return CMD_STATUS_CLEAR;
-    } else if (strcmp(command, "pwd") == 0)
-        cmd_pwd(out_buffer, max_len);
-    else if (strcmp(command, "cd") == 0)
-        cmd_cd(argument, out_buffer, max_len);
-    else if (strcmp(command, "ls") == 0)
-        cmd_ls(out_buffer, max_len);
-    else if (strcmp(command, "cat") == 0)
-        cmd_cat(argument, out_buffer, max_len);
-    else if (strcmp(command, "touch") == 0)
-        cmd_touch(argument, out_buffer, max_len);
-    else if (strcmp(command, "rm") == 0)
-        cmd_rm(argument, out_buffer, max_len);
-    else if (strcmp(command, "write") == 0)
-        cmd_write(argument, out_buffer, max_len);
-    else if (strcmp(command, "echo") == 0)
-        cmd_echo(argument, out_buffer, max_len);
-    else if (strcmp(command, "clock") == 0)
-        cmd_clock(out_buffer, max_len);
-    else if (strcmp(command, "df") == 0)
-        cmd_df(out_buffer, max_len);
-    else if (strcmp(command, "mem") == 0)
-        cmd_mem(out_buffer, max_len);
-    else if (strcmp(command, "cp") == 0)
-        cmd_cp(argument, out_buffer, max_len);
-    else if (strcmp(command, "mv") == 0)
-        cmd_mv(argument, out_buffer, max_len);
-    else if (strcmp(command, "mkdir") == 0)
-        cmd_mkdir(argument, out_buffer, max_len);
-    else if (strcmp(command, "rmdir") == 0)
-        cmd_rmdir(argument, out_buffer, max_len);
-    else if (strcmp(command, "tee") == 0)
-        cmd_tee(argument, out_buffer, max_len);
-    else if (strcmp(command, "history") == 0)
-        cmd_history(out_buffer, max_len);
-    else if (strcmp(command, "asm") == 0)
-        cmd_asmasm(argument, out_buffer, max_len);
-    else if (strcmp(command, "run") == 0) {
-        cmd_run(argument, out_buffer, max_len);
-    } else if (strcmp(command, "gui") == 0) {
-        append_output(out_buffer, max_len, "Starting GUI...\n\n");
-        sleep_s(1);
-        return CMD_STATUS_GUI;
-    } else if (strcmp(command, "exit") == 0) {
-        append_output(out_buffer, max_len, "Exiting...\n");
-        sleep_s(1);
-        return CMD_STATUS_EXIT;
-    } else if (command[0] != '\0') {
-        append_output(out_buffer, max_len, "Unknown command: ");
-        append_output(out_buffer, max_len, command);
-        append_output(out_buffer, max_len, "\n\n");
-    }
-
-    if (out_buffer[0])
-        term_buf_push_text(out_buffer);
-    return CMD_STATUS_OK;
-}
-
-void cli_run(void) {
-    clear_screen(BLACK);
-    s_cli.cursor_x = 0;
-    s_cli.cursor_y = 0;
-    blit();
-    cli_println("ASMOS CLI");
-    cli_println("Type 'help' for commands.");
-    cli_draw_char('\n');
-    blit();
-
-    static char out_buf[CMD_OUTPUT_MAX];
-
-    while (1) {
-        shell_draw_prompt();
-        s_cli.buffer_pos = 0;
-        s_cli.buffer[0] = '\0';
-
-        while (1) {
-            ps2_update();
-            if (!kb.key_pressed)
-                continue;
-
-            if (kb.last_scancode == ENTER) {
-                cli_draw_char('\n');
-                blit();
-                cmd_status_t status =
-                    cli_execute_command(s_cli.buffer, out_buf, CMD_OUTPUT_MAX);
-                if (status == CMD_STATUS_EXIT || status == CMD_STATUS_GUI) {
-                    cli_print(out_buf);
-                    return;
-                } else if (status == CMD_STATUS_CLEAR) {
-                    clear_screen(BLACK);
-                    s_cli.cursor_x = 0;
-                    s_cli.cursor_y = 0;
-                    blit();
-                } else {
-                    cli_print(out_buf);
-                }
-                break;
-            }
-            if (kb.last_scancode == BACKSPACE) {
-                if (s_cli.buffer_pos > 0) {
-                    s_cli.buffer_pos--;
-                    s_cli.buffer[s_cli.buffer_pos] = '\0';
-                    s_cli.cursor_x -= CHAR_SPACING;
-                    if (s_cli.cursor_x < 0)
-                        s_cli.cursor_x = 0;
-                    draw_char(s_cli.cursor_x, s_cli.cursor_y, ' ', BLACK, 2);
-                    blit();
-                }
-                continue;
-            }
-            if (kb.last_char >= 32 && kb.last_char < 127) {
-                if (s_cli.buffer_pos < CLI_BUFFER_SIZE - 1) {
-                    s_cli.buffer[s_cli.buffer_pos++] = kb.last_char;
-                    s_cli.buffer[s_cli.buffer_pos] = '\0';
-                    cli_draw_char(kb.last_char);
-                    blit();
-                }
-            }
-        }
-    }
+    snprintf(out, max, "asm: %s -> %s (%d bytes)\n", src, dst, olen);
 }

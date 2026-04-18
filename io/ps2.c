@@ -4,16 +4,17 @@
 #include "lib/core.h"
 
 void ps2_init(void) {
-	mouse_init();
-	kb_init();
+    mouse_init();
+    kb_init();
 }
 
 void ps2_update(void) {
-	kb_update();
-	mouse_update();
+    kb_update();
+    mouse_update();
     while (1) {
         unsigned char status = inb(PS2_STATUS);
-        if (!(status & 0x01)) break;
+        if (!(status & 0x01))
+            break;
 
         unsigned char byte = inb(PS2_DATA);
 

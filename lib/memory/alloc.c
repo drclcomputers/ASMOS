@@ -2,8 +2,8 @@
 #include "lib/memory/mem.h"
 
 typedef struct block_header {
-    uint32_t            size;
-    bool                free;
+    uint32_t size;
+    bool free;
     struct block_header *next;
 } block_header_t;
 
@@ -29,7 +29,7 @@ static void coalesce(void) {
     while (cur && cur->next) {
         if (cur->free && cur->next->free) {
             cur->size += HEADER_SIZE + cur->next->size;
-            cur->next  = cur->next->next;
+            cur->next = cur->next->next;
         } else {
             cur = cur->next;
         }
@@ -37,14 +37,16 @@ static void coalesce(void) {
 }
 
 void *kmalloc(uint32_t size) {
-    if (size == 0) return NULL;
-    size = (size + 3) & ~3u;   // 4-byte align
+    if (size == 0)
+        return NULL;
+    size = (size + 3) & ~3u; // 4-byte align
 
     block_header_t *cur = heap_start_ptr;
     while (cur) {
         if (cur->free && cur->size >= size) {
             if (cur->size >= size + HEADER_SIZE + 4) {
-                block_header_t *nb = (block_header_t *)((uint8_t *)cur + HEADER_SIZE + size);
+                block_header_t *nb =
+                    (block_header_t *)((uint8_t *)cur + HEADER_SIZE + size);
                 nb->size = cur->size - size - HEADER_SIZE;
                 nb->free = true;
                 nb->next = cur->next;
@@ -61,40 +63,51 @@ void *kmalloc(uint32_t size) {
 
 void *kzalloc(uint32_t size) {
     void *p = kmalloc(size);
-    if (p) memset(p, 0, size);
+    if (p)
+        memset(p, 0, size);
     return p;
 }
 
 void *krealloc(void *ptr, uint32_t new_size) {
-    if (!ptr)      return kmalloc(new_size);
-    if (!new_size) { kfree(ptr); return NULL; }
+    if (!ptr)
+        return kmalloc(new_size);
+    if (!new_size) {
+        kfree(ptr);
+        return NULL;
+    }
 
     block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
-    if (hdr->size >= new_size) return ptr;  // already big enough
+    if (hdr->size >= new_size)
+        return ptr; // already big enough
 
     void *np = kmalloc(new_size);
-    if (!np) return NULL;
+    if (!np)
+        return NULL;
     memcpy(np, ptr, hdr->size < new_size ? hdr->size : new_size);
     kfree(ptr);
     return np;
 }
 
 void *kmalloc_aligned(uint32_t size, uint32_t align) {
-    if (align == 0 || (align & (align - 1)) != 0) return NULL;
-    if (align <= 4) return kmalloc(size);
+    if (align == 0 || (align & (align - 1)) != 0)
+        return NULL;
+    if (align <= 4)
+        return kmalloc(size);
 
     uint32_t over = size + align + HEADER_SIZE;
-    uint8_t *raw  = (uint8_t *)kmalloc(over);
-    if (!raw) return NULL;
+    uint8_t *raw = (uint8_t *)kmalloc(over);
+    if (!raw)
+        return NULL;
 
-    uint32_t addr    = (uint32_t)raw;
+    uint32_t addr = (uint32_t)raw;
     uint32_t aligned = (addr + align - 1) & ~(align - 1);
     (void)aligned;
     return raw;
 }
 
 void kfree(void *ptr) {
-    if (!ptr) return;
+    if (!ptr)
+        return;
     block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
     hdr->free = true;
     coalesce();
@@ -104,7 +117,8 @@ uint32_t heap_used(void) {
     uint32_t used = 0;
     block_header_t *cur = heap_start_ptr;
     while (cur) {
-        if (!cur->free) used += HEADER_SIZE + cur->size;
+        if (!cur->free)
+            used += HEADER_SIZE + cur->size;
         cur = cur->next;
     }
     return used;
@@ -114,21 +128,25 @@ uint32_t heap_remaining(void) {
     uint32_t free_bytes = 0;
     block_header_t *cur = heap_start_ptr;
     while (cur) {
-        if (cur->free) free_bytes += cur->size;
+        if (cur->free)
+            free_bytes += cur->size;
         cur = cur->next;
     }
     return free_bytes;
 }
 
-bool pool_init(pool_t *pool, void *slab, uint32_t capacity, uint32_t block_size) {
-    if (!pool || !slab || capacity == 0 || block_size == 0) return false;
+bool pool_init(pool_t *pool, void *slab, uint32_t capacity,
+               uint32_t block_size) {
+    if (!pool || !slab || capacity == 0 || block_size == 0)
+        return false;
 
     pool->block_size = (block_size + 3) & ~3u;
-    pool->capacity   = capacity;
-    pool->slab       = (uint8_t *)slab;
+    pool->capacity = capacity;
+    pool->slab = (uint8_t *)slab;
 
     pool->free_stack = (uint32_t *)kmalloc(capacity * sizeof(uint32_t));
-    if (!pool->free_stack) return false;
+    if (!pool->free_stack)
+        return false;
 
     for (uint32_t i = 0; i < capacity; i++)
         pool->free_stack[i] = i;
@@ -144,13 +162,15 @@ void pool_destroy(pool_t *pool) {
 }
 
 void *pool_alloc(pool_t *pool) {
-    if (!pool || pool->free_count == 0) return NULL;
+    if (!pool || pool->free_count == 0)
+        return NULL;
     uint32_t idx = pool->free_stack[--pool->free_count];
     return pool->slab + idx * pool->block_size;
 }
 
 void pool_free(pool_t *pool, void *ptr) {
-    if (!pool || !ptr) return;
+    if (!pool || !ptr)
+        return;
     uint32_t idx = (uint32_t)((uint8_t *)ptr - pool->slab) / pool->block_size;
     if (idx < pool->capacity)
         pool->free_stack[pool->free_count++] = idx;
