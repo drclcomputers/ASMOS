@@ -52,95 +52,17 @@ const char *desktop_fs_path(void);
  * their actual runtime addresses, not their link-time offsets from 0.
  */
 #define HELLO_ASM \
-"bits 32\n" \
-"org  0\n" \
-"SC_PRINT    equ 0\n" \
-"SC_PUTCHAR  equ 4\n" \
-"SC_READLINE equ 8\n" \
-"SC_GETCHAR  equ 12\n" \
-"SC_ITOA     equ 16\n" \
-"    call .findbase\n" \
-".findbase:\n" \
-"    pop  ebp\n" \
-"    sub  ebp, (.findbase - $$)\n" \
-"    push ebx\n" \
-"    push esi\n" \
-"    push edi\n" \
-"    mov  ebx, [esp + 16]\n" \
-"    lea  eax, [ebp + msg_hello]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    lea  eax, [ebp + msg_prompt]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    lea  eax, [ebp + name_buf]\n" \
-"    push 33\n" \
-"    push eax\n" \
-"    call [ebx + SC_READLINE]\n" \
-"    add  esp, 8\n" \
-"    lea  eax, [ebp + msg_reply]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    lea  eax, [ebp + name_buf]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    lea  eax, [ebp + msg_exclaim]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    lea  eax, [ebp + msg_counting]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    mov  esi, 1\n" \
-".count_loop:\n" \
-"    cmp  esi, 5\n" \
-"    jg   .count_done\n" \
-"    lea  eax, [ebp + num_buf]\n" \
-"    push eax\n" \
-"    push esi\n" \
-"    call [ebx + SC_ITOA]\n" \
-"    add  esp, 8\n" \
-"    lea  eax, [ebp + num_buf]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    cmp  esi, 5\n" \
-"    je   .last_num\n" \
-"    lea  eax, [ebp + msg_space]\n" \
-"    push eax\n" \
-"    jmp  .print_sep\n" \
-".last_num:\n" \
-"    lea  eax, [ebp + msg_newline]\n" \
-"    push eax\n" \
-".print_sep:\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    inc  esi\n" \
-"    jmp  .count_loop\n" \
-".count_done:\n" \
-"    lea  eax, [ebp + msg_anykey]\n" \
-"    push eax\n" \
-"    call [ebx + SC_PRINT]\n" \
-"    add  esp, 4\n" \
-"    call [ebx + SC_GETCHAR]\n" \
-"    pop  edi\n" \
-"    pop  esi\n" \
-"    pop  ebx\n" \
-"    ret\n" \
-"name_buf:    times 34 db 0\n" \
-"num_buf:     times 12 db 0\n" \
-"msg_hello:    db \"Hello from ASMOS Assembly!\", 10, 0\n" \
-"msg_prompt:   db \"Enter your name: \", 0\n" \
-"msg_reply:    db \"Nice to meet you, \", 0\n" \
-"msg_exclaim:  db \"!\", 10, 0\n" \
-"msg_counting: db \"Counting: \", 0\n" \
-"msg_space:    db \" \", 0\n" \
-"msg_newline:  db 10, 0\n" \
-"msg_anykey:   db \"Press any key to exit...\", 0"
+"; The syscall table pointer is at [esp + 4]\n" \
+"\n" \
+"_start:\n" \
+"    mov ebx, [esp + 4]     ; Get the syscall_t pointer\n" \
+"\n" \
+"    ; Try to print a single character using bsc_putchar\n" \
+"    ; Offset for putchar is 4 (see binrun.h)\n" \
+"    push '!'               ; Push char to print\n" \
+"    call [ebx + 4]         ; Call sc_putchar\n" \
+"    add esp, 4             ; Clean up stack\n" \
+"\n" \
+"    ret                    ; Return to binrun.c\n"
 
 #endif

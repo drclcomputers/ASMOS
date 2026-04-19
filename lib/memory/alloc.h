@@ -4,6 +4,8 @@
 #include "config/config.h"
 #include "lib/core.h"
 
+#define HEAP_MAGIC 0xDEADBEEF
+
 void alloc_init(void);
 void alloc_set_end(uint32_t end);
 
@@ -27,8 +29,7 @@ typedef struct {
     uint32_t free_count;
 } pool_t;
 
-bool pool_init(pool_t *pool, void *slab, uint32_t capacity,
-               uint32_t block_size);
+bool pool_init(pool_t *pool, void *slab, uint32_t capacity, uint32_t block_size);
 
 void pool_destroy(pool_t *pool);
 

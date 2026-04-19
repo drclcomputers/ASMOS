@@ -1,4 +1,6 @@
 #include "os/api.h"
+#include "os/scheduler.h"
+#include "shell/asm/asm.h"
 #include "shell/binrun.h"
 #include "shell/term_buf.h"
 
@@ -231,7 +233,7 @@ static void term_execute(asmterm_state_t *s) {
     s->hist_pos = -1;
     s->hist_draft[0] = '\0';
 
-    char outbuf[1024];
+    static char outbuf[1024];
     outbuf[0] = '\0';
     if (strcmp("exit", s->input) == 0) {
         s->should_exit = true;

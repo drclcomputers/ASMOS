@@ -5,10 +5,10 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 
-#define ASM_MAX_LABELS 256
+#define ASM_MAX_LABELS 512
 #define ASM_MAX_FIXUPS 512
 #define ASM_MAX_LINE 256
-#define ASM_MAX_TOKENS 16
+#define ASM_MAX_TOKENS 64
 
 static uint8_t a_out[ASM_OUT_MAX];
 static int a_out_len;
@@ -137,60 +137,68 @@ static void a_fixup_apply(void) {
 
 static void a_tokenise(char *line) {
     a_tok_count = 0;
-    for (char *q = line; *q; q++)
+
+    for (char *q = line; *q; q++) {
         if (*q == ';') {
             *q = '\0';
             break;
         }
+    }
+
     char *p = line;
     while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == ',')
+        while (*p && (*p == ' ' || *p == '\t' || *p == ',')) {
             p++;
-        if (!*p || a_tok_count >= ASM_MAX_TOKENS)
-            break;
+        }
+
+        if (!*p) break;
+
+        if (a_tok_count >= ASM_MAX_TOKENS) {
+            strncpy(a_err, "Token limit exceeded on one line", sizeof(a_err)-1);
+            a_had_error = true;
+            return;
+        }
+
         char *dst = a_tokens[a_tok_count];
         int di = 0;
+
         if (*p == '"' || *p == '\'') {
-            char q = *p++;
-            dst[di++] = q;
-            while (*p && *p != q && di < ASM_MAX_LINE - 2) {
+            char quote = *p++;
+            dst[di++] = quote;
+            while (*p && *p != quote && di < ASM_MAX_LINE - 2) {
                 if (*p == '\\' && *(p + 1)) {
                     p++;
                     switch (*p) {
-                    case 'n':
-                        dst[di++] = '\n';
-                        break;
-                    case 't':
-                        dst[di++] = '\t';
-                        break;
-                    case '0':
-                        dst[di++] = ASM_NUL_SENTINEL;
-                        break;
-                    default:
-                        dst[di++] = *p;
-                        break;
+                        case 'n': dst[di++] = '\n'; break;
+                        case 't': dst[di++] = '\t'; break;
+                        case '0': dst[di++] = ASM_NUL_SENTINEL; break;
+                        default:  dst[di++] = *p; break;
                     }
                     p++;
-                } else
+                } else {
                     dst[di++] = *p++;
+                }
             }
-            if (*p == q)
-                p++;
-            dst[di++] = q;
-        } else if (*p == '[') {
-            dst[di++] = *p++;
-            while (*p && *p != ']' && di < ASM_MAX_LINE - 2)
-                dst[di++] = *p++;
-            if (*p == ']')
-                dst[di++] = *p++;
-        } else {
-            while (*p && *p != ' ' && *p != '\t' && *p != ',' && *p != ';' &&
-                   di < ASM_MAX_LINE - 1)
-                dst[di++] = *p++;
+            if (*p == quote) p++;
+            dst[di++] = quote;
         }
+        else if (*p == '[') {
+            dst[di++] = *p++;
+            while (*p && *p != ']' && di < ASM_MAX_LINE - 2) {
+                dst[di++] = *p++;
+            }
+            if (*p == ']') dst[di++] = *p++;
+        }
+        else {
+            while (*p && *p != ' ' && *p != '\t' && *p != ',' && *p != ';' && di < ASM_MAX_LINE - 1) {
+                dst[di++] = *p++;
+            }
+        }
+
         dst[di] = '\0';
-        if (di > 0)
+        if (di > 0) {
             a_tok_count++;
+        }
     }
 }
 
@@ -687,6 +695,7 @@ static void a_alu(int grp, op_t *dst, op_t *src) {
             int sz = dst->size;
             if (sz == 16)
                 a_emit_b(0x66);
+
             if (sz == 8) {
                 if (dst->reg == R_AL && !fwd) {
                     a_emit_b(0x04 | (grp << 3));
@@ -698,18 +707,13 @@ static void a_alu(int grp, op_t *dst, op_t *src) {
                 }
             } else {
                 if (!fwd && (int32_t)imm >= -128 && (int32_t)imm <= 127) {
+                    a_emit_b(0x83);
+                    a_emit_b(0xC0 | (grp << 3) | re(dst->reg));
+                    a_emit_b((uint8_t)(int8_t)(int32_t)imm);
+                } else {
                     if (dst->reg == R_EAX && sz == 32) {
                         a_emit_b(0x05 | (grp << 3));
-                        a_emit_d(imm);
                     } else {
-                        a_emit_b(0x83);
-                        a_emit_b(0xC0 | (grp << 3) | re(dst->reg));
-                        a_emit_b((uint8_t)(int8_t)(int32_t)imm);
-                    }
-                } else {
-                    if (dst->reg == R_EAX && sz == 32)
-                        a_emit_b(0x05 | (grp << 3));
-                    else {
                         a_emit_b(0x81);
                         a_emit_b(0xC0 | (grp << 3) | re(dst->reg));
                     }
@@ -1602,7 +1606,7 @@ bool asm_assemble_file(const char *src_path, uint8_t *out_buf, int *out_len,
                        int buf_max, char *err_msg, int err_max) {
     fat16_file_t f;
     if (!fat16_open(src_path, &f)) {
-        snprintf(err_msg, err_max, "cannot open '%s'", src_path);
+        sprintf(err_msg, "cannot open '%s'", src_path);
         return false;
     }
     static char fbuf[32768];
@@ -1655,7 +1659,7 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
     char errmsg[128];
     if (!asm_assemble_file(src, obuf, &olen, ASM_OUT_MAX, errmsg,
                            sizeof(errmsg))) {
-        snprintf(out, max, "asm: error: %s\n", errmsg);
+        sprintf(out, "asm: error: %s\n", errmsg);
         return;
     }
     if (olen == 0) {
@@ -1668,10 +1672,10 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
         fat16_delete(dst);
     fat16_file_t wf;
     if (!fat16_create(dst, &wf)) {
-        snprintf(out, max, "asm: cannot create '%s'\n", dst);
+        sprintf(out, "asm: cannot create '%s'\n", dst);
         return;
     }
     fat16_write(&wf, obuf, olen);
     fat16_close(&wf);
-    snprintf(out, max, "asm: %s -> %s (%d bytes)\n", src, dst, olen);
+    sprintf(out, "asm: %s -> %s (%d bytes)\n", src, dst, olen);
 }

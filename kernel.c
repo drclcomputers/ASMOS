@@ -4,6 +4,7 @@
 #include "os/app_registry.h"
 #include "os/error.h"
 #include "os/os.h"
+#include "os/scheduler.h"
 #include "shell/cli.h"
 
 #include "config/config.h"
@@ -15,9 +16,7 @@
 #include "lib/memory.h"
 #include "lib/time.h"
 
-#include "ui/desktop.h"
-#include "ui/desktop_fs.h"
-#include "ui/menubar.h"
+#include "ui/ui.h"
 
 extern app_descriptor asmasm_app;
 extern app_descriptor asmdraw_app;
@@ -29,6 +28,10 @@ extern app_descriptor filef_app;
 extern app_descriptor monitor_app;
 extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
+
+extern void wm_init(void);
+extern void scheduler_init(void);
+extern void desktop_on_frame(void);
 
 typedef struct __attribute__((packed)) {
     uint64_t base;
@@ -99,8 +102,10 @@ void kmain(void) {
 
     desktop_fs_init();
 
+    wm_init();
     desktop_init();
     menubar_init();
+
     if (g_cfg.sound_enabled)
         speaker_init();
     error_set_gui_mode(true);
@@ -108,5 +113,7 @@ void kmain(void) {
     for (int i = 0; i < app_registry_count; i++)
         os_install_app(app_registry[i].desc);
 
-    os_run();
+    scheduler_init();
+
+    scheduler_kernel_task();
 }

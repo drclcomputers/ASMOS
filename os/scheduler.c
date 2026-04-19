@@ -13,93 +13,58 @@
 #include "ui/ui.h"
 
 task_t tasks[MAX_TASKS];
-int task_count = 0;
 int current_task = 0;
+int task_count = 0;
 
-uint32_t scheduler_exit_esp = 0;
+#define MAX_PENDING_FREES 64
+static void *s_pending_free[MAX_PENDING_FREES];
+static int s_pending_free_count = 0;
 
-static uint8_t s_kernel_stack[TASK_STACK_SIZE];
+extern void scheduler_kernel_task(void);
 
-extern void task_switch(uint32_t *old_esp_ptr, uint32_t new_esp);
-extern void task_trampoline(void);
+void scheduler_init(void) {
+    memset(tasks, 0, sizeof(tasks));
 
-/* Lay out a brand-new task's initial stack so that when task_switch pops
- * the saved frame and executes ret, execution lands in task_trampoline
- * with `slot` already sitting in the correct cdecl argument position.
- *
- * Stack layout (high address → low address):
- *
- *   [stack_base + TASK_STACK_SIZE]   ← top (unused guard)
- *   [ 0 ]                            fake ret-addr for task_trampoline_c
- *   [ slot ]                         cdecl arg 1 for task_trampoline_c
- *   [ &task_trampoline ]             ret-addr that task_switch's ret jumps to
- *   [ 0 ]                            fake edi  ─┐
- *   [ 0 ]                            fake esi   │  popped by task_switch
- *   [ 0 ]                            fake ebx   │  before the ret
- *   [ 0 ]                            fake ebp   │
- *   [ 0x00000202 ]                   eflags IF=1─┘
- *   ← saved_esp points here
- *
- * task_switch restores: edi, esi, ebx, ebp, eflags  (5 pops)
- * then ret → &task_trampoline
- *
- * task_trampoline (asm):
- *   add esp, 4      ; discard its own address (the ret-addr we jumped to)
- *   jmp task_trampoline_c
- *
- * After that add, the stack looks like a normal cdecl call:
- *   [esp+0] = fake ret-addr (0)  ← task_trampoline_c's return address
- *   [esp+4] = slot               ← first argument
- */
-
-static uint32_t build_initial_stack(uint8_t *stack_base, int slot) {
-    uint32_t *sp = (uint32_t *)(stack_base + TASK_STACK_SIZE);
-
-    *--sp = (uint32_t)slot;
-    *--sp = 0;
-    *--sp = (uint32_t)task_trampoline;
-    *--sp = 0x00000202;
-    *--sp = 0;
-    *--sp = 0;
-    *--sp = 0;
-    *--sp = 0;
-
-    return (uint32_t)sp;
+    tasks[0].alive = true;
+    tasks[0].stack_base = NULL;
+    current_task = 0;
+    task_count = 1;
 }
 
 void task_trampoline_c(int slot) {
-    task_t *t = &tasks[slot];
-
     if (slot == 0) {
-        extern bool gui_should_exit;
-
-        while (!gui_should_exit) {
-            if (t->entry)
-                t->entry(t->app_state);
-            task_yield();
-        }
-
-        t->alive = false;
-
-        task_switch(&t->saved_esp, scheduler_exit_esp);
-
-        for (;;) {
-            __asm__ volatile("hlt");
-        }
-
+        scheduler_kernel_task();
     } else {
-        while (t->alive) {
-            if (t->entry)
-                t->entry(t->app_state);
-            task_yield();
+        task_t *t = &tasks[slot];
+        if (t->entry) {
+            t->entry(t->arg);
         }
-        while (1)
-            task_yield();
+    }
+
+    scheduler_exit_current();
+    while (1) {
+        task_yield();
     }
 }
 
-int scheduler_add_task(void (*entry)(void *), void *state) {
-    /* Slot 0 is reserved for the kernel task */
+static void enqueue_stack_free(void *stack) {
+    if (!stack)
+        return;
+    if (s_pending_free_count < MAX_PENDING_FREES)
+        s_pending_free[s_pending_free_count++] = stack;
+}
+
+void scheduler_reap(void) {
+    for (int i = 0; i < s_pending_free_count; i++) {
+        kfree(s_pending_free[i]);
+        s_pending_free[i] = NULL;
+    }
+    s_pending_free_count = 0;
+}
+
+extern void task_switch(uint32_t *old_esp, uint32_t new_esp);
+
+int scheduler_add_task(void (*entry)(void *), void *arg) {
     int slot = -1;
     for (int i = 1; i < MAX_TASKS; i++) {
         if (!tasks[i].alive) {
@@ -113,107 +78,110 @@ int scheduler_add_task(void (*entry)(void *), void *state) {
     uint8_t *stack = (uint8_t *)kmalloc(TASK_STACK_SIZE);
     if (!stack)
         return -1;
-    memset(stack, 0, TASK_STACK_SIZE);
 
-    task_t *t = &tasks[slot];
-    t->stack_base = stack;
-    t->entry = entry;
-    t->app_state = state;
-    t->alive = true;
-    t->saved_esp = build_initial_stack(stack, slot);
+    tasks[slot].entry = entry;
+    tasks[slot].arg = arg;
+    tasks[slot].stack_base = stack;
 
-    if (slot >= task_count)
-        task_count = slot + 1;
+    uint32_t *sp = (uint32_t *)(stack + TASK_STACK_SIZE);
+    extern void task_trampoline(void);
 
+    *--sp = (uint32_t)slot;
+    *--sp = 0;
+    *--sp = (uint32_t)task_trampoline;
+
+    *--sp = 0;     // edi
+    *--sp = 0;     // esi
+    *--sp = 0;     // ebx
+    *--sp = 0;     // ebp
+    *--sp = 0x202; // eflags
+
+    tasks[slot].esp = (uint32_t)sp;
+    tasks[slot].alive = true;
+    task_count++;
     return slot;
-}
-
-void scheduler_remove_task(int slot) {
-    if (slot < 1 || slot >= MAX_TASKS)
-        return;
-    task_t *t = &tasks[slot];
-    t->alive = false;
-    if (t->stack_base) {
-        kfree(t->stack_base);
-        t->stack_base = NULL;
-    }
 }
 
 void task_yield(void) {
     int old = current_task;
     int next = old;
 
-    for (int i = 1; i <= task_count; i++) {
-        int c = (old + i) % task_count;
-        if (tasks[c].alive) {
-            next = c;
+    for (int tries = 0; tries < MAX_TASKS; tries++) {
+        next = (next + 1) % MAX_TASKS;
+        if (tasks[next].alive)
             break;
-        }
     }
 
     if (next == old)
         return;
 
     current_task = next;
-    task_switch(&tasks[old].saved_esp, tasks[next].saved_esp);
+    task_switch(&tasks[old].esp, tasks[next].esp);
 }
 
-/*
- * One frame of kernel work — called by task_trampoline_c for slot 0.
- * Input → logic → desktop → WM → draw → frame-rate cap.
- * After this returns, task_trampoline_c calls task_yield() so every
- * app task gets exactly one on_frame call per kernel frame.
- */
-void scheduler_kernel_task(void *unused) {
-    (void)unused;
-    extern menubar g_menubar;
-    extern bool g_menubar_click_consumed;
+void scheduler_kill_task(int slot) {
+    if (slot < 1 || slot >= MAX_TASKS)
+        return;
+    if (!tasks[slot].alive)
+        return;
 
-    uint32_t frame_start = time_millis();
+    tasks[slot].alive = false;
+    task_count--;
 
-    // 1. Core Kernel Logic (Runs once per 16ms)
-    g_menubar_click_consumed = false;
-    ps2_update(); // Only poll here! This ensures logic sees the state.
-    speaker_update();
+    enqueue_stack_free(tasks[slot].stack_base);
+    tasks[slot].stack_base = NULL;
+}
 
-    wm_sync_menubar(&g_menubar);
-    menubar_layout(&g_menubar);
-
-    if (!modal_active())
-        menubar_update(&g_menubar);
-
-    desktop_on_frame();
-
-    wm_sync_menubar(&g_menubar);
-    menubar_layout(&g_menubar);
-
-    if (!modal_active())
-        wm_update_all();
-
-    wm_draw_all();
-    menubar_draw(&g_menubar);
-
-    modal_update();
-    modal_draw();
-
-    draw_cursor(mouse.x, mouse.y);
-    blit();
-
-    while ((time_millis() - frame_start) < FRAME_TIME_MS) {
-
-        task_yield();
+void scheduler_exit_current(void) {
+    int slot = current_task;
+    if (slot < 1 || slot >= MAX_TASKS) {
+        while (1)
+            task_yield();
     }
+
+    enqueue_stack_free(tasks[slot].stack_base);
+    tasks[slot].stack_base = NULL;
+    tasks[slot].alive = false;
+    task_count--;
+
+    while (1)
+        task_yield();
 }
 
-void scheduler_init(void) {
-    memset(tasks, 0, sizeof(tasks));
-    task_count = 1;
-    current_task = 0;
+void scheduler_kernel_task(void) {
+    extern menubar g_menubar;
 
-    task_t *kt = &tasks[0];
-    kt->stack_base = s_kernel_stack;
-    kt->entry = scheduler_kernel_task;
-    kt->app_state = NULL;
-    kt->alive = true;
-    kt->saved_esp = build_initial_stack(s_kernel_stack, 0);
+    while (!gui_should_exit) {
+        uint32_t frame_start = time_millis();
+
+        g_menubar_click_consumed = false;
+        ps2_update();
+        speaker_update();
+
+        wm_sync_menubar(&g_menubar);
+        menubar_layout(&g_menubar);
+
+        if (!modal_active()) {
+            menubar_update(&g_menubar);
+            os_tick_apps();
+            wm_update_all();
+        }
+
+        os_reap_dead_apps();
+
+        desktop_on_frame();
+        wm_draw_all();
+        menubar_draw(&g_menubar);
+
+        modal_update();
+        modal_draw();
+
+        draw_cursor(mouse.x, mouse.y);
+
+        blit();
+
+        while ((time_millis() - frame_start) < FRAME_TIME_MS) {
+            task_yield();
+        }
+    }
 }

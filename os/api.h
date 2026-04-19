@@ -33,7 +33,7 @@
 #include "os/error.h"
 #include "os/os.h"
 
-// Shell / CLI
+// Shell / CLI / Assembler
 #include "shell/cli.h"
 
 #endif

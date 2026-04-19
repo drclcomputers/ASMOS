@@ -11,6 +11,7 @@
 
 #include "ui/modal.h"
 #include "ui/ui.h"
+#include "ui/window.h"
 
 #include "config/config.h"
 #include "io/ps2.h"
@@ -24,35 +25,6 @@ int installed_app_count = 0;
 
 app_instance_t running_apps[MAX_RUNNING_APPS];
 int running_app_count = 0;
-
-/*
- * This is the entry function stored in each app's task_t.
- * task_trampoline_c calls it once per scheduler turn, then calls
- * task_yield() to hand control back to the kernel task.
- */
-
-static uint32_t last_logic_frame = 0;
-
-static void app_task_entry(void *state) {
-    app_instance_t *inst = (app_instance_t *)state;
-    if (!inst || !inst->running)
-        return;
-
-    static uint32_t last_run_time[MAX_RUNNING_APPS];
-    uint32_t now = time_millis();
-
-    int idx = -1;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++)
-        if (&running_apps[i] == inst)
-            idx = i;
-
-    if (idx != -1 && (now - last_run_time[idx] >= FRAME_TIME_MS)) {
-        if (inst->desc && inst->desc->on_frame) {
-            inst->desc->on_frame(inst->state);
-            last_run_time[idx] = now;
-        }
-    }
-}
 
 void os_install_app(app_descriptor *desc) {
     if (!desc) {
@@ -76,92 +48,64 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
         return NULL;
     }
 
-    app_instance_t *inst = NULL;
+    int slot = -1;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         if (!running_apps[i].running) {
-            inst = &running_apps[i];
+            slot = i;
             break;
         }
     }
-    if (!inst) {
+    if (slot < 0) {
         ERR_WARN_REPORT(ERR_APP_MAX_RUNNING, "os_launch_app: no slot");
         return NULL;
     }
 
-    void *state = NULL;
+    app_instance_t *app = &running_apps[slot];
+    app->desc = desc;
+    app->task_slot = -1;
+    app->wants_quit = false;
+
     if (desc->state_size > 0) {
-        state = kmalloc(desc->state_size);
-        if (!state) {
+        app->state = kmalloc(desc->state_size);
+        if (!app->state) {
             ERR_WARN_REPORT(ERR_APP_ALLOC, desc->name ? desc->name : "?");
             return NULL;
         }
-        memset(state, 0, desc->state_size);
+        memset(app->state, 0, desc->state_size);
+    } else {
+        app->state = NULL;
     }
 
-    inst->desc = desc;
-    inst->state = state;
-    inst->running = true;
-    inst->task_slot = -1;
+    app->running = true;
     running_app_count++;
 
     if (desc->init)
-        desc->init(state);
+        desc->init(app->state);
 
-    int slot = scheduler_add_task(app_task_entry, (void *)inst);
-    if (slot < 0)
-        ERR_WARN_REPORT(ERR_APP_ALLOC, "scheduler_add_task: out of slots");
-    inst->task_slot = slot;
-
-    return inst;
+    return app;
 }
 
 void os_quit_app(app_instance_t *inst) {
-    if (!inst || !inst->running)
-        return;
-
-    /* Kill the scheduler task so it won't be entered again.
-       If we are currently executing ON that task's stack (i.e. the app
-       called os_quit_app on itself), scheduler_remove_task just marks
-       alive=false; task_trampoline_c's loop exits on the next check and
-       parks in task_yield() until the kernel cleans up. */
-    if (inst->task_slot >= 0) {
-        scheduler_remove_task(inst->task_slot);
-        inst->task_slot = -1;
-    }
-
-    if (inst->desc && inst->desc->destroy)
-        inst->desc->destroy(inst->state);
-
-    if (inst->state) {
-        kfree(inst->state);
-        inst->state = NULL;
-    }
-
-    inst->desc = NULL;
-    inst->running = false;
-    running_app_count--;
-
-    for (int i = win_count - 1; i >= 0; i--) {
-        if (win_stack[i]->visible && !win_stack[i]->minimized) {
-            wm_focus(win_stack[i]);
-            break;
-        }
-    }
+    if (inst && inst->running)
+        inst->wants_quit = true;
 }
 
 void os_quit_app_by_desc(app_descriptor *desc) {
     if (!desc)
         return;
-    app_instance_t *inst = os_find_instance(desc);
-    if (inst)
-        os_quit_app(inst);
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        if (running_apps[i].running && running_apps[i].desc == desc) {
+            running_apps[i].wants_quit = true;
+        }
+    }
 }
 
 app_instance_t *os_find_instance(app_descriptor *desc) {
     if (!desc)
         return NULL;
     for (int i = 0; i < MAX_RUNNING_APPS; i++)
-        if (running_apps[i].running && running_apps[i].desc == desc)
+        if (running_apps[i].running && running_apps[i].desc == desc &&
+            !running_apps[i].wants_quit)
             return &running_apps[i];
     return NULL;
 }
@@ -171,7 +115,8 @@ int os_find_instances(app_descriptor *desc, app_instance_t **out, int max) {
         return 0;
     int found = 0;
     for (int i = 0; i < MAX_RUNNING_APPS && found < max; i++)
-        if (running_apps[i].running && running_apps[i].desc == desc)
+        if (running_apps[i].running && running_apps[i].desc == desc &&
+            !running_apps[i].wants_quit)
             out[found++] = &running_apps[i];
     return found;
 }
@@ -187,44 +132,54 @@ app_descriptor *os_find_app(const char *name) {
 
 void os_request_exit(void) { gui_should_exit = true; }
 
-/*
- * Full-stack-switching bootstrap.
- *
- * Execution flow:
- *
- *  kmain()
- *    └─ os_run()
- *         1. scheduler_init()   — builds slot 0 (kernel task) on s_kernel_stack
- *         2. saves own esp into scheduler_exit_esp
- *         3. task_switch(&dummy, tasks[0].saved_esp)
- *              └─ jumps to task_trampoline → task_trampoline_c(0)
- *                    ├─ [kernel frame loop] scheduler_kernel_task() →
- * task_yield() │       └─ switches to each app task in turn │             app
- * task: on_frame() → task_yield() → back to kernel └─ when gui_should_exit:
- *                          task_switch(&tasks[0].saved_esp, scheduler_exit_esp)
- *                              └─ returns here (step 4 below)
- *         4. cleanup: destroy all running apps
- *         5. return to kmain
- */
+void os_tick_apps(void) {
+    uint32_t now = time_millis();
+    static uint32_t last_run_time[MAX_RUNNING_APPS];
 
-extern void task_switch(uint32_t *old_esp_ptr, uint32_t new_esp);
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *app = &running_apps[i];
+        if (!app->running || app->wants_quit)
+            continue;
 
-void os_run(void) {
-    gui_should_exit = false;
-
-    scheduler_init(); /* builds kernel task in slot 0 */
-
-    task_switch(&scheduler_exit_esp, tasks[0].saved_esp);
-
-    for (int i = 0; i < MAX_RUNNING_APPS; i++)
-        if (running_apps[i].running)
-            os_quit_app(&running_apps[i]);
-
-    for (int i = 1; i < task_count; i++) {
-        if (tasks[i].stack_base) {
-            kfree(tasks[i].stack_base);
-            tasks[i].stack_base = NULL;
+        if (now - last_run_time[i] >= FRAME_TIME_MS) {
+            if (app->desc && app->desc->on_frame) {
+                app->desc->on_frame(app->state);
+            }
+            last_run_time[i] = now;
         }
-        tasks[i].alive = false;
     }
+}
+
+void os_reap_dead_apps(void) {
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *app = &running_apps[i];
+        if (!app->running || !app->wants_quit)
+            continue;
+
+        if (app->desc && app->desc->destroy)
+            app->desc->destroy(app->state);
+
+        if (app->state) {
+            kfree(app->state);
+            app->state = NULL;
+        }
+
+        if (app->task_slot >= 1)
+            scheduler_kill_task(app->task_slot);
+
+        app->running = false;
+        app->wants_quit = false;
+        app->desc = NULL;
+        app->task_slot = -1;
+        running_app_count--;
+
+        for (int w = win_count - 1; w >= 0; w--) {
+            if (win_stack[w]->visible && !win_stack[w]->minimized) {
+                wm_focus(win_stack[w]);
+                break;
+            }
+        }
+    }
+
+    scheduler_reap();
 }

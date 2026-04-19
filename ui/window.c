@@ -66,6 +66,14 @@ static int taskbar_label_width(const window *win) {
     return (int)strlen(win->title) * 5 + 8;
 }
 
+void wm_init(void) {
+    win_count = 0;
+    focused_window = NULL;
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        win_stack[i] = NULL;
+    }
+}
+
 window *wm_register(const window_spec_t *spec) {
     if (!spec) {
         ERR_WARN_REPORT(ERR_NULL_PTR, "wm_register: spec");

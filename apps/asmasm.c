@@ -1,4 +1,5 @@
 #include "os/api.h"
+#include "shell/asm/asm.h"
 
 #define ASMASM_W 280
 #define ASMASM_H 165

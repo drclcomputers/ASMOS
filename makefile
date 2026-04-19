@@ -22,7 +22,11 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/interrupts/interrupt.o  		\
       $(BUILD_DIR)/interrupts/idt.o        		\
       \
+      $(BUILD_DIR)/shell/asm/asm.o              \
+      $(BUILD_DIR)/shell/binrun.o               \
       $(BUILD_DIR)/shell/cli.o                  \
+      $(BUILD_DIR)/shell/cmds.o                 \
+      $(BUILD_DIR)/shell/term_buf.o             \
       \
 	  $(BUILD_DIR)/apps/asmasm.o				\
 	  $(BUILD_DIR)/apps/asmdraw.o               \
