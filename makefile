@@ -35,6 +35,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/apps/calculator.o            \
 	  $(BUILD_DIR)/apps/clock.o                 \
       $(BUILD_DIR)/apps/filef.o                 \
+      $(BUILD_DIR)/apps/hexview.o               \
 	  $(BUILD_DIR)/apps/monitor.o               \
 	  $(BUILD_DIR)/apps/settings.o              \
 	  $(BUILD_DIR)/apps/teditor.o 				\

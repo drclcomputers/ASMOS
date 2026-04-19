@@ -18,17 +18,6 @@
 
 #include "ui/ui.h"
 
-extern app_descriptor asmasm_app;
-extern app_descriptor asmdraw_app;
-extern app_descriptor asmterm_app;
-extern app_descriptor asmusic_app;
-extern app_descriptor calculator_app;
-extern app_descriptor clock_app;
-extern app_descriptor filef_app;
-extern app_descriptor monitor_app;
-extern app_descriptor settings_app;
-extern app_descriptor teditor_app;
-
 extern void wm_init(void);
 extern void scheduler_init(void);
 extern void desktop_on_frame(void);
