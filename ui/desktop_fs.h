@@ -51,7 +51,7 @@ const char *desktop_fs_path(void);
  * references use the call/pop base-address trick so labels resolve to
  * their actual runtime addresses, not their link-time offsets from 0.
  */
-#define HELLO_ASM \
+#define SMECHER_ASM \
 "[BITS 32]\n" \
 "_start:\n" \
 "    push ebx               ; Preserve EBX (C-standard)\n" \
@@ -65,7 +65,7 @@ const char *desktop_fs_path(void);
 "    pop ebx                ; Restore EBX\n" \
 "    ret"
 
-#define SMECHER_ASM \
+#define HELLO_ASM \
 "[BITS 32]\n" \
 "_start:\n" \
 "    push ebp\n" \
@@ -73,56 +73,58 @@ const char *desktop_fs_path(void);
 "    sub esp, 32            ; Allocate 32 bytes on stack for a buffer\n" \
 "    push ebx\n" \
 "    push esi\n" \
+"    push edi               ; Preserve EDI! (We use it as a counter)\n" \
 "\n" \
-"    ; 1. Get the Syscall Table and Base Address\n" \
 "    mov esi, [ebp + 8]     ; ESI = bin_syscall_t pointer\n" \
-"    call .get_eip          ; Standard trick to find our data\n" \
-".get_eip:\n" \
-"    pop ebx                ; EBX now points to .get_eip\n" \
 "\n" \
-"    ; 2. Print Prompt (using sc_print at offset 0)\n" \
-"    lea eax, [ebx + (prompt - .get_eip)]\n" \
+"    ; 1. The ASMOS Base Address Trick\n" \
+"    call .here\n" \
+".here:\n" \
+"    pop ebx                ; EBX = absolute address of .here in RAM\n" \
+"    sub ebx, (.here - $$)  ; EBX = base address of the binary\n" \
+"\n" \
+"    ; 2. Print Prompt\n" \
+"    ; Since EBX is our base, and 'prompt' is an offset, this parses perfectly!\n" \
+"    lea eax, [ebx + prompt]\n" \
 "    push eax\n" \
 "    call [esi + 0]\n" \
 "    add esp, 4\n" \
 "\n" \
-"    ; 3. Read Input (using sc_readline at offset 8)\n" \
+"    ; 3. Read Input\n" \
 "    push 31                ; Max chars\n" \
 "    lea eax, [ebp - 32]    ; Our stack buffer\n" \
 "    push eax\n" \
-"    call [esi + 8]\n" \
+"    call [esi + 8]         ; Will NOT freeze now that the IF bug is fixed!\n" \
 "    add esp, 8\n" \
 "\n" \
-"    ; 4. Greeting Loop (Count 1 to 5)\n" \
+"    ; 4. Greeting Loop\n" \
 "    mov edi, 1\n" \
 ".loop:\n" \
-"    ; Convert number to string (sc_itoa at offset 16)\n" \
-"    lea eax, [ebp - 32]    ; Reuse buffer for itoa result\n" \
+"    lea eax, [ebp - 32]    \n" \
 "    push eax\n" \
 "    push edi\n" \
-"    call [esi + 16]\n" \
+"    call [esi + 16]        ; sc_itoa\n" \
 "    add esp, 8\n" \
 "\n" \
-"    ; Print the number\n" \
 "    lea eax, [ebp - 32]\n" \
 "    push eax\n" \
-"    call [esi + 0]\n" \
+"    call [esi + 0]         ; sc_print (the number)\n" \
 "    add esp, 4\n" \
 "\n" \
-"    ; Print a space (sc_putchar at offset 4)\n" \
 "    push 32                ; ASCII space\n" \
-"    call [esi + 4]\n" \
+"    call [esi + 4]         ; sc_putchar\n" \
 "    add esp, 4\n" \
 "\n" \
 "    inc edi\n" \
 "    cmp edi, 6\n" \
 "    jne .loop\n" \
 "\n" \
-"    ; 5. Print Newline and Exit\n" \
+"    ; 5. Exit cleanly\n" \
 "    push 10                ; '\\n'\n" \
 "    call [esi + 4]\n" \
 "    add esp, 4\n" \
 "\n" \
+"    pop edi                ; Restore EDI!\n" \
 "    pop esi\n" \
 "    pop ebx\n" \
 "    mov esp, ebp\n" \

@@ -90,11 +90,11 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
     *--sp = 0;
     *--sp = (uint32_t)task_trampoline;
 
-    *--sp = 0;     // edi
-    *--sp = 0;     // esi
-    *--sp = 0;     // ebx
+    *--sp = 0x202; // eflags (Highest address, popped last)
     *--sp = 0;     // ebp
-    *--sp = 0x202; // eflags
+    *--sp = 0;     // ebx
+    *--sp = 0;     // esi
+    *--sp = 0;     // edi
 
     tasks[slot].esp = (uint32_t)sp;
     tasks[slot].alive = true;
