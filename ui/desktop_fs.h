@@ -52,17 +52,83 @@ const char *desktop_fs_path(void);
  * their actual runtime addresses, not their link-time offsets from 0.
  */
 #define HELLO_ASM \
-"; The syscall table pointer is at [esp + 4]\n" \
-"\n" \
+"[BITS 32]\n" \
 "_start:\n" \
-"    mov ebx, [esp + 4]     ; Get the syscall_t pointer\n" \
+"    push ebx               ; Preserve EBX (C-standard)\n" \
+"    mov eax, [esp + 8]     ; Get syscall_t pointer (now at +8 due to push)\n" \
 "\n" \
-"    ; Try to print a single character using bsc_putchar\n" \
-"    ; Offset for putchar is 4 (see binrun.h)\n" \
-"    push '!'               ; Push char to print\n" \
-"    call [ebx + 4]         ; Call sc_putchar\n" \
-"    add esp, 4             ; Clean up stack\n" \
+"    push 33                ; Push '!' (ASCII 33)\n" \
+"    mov ebx, [eax + 4]     ; Load address of sc_putchar into EBX\n" \
+"    call ebx               ; Call it\n" \
+"    add esp, 4             ; Clean stack\n" \
 "\n" \
-"    ret                    ; Return to binrun.c\n"
+"    pop ebx                ; Restore EBX\n" \
+"    ret"
+
+#define SMECHER_ASM \
+"[BITS 32]\n" \
+"_start:\n" \
+"    push ebp\n" \
+"    mov ebp, esp\n" \
+"    sub esp, 32            ; Allocate 32 bytes on stack for a buffer\n" \
+"    push ebx\n" \
+"    push esi\n" \
+"\n" \
+"    ; 1. Get the Syscall Table and Base Address\n" \
+"    mov esi, [ebp + 8]     ; ESI = bin_syscall_t pointer\n" \
+"    call .get_eip          ; Standard trick to find our data\n" \
+".get_eip:\n" \
+"    pop ebx                ; EBX now points to .get_eip\n" \
+"\n" \
+"    ; 2. Print Prompt (using sc_print at offset 0)\n" \
+"    lea eax, [ebx + (prompt - .get_eip)]\n" \
+"    push eax\n" \
+"    call [esi + 0]\n" \
+"    add esp, 4\n" \
+"\n" \
+"    ; 3. Read Input (using sc_readline at offset 8)\n" \
+"    push 31                ; Max chars\n" \
+"    lea eax, [ebp - 32]    ; Our stack buffer\n" \
+"    push eax\n" \
+"    call [esi + 8]\n" \
+"    add esp, 8\n" \
+"\n" \
+"    ; 4. Greeting Loop (Count 1 to 5)\n" \
+"    mov edi, 1\n" \
+".loop:\n" \
+"    ; Convert number to string (sc_itoa at offset 16)\n" \
+"    lea eax, [ebp - 32]    ; Reuse buffer for itoa result\n" \
+"    push eax\n" \
+"    push edi\n" \
+"    call [esi + 16]\n" \
+"    add esp, 8\n" \
+"\n" \
+"    ; Print the number\n" \
+"    lea eax, [ebp - 32]\n" \
+"    push eax\n" \
+"    call [esi + 0]\n" \
+"    add esp, 4\n" \
+"\n" \
+"    ; Print a space (sc_putchar at offset 4)\n" \
+"    push 32                ; ASCII space\n" \
+"    call [esi + 4]\n" \
+"    add esp, 4\n" \
+"\n" \
+"    inc edi\n" \
+"    cmp edi, 6\n" \
+"    jne .loop\n" \
+"\n" \
+"    ; 5. Print Newline and Exit\n" \
+"    push 10                ; '\\n'\n" \
+"    call [esi + 4]\n" \
+"    add esp, 4\n" \
+"\n" \
+"    pop esi\n" \
+"    pop ebx\n" \
+"    mov esp, ebp\n" \
+"    pop ebp\n" \
+"    ret\n" \
+"\n" \
+"prompt: db \"Enter Name: \", 0\n"
 
 #endif

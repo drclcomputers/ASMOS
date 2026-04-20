@@ -151,10 +151,12 @@ static void a_tokenise(char *line) {
             p++;
         }
 
-        if (!*p) break;
+        if (!*p)
+            break;
 
         if (a_tok_count >= ASM_MAX_TOKENS) {
-            strncpy(a_err, "Token limit exceeded on one line", sizeof(a_err)-1);
+            strncpy(a_err, "Token limit exceeded on one line",
+                    sizeof(a_err) - 1);
             a_had_error = true;
             return;
         }
@@ -169,28 +171,63 @@ static void a_tokenise(char *line) {
                 if (*p == '\\' && *(p + 1)) {
                     p++;
                     switch (*p) {
-                        case 'n': dst[di++] = '\n'; break;
-                        case 't': dst[di++] = '\t'; break;
-                        case '0': dst[di++] = ASM_NUL_SENTINEL; break;
-                        default:  dst[di++] = *p; break;
+                    case 'n':
+                        dst[di++] = '\n';
+                        break;
+                    case 't':
+                        dst[di++] = '\t';
+                        break;
+                    case '0':
+                        dst[di++] = ASM_NUL_SENTINEL;
+                        break;
+                    default:
+                        dst[di++] = *p;
+                        break;
                     }
                     p++;
                 } else {
                     dst[di++] = *p++;
                 }
             }
-            if (*p == quote) p++;
+            if (*p == quote)
+                p++;
             dst[di++] = quote;
-        }
-        else if (*p == '[') {
-            dst[di++] = *p++;
-            while (*p && *p != ']' && di < ASM_MAX_LINE - 2) {
-                dst[di++] = *p++;
+        } else if (*p == '[') {
+            const char *peek = p + 1;
+            while (*peek == ' ')
+                peek++;
+            bool is_dir = (strncasecmp(peek, "bits", 4) == 0 &&
+                           (peek[4] == ' ' || peek[4] == '\t')) ||
+                          (strncasecmp(peek, "org", 3) == 0 &&
+                           (peek[3] == ' ' || peek[3] == '\t'));
+            if (is_dir) {
+                p++;
+                while (*p && *p != ']') {
+                    while (*p == ' ' || *p == '\t')
+                        p++;
+                    if (!*p || *p == ']')
+                        break;
+                    char *idst = a_tokens[a_tok_count];
+                    int idi = 0;
+                    while (*p && *p != ' ' && *p != '\t' && *p != ']' &&
+                           idi < ASM_MAX_LINE - 1)
+                        idst[idi++] = *p++;
+                    idst[idi] = '\0';
+                    if (idi > 0)
+                        a_tok_count++;
+                }
+                if (*p == ']')
+                    p++;
+                continue;
             }
-            if (*p == ']') dst[di++] = *p++;
-        }
-        else {
-            while (*p && *p != ' ' && *p != '\t' && *p != ',' && *p != ';' && di < ASM_MAX_LINE - 1) {
+            dst[di++] = *p++;
+            while (*p && *p != ']' && di < ASM_MAX_LINE - 2)
+                dst[di++] = *p++;
+            if (*p == ']')
+                dst[di++] = *p++;
+        } else {
+            while (*p && *p != ' ' && *p != '\t' && *p != ',' && *p != ';' &&
+                   di < ASM_MAX_LINE - 1) {
                 dst[di++] = *p++;
             }
         }

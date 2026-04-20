@@ -73,20 +73,16 @@ static void bin_task_entry(void *arg) {
 
     typedef void (*bin_fn_t)(const bin_syscall_t *);
     bin_fn_t entry = (bin_fn_t)(void *)ctx->buf;
+
     entry(ctx->sc);
 
     kfree(ctx->buf);
     ctx->buf = NULL;
     s_active_ctx = NULL;
 
-    int slot = ctx->task_slot;
     kfree(ctx);
 
-    if (slot >= 1 && slot < MAX_TASKS)
-        tasks[slot].alive = false;
-
-    while (1)
-        task_yield();
+    scheduler_exit_current();
 }
 
 static void do_run(term_context_t *tctx, const char *path, char *out,
