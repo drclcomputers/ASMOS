@@ -17,6 +17,7 @@ void cfg_init_defaults(void) {
     g_cfg.sound_enabled = 1;
     g_cfg.wallpaper_main_color = GREEN;
     g_cfg.wallpaper_secondary_color = LIGHT_GREEN;
+    g_cfg.filef_single_window = 0;
 }
 
 bool cfg_load(void) {
@@ -34,6 +35,9 @@ bool cfg_load(void) {
         return false;
 
     g_cfg = tmp;
+
+    if (g_cfg.version < 2)
+        g_cfg.filef_single_window = 0;
     return true;
 }
 

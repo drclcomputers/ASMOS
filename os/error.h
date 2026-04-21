@@ -4,9 +4,9 @@
 #include "lib/core.h"
 
 typedef enum {
-    ERR_INFO    = 0,
+    ERR_INFO = 0,
     ERR_WARNING = 1,
-    ERR_FATAL   = 2,
+    ERR_FATAL = 2,
 } err_severity_t;
 
 typedef enum {
@@ -45,16 +45,24 @@ bool error_gui_mode(void);
 
 void error_report(err_severity_t sev, err_code_t code, const char *context);
 
-#define ERR_INFO_REPORT(code, ctx)    error_report(ERR_INFO,    code, ctx)
-#define ERR_WARN_REPORT(code, ctx)    error_report(ERR_WARNING, code, ctx)
-#define ERR_FATAL_REPORT(code, ctx)   error_report(ERR_FATAL,   code, ctx)
+#define ERR_INFO_REPORT(code, ctx) error_report(ERR_INFO, code, ctx)
+#define ERR_WARN_REPORT(code, ctx) error_report(ERR_WARNING, code, ctx)
+#define ERR_FATAL_REPORT(code, ctx) error_report(ERR_FATAL, code, ctx)
 
 // triggers FATAL if condition is false.
-#define ASSERT(cond, code, ctx)  do { if (!(cond)) ERR_FATAL_REPORT(code, ctx); } while(0)
+#define ASSERT(cond, code, ctx)                                                \
+    do {                                                                       \
+        if (!(cond))                                                           \
+            ERR_FATAL_REPORT(code, ctx);                                       \
+    } while (0)
 #define ASSERT_NOT_NULL(ptr, ctx) ASSERT((ptr) != NULL, ERR_NULL_PTR, ctx)
 
 // warns but does not halt.
-#define WARN_IF(cond, code, ctx) do { if (cond) ERR_WARN_REPORT(code, ctx); } while(0)
+#define WARN_IF(cond, code, ctx)                                               \
+    do {                                                                       \
+        if (cond)                                                              \
+            ERR_WARN_REPORT(code, ctx);                                        \
+    } while (0)
 
 void boot_check_ata(void);
 void boot_check_fat(void);

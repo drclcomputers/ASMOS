@@ -26,19 +26,31 @@ static bool ata_wait_ready(void) {
     return false;
 }
 
-static void ata_select_lba28(uint32_t lba, uint8_t sector_count) {
-    outb(ATA_PRIMARY_BASE + ATA_REG_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));
+static void ata_select_drive(uint8_t drive_id, uint32_t lba) {
+    uint8_t drive_select = (drive_id == 1) ? 0xF0 : 0xE0;
+    outb(ATA_PRIMARY_BASE + ATA_REG_DRIVE, drive_select | ((lba >> 24) & 0x0F));
+
+    for (int i = 0; i < 4; i++) {
+        inb(ATA_PRIMARY_BASE + ATA_REG_STATUS);
+    }
+}
+
+static void ata_select_lba28(uint8_t drive_id, uint32_t lba,
+                             uint8_t sector_count) {
+    ata_select_drive(drive_id, lba);
     outb(ATA_PRIMARY_BASE + ATA_REG_SECCOUNT, sector_count);
     outb(ATA_PRIMARY_BASE + ATA_REG_LBA_LO, (lba) & 0xFF);
     outb(ATA_PRIMARY_BASE + ATA_REG_LBA_MID, (lba >> 8) & 0xFF);
     outb(ATA_PRIMARY_BASE + ATA_REG_LBA_HI, (lba >> 16) & 0xFF);
 }
 
-bool ata_read_sector(uint32_t lba, void *buf) {
+bool ata_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
+    ata_select_drive(drive_id, lba);
+
     if (!ata_wait_ready())
         return false;
 
-    ata_select_lba28(lba, 1);
+    ata_select_lba28(drive_id, lba, 1);
     outb(ATA_PRIMARY_BASE + ATA_REG_COMMAND, ATA_CMD_READ_PIO);
 
     if (!ata_wait_drq())
@@ -51,11 +63,13 @@ bool ata_read_sector(uint32_t lba, void *buf) {
     return true;
 }
 
-bool ata_write_sector(uint32_t lba, const void *buf) {
+bool ata_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
+    ata_select_drive(drive_id, lba);
+
     if (!ata_wait_ready())
         return false;
 
-    ata_select_lba28(lba, 1);
+    ata_select_lba28(drive_id, lba, 1);
     outb(ATA_PRIMARY_BASE + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
 
     if (!ata_wait_drq())
@@ -71,20 +85,22 @@ bool ata_write_sector(uint32_t lba, const void *buf) {
     return true;
 }
 
-bool ata_read_sectors(uint32_t lba, uint8_t count, void *buf) {
+bool ata_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count,
+                      void *buf) {
     uint8_t *p = (uint8_t *)buf;
     for (uint8_t i = 0; i < count; i++) {
-        if (!ata_read_sector(lba + i, p))
+        if (!ata_read_sector(drive_id, lba + i, p))
             return false;
         p += 512;
     }
     return true;
 }
 
-bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buf) {
+bool ata_write_sectors(uint8_t drive_id, uint32_t lba, uint8_t count,
+                       const void *buf) {
     const uint8_t *p = (const uint8_t *)buf;
     for (uint8_t i = 0; i < count; i++) {
-        if (!ata_write_sector(lba + i, p))
+        if (!ata_write_sector(drive_id, lba + i, p))
             return false;
         p += 512;
     }

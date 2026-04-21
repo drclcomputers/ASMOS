@@ -29,10 +29,11 @@
 #define ATA_CMD_FLUSH 0xE7
 #define ATA_CMD_IDENTIFY 0xEC
 
-bool ata_read_sector(uint32_t lba, void *buf);
-bool ata_write_sector(uint32_t lba, const void *buf);
+bool ata_read_sector(uint8_t drive_id, uint32_t lba, void *buf);
+bool ata_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
 
-bool ata_read_sectors(uint32_t lba, uint8_t count, void *buf);
-bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buf);
+bool ata_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count, void *buf);
+bool ata_write_sectors(uint8_t drive_id, uint32_t lba, uint8_t count,
+                       const void *buf);
 
 #endif

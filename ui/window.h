@@ -13,6 +13,7 @@
 #define MAX_WINDOWS 32
 #define MAX_WIN_WIDGETS 128
 #define MAX_WIN_MENUS 16
+#define RESIZE_BUTTON 8
 
 typedef struct window window;
 

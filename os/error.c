@@ -153,7 +153,7 @@ void boot_check_ata(void) {
     boot_puts("ATA / Disk\n", LIGHT_GRAY);
 
     uint8_t buf[512];
-    bool ok = ata_read_sector(0, buf);
+    bool ok = ata_read_sector(0, 0, buf);
     boot_check_line("Sector 0 read", ok, ok ? NULL : "timeout or error");
 
     if (!ok)
@@ -168,28 +168,31 @@ void boot_check_ata(void) {
 void boot_check_fat(void) {
     boot_puts("FAT16 Filesystem\n", LIGHT_GRAY);
 
-    bool mounted = fs.mounted;
+    bool mounted = g_drives[0].mounted;
     boot_check_line("Mounted", mounted,
-                    mounted ? NULL : "fat16_mount() returned false");
+                    mounted ? NULL : "fat16_mount() failed to mount HDA");
+
     if (!mounted) {
         error_report(ERR_FATAL, ERR_FAT_MOUNT, "boot_check_fat");
         return;
     }
 
-    bool bps_ok = (fs.bpb.bytes_per_sector == 512);
+    fat16_fs_t *boot_fs = &g_drives[0];
+
+    bool bps_ok = (boot_fs->bpb.bytes_per_sector == 512);
     boot_check_line("Bytes/sector = 512", bps_ok,
                     bps_ok ? NULL : "unexpected sector size");
     if (!bps_ok)
         error_report(ERR_FATAL, ERR_FAT_CORRUPT, "bytes_per_sector");
 
-    bool spc_ok =
-        (fs.bpb.sectors_per_cluster >= 1 && fs.bpb.sectors_per_cluster <= 128);
+    bool spc_ok = (boot_fs->bpb.sectors_per_cluster >= 1 &&
+                   boot_fs->bpb.sectors_per_cluster <= 128);
     boot_check_line("Sectors/cluster sane", spc_ok,
                     spc_ok ? NULL : "out of range");
     if (!spc_ok)
         error_report(ERR_WARNING, ERR_FAT_CORRUPT, "sectors_per_cluster");
 
-    bool fat_ok = (fs.bpb.fat_count == 1 || fs.bpb.fat_count == 2);
+    bool fat_ok = (boot_fs->bpb.fat_count == 1 || boot_fs->bpb.fat_count == 2);
     boot_check_line("FAT count in [1,2]", fat_ok,
                     fat_ok ? NULL : "bad fat_count");
     if (!fat_ok)
@@ -205,7 +208,8 @@ void boot_check_fat(void) {
             error_report(ERR_WARNING, ERR_FAT_NO_SPACE, "disk >90% full");
     }
 
-    bool clust_ok = (fs.cluster_count >= 4096 && fs.cluster_count <= 65524);
+    bool clust_ok =
+        (boot_fs->cluster_count >= 4096 && boot_fs->cluster_count <= 65524);
     boot_check_line("Cluster count sane", clust_ok,
                     clust_ok ? NULL : "not a valid FAT16 range");
     if (!clust_ok)

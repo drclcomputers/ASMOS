@@ -327,13 +327,15 @@ void window_draw(window *win) {
         if (win->on_draw)
             win->on_draw(win, win->on_draw_userdata);
 
+
+
         if (win->resizable) {
-            int gx = win->x + win->w - 10;
-            int gy = win->y + MENUBAR_H_SIZE + win->h - 10;
-            fill_rect(gx, gy, 10, 10, LIGHT_GRAY);
-            draw_rect(gx, gy, 10, 10, DARK_GRAY);
-            draw_line(gx + 3, gy + 8, gx + 8, gy + 3, DARK_GRAY);
-            draw_line(gx + 6, gy + 8, gx + 8, gy + 6, DARK_GRAY);
+            int gx = win->x + win->w - RESIZE_BUTTON;
+            int gy = win->y + MENUBAR_H_SIZE + win->h - RESIZE_BUTTON;
+            fill_rect(gx, gy, RESIZE_BUTTON, RESIZE_BUTTON, LIGHT_GRAY);
+            draw_rect(gx, gy, RESIZE_BUTTON, RESIZE_BUTTON, DARK_GRAY);
+            draw_line(gx + 1, gy + 6, gx + 6, gy + 1, DARK_GRAY);
+            draw_line(gx + 4, gy + 6, gx + 6, gy + 4, DARK_GRAY);
         }
     }
 

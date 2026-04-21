@@ -28,7 +28,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/shell/cmds.o                 \
       $(BUILD_DIR)/shell/term_buf.o             \
       \
-	  $(BUILD_DIR)/apps/asmasm.o				\
 	  $(BUILD_DIR)/apps/asmdraw.o               \
 	  $(BUILD_DIR)/apps/asmterm.o               \
 	  $(BUILD_DIR)/apps/asmusic.o               \

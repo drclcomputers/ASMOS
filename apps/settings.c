@@ -2,7 +2,7 @@
 #include "os/api.h"
 
 #define SET_W 220
-#define SET_H 170
+#define SET_H 180
 #define SET_X 30
 #define SET_Y 20
 
@@ -29,8 +29,7 @@ static void set_status(settings_state_t *s, const char *msg) {
 static bool btn(int x, int y, int w, int h, const char *lbl, uint8_t bg) {
     fill_rect(x, y, w, h, bg);
     draw_rect(x, y, w, h, BLACK);
-    int tx = x + w / 2 - (int)(strlen(lbl) * 5) / 2;
-    int ty = y + h / 2 - 3;
+    int tx = x + w / 2 - (int)(strlen(lbl) * 5) / 2, ty = y + h / 2 - 3;
     draw_string(tx, ty, (char *)lbl, WHITE, 2);
     return mouse.left_clicked && mouse.x >= x && mouse.x < x + w &&
            mouse.y >= y && mouse.y < y + h;
@@ -40,19 +39,12 @@ static void settings_draw(window *win, void *ud) {
     settings_state_t *s = (settings_state_t *)ud;
     if (!s)
         return;
-
-    int wx = win->x + 1;
-    int wy = win->y + MENUBAR_H + 16;
-    int ww = win->w - 2;
-    int wh = win->h - 16;
-
+    int wx = win->x + 1, wy = win->y + MENUBAR_H + 16, ww = win->w - 2,
+        wh = win->h - 16;
     fill_rect(wx, wy, ww, wh, LIGHT_GRAY);
-
     fill_rect(wx, wy, ww, 10, DARK_GRAY);
     draw_string(wx + 4, wy + 2, "System Settings", WHITE, 2);
-
     int row = 1;
-
 #define ROW_Y(r) (wy + 4 + (r) * ROW_H + 8)
 
     draw_string(wx + LBL_X, ROW_Y(row), "Wallpaper:", DARK_GRAY, 2);
@@ -107,6 +99,13 @@ static void settings_draw(window *win, void *ud) {
                 BLACK, 2);
     btn(wx + VAL_X + 22, ROW_Y(row) - 1, 24, 9,
         g_cfg.start_in_gui ? "No" : "Yes", DARK_GRAY);
+    row++;
+
+    draw_string(wx + LBL_X, ROW_Y(row), "FileF Mode:", DARK_GRAY, 2);
+    draw_string(wx + VAL_X, ROW_Y(row),
+                g_cfg.filef_single_window ? "Single" : "Multi", BLACK, 2);
+    btn(wx + VAL_X + 30, ROW_Y(row) - 1, 36, 9,
+        g_cfg.filef_single_window ? "Multi" : "Single", DARK_GRAY);
     row += 2;
 
     uint8_t save_bg = s->dirty ? RED : DARK_GRAY;
@@ -131,17 +130,13 @@ static void settings_on_frame(void *state) {
     if (s->status_timer > 0)
         s->status_timer--;
 
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-    int ww = s->win->w - 2;
-    int wh = s->win->h - 16;
+    int wx = s->win->x + 1, wy = s->win->y + MENUBAR_H + 16, ww = s->win->w - 2,
+        wh = s->win->h - 16;
 
 #define ROW_Y(r) (wy + 4 + (r) * ROW_H + 8)
-
     if (mouse.left_clicked) {
         int row = 1;
         row++;
-
         if (btn(wx + VAL_X, ROW_Y(row) - 1, 10, 9, "<", DARK_GRAY)) {
             g_cfg.wallpaper_pattern = (g_cfg.wallpaper_pattern + 3) % 4;
             s->dirty = true;
@@ -151,7 +146,6 @@ static void settings_on_frame(void *state) {
             s->dirty = true;
         }
         row++;
-
         if (btn(wx + VAL_X + 18, ROW_Y(row) - 1, 10, 9, "-", DARK_GRAY)) {
             if (g_cfg.wallpaper_main_color > 0) {
                 g_cfg.wallpaper_main_color--;
@@ -165,7 +159,6 @@ static void settings_on_frame(void *state) {
             }
         }
         row++;
-
         if (btn(wx + VAL_X + 18, ROW_Y(row) - 1, 10, 9, "-", DARK_GRAY)) {
             if (g_cfg.wallpaper_secondary_color > 0) {
                 g_cfg.wallpaper_secondary_color--;
@@ -179,7 +172,6 @@ static void settings_on_frame(void *state) {
             }
         }
         row++;
-
         if (btn(wx + VAL_X + 20, ROW_Y(row) - 1, 10, 9, "-", DARK_GRAY)) {
             int8_t tz = (int8_t)g_cfg.timezone_offset;
             if (tz > -12) {
@@ -195,39 +187,39 @@ static void settings_on_frame(void *state) {
             }
         }
         row++;
-
         if (btn(wx + VAL_X + 20, ROW_Y(row) - 1, 24, 9,
                 g_cfg.play_bootchime ? "Off" : "On", DARK_GRAY)) {
             g_cfg.play_bootchime ^= 1;
             s->dirty = true;
         }
         row++;
-
         if (btn(wx + VAL_X + 20, ROW_Y(row) - 1, 24, 9,
                 g_cfg.sound_enabled ? "Off" : "On", DARK_GRAY)) {
             g_cfg.sound_enabled ^= 1;
             s->dirty = true;
         }
         row++;
-
         if (btn(wx + VAL_X + 22, ROW_Y(row) - 1, 24, 9,
                 g_cfg.start_in_gui ? "No" : "Yes", DARK_GRAY)) {
             g_cfg.start_in_gui ^= 1;
             s->dirty = true;
         }
+        row++;
+        if (btn(wx + VAL_X + 30, ROW_Y(row) - 1, 36, 9,
+                g_cfg.filef_single_window ? "Multi" : "Single", DARK_GRAY)) {
+            g_cfg.filef_single_window ^= 1;
+            s->dirty = true;
+        }
         row += 2;
-
         if (btn(wx + ww / 2 - 30, ROW_Y(row) - 1, 60, 10, "Save",
                 s->dirty ? RED : DARK_GRAY)) {
             if (cfg_save()) {
                 s->dirty = false;
                 set_status(s, "Saved successfully.");
-            } else {
+            } else
                 set_status(s, "Save failed!");
-            }
         }
     }
-
 #undef ROW_Y
     settings_draw(s->win, s);
 }
@@ -237,12 +229,10 @@ static bool settings_close(window *w) {
     os_quit_app_by_desc(&settings_app);
     return true;
 }
-
 static void on_file_close(void) { settings_close(NULL); }
 
 static void settings_init(void *state) {
     settings_state_t *s = (settings_state_t *)state;
-
     const window_spec_t spec = {
         .x = SET_X,
         .y = SET_Y,
@@ -259,13 +249,10 @@ static void settings_init(void *state) {
     s->win = wm_register(&spec);
     if (!s->win)
         return;
-
     s->win->on_draw = settings_draw;
     s->win->on_draw_userdata = s;
-
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Close", on_file_close);
-
     s->dirty = false;
 }
 

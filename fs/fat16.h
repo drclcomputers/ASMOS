@@ -57,6 +57,12 @@ typedef struct __attribute__((packed)) {
 #define FAT16_BAD 0xFFF7
 #define FAT16_EOC 0xFFF8
 
+#define DRIVE_HDA 0  /* Primary ATA master  (boot drive) */
+#define DRIVE_HDB 1  /* Primary ATA slave */
+#define DRIVE_FDD0 2 /* Floppy A: */
+#define DRIVE_FDD1 3 /* Floppy B: */
+#define DRIVE_COUNT 4
+
 typedef struct {
     bpb_t bpb;
     uint32_t fat_lba;
@@ -64,6 +70,8 @@ typedef struct {
     uint32_t data_lba;
     uint32_t cluster_count;
     bool mounted;
+    uint8_t drive_id; /* physical drive */
+    char label[12];   /* volume label */
 } fat16_fs_t;
 
 typedef struct {
@@ -75,30 +83,42 @@ typedef struct {
     bool open;
     uint16_t parent_cluster;
     uint16_t dir_cluster;
+    uint8_t drive_id;
 } fat16_file_t;
 
 typedef struct {
     uint16_t current_cluster;
     char path[256];
+    uint8_t drive_id;
 } fat16_dir_context_t;
 
-extern fat16_fs_t fs;
+extern fat16_fs_t fs;                    /* current active volume   */
+extern fat16_fs_t g_drives[DRIVE_COUNT]; /* all mounted volumes     */
 extern fat16_dir_context_t dir_context;
 
-// init
+#define PROTECTED_PATH_COUNT 2
+extern const char *g_protected_paths[PROTECTED_PATH_COUNT];
 
+bool path_is_protected(const char *name_or_path);
+
+/* Drive management */
+bool fat16_mount_drive(uint8_t drive_id);
+bool fat16_select_drive(uint8_t drive_id);
+uint8_t fat16_current_drive(void);
+const char *fat16_drive_label(uint8_t drive_id);
+bool fat16_drive_mounted(uint8_t drive_id);
+
+/* init */
 bool fat16_mount(void);
 bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes);
 
-// path
-
+/* path */
 void fat16_make_83(const char *filename, char *out83);
 bool fat16_resolve(const char *path, uint16_t *out_cluster, char *out_name83);
 bool fat16_chdir(const char *path);
 bool fat16_pwd(char *buf, int buflen);
 
-// dirs
-
+/* dirs */
 bool fat16_mkdir(const char *path);
 bool fat16_find_in_dir(uint16_t dir_cluster, const char *name83,
                        dir_entry_t *out);
@@ -108,8 +128,7 @@ bool fat16_list_dir(uint16_t dir_cluster, dir_entry_t *buf, int max,
 bool is_dir_empty(uint16_t cluster);
 void fat16_wipe_cluster(uint16_t cluster);
 
-// files
-
+/* files */
 bool fat16_open(const char *path, fat16_file_t *f);
 bool fat16_create(const char *path, fat16_file_t *f);
 int fat16_read(fat16_file_t *f, void *buf, int len);
@@ -118,8 +137,7 @@ bool fat16_seek(fat16_file_t *f, uint32_t offset);
 int fat16_tell(fat16_file_t *f);
 bool fat16_close(fat16_file_t *f);
 
-// file and dir
-
+/* file and dir */
 bool fat16_rename(const char *path, const char *new_name);
 bool fat16_delete(const char *path);
 bool fat16_rmdir(const char *path);
@@ -130,5 +148,9 @@ bool fat16_move_file(const char *src_path, const char *dest_path);
 
 bool fat16_copy_dir(const char *src_path, const char *dest_path);
 bool fat16_move_dir(const char *src_path, const char *dest_path);
+
+/* hidden file helpers */
+bool fat16_set_hidden(const char *path, bool hidden);
+bool fat16_is_hidden(const char *path);
 
 #endif
