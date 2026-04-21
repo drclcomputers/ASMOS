@@ -607,7 +607,7 @@ static void teditor_on_frame(void *state) {
     if (s->status_timer > 0)
         s->status_timer--;
 
-    //changecursor(state);
+    // changecursor(state);
 
     if (s->fname_mode != FNAME_MODE_NONE) {
         if (kb.key_pressed) {
