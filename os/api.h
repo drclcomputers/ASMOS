@@ -30,6 +30,7 @@
 #include "fs/fat16.h"
 
 // OS Services
+#include "os/clipboard.h"
 #include "os/error.h"
 #include "os/os.h"
 

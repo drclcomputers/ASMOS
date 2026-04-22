@@ -14,6 +14,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/kernel.o                     \
       \
 	  $(BUILD_DIR)/os/app_registry.o            \
+      $(BUILD_DIR)/os/clipboard.o               \
 	  $(BUILD_DIR)/os/error.o                   \
       $(BUILD_DIR)/os/os.o                      \
 	  $(BUILD_DIR)/os/scheduler.o               \
