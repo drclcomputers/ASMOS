@@ -222,27 +222,6 @@ int vfprintf(FILE *f, const char *fmt, va_list ap) {
     fwrite(buf, 1, n, f);
     return n;
 }
-int snprintf(char *s, size_t n, const char *fmt, ...) {
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    int len = vsprintf(buf, fmt, ap);
-    va_end(ap);
-    if (len >= (int)n)
-        len = (int)n - 1;
-    memcpy(s, buf, len);
-    s[len] = '\0';
-    return len;
-}
-int vsnprintf(char *s, size_t n, const char *fmt, va_list ap) {
-    char buf[1024];
-    int len = vsprintf(buf, fmt, ap);
-    if (len >= (int)n)
-        len = (int)n - 1;
-    memcpy(s, buf, len);
-    s[len] = '\0';
-    return len;
-}
 void perror(const char *s) { fprintf(stderr, "%s: error\n", s ? s : ""); }
 int remove(const char *path) { return fat16_delete(path) ? 0 : -1; }
 

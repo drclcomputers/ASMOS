@@ -46,6 +46,8 @@ double str_to_double(const char *s, char **end);
 
 // Formatted output
 
+int vsnprintf(char *str, size_t size, const char *format, va_list args);
+int snprintf(char *str, size_t size, const char *format, ...);
 int vsprintf(char *str, const char *format, va_list args);
 int sprintf(char *str, const char *format, ...);
 

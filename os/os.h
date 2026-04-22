@@ -19,6 +19,7 @@ typedef struct {
     app_init_fn init;
     app_frame_fn on_frame;
     app_destroy_fn destroy;
+    bool single_instance;
 } app_descriptor;
 
 typedef struct {

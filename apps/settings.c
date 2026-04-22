@@ -270,4 +270,5 @@ app_descriptor settings_app = {
     .init = settings_init,
     .on_frame = settings_on_frame,
     .destroy = settings_destroy,
+    .single_instance = true,
 };

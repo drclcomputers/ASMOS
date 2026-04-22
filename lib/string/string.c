@@ -297,49 +297,37 @@ double str_to_double(const char *s, char **end) {
     return result * sign;
 }
 
-int vsprintf(char *str, const char *format, va_list args) {
-    char *ptr = str;
-    char temp_buf[32];
+int vsnprintf(char *str, size_t size, const char *format, va_list args) {
+    size_t total = 0;
+
+    #define PUTC(c) do { \
+        if (size > 0 && total < size - 1 && str) { \
+            str[total] = (char)(c); \
+        } \
+        total++; \
+    } while (0)
 
     while (*format) {
         if (*format != '%') {
-            *ptr++ = *format++;
+            PUTC(*format++);
             continue;
         }
         format++;
 
-        bool left_align = false;
-        bool zero_pad = false;
-        bool plus_sign = false;
-        bool space_sign = false;
-
+        bool left_align = false, zero_pad = false, plus_sign = false, space_sign = false;
         bool parsing_flags = true;
         while (parsing_flags) {
             switch (*format) {
-            case '-':
-                left_align = true;
-                format++;
-                break;
-            case '0':
-                zero_pad = true;
-                format++;
-                break;
-            case '+':
-                plus_sign = true;
-                format++;
-                break;
-            case ' ':
-                space_sign = true;
-                format++;
-                break;
-            default:
-                parsing_flags = false;
-                break;
+                case '-': left_align = true; format++; break;
+                case '0': zero_pad = true;  format++; break;
+                case '+': plus_sign = true;  format++; break;
+                case ' ': space_sign = true; format++; break;
+                default:  parsing_flags = false;    break;
             }
         }
 
         int width = 0;
-        while (*format >= '0' && *format <= '9') {
+        while (isdigit(*format)) {
             width = width * 10 + (*format - '0');
             format++;
         }
@@ -348,217 +336,127 @@ int vsprintf(char *str, const char *format, va_list args) {
         if (*format == '.') {
             format++;
             precision = 0;
-            while (*format >= '0' && *format <= '9') {
+            while (isdigit(*format)) {
                 precision = precision * 10 + (*format - '0');
                 format++;
             }
         }
 
-        if (*format == 'l' || *format == 'h')
-            format++;
+        if (*format == 'l' || *format == 'h') format++;
 
-#define WRITE_PADDED(s, slen)                                                  \
-    do {                                                                       \
-        int _len = (slen);                                                     \
-        int _pad = (width > _len) ? width - _len : 0;                          \
-        char _pc = (zero_pad && !left_align) ? '0' : ' ';                      \
-        if (!left_align)                                                       \
-            for (int _i = 0; _i < _pad; _i++)                                  \
-                *ptr++ = _pc;                                                  \
-        for (int _i = 0; _i < _len; _i++)                                      \
-            *ptr++ = (s)[_i];                                                  \
-        if (left_align)                                                        \
-            for (int _i = 0; _i < _pad; _i++)                                  \
-                *ptr++ = ' ';                                                  \
-    } while (0)
+        #define WRITE_PADDED_SAFE(s, slen) do { \
+            int _len = (slen); \
+            int _pad = (width > _len) ? width - _len : 0; \
+            char _pc = (zero_pad && !left_align) ? '0' : ' '; \
+            if (!left_align) \
+                for (int _i = 0; _i < _pad; _i++) PUTC(_pc); \
+            for (int _i = 0; _i < _len; _i++) PUTC((s)[_i]); \
+            if (left_align) \
+                for (int _i = 0; _i < _pad; _i++) PUTC(' '); \
+        } while (0)
 
         switch (*format) {
-        case 'c': {
-            char c = (char)va_arg(args, int);
-            char buf[1];
-            buf[0] = c;
-            WRITE_PADDED(buf, 1);
-            break;
-        }
-
-        case 's': {
-            char *s = va_arg(args, char *);
-            if (!s)
-                s = "(null)";
-            int slen = (int)strlen(s);
-            if (precision >= 0 && slen > precision)
-                slen = precision;
-            WRITE_PADDED(s, slen);
-            break;
-        }
-
-        case 'd':
-        case 'i': {
-            int val = va_arg(args, int);
-            char tmp[24];
-            int ti = 0;
-            bool neg = (val < 0);
-            uint32_t uval = neg ? (uint32_t)(-(int32_t)val) : (uint32_t)val;
-
-            if (uval == 0) {
-                tmp[ti++] = '0';
-            } else {
-                while (uval > 0) {
-                    tmp[ti++] = '0' + (uval % 10);
-                    uval /= 10;
+            case 'c': {
+                char buf[1] = { (char)va_arg(args, int) };
+                WRITE_PADDED_SAFE(buf, 1);
+                break;
+            }
+            case 's': {
+                char *s = va_arg(args, char *);
+                if (!s) s = "(null)";
+                int slen = (int)strlen(s);
+                if (precision >= 0 && slen > precision) slen = precision;
+                WRITE_PADDED_SAFE(s, slen);
+                break;
+            }
+            case 'd':
+            case 'i': {
+                int val = va_arg(args, int);
+                char tmp[24];
+                int ti = 0;
+                bool neg = (val < 0);
+                uint32_t uval = neg ? (uint32_t)(-(int32_t)val) : (uint32_t)val;
+                if (uval == 0) tmp[ti++] = '0';
+                else {
+                    while (uval > 0) {
+                        tmp[ti++] = '0' + (uval % 10);
+                        uval /= 10;
+                    }
                 }
-            }
-
-            if (precision > ti) {
-                while (ti < precision && ti < (int)sizeof(tmp) - 2)
-                    tmp[ti++] = '0';
-            }
-
-            for (int a = 0, b = ti - 1; a < b; a++, b--) {
-                char c = tmp[a];
-                tmp[a] = tmp[b];
-                tmp[b] = c;
-            }
-
-            char prefix[2];
-            int plen = 0;
-            if (neg)
-                prefix[plen++] = '-';
-            else if (plus_sign)
-                prefix[plen++] = '+';
-            else if (space_sign)
-                prefix[plen++] = ' ';
-
-            int total = plen + ti;
-            int pad = (width > total) ? width - total : 0;
-            char pc = (zero_pad && !left_align) ? '0' : ' ';
-
-            if (!left_align && !zero_pad)
-                for (int i = 0; i < pad; i++)
-                    *ptr++ = ' ';
-            for (int i = 0; i < plen; i++)
-                *ptr++ = prefix[i];
-            if (!left_align && zero_pad)
-                for (int i = 0; i < pad; i++)
-                    *ptr++ = pc;
-            for (int i = 0; i < ti; i++)
-                *ptr++ = tmp[i];
-            if (left_align)
-                for (int i = 0; i < pad; i++)
-                    *ptr++ = ' ';
-            break;
-        }
-
-        case 'u': {
-            uint32_t val = va_arg(args, uint32_t);
-            char tmp[24];
-            int ti = 0;
-
-            if (val == 0) {
-                tmp[ti++] = '0';
-            } else {
-                while (val > 0) {
-                    tmp[ti++] = '0' + (val % 10);
-                    val /= 10;
+                while (ti < precision && ti < (int)sizeof(tmp) - 2) tmp[ti++] = '0';
+                for (int a = 0, b = ti - 1; a < b; a++, b--) {
+                    char c = tmp[a]; tmp[a] = tmp[b]; tmp[b] = c;
                 }
+                char prefix[2];
+                int plen = 0;
+                if (neg) prefix[plen++] = '-';
+                else if (plus_sign) prefix[plen++] = '+';
+                else if (space_sign) prefix[plen++] = ' ';
+
+                int sub_total = plen + ti;
+                int pad = (width > sub_total) ? width - sub_total : 0;
+                char pc = (zero_pad && !left_align) ? '0' : ' ';
+                if (!left_align && !zero_pad) for (int i = 0; i < pad; i++) PUTC(' ');
+                for (int i = 0; i < plen; i++) PUTC(prefix[i]);
+                if (!left_align && zero_pad) for (int i = 0; i < pad; i++) PUTC(pc);
+                for (int i = 0; i < ti; i++) PUTC(tmp[i]);
+                if (left_align) for (int i = 0; i < pad; i++) PUTC(' ');
+                break;
             }
-
-            if (precision > ti)
-                while (ti < precision && ti < (int)sizeof(tmp) - 1)
-                    tmp[ti++] = '0';
-
-            for (int a = 0, b = ti - 1; a < b; a++, b--) {
-                char c = tmp[a];
-                tmp[a] = tmp[b];
-                tmp[b] = c;
-            }
-
-            WRITE_PADDED(tmp, ti);
-            break;
-        }
-
-        case 'x':
-        case 'X': {
-            uint32_t val = va_arg(args, uint32_t);
-            const char *digits =
-                (*format == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
-            char tmp[24];
-            int ti = 0;
-
-            if (val == 0) {
-                tmp[ti++] = '0';
-            } else {
-                while (val > 0) {
-                    tmp[ti++] = digits[val % 16];
-                    val /= 16;
+            case 'u':
+            case 'x':
+            case 'X':
+            case 'o': {
+                uint32_t val = va_arg(args, uint32_t);
+                const char *digits = (*format == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+                int base = (*format == 'o') ? 8 : ((*format == 'u') ? 10 : 16);
+                char tmp[24];
+                int ti = 0;
+                if (val == 0) tmp[ti++] = '0';
+                else {
+                    while (val > 0) {
+                        tmp[ti++] = digits[val % base];
+                        val /= base;
+                    }
                 }
-            }
-
-            if (precision > ti)
-                while (ti < precision && ti < (int)sizeof(tmp) - 1)
-                    tmp[ti++] = '0';
-
-            for (int a = 0, b = ti - 1; a < b; a++, b--) {
-                char c = tmp[a];
-                tmp[a] = tmp[b];
-                tmp[b] = c;
-            }
-
-            WRITE_PADDED(tmp, ti);
-            break;
-        }
-
-        case 'o': {
-            uint32_t val = va_arg(args, uint32_t);
-            char tmp[24];
-            int ti = 0;
-            if (val == 0) {
-                tmp[ti++] = '0';
-            } else {
-                while (val > 0) {
-                    tmp[ti++] = '0' + (val % 8);
-                    val /= 8;
+                while (precision > ti && ti < (int)sizeof(tmp) - 1) tmp[ti++] = '0';
+                for (int a = 0, b = ti - 1; a < b; a++, b--) {
+                    char c = tmp[a]; tmp[a] = tmp[b]; tmp[b] = c;
                 }
+                WRITE_PADDED_SAFE(tmp, ti);
+                break;
             }
-            for (int a = 0, b = ti - 1; a < b; a++, b--) {
-                char c = tmp[a];
-                tmp[a] = tmp[b];
-                tmp[b] = c;
+            case 'p': {
+                uint32_t val = (uint32_t)(uintptr_t)va_arg(args, void *);
+                char tmp[10] = { '0', 'x' };
+                const char *hd = "0123456789abcdef";
+                for (int i = 0; i < 8; i++) tmp[2 + i] = hd[(val >> (28 - i * 4)) & 0xF];
+                WRITE_PADDED_SAFE(tmp, 10);
+                break;
             }
-            WRITE_PADDED(tmp, ti);
-            break;
+            case '%': PUTC('%'); break;
+            default:  PUTC('%'); PUTC(*format); break;
         }
-
-        case 'p': {
-            uint32_t val = (uint32_t)(uintptr_t)va_arg(args, void *);
-            char tmp[10];
-            tmp[0] = '0';
-            tmp[1] = 'x';
-            const char *hd = "0123456789abcdef";
-            for (int i = 0; i < 8; i++)
-                tmp[2 + i] = hd[(val >> (28 - i * 4)) & 0xF];
-            WRITE_PADDED(tmp, 10);
-            break;
-        }
-
-        case '%': {
-            *ptr++ = '%';
-            break;
-        }
-
-        default: {
-            *ptr++ = '%';
-            *ptr++ = *format;
-            break;
-        }
-        }
-
-#undef WRITE_PADDED
         format++;
     }
 
-    *ptr = '\0';
-    return (int)(ptr - str);
+    if (size > 0 && str) {
+        str[total < size ? total : size - 1] = '\0';
+    }
+
+    return (int)total;
+}
+
+int snprintf(char *str, size_t size, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(str, size, format, args);
+    va_end(args);
+    return written;
+}
+
+int vsprintf(char *str, const char *format, va_list args) {
+    return vsnprintf(str, (size_t)-1, format, args);
 }
 
 int sprintf(char *str, const char *format, ...) {

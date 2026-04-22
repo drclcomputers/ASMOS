@@ -43,6 +43,21 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
         ERR_WARN_REPORT(ERR_NULL_PTR, "os_launch_app");
         return NULL;
     }
+
+    if (desc->single_instance) {
+        for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+            app_instance_t *a = &running_apps[i];
+            if (!a->running || a->wants_quit || a->desc != desc)
+                continue;
+            if (a->state) {
+                window **wp = (window **)a->state;
+                if (*wp && (*wp)->visible)
+                    wm_focus(*wp);
+            }
+            return a;
+        }
+    }
+
     if (running_app_count >= MAX_RUNNING_APPS) {
         ERR_WARN_REPORT(ERR_APP_MAX_RUNNING, "os_launch_app");
         return NULL;
@@ -93,11 +108,9 @@ void os_quit_app(app_instance_t *inst) {
 void os_quit_app_by_desc(app_descriptor *desc) {
     if (!desc)
         return;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        if (running_apps[i].running && running_apps[i].desc == desc) {
+    for (int i = 0; i < MAX_RUNNING_APPS; i++)
+        if (running_apps[i].running && running_apps[i].desc == desc)
             running_apps[i].wants_quit = true;
-        }
-    }
 }
 
 app_instance_t *os_find_instance(app_descriptor *desc) {
@@ -140,11 +153,9 @@ void os_tick_apps(void) {
         app_instance_t *app = &running_apps[i];
         if (!app->running || app->wants_quit)
             continue;
-
         if (now - last_run_time[i] >= FRAME_TIME_MS) {
-            if (app->desc && app->desc->on_frame) {
+            if (app->desc && app->desc->on_frame)
                 app->desc->on_frame(app->state);
-            }
             last_run_time[i] = now;
         }
     }

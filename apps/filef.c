@@ -93,6 +93,10 @@ app_descriptor filef_app;
 
 static int s_cascade = 0;
 
+/* Track the last-focused FileF instance so menu callbacks work even after
+   the menu closes and focus shifts briefly. */
+static ff_inst_t *s_last_active = NULL;
+
 static void ff_reload(ff_inst_t *s);
 static void ff_draw_window(window *win, void *ud);
 static void ff_navigate(ff_inst_t *s, uint16_t cluster, const char *path);
@@ -164,11 +168,33 @@ static ff_inst_t *inst_of(window *w) {
     return NULL;
 }
 
+/*
+ * active_finder — returns the last-focused FileF instance.
+ * We prefer the currently-focused window, but fall back to
+ * s_last_active so that menu-item callbacks still work after the
+ * menu closes and the focused window briefly changes.
+ */
 static ff_inst_t *active_finder(void) {
     window *fw = wm_focused_window();
-    if (!fw)
-        return NULL;
-    return inst_of(fw);
+    if (fw) {
+        ff_inst_t *s = inst_of(fw);
+        if (s) {
+            s_last_active = s;
+            return s;
+        }
+    }
+    /* Fallback: use the last window that was focused */
+    if (s_last_active) {
+        /* Make sure it's still alive */
+        for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+            app_instance_t *a = &running_apps[i];
+            if (a->running && a->desc == &filef_app &&
+                a->state == s_last_active)
+                return s_last_active;
+        }
+        s_last_active = NULL;
+    }
+    return NULL;
 }
 
 static void entry_to_name(const dir_entry_t *e, char *out) {
@@ -357,7 +383,7 @@ static bool item_is_app(const ff_item_t *it) {
             it->entry.ext[2] == 'P');
 }
 
-/* ── drive bar ─────────────────────────────────────────────────────────── */
+/* ── drive bar ──────────────────────────────────────────────────────────── */
 static void ff_draw_drivebar(ff_inst_t *s, int wx, int wy, int ww) {
     int bx = wx, by = wy + CONTENT_TOP - DRIVEBAR_H + 4;
     fill_rect(bx, by, ww, DRIVEBAR_H, DARK_GRAY);
@@ -379,6 +405,7 @@ static void ff_draw_drivebar(ff_inst_t *s, int wx, int wy, int ww) {
 
 static bool ff_drivebar_click(ff_inst_t *s, int mx, int my, int wx, int wy,
                               int ww) {
+    (void)ww;
     int by = wy + CONTENT_TOP - DRIVEBAR_H + 4;
     if (my < by || my >= by + DRIVEBAR_H)
         return false;
@@ -493,18 +520,20 @@ static void ff_draw_info_overlay(ff_inst_t *s, int wx, int wy, int ww, int wh) {
     draw_string(vx, row_y, s->info_name, BLACK, 2);
     row_y += line_h;
     draw_string(lx, row_y, "Path:", DARK_GRAY, 2);
-    int max_path_chars = (pw - 54) / CHAR_W;
-    int plen = (int)strlen(s->info_path);
-    if (plen <= max_path_chars) {
-        draw_string(vx, row_y, s->info_path, BLACK, 2);
-    } else {
-        char trunc[64];
-        strcpy(trunc, "...");
-        int start = plen - (max_path_chars - 3);
-        if (start < 0)
-            start = 0;
-        strcat(trunc, s->info_path + start);
-        draw_string(vx, row_y, trunc, BLACK, 2);
+    {
+        int max_path_chars = (pw - 54) / CHAR_W;
+        int plen = (int)strlen(s->info_path);
+        if (plen <= max_path_chars) {
+            draw_string(vx, row_y, s->info_path, BLACK, 2);
+        } else {
+            char trunc[64];
+            strcpy(trunc, "...");
+            int start = plen - (max_path_chars - 3);
+            if (start < 0)
+                start = 0;
+            strcat(trunc, s->info_path + start);
+            draw_string(vx, row_y, trunc, BLACK, 2);
+        }
     }
     row_y += line_h;
     draw_string(lx, row_y, "Type:", DARK_GRAY, 2);
@@ -566,12 +595,12 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
         }
         sprintf(s->info_size, "%u B", it->entry.file_size);
     }
-    uint16_t fat_date = it->entry.modify_date, fat_time = it->entry.modify_time;
-    uint16_t year = ((fat_date >> 9) & 0x7F) + 1980;
-    uint8_t month = (fat_date >> 5) & 0x0F, day = fat_date & 0x1F;
-    uint8_t hour = (fat_time >> 11) & 0x1F, min2 = (fat_time >> 5) & 0x3F,
-            sec = (fat_time & 0x1F) * 2;
-    if (fat_date == 0) {
+    uint16_t fd = it->entry.modify_date, ft = it->entry.modify_time;
+    uint16_t year = ((fd >> 9) & 0x7F) + 1980;
+    uint8_t month = (fd >> 5) & 0x0F, day = fd & 0x1F;
+    uint8_t hour = (ft >> 11) & 0x1F, min2 = (ft >> 5) & 0x3F,
+            sec = (ft & 0x1F) * 2;
+    if (fd == 0) {
         strcpy(s->info_date, "Unknown");
         strcpy(s->info_time, "Unknown");
     } else {
@@ -728,7 +757,6 @@ static void do_delete(void *ud) {
         s->mode = MODE_NORMAL;
         return;
     }
-
     if (path_is_protected(s->items[sel].name)) {
         strcpy(s->status, "Protected item.");
         s->mode = MODE_NORMAL;
@@ -855,7 +883,7 @@ static void menu_show_hidden_toggle(void) {
     ff_reload(s);
 }
 
-/* ── copy / cut / paste using global clipboard ──────────────────────────── */
+/* ── copy / cut / paste ─────────────────────────────────────────────────── */
 
 static void menu_copy(void) {
     ff_inst_t *s = active_finder();
@@ -909,22 +937,34 @@ static void menu_paste(void) {
         return;
     if (!clipboard_has_file()) {
         strcpy(s->status, "Clipboard empty.");
+        modal_show(MODAL_INFO, "Paste", "Clipboard is empty.", NULL, NULL);
         return;
     }
 
+    /* Build full source path */
     char src_path[270];
     if (g_clipboard.src_path[0] == '/' && g_clipboard.src_path[1] == '\0')
         sprintf(src_path, "/%s", g_clipboard.name);
     else
         sprintf(src_path, "%s/%s", g_clipboard.src_path, g_clipboard.name);
 
+    /* Prevent pasting into itself */
+    if (strcmp(g_clipboard.src_path, s->path) == 0 && !g_clipboard.is_cut) {
+        strcpy(s->status, "Already here.");
+        modal_show(MODAL_INFO, "Paste", "File already in this folder.", NULL,
+                   NULL);
+        return;
+    }
+
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = s->dir_cluster;
 
     dir_entry_t de;
     if (fat16_find(g_clipboard.name, &de)) {
-        strcpy(s->status, "Name already exists.");
         dir_context.current_cluster = saved;
+        strcpy(s->status, "Name already exists.");
+        modal_show(MODAL_ERROR, "Paste Failed",
+                   "A file with that name already exists here.", NULL, NULL);
         return;
     }
 
@@ -940,9 +980,16 @@ static void menu_paste(void) {
     }
 
     dir_context.current_cluster = saved;
-    strcpy(s->status, ok ? "Pasted." : "Paste failed.");
-    maybe_notify_desktop(s);
-    ff_reload(s);
+
+    if (ok) {
+        strcpy(s->status, "Pasted.");
+        maybe_notify_desktop(s);
+        ff_reload(s);
+    } else {
+        strcpy(s->status, "Paste failed.");
+        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL,
+                   NULL);
+    }
 }
 
 static void menu_delete(void) {
@@ -992,6 +1039,7 @@ static void menu_sort_size(void) {
     ff_sort(s);
     ff_layout(s);
 }
+
 static void menu_about_filef(void) {
     modal_show(MODAL_INFO, "About FileF",
                "FileF v1.3\nASMOS File Manager\nDrag, drop, copy & move files.",
@@ -1004,6 +1052,8 @@ static bool ff_close_cb(window *w) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         if (running_apps[i].running && running_apps[i].desc == &filef_app &&
             running_apps[i].state == s) {
+            if (s_last_active == s)
+                s_last_active = NULL;
             os_quit_app(&running_apps[i]);
             return true;
         }
@@ -1077,7 +1127,7 @@ static void ff_handle_rename(ff_inst_t *s) {
     ff_reload(s);
 }
 
-/* ── drag-and-drop between finder windows / desktop ─────────────────────── */
+/* ── drag-and-drop ──────────────────────────────────────────────────────── */
 
 static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
     for (int i = win_count - 1; i >= 0; i--) {
@@ -1197,13 +1247,12 @@ static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
     if (ok) {
         strcpy(src->status, "Moved to Desktop.");
         ff_reload(src);
-    } else {
+    } else
         strcpy(src->status, "Drop to Desktop failed.");
-    }
     return ok;
 }
 
-/* ── scroll helper ──────────────────────────────────────────────────────── */
+/* ── scroll ─────────────────────────────────────────────────────────────── */
 
 static void ff_scroll(ff_inst_t *s, int delta) {
     int view_h = content_view_h(s);
@@ -1223,6 +1272,10 @@ static void ff_on_frame(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
     if (!s->win || !s->win->visible)
         return;
+
+    /* Track last-active whenever this window is focused */
+    if (wm_focused_window() == s->win)
+        s_last_active = s;
 
     if (s->win->w != s->last_win_w || s->win->h != s->last_win_h) {
         s->last_win_w = s->win->w;
@@ -1557,10 +1610,14 @@ static void ff_init(void *state) {
     strcpy(s->path, desktop_fs_path());
     s->win->title = s->path;
     ff_reload(s);
+
+    s_last_active = s;
 }
 
 static void ff_destroy(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
+    if (s_last_active == s)
+        s_last_active = NULL;
     if (s->win) {
         wm_unregister(s->win);
         s->win = NULL;

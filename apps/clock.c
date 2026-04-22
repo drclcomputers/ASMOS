@@ -93,4 +93,5 @@ app_descriptor clock_app = {
     .init = clock_init,
     .on_frame = clock_on_frame,
     .destroy = clock_destroy,
+    .single_instance = true,
 };

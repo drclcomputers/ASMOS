@@ -130,4 +130,5 @@ app_descriptor monitor_app = {
     .init = monitor_init,
     .on_frame = monitor_on_frame,
     .destroy = monitor_destroy,
+    .single_instance = true,
 };
