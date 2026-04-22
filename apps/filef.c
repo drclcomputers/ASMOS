@@ -941,14 +941,12 @@ static void menu_paste(void) {
         return;
     }
 
-    /* Build full source path */
     char src_path[270];
     if (g_clipboard.src_path[0] == '/' && g_clipboard.src_path[1] == '\0')
         sprintf(src_path, "/%s", g_clipboard.name);
     else
         sprintf(src_path, "%s/%s", g_clipboard.src_path, g_clipboard.name);
 
-    /* Prevent pasting into itself */
     if (strcmp(g_clipboard.src_path, s->path) == 0 && !g_clipboard.is_cut) {
         strcpy(s->status, "Already here.");
         modal_show(MODAL_INFO, "Paste", "File already in this folder.", NULL,
@@ -985,6 +983,7 @@ static void menu_paste(void) {
         strcpy(s->status, "Pasted.");
         maybe_notify_desktop(s);
         ff_reload(s);
+        desktop_fs_set_dirty();
     } else {
         strcpy(s->status, "Paste failed.");
         modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL,
@@ -1437,7 +1436,8 @@ static void ff_on_frame(void *state) {
     }
 
     /* Begin drag */
-    if (mouse.left && !mouse.left_clicked && s->drag_idx < 0) {
+    if (mouse.left && !mouse.left_clicked && s->drag_idx < 0 &&
+        wm_focused_window() == s->win) {
         for (int i = 0; i < s->item_count; i++) {
             ff_item_t *it = &s->items[i];
             if (!it->selected || it->is_dotdot)

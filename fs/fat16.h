@@ -57,11 +57,21 @@ typedef struct __attribute__((packed)) {
 #define FAT16_BAD 0xFFF7
 #define FAT16_EOC 0xFFF8
 
+#define FAT12_FREE 0x000
+#define FAT12_RESERVED 0xFF0
+#define FAT12_BAD 0xFF7
+#define FAT12_EOC 0xFF8
+
 #define DRIVE_HDA 0  /* Primary ATA master  (boot drive) */
 #define DRIVE_HDB 1  /* Primary ATA slave */
 #define DRIVE_FDD0 2 /* Floppy A: */
 #define DRIVE_FDD1 3 /* Floppy B: */
 #define DRIVE_COUNT 4
+
+typedef enum {
+    FAT_TYPE_FAT12 = 12,
+    FAT_TYPE_FAT16 = 16,
+} fat_type_t;
 
 typedef struct {
     bpb_t bpb;
@@ -72,6 +82,7 @@ typedef struct {
     bool mounted;
     uint8_t drive_id; /* physical drive */
     char label[12];   /* volume label */
+    fat_type_t fat_type;
 } fat16_fs_t;
 
 typedef struct {

@@ -1,5 +1,6 @@
 #include "fs/fat16.h"
 #include "fs/ata.h"
+//#include "fs/fdd.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -25,7 +26,9 @@ bool path_is_protected(const char *name_or_path) {
         if (strcasecmp(name_or_path, g_protected_paths[i]) == 0)
             return true;
     }
-    if (strncasecmp(name_or_path, "/DESKTOP", 8) == 0)
+    if (strcasecmp(name_or_path, "/DESKTOP") == 0)
+        return true;
+    if (strcasecmp(name_or_path, "/DESKTOP/") == 0)
         return true;
     return false;
 }
@@ -37,6 +40,10 @@ static bool drive_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
     case DRIVE_HDA:
     case DRIVE_HDB:
         return ata_read_sector(drive_id, lba, buf);
+    //case DRIVE_FDD0:
+    //    return fdd_read_sector(0, lba, buf);
+    //case DRIVE_FDD1:
+    //    return fdd_read_sector(1, lba, buf);
     default:
         return false;
     }
@@ -48,6 +55,10 @@ static bool drive_write_sector(uint8_t drive_id, uint32_t lba,
     case DRIVE_HDA:
     case DRIVE_HDB:
         return ata_write_sector(drive_id, lba, buf);
+    //case DRIVE_FDD0:
+    //    return fdd_write_sector(0, lba, buf);
+    //case DRIVE_FDD1:
+    //    return fdd_write_sector(1, lba, buf);
     default:
         return false;
     }
@@ -67,7 +78,10 @@ static bool cluster_valid(uint16_t cluster) {
         return false;
     if (cluster >= (uint16_t)(fs.cluster_count + 2))
         return false;
-    if (cluster >= FAT16_RESERVED)
+
+    uint16_t reserved =
+        (fs.fat_type == FAT_TYPE_FAT12) ? FAT12_RESERVED : FAT16_RESERVED;
+    if (cluster >= reserved)
         return false;
     return true;
 }
@@ -81,6 +95,38 @@ static uint32_t cluster_to_lba(uint16_t cluster) {
 static uint16_t fat_get(uint16_t cluster) {
     if (cluster < 2 || cluster >= (uint16_t)(fs.cluster_count + 2))
         return FAT16_BAD;
+
+    if (fs.fat_type == FAT_TYPE_FAT12) {
+        uint32_t bit_offset = cluster * 12;
+        uint32_t byte_offset = bit_offset / 8;
+        uint32_t fat_sector = fs.fat_lba + byte_offset / 512;
+        uint32_t off_in_sec = byte_offset % 512;
+
+        uint8_t buf0[512], buf1[512];
+        if (!rd(fat_sector, buf0))
+            return FAT16_BAD;
+
+        uint16_t val;
+        if (off_in_sec == 511) {
+            if (!rd(fat_sector + 1, buf1))
+                return FAT16_BAD;
+            val = buf0[511] | ((uint16_t)buf1[0] << 8);
+        } else {
+            val = buf0[off_in_sec] | ((uint16_t)buf0[off_in_sec + 1] << 8);
+        }
+
+        if (cluster & 1)
+            val >>= 4;
+        else
+            val &= 0x0FFF;
+
+        if (val >= FAT12_RESERVED)
+            return FAT16_EOC;
+        if (val == FAT12_BAD)
+            return FAT16_BAD;
+        return val;
+    }
+
     uint32_t fat_sector = fs.fat_lba + (cluster / 256);
     uint16_t fat_offset = (cluster % 256) * 2;
     uint8_t local_buf[512];
@@ -92,6 +138,53 @@ static uint16_t fat_get(uint16_t cluster) {
 static bool fat_set(uint16_t cluster, uint16_t value) {
     if (cluster < 2 || cluster >= (uint16_t)(fs.cluster_count + 2))
         return false;
+
+    if (fs.fat_type == FAT_TYPE_FAT12) {
+        uint16_t val12 = value;
+        if (value == FAT16_FREE)
+            val12 = FAT12_FREE;
+        else if (value >= FAT16_EOC)
+            val12 = 0xFFF;
+        else if (value == FAT16_BAD)
+            val12 = FAT12_BAD;
+
+        uint32_t bit_offset = cluster * 12;
+        uint32_t byte_offset = bit_offset / 8;
+        uint32_t fat_sector = fs.fat_lba + byte_offset / 512;
+        uint32_t off_in_sec = byte_offset % 512;
+
+        for (int copy = 0; copy < fs.bpb.fat_count; copy++) {
+            uint32_t lba0 =
+                fs.fat_lba + copy * fs.bpb.sectors_per_fat + byte_offset / 512;
+
+            uint8_t buf0[512], buf1[512];
+            bool straddle = (off_in_sec == 511);
+
+            if (!rd(lba0, buf0))
+                return false;
+            if (straddle && !rd(lba0 + 1, buf1))
+                return false;
+
+            uint8_t *lo = straddle ? &buf0[511] : &buf0[off_in_sec];
+            uint8_t *hi = straddle ? &buf1[0] : &buf0[off_in_sec + 1];
+
+            if (cluster & 1) {
+                *lo = (*lo & 0x0F) | ((val12 << 4) & 0xF0);
+                *hi = (val12 >> 4) & 0xFF;
+            } else {
+                *lo = val12 & 0xFF;
+                *hi = (*hi & 0xF0) | ((val12 >> 8) & 0x0F);
+            }
+
+            if (!wr(lba0, buf0))
+                return false;
+            if (straddle && !wr(lba0 + 1, buf1))
+                return false;
+            (void)fat_sector;
+        }
+        return true;
+    }
+
     uint32_t fat_sector = cluster / 256;
     uint16_t fat_offset = (cluster % 256) * 2;
     uint8_t local_buf[512];
@@ -455,6 +548,11 @@ bool fat16_mount_drive(uint8_t drive_id) {
     vol->drive_id = drive_id;
     vol->mounted = true;
 
+    if (vol->cluster_count < 4085)
+        vol->fat_type = FAT_TYPE_FAT12;
+    else
+        vol->fat_type = FAT_TYPE_FAT16;
+
     extract_volume_label(vol);
 
     fs.drive_id = saved_id;
@@ -511,16 +609,15 @@ bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
                                             : fs.bpb.total_sectors_16) *
                    fs.bpb.bytes_per_sector;
     uint32_t used_clusters = 0;
-    uint16_t fat_buf[256];
-    for (uint32_t s = 0; s < fs.bpb.sectors_per_fat; s++) {
-        if (!rd(fs.fat_lba + s, fat_buf))
-            return false;
-        for (int i = 0; i < 256; i++) {
-            uint16_t v = fat_buf[i];
-            if (v != FAT16_FREE && v < FAT16_RESERVED)
-                used_clusters++;
-        }
+
+    for (uint16_t c = 2; c < (uint16_t)(fs.cluster_count + 2); c++) {
+        uint16_t v = fat_get(c);
+        if (v != FAT16_FREE && v < FAT16_EOC && v != FAT16_BAD)
+            used_clusters++;
+        if (v >= FAT16_EOC)
+            used_clusters++;
     }
+
     *used_bytes =
         used_clusters * fs.bpb.bytes_per_sector * fs.bpb.sectors_per_cluster;
     return true;
