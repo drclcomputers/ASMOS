@@ -3,11 +3,26 @@
 #include "lib/memory.h"
 #include "lib/time.h"
 
-static uint8_t s_dma_buf[FDD_SECTOR_SIZE] __attribute__((aligned(512)));
+#define s_dma_buf       ((uint8_t *)0x7000)
+#define s_present       ((bool *)0x7200)
+#define s_motor_on      ((bool *)0x7204)
+#define s_current_track ((int *)0x7208)
 
-static bool s_present[2] = {false, false};
-static bool s_motor_on[2] = {false, false};
-static int s_current_track[2] = {-1, -1};
+static void fdd_busy_wait(uint32_t ms) {
+    extern volatile uint32_t pit_ticks;
+    uint32_t ticks = (ms + 9) / 10;
+    uint32_t end = pit_ticks + ticks;
+    while (pit_ticks < end)
+        __asm__ volatile("nop");
+}
+
+static bool fdd_cmos_present(uint8_t drive_id) {
+    outb(0x70, 0x10 | 0x80);
+    uint8_t drives = inb(0x71);
+    outb(0x70, 0x80);
+    uint8_t type = (drive_id == 0) ? (drives >> 4) : (drives & 0x0F);
+    return type != 0;
+}
 
 static bool fdc_wait_rqm(void) {
     uint32_t timeout = 0x40000;
@@ -65,7 +80,7 @@ static void fdd_motor_start(uint8_t drive_id) {
                            : (FDD_DOR_SEL_B | FDD_DOR_MOTOR_B);
     outb(FDD_DOR, dor);
     s_motor_on[drive_id] = true;
-    sleep_ms(300);
+    fdd_busy_wait(300);
 }
 
 void fdd_motor_off(uint8_t drive_id) {
@@ -114,7 +129,7 @@ static bool fdd_seek(uint8_t drive_id, uint8_t track) {
 
         if (cyl == track) {
             s_current_track[drive_id] = track;
-            sleep_ms(15);
+            fdd_busy_wait(15);
             return true;
         }
     }
@@ -300,12 +315,17 @@ bool fdd_is_present(uint8_t drive_id) {
 bool fdd_init(uint8_t drive_id) {
     if (drive_id > 1)
         return false;
+    s_present[drive_id] = false;
+    s_motor_on[drive_id] = false;
+    s_current_track[drive_id] = -1;
+    if (!fdd_cmos_present(drive_id))
+        return false;
 
     /* Reset FDC */
     outb(FDD_DOR, 0x00);
-    sleep_ms(5);
+    fdd_busy_wait(5);
     outb(FDD_DOR, FDD_DOR_RESET | FDD_DOR_IRQ_DMA);
-    sleep_ms(5);
+    fdd_busy_wait(5);
 
     /* Specify: SRT=8ms, HLT=15ms, HUT=240ms, no DMA=0 */
     fdc_send_byte(FDD_CMD_SPECIFY);

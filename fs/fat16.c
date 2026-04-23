@@ -1,6 +1,6 @@
 #include "fs/fat16.h"
 #include "fs/ata.h"
-//#include "fs/fdd.h"
+#include "fs/fdd.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -40,10 +40,10 @@ static bool drive_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
     case DRIVE_HDA:
     case DRIVE_HDB:
         return ata_read_sector(drive_id, lba, buf);
-    //case DRIVE_FDD0:
-    //    return fdd_read_sector(0, lba, buf);
-    //case DRIVE_FDD1:
-    //    return fdd_read_sector(1, lba, buf);
+    case DRIVE_FDD0:
+        return fdd_read_sector(0, lba, buf);
+    case DRIVE_FDD1:
+        return fdd_read_sector(1, lba, buf);
     default:
         return false;
     }
@@ -55,10 +55,10 @@ static bool drive_write_sector(uint8_t drive_id, uint32_t lba,
     case DRIVE_HDA:
     case DRIVE_HDB:
         return ata_write_sector(drive_id, lba, buf);
-    //case DRIVE_FDD0:
-    //    return fdd_write_sector(0, lba, buf);
-    //case DRIVE_FDD1:
-    //    return fdd_write_sector(1, lba, buf);
+    case DRIVE_FDD0:
+        return fdd_write_sector(0, lba, buf);
+    case DRIVE_FDD1:
+        return fdd_write_sector(1, lba, buf);
     default:
         return false;
     }
@@ -598,6 +598,13 @@ bool fat16_mount(void) {
     s_current_drive = DRIVE_HDA;
 
     fat16_mount_drive(DRIVE_HDB);
+
+    if (fdd_init(0)) {
+        fat16_mount_drive(DRIVE_FDD0);
+    }
+    if (fdd_init(1)) {
+        fat16_mount_drive(DRIVE_FDD1);
+    }
 
     return true;
 }

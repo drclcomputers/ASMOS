@@ -47,6 +47,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
       $(BUILD_DIR)/fs/ata.o                     \
       $(BUILD_DIR)/fs/fat16.o                   \
+      $(BUILD_DIR)/fs/fdd.o                     \
       \
       $(BUILD_DIR)/io/ps2.o                     \
       $(BUILD_DIR)/io/mouse.o                   \
@@ -70,7 +71,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/lib/graphics/primitive_graphics.o \
       \
       $(BUILD_DIR)/lib/compat/libcore.o         \
-      $(BUILD_DIR)/lib/compat/libc_compat.o     \
       \
       $(BUILD_DIR)/ui/cursor.o                  \
 	  $(BUILD_DIR)/ui/desktop.o                 \
@@ -127,15 +127,28 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 qemu: all
-	qemu-system-i386 -drive format=raw,file=os_image.bin \
-	                 -m 4M -machine pc \
-	                 -audiodev coreaudio,id=snd0 \
-	                 -machine pcspk-audiodev=snd0
+	@if [ ! -f floppy.img ]; then \
+	    dd if=/dev/zero of=floppy.img bs=512 count=2880 2>/dev/null; \
+	    /opt/homebrew/sbin/mkfs.vfat -F 12 -n "FDD1" floppy.img; \
+	    echo "Created blank floppy.img"; \
+	fi
+	qemu-system-i386 \
+	    -drive format=raw,file=os_image.bin \
+	    -drive format=raw,file=floppy.img,if=floppy \
+	    -m 4M -machine pc \
+	    -audiodev coreaudio,id=snd0 \
+	    -machine pcspk-audiodev=snd0 \
 
 bochs: all
+	@if [ ! -f floppy.img ]; then \
+	    dd if=/dev/zero of=floppy.img bs=512 count=2880 2>/dev/null; \
+	    mkfs.vfat -F 12 floppy.img; \
+	    echo "Created blank floppy.img"; \
+	fi
 	bochs -f bochs/bochssrc.txt -q
 
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f *.bin os_image.bin
-	rm -f qemu.log
+	rm -f qemulog.txt
+	rm -f floppy.img
