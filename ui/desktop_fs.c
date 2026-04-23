@@ -92,41 +92,13 @@ void desktop_fs_init(void) {
         s_cluster = de.cluster_lo;
     }
 
-    {
-        uint16_t saved = dir_context.current_cluster;
-        dir_context.current_cluster = 0;
-
-        for (uint8_t d = DRIVE_FDD0; d <= DRIVE_FDD1; d++) {
-            if (fat16_drive_mounted(d)) {
-                char mnt_name[12];
-                strncpy(mnt_name, fat16_drive_label(d), 11);
-                mnt_name[11] = '\0';
-                dir_entry_t dummy;
-                if (!fat16_find_in_dir(0, mnt_name, &dummy))
-                    fat16_mkdir(mnt_name);
-            }
-        }
-        dir_context.current_cluster = saved;
-    }
-
-    {
-        if (fat16_drive_mounted(DRIVE_HDB)) {
-            char mnt_name[12];
-            strncpy(mnt_name, fat16_drive_label(DRIVE_HDB), 11);
-            mnt_name[11] = '\0';
-            dir_entry_t dummy;
-            uint16_t saved = dir_context.current_cluster;
-            dir_context.current_cluster = 0;
-            if (!fat16_find_in_dir(0, mnt_name, &dummy))
-                fat16_mkdir(mnt_name);
-            dir_context.current_cluster = saved;
-        }
-    }
-
     desktop_fs_reload();
 }
 
 void desktop_fs_reload(void) {
+    uint8_t saved_drive = fat16_current_drive();
+    fat16_select_drive(DRIVE_HDA);
+
     s_dirty = false;
     s_count = 0;
     memset(s_items, 0, sizeof(s_items));
@@ -181,6 +153,20 @@ void desktop_fs_reload(void) {
         grid_slot(slot++, &it->x, &it->y);
         s_count++;
     }
+
+    if (!fat16_drive_mounted(DRIVE_HDB)) {
+        fat16_select_drive(saved_drive);
+        return;
+    }
+    desktop_item_t *it = &s_items[s_count];
+    memset(it, 0, sizeof(desktop_item_t));
+    strncpy(it->name, fat16_drive_label(DRIVE_HDB), DESKTOP_NAME_MAX - 1);
+    it->kind = DESKTOP_ITEM_HDD;
+    it->drive_id = 1;
+    it->used = true;
+    grid_slot(slot++, &it->x, &it->y);
+    s_count++;
+    fat16_select_drive(saved_drive);
 }
 
 void desktop_fs_set_dirty(void) { s_dirty = true; }

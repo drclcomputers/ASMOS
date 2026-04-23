@@ -17,6 +17,9 @@ static uint8_t sector_buf[512];
 const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
     "DESKTOP", "/DESKTOP", "FDD0", "/FDD0", "FDD1", "/FDD1", "HDB", "/HDB"};
 
+fat16_mount_point_t g_mount_points[] = {
+    {"FDD0", DRIVE_FDD0}, {"FDD1", DRIVE_FDD1}, {"HDB", DRIVE_HDB}, {NULL, 0}};
+
 bool path_is_protected(const char *name_or_path) {
     if (!name_or_path)
         return false;
@@ -28,6 +31,18 @@ bool path_is_protected(const char *name_or_path) {
         return true;
     if (strcasecmp(name_or_path, "/DESKTOP/") == 0)
         return true;
+    return false;
+}
+
+bool fat16_is_mount_point(const char *name, uint8_t *drive_id_out) {
+    for (int i = 0; g_mount_points[i].name != NULL; i++) {
+        if (strcasecmp(name, g_mount_points[i].name) == 0) {
+            if (fat16_drive_mounted(g_mount_points[i].drive_id)) {
+                *drive_id_out = g_mount_points[i].drive_id;
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -492,7 +507,8 @@ static bool _copy_dir_entry_cb_drive(dir_entry_t *e, uint16_t cluster, int idx,
         uint8_t saved = fat16_current_drive();
         fat16_select_drive(ctx->dst_drive);
         char full_child[270];
-        snprintf(full_child, sizeof(full_child), "%s/%s", ctx->dst_path, child83);
+        snprintf(full_child, sizeof(full_child), "%s/%s", ctx->dst_path,
+                 child83);
         if (!fat16_mkdir(child83)) {
             fat16_select_drive(saved);
             return false;
@@ -752,6 +768,13 @@ bool fat16_resolve(const char *path, uint16_t *out_parent_cluster,
             fat16_make_83(component, out_name83);
             *out_parent_cluster = parent;
             return true;
+        }
+        uint8_t mount_drive;
+        if (fat16_is_mount_point(component, &mount_drive)) {
+            uint8_t saved = s_current_drive;
+            fat16_select_drive(mount_drive);
+            parent = 0;
+            continue;
         }
         char name83[12];
         fat16_make_83(component, name83);

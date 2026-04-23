@@ -308,9 +308,11 @@ bool desktop_accept_drop(const char *src_path, const char *src_name,
 
     bool ok;
     if (src_drive != dst_drive) {
-        ok = (src_de.attr & ATTR_DIRECTORY)
-                 ? fat16_move_dir_drive(src_drive, src_path, dst_drive, src_name)
-                 : fat16_move_file_drive(src_drive, src_path, dst_drive, src_name);
+        ok =
+            (src_de.attr & ATTR_DIRECTORY)
+                ? fat16_move_dir_drive(src_drive, src_path, dst_drive, src_name)
+                : fat16_move_file_drive(src_drive, src_path, dst_drive,
+                                        src_name);
     } else {
         ok = (src_de.attr & ATTR_DIRECTORY)
                  ? fat16_move_dir(src_path, src_name)
@@ -469,8 +471,9 @@ static void menu_paste(void) {
                      ? fat16_move_dir(src_path, g_clipboard.name)
                      : fat16_move_file(src_path, g_clipboard.name);
         }
-        if (ok)
+        if (ok) {
             clipboard_clear();
+        }
     } else {
         if (src_drive != dst_drive) {
             ok = g_clipboard.is_dir

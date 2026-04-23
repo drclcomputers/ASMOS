@@ -127,11 +127,6 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 qemu: all
-	@if [ ! -f floppy.img ]; then \
-	    dd if=/dev/zero of=floppy.img bs=512 count=2880 2>/dev/null; \
-	    /opt/homebrew/sbin/mkfs.vfat -F 12 -n "FDD" floppy.img; \
-	    echo "Created blank floppy.img"; \
-	fi
 	qemu-system-i386 \
 	    -drive format=raw,file=os_image.bin \
 	    -drive format=raw,file=floppy.img,if=floppy \
@@ -140,11 +135,6 @@ qemu: all
 	    -machine pcspk-audiodev=snd0 \
 
 bochs: all
-	@if [ ! -f floppy.img ]; then \
-	    dd if=/dev/zero of=floppy.img bs=512 count=2880 2>/dev/null; \
-	    mkfs.vfat -F 12 floppy.img; \
-	    echo "Created blank floppy.img"; \
-	fi
 	bochs -f bochs/bochssrc.txt -q
 
 clean:

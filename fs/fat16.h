@@ -103,6 +103,14 @@ typedef struct {
     uint8_t drive_id;
 } fat16_dir_context_t;
 
+typedef struct {
+    const char *name;
+    uint8_t drive_id;
+} fat16_mount_point_t;
+
+extern fat16_mount_point_t g_mount_points[];
+bool fat16_is_mount_point(const char *name, uint8_t *drive_id_out);
+
 extern fat16_fs_t fs;                    /* current active volume   */
 extern fat16_fs_t g_drives[DRIVE_COUNT]; /* all mounted volumes     */
 extern fat16_dir_context_t dir_context;
