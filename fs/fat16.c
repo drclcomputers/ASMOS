@@ -15,9 +15,7 @@ fat16_dir_context_t dir_context = {
 static uint8_t sector_buf[512];
 
 const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
-    "DESKTOP",
-    "/DESKTOP",
-};
+    "DESKTOP", "/DESKTOP", "FDD0", "/FDD0", "FDD1", "/FDD1", "HDB", "/HDB"};
 
 bool path_is_protected(const char *name_or_path) {
     if (!name_or_path)
@@ -448,6 +446,8 @@ static bool _copy_open_file(fat16_file_t *src, const char *dest_name83) {
 }
 
 static bool _copy_dir_cluster(uint16_t src_cluster, const char *dest_name83);
+static bool _copy_dir_cluster_drive(uint8_t src_drive, uint16_t src_cluster,
+                                    uint8_t dst_drive, const char *dst_path);
 static bool _copy_dir_entry_cb(dir_entry_t *e, uint16_t cluster, int idx,
                                void *user) {
     (void)cluster;
@@ -473,9 +473,67 @@ static bool _copy_dir_entry_cb(dir_entry_t *e, uint16_t cluster, int idx,
     }
     return true;
 }
+static bool _copy_dir_entry_cb_drive(dir_entry_t *e, uint16_t cluster, int idx,
+                                     void *user) {
+    (void)cluster;
+    (void)idx;
+    struct copy_ctx {
+        uint8_t src_drive;
+        uint8_t dst_drive;
+        const char *dst_path;
+    } *ctx = (struct copy_ctx *)user;
+
+    char child83[12];
+    for (int i = 0; i < 11; i++)
+        child83[i] = (char)e->name[i];
+    child83[11] = '\0';
+
+    if (e->attr & ATTR_DIRECTORY) {
+        uint8_t saved = fat16_current_drive();
+        fat16_select_drive(ctx->dst_drive);
+        char full_child[270];
+        snprintf(full_child, sizeof(full_child), "%s/%s", ctx->dst_path, child83);
+        if (!fat16_mkdir(child83)) {
+            fat16_select_drive(saved);
+            return false;
+        }
+        fat16_select_drive(saved);
+        if (!_copy_dir_cluster_drive(ctx->src_drive, e->cluster_lo,
+                                     ctx->dst_drive, full_child))
+            return false;
+    } else {
+        uint8_t saved = fat16_current_drive();
+        fat16_select_drive(ctx->src_drive);
+        fat16_file_t src;
+        if (!fat16_open(child83, &src)) {
+            fat16_select_drive(saved);
+            return false;
+        }
+        fat16_select_drive(ctx->dst_drive);
+        bool ok = _copy_open_file(&src, child83);
+        fat16_close(&src);
+        fat16_select_drive(saved);
+        if (!ok)
+            return false;
+    }
+    return true;
+}
 static bool _copy_dir_cluster(uint16_t src_cluster, const char *dest_name83) {
     (void)dest_name83;
     return cluster_iterate(src_cluster, _copy_dir_entry_cb, NULL);
+}
+static bool _copy_dir_cluster_drive(uint8_t src_drive, uint16_t src_cluster,
+                                    uint8_t dst_drive, const char *dst_path) {
+    struct {
+        uint8_t src_drive;
+        uint8_t dst_drive;
+        const char *dst_path;
+    } ctx = {src_drive, dst_drive, dst_path};
+    uint8_t saved = fat16_current_drive();
+    fat16_select_drive(src_drive);
+    bool ok = cluster_iterate(src_cluster, _copy_dir_entry_cb_drive, &ctx);
+    fat16_select_drive(saved);
+    return ok;
 }
 
 /* ── drive management ─────────────────────────────────────────────────── */
@@ -631,7 +689,6 @@ bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
 }
 
 /* ── path resolution ──────────────────────────────────────────────────── */
-
 void fat16_make_83(const char *filename, char *out83) {
     memset(out83, ' ', 11);
     out83[11] = '\0';
@@ -866,7 +923,6 @@ void fat16_wipe_cluster(uint16_t cluster) {
 }
 
 /* ── file operations ──────────────────────────────────────────────────── */
-
 bool fat16_open(const char *path, fat16_file_t *f) {
     uint16_t dir_cluster;
     char name83[12];
@@ -1321,8 +1377,97 @@ bool fat16_move_dir(const char *src_path, const char *dest_path) {
     return true;
 }
 
-/* ── hidden file helpers ──────────────────────────────────────────────── */
+bool fat16_copy_file_drive(uint8_t src_drive, const char *src_path,
+                           uint8_t dst_drive, const char *dst_path) {
+    uint8_t saved_drive = fat16_current_drive();
 
+    fat16_select_drive(src_drive);
+    fat16_file_t src;
+    if (!fat16_open(src_path, &src)) {
+        fat16_select_drive(saved_drive);
+        return false;
+    }
+
+    fat16_select_drive(dst_drive);
+    fat16_file_t dst;
+    if (!fat16_create(dst_path, &dst)) {
+        fat16_select_drive(src_drive);
+        fat16_close(&src);
+        fat16_select_drive(saved_drive);
+        return false;
+    }
+
+    uint8_t buf[512];
+    int n;
+    while ((n = fat16_read(&src, buf, sizeof(buf))) > 0) {
+        if (fat16_write(&dst, buf, n) != n) {
+            fat16_close(&dst);
+            fat16_delete(dst_path);
+            fat16_select_drive(src_drive);
+            fat16_close(&src);
+            fat16_select_drive(saved_drive);
+            return false;
+        }
+    }
+
+    fat16_close(&src);
+    fat16_close(&dst);
+    fat16_select_drive(saved_drive);
+    return true;
+}
+
+bool fat16_move_file_drive(uint8_t src_drive, const char *src_path,
+                           uint8_t dst_drive, const char *dst_path) {
+    if (!fat16_copy_file_drive(src_drive, src_path, dst_drive, dst_path))
+        return false;
+    fat16_select_drive(src_drive);
+    return fat16_delete(src_path);
+}
+
+bool fat16_copy_dir_drive(uint8_t src_drive, const char *src_path,
+                          uint8_t dst_drive, const char *dst_path) {
+    uint8_t saved_drive = fat16_current_drive();
+
+    fat16_select_drive(src_drive);
+    dir_entry_t src_entry;
+    if (!fat16_find(src_path, &src_entry) ||
+        !(src_entry.attr & ATTR_DIRECTORY)) {
+        fat16_select_drive(saved_drive);
+        return false;
+    }
+
+    fat16_select_drive(dst_drive);
+    dir_entry_t collision;
+    if (fat16_find(dst_path, &collision)) {
+        fat16_select_drive(saved_drive);
+        return false;
+    }
+    if (!fat16_mkdir(dst_path)) {
+        fat16_select_drive(saved_drive);
+        return false;
+    }
+
+    if (!_copy_dir_cluster_drive(src_drive, src_entry.cluster_lo, dst_drive,
+                                 dst_path)) {
+        fat16_select_drive(dst_drive);
+        fat16_rm_rf(dst_path);
+        fat16_select_drive(saved_drive);
+        return false;
+    }
+
+    fat16_select_drive(saved_drive);
+    return true;
+}
+
+bool fat16_move_dir_drive(uint8_t src_drive, const char *src_path,
+                          uint8_t dst_drive, const char *dst_path) {
+    if (!fat16_copy_dir_drive(src_drive, src_path, dst_drive, dst_path))
+        return false;
+    fat16_select_drive(src_drive);
+    return fat16_rm_rf(src_path);
+}
+
+/* ── hidden file helpers ──────────────────────────────────────────────── */
 bool fat16_set_hidden(const char *path, bool hidden) {
     uint16_t dir_cluster;
     char name83[12];

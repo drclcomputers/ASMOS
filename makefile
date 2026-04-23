@@ -129,7 +129,7 @@ $(BUILD_DIR):
 qemu: all
 	@if [ ! -f floppy.img ]; then \
 	    dd if=/dev/zero of=floppy.img bs=512 count=2880 2>/dev/null; \
-	    /opt/homebrew/sbin/mkfs.vfat -F 12 -n "FDD1" floppy.img; \
+	    /opt/homebrew/sbin/mkfs.vfat -F 12 -n "FDD" floppy.img; \
 	    echo "Created blank floppy.img"; \
 	fi
 	qemu-system-i386 \

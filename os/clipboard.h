@@ -23,6 +23,7 @@ typedef struct {
     char name[CLIP_NAME_MAX];
     bool is_dir;
     bool is_cut;
+    uint8_t src_drive;
 } clipboard_t;
 
 extern clipboard_t g_clipboard;
@@ -30,7 +31,7 @@ extern clipboard_t g_clipboard;
 void clipboard_clear(void);
 void clipboard_set_text(const char *text, int len);
 void clipboard_set_file(const char *src_path, const char *name, bool is_dir,
-                        bool is_cut);
+                        bool is_cut, uint8_t src_drive);
 static inline bool clipboard_has_text(void) {
     return g_clipboard.type == CLIP_TEXT && g_clipboard.text_len > 0;
 }

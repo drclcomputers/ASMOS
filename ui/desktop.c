@@ -194,13 +194,23 @@ static void open_item(desktop_item_t *it) {
             sprintf(path, "%s/%s", desktop_fs_path(), it->name);
             ff_open_dir_pub(de.cluster_lo, path);
         }
+    } else if (it->kind == DESKTOP_ITEM_FDD) {
+        extern void ff_open_dir_pub(uint16_t cluster, const char *path);
+        uint8_t prev = fat16_current_drive();
+        if (fat16_select_drive(it->drive_id)) {
+            char path[16];
+            sprintf(path, "/%s", it->name);
+            ff_open_dir_pub(0, path);
+            fat16_select_drive(prev);
+        }
     } else {
         extern void ff_open_dir_pub(uint16_t cluster, const char *path);
         ff_open_dir_pub(desktop_fs_cluster(), desktop_fs_path());
     }
 }
 
-/* ── drawing ────────────────────────────────────────────────────────────── */
+/* ── drawing ──────────────────────────────────────────────────────────────
+ */
 
 static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     int ax = DESK_ORIGIN_X + it->x;
@@ -235,6 +245,9 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
             draw_unknown_icon(ax, ay, it->selected);
         break;
     }
+    case DESKTOP_ITEM_FDD:
+        draw_floppy_icon(ax, ay, it->selected);
+        break;
     default:
         draw_file_icon(ax, ay, it->selected);
         break;
@@ -271,7 +284,8 @@ static int desktop_hit(int mx, int my) {
     return -1;
 }
 
-bool desktop_accept_drop(const char *src_path, const char *src_name) {
+bool desktop_accept_drop(const char *src_path, const char *src_name,
+                         uint8_t src_drive) {
     if (!src_path || !src_name)
         return false;
 
@@ -283,19 +297,27 @@ bool desktop_accept_drop(const char *src_path, const char *src_name) {
         dir_context.current_cluster = saved;
         return false;
     }
-    dir_context.current_cluster = saved;
 
     dir_entry_t src_de;
-    bool found = fat16_find(src_path, &src_de);
-    if (!found)
+    if (!fat16_find(src_path, &src_de)) {
+        dir_context.current_cluster = saved;
         return false;
+    }
 
-    dir_context.current_cluster = desktop_fs_cluster();
-    bool ok = (src_de.attr & ATTR_DIRECTORY)
-                  ? fat16_move_dir(src_path, src_name)
-                  : fat16_move_file(src_path, src_name);
+    uint8_t dst_drive = DRIVE_HDA;
+
+    bool ok;
+    if (src_drive != dst_drive) {
+        ok = (src_de.attr & ATTR_DIRECTORY)
+                 ? fat16_move_dir_drive(src_drive, src_path, dst_drive, src_name)
+                 : fat16_move_file_drive(src_drive, src_path, dst_drive, src_name);
+    } else {
+        ok = (src_de.attr & ATTR_DIRECTORY)
+                 ? fat16_move_dir(src_path, src_name)
+                 : fat16_move_file(src_path, src_name);
+    }
+
     dir_context.current_cluster = saved;
-
     if (ok)
         desktop_fs_set_dirty();
     return ok;
@@ -310,7 +332,8 @@ static int selected_idx(void) {
     return -1;
 }
 
-/* ── menu actions ───────────────────────────────────────────────────────── */
+/* ── menu actions ─────────────────────────────────────────────────────────
+ */
 
 static void do_delete(void) {
     int sel = selected_idx();
@@ -367,7 +390,7 @@ static void menu_copy(void) {
     }
 
     clipboard_set_file(desktop_fs_path(), disk_name,
-                       it->kind == DESKTOP_ITEM_DIR, false);
+                       it->kind == DESKTOP_ITEM_DIR, false, DRIVE_HDA);
     modal_show(MODAL_INFO, "Copy", "Item copied to clipboard.", NULL, NULL);
 }
 
@@ -403,7 +426,7 @@ static void menu_cut(void) {
     }
 
     clipboard_set_file(desktop_fs_path(), disk_name,
-                       it->kind == DESKTOP_ITEM_DIR, true);
+                       it->kind == DESKTOP_ITEM_DIR, true, DRIVE_HDA);
     modal_show(MODAL_INFO, "Cut", "Item cut. Paste to move.", NULL, NULL);
 }
 
@@ -430,15 +453,36 @@ static void menu_paste(void) {
         return;
     }
 
+    uint8_t src_drive = g_clipboard.src_drive;
+    uint8_t dst_drive = DRIVE_HDA;
     bool ok;
+
     if (g_clipboard.is_cut) {
-        ok = g_clipboard.is_dir ? fat16_move_dir(src_path, g_clipboard.name)
-                                : fat16_move_file(src_path, g_clipboard.name);
+        if (src_drive != dst_drive) {
+            ok = g_clipboard.is_dir
+                     ? fat16_move_dir_drive(src_drive, src_path, dst_drive,
+                                            g_clipboard.name)
+                     : fat16_move_file_drive(src_drive, src_path, dst_drive,
+                                             g_clipboard.name);
+        } else {
+            ok = g_clipboard.is_dir
+                     ? fat16_move_dir(src_path, g_clipboard.name)
+                     : fat16_move_file(src_path, g_clipboard.name);
+        }
         if (ok)
             clipboard_clear();
     } else {
-        ok = g_clipboard.is_dir ? fat16_copy_dir(src_path, g_clipboard.name)
-                                : fat16_copy_file(src_path, g_clipboard.name);
+        if (src_drive != dst_drive) {
+            ok = g_clipboard.is_dir
+                     ? fat16_copy_dir_drive(src_drive, src_path, dst_drive,
+                                            g_clipboard.name)
+                     : fat16_copy_file_drive(src_drive, src_path, dst_drive,
+                                             g_clipboard.name);
+        } else {
+            ok = g_clipboard.is_dir
+                     ? fat16_copy_dir(src_path, g_clipboard.name)
+                     : fat16_copy_file(src_path, g_clipboard.name);
+        }
     }
 
     dir_context.current_cluster = saved;
@@ -491,7 +535,8 @@ static void menu_restart(void) {
     modal_show(MODAL_CONFIRM, "Restart", "Restart ASMOS?", do_restart, NULL);
 }
 
-/* ── new name dialog ────────────────────────────────────────────────────── */
+/* ── new name dialog ──────────────────────────────────────────────────────
+ */
 
 static void handle_newname(void) {
     const char *err = NULL;
@@ -539,7 +584,8 @@ static void draw_newname_dialog(void) {
     }
 }
 
-/* ── desktop init ───────────────────────────────────────────────────────── */
+/* ── desktop init ─────────────────────────────────────────────────────────
+ */
 
 static menu *s_apps_menu;
 
@@ -590,7 +636,6 @@ void desktop_init(void) {
 }
 
 /* ── per-frame ──────────────────────────────────────────────────────────── */
-
 static void draw_items(int count, desktop_item_t *items) {
     for (int i = 0; i < count; i++) {
         if (!items[i].used)
@@ -637,7 +682,8 @@ void desktop_on_frame(void) {
         return;
     }
 
-    /* ── drag ────────────────────────────────────────────────────────────── */
+    /* ── drag
+     * ────────────────────────────────────────────────────────────── */
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
         if (mouse.left) {

@@ -171,6 +171,18 @@ void draw_cfg_icon(int ax, int ay, bool sel) {
     fill_rect(cx - 1, cy - 1, 3, 3, bg);
 }
 
+void draw_floppy_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
+    fill_rect(ax + 1, ay, ICO_W - 2, ICO_H, bg);
+    draw_rect(ax + 1, ay, ICO_W - 2, ICO_H, BLACK);
+    // shutter slot
+    fill_rect(ax + 3, ay + ICO_H - 6, ICO_W - 6, 5, sel ? LIGHT_GRAY : DARK_GRAY);
+    draw_rect(ax + 3, ay + ICO_H - 6, ICO_W - 6, 5, BLACK);
+    // label area
+    fill_rect(ax + 3, ay + 2, ICO_W - 10, 6, sel ? DARK_GRAY : WHITE);
+    draw_rect(ax + 3, ay + 2, ICO_W - 10, 6, BLACK);
+}
+
 void draw_unknown_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
     fill_rect(ax + 1, ay, ICO_W - 5, ICO_H, bg);

@@ -107,7 +107,7 @@ extern fat16_fs_t fs;                    /* current active volume   */
 extern fat16_fs_t g_drives[DRIVE_COUNT]; /* all mounted volumes     */
 extern fat16_dir_context_t dir_context;
 
-#define PROTECTED_PATH_COUNT 2
+#define PROTECTED_PATH_COUNT 8
 extern const char *g_protected_paths[PROTECTED_PATH_COUNT];
 
 bool path_is_protected(const char *name_or_path);
@@ -147,6 +147,14 @@ int fat16_write(fat16_file_t *f, const void *buf, int len);
 bool fat16_seek(fat16_file_t *f, uint32_t offset);
 int fat16_tell(fat16_file_t *f);
 bool fat16_close(fat16_file_t *f);
+bool fat16_copy_file_drive(uint8_t src_drive, const char *src_path,
+                           uint8_t dst_drive, const char *dst_path);
+bool fat16_move_file_drive(uint8_t src_drive, const char *src_path,
+                           uint8_t dst_drive, const char *dst_path);
+bool fat16_copy_dir_drive(uint8_t src_drive, const char *src_path,
+                          uint8_t dst_drive, const char *dst_path);
+bool fat16_move_dir_drive(uint8_t src_drive, const char *src_path,
+                          uint8_t dst_drive, const char *dst_path);
 
 /* file and dir */
 bool fat16_rename(const char *path, const char *new_name);

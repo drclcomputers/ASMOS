@@ -22,7 +22,7 @@ void clipboard_set_text(const char *text, int len) {
 }
 
 void clipboard_set_file(const char *src_path, const char *name, bool is_dir,
-                        bool is_cut) {
+                        bool is_cut, uint8_t src_drive) {
     clipboard_clear();
     if (!src_path || !name || name[0] == '\0')
         return;
@@ -32,5 +32,6 @@ void clipboard_set_file(const char *src_path, const char *name, bool is_dir,
     g_clipboard.name[CLIP_NAME_MAX - 1] = '\0';
     g_clipboard.is_dir = is_dir;
     g_clipboard.is_cut = is_cut;
+    g_clipboard.src_drive = src_drive;
     g_clipboard.type = CLIP_FILE;
 }
