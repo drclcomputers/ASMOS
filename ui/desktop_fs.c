@@ -175,7 +175,10 @@ bool desktop_fs_is_dirty(void) { return s_dirty; }
 
 desktop_item_t *desktop_fs_items(void) { return s_items; }
 int desktop_fs_count(void) { return s_count; }
-uint16_t desktop_fs_cluster(void) { return s_cluster; }
+uint16_t desktop_fs_cluster(void) {
+    fat16_select_drive(DRIVE_HDA);
+    return s_cluster;
+}
 const char *desktop_fs_path(void) { return DESKTOP_PATH; }
 
 /* ── Mutations ───────────────────────────────────────────────────────────── */

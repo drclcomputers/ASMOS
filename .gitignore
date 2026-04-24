@@ -6,4 +6,5 @@
 *.log
 *.html
 *.img
-makefdd.sh
+*.sh
+/fdd_mount

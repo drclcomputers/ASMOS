@@ -103,8 +103,6 @@ app_descriptor filef_app;
 
 static int s_cascade = 0;
 
-/* Track the last-focused FileF instance so menu callbacks work even after
-   the menu closes and focus shifts briefly. */
 static ff_inst_t *s_last_active = NULL;
 
 static void ff_reload(ff_inst_t *s);
@@ -164,6 +162,8 @@ static void cancel_confirm(void *ud);
 static int ff_hit(ff_inst_t *s, int mx, int my);
 static bool in_content(ff_inst_t *s, int mx, int my);
 
+/* ── Internal Helpers
+ * ──────────────────────────────────────────────────────────── */
 static void maybe_notify_desktop(ff_inst_t *s) {
     if (strcmp(s->path, desktop_fs_path()) == 0)
         desktop_fs_set_dirty();
@@ -192,12 +192,6 @@ static ff_inst_t *inst_of(window *w) {
     return NULL;
 }
 
-/*
- * active_finder — returns the last-focused FileF instance.
- * We prefer the currently-focused window, but fall back to
- * s_last_active so that menu-item callbacks still work after the
- * menu closes and the focused window briefly changes.
- */
 static ff_inst_t *active_finder(void) {
     window *fw = wm_focused_window();
     if (fw) {
@@ -207,9 +201,7 @@ static ff_inst_t *active_finder(void) {
             return s;
         }
     }
-    /* Fallback: use the last window that was focused */
     if (s_last_active) {
-        /* Make sure it's still alive */
         for (int i = 0; i < MAX_RUNNING_APPS; i++) {
             app_instance_t *a = &running_apps[i];
             if (a->running && a->desc == &filef_app &&
@@ -454,7 +446,7 @@ static bool ff_drivebar_click(ff_inst_t *s, int mx, int my, int wx, int wy,
                         char mnt_path[270];
                         sprintf(mnt_path, "/%s", label);
                         s->drive_id = d;
-                        s->dir_cluster = 0; // root of the real drive
+                        s->dir_cluster = 0;
                         strncpy(s->path, mnt_path, 255);
                         s->path[255] = '\0';
                         s->win->title = s->path;
@@ -791,7 +783,6 @@ static bool in_content(ff_inst_t *s, int mx, int my) {
 }
 
 /* ── delete / paste helpers ─────────────────────────────────────────────── */
-
 static void do_delete(void *ud) {
     ff_inst_t *s = (ff_inst_t *)ud;
     int sel = -1;
@@ -827,7 +818,6 @@ static void cancel_confirm(void *ud) {
 }
 
 /* ── menu handlers ──────────────────────────────────────────────────────── */
-
 static void menu_new_file(void) {
     ff_inst_t *s = active_finder();
     if (!s)
@@ -931,7 +921,6 @@ static void menu_show_hidden_toggle(void) {
 }
 
 /* ── copy / cut / paste ─────────────────────────────────────────────────── */
-
 static void menu_copy(void) {
     ff_inst_t *s = active_finder();
     if (!s)
@@ -1122,7 +1111,6 @@ static void menu_close(void) {
 }
 
 /* ── newname / rename helpers ───────────────────────────────────────────── */
-
 static void ff_handle_newname(ff_inst_t *s) {
     const char *err = NULL;
     if (!validate_fat_name(s->newname_buf, s->newname_is_dir, &err)) {
@@ -1182,7 +1170,6 @@ static void ff_handle_rename(ff_inst_t *s) {
 }
 
 /* ── drag-and-drop ──────────────────────────────────────────────────────── */
-
 static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
     for (int i = win_count - 1; i >= 0; i--) {
         window *w = win_stack[i];
@@ -1298,9 +1285,7 @@ static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
     return ok;
 }
 
-/* ── scroll ───────────────────────────────────────────────────────────────
- */
-
+/* ── scroll ─────────────────────────────────────────────────────────────── */
 static void ff_scroll(ff_inst_t *s, int delta) {
     int view_h = content_view_h(s);
     int max_scroll = s->content_h_total - view_h;
@@ -1313,15 +1298,13 @@ static void ff_scroll(ff_inst_t *s, int delta) {
         s->scroll_y = max_scroll;
 }
 
-/* ── on_frame
- * ────────────────────────────────────────────────────────────── */
-
+/* ── on_frame * ──────────────────────────────────────────────────────────────
+ */
 static void ff_on_frame(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
     if (!s->win || !s->win->visible)
         return;
 
-    /* Track last-active whenever this window is focused */
     if (wm_focused_window() == s->win)
         s_last_active = s;
 
@@ -1611,16 +1594,13 @@ static void ff_on_frame(void *state) {
     ff_draw_window(s->win, s);
 }
 
-/* ── init / destroy ───────────────────────────────────────────────────────
- */
-
+/* ── init / destroy ─────────────────────────────────────────────────────── */
 static void ff_init(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
     s->scroll_y = 0;
     s->last_win_w = FF_DEFAULT_W;
     s->last_win_h = FF_DEFAULT_H;
     s->show_hidden = false;
-    s->drive_id = fat16_current_drive();
 
     int x = FF_DEFAULT_X + (s_cascade % 6) * FF_CASCADE;
     int y = FF_DEFAULT_Y + (s_cascade % 6) * FF_CASCADE;
@@ -1674,13 +1654,15 @@ static void ff_init(void *state) {
     menu_add_separator(view_menu);
     menu_add_item(view_menu, "Show Hidden", menu_show_hidden_toggle);
 
-    s->dir_cluster = desktop_fs_cluster();
+    s->dir_cluster = 0;
     s->sort = SORT_NAME;
     s->drag_idx = -1;
     s->last_click_idx = -1;
     s->mode = MODE_NORMAL;
-    strcpy(s->path, desktop_fs_path());
+    strcpy(s->path, "/");
     s->win->title = s->path;
+    const mount_point_t *mp = find_mount_point(desktop_fs_path());
+    s->drive_id = mp ? mp->drive_id : DRIVE_HDA;
     ff_reload(s);
 
     s_last_active = s;
