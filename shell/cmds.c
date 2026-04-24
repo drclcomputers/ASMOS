@@ -58,7 +58,7 @@ void cmd_cd(const char *path, char *out, size_t max) {
 void cmd_ls(char *out, size_t max) {
     dir_entry_t entries[32];
     int count = 0;
-    if (!fat16_list_dir(dir_context.current_cluster, entries, 32, &count)) {
+    if (!fat16_list_dir(dir_context.drive_id, dir_context.current_cluster, entries, 32, &count)) {
         append(out, max, "Error listing files\n\n");
         return;
     }

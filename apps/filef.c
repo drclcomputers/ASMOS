@@ -110,6 +110,7 @@ static ff_inst_t *s_last_active = NULL;
 static void ff_reload(ff_inst_t *s);
 static void ff_draw_window(window *win, void *ud);
 static void ff_navigate(ff_inst_t *s, uint16_t cluster, const char *path);
+static const mount_point_t *find_mount_point(const char *path);
 
 void ff_open_dir_pub(uint16_t cluster, const char *path) {
     if (g_cfg.filef_single_window) {
@@ -131,7 +132,8 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
     strncpy(s->path, path, 255);
     s->path[255] = '\0';
     s->win->title = s->path;
-    s->drive_id = fat16_current_drive();
+    const mount_point_t *mp = find_mount_point(path);
+    s->drive_id = mp ? mp->drive_id : fat16_current_drive();
     ff_reload(s);
 }
 
@@ -168,9 +170,13 @@ static void maybe_notify_desktop(ff_inst_t *s) {
 }
 
 static const mount_point_t *find_mount_point(const char *path) {
-    for (int i = 0; s_mount_points[i].path != NULL; i++)
-        if (strcmp(path, s_mount_points[i].path) == 0)
+    for (int i = 0; s_mount_points[i].path != NULL; i++) {
+        const char *mp = s_mount_points[i].path;
+        size_t len = strlen(mp);
+        if (strncmp(path, mp, len) == 0 &&
+            (path[len] == '\0' || path[len] == '/'))
             return &s_mount_points[i];
+    }
     return NULL;
 }
 
@@ -361,7 +367,7 @@ static void ff_reload(ff_inst_t *s) {
 
     dir_entry_t raw[MAX_ENTRIES];
     int count = 0;
-    fat16_list_dir(s->dir_cluster, raw, MAX_ENTRIES, &count);
+    fat16_list_dir(s->drive_id, s->dir_cluster, raw, MAX_ENTRIES, &count);
 
     s->item_count = 0;
 
@@ -1009,36 +1015,21 @@ static void menu_paste(void) {
         return;
     }
 
-    uint8_t src_drive = g_clipboard.src_drive;
-    uint8_t dst_drive = s->drive_id;
-    bool ok;
+    char dst_path[270];
+    if (s->path[0] == '/' && s->path[1] == '\0')
+        sprintf(dst_path, "/%s", g_clipboard.name);
+    else
+        sprintf(dst_path, "%s/%s", s->path, g_clipboard.name);
 
+    bool ok;
     if (g_clipboard.is_cut) {
-        if (src_drive != dst_drive) {
-            ok = g_clipboard.is_dir
-                     ? fat16_move_dir_drive(src_drive, src_path, dst_drive,
-                                            g_clipboard.name)
-                     : fat16_move_file_drive(src_drive, src_path, dst_drive,
-                                             g_clipboard.name);
-        } else {
-            ok = g_clipboard.is_dir
-                     ? fat16_move_dir(src_path, g_clipboard.name)
-                     : fat16_move_file(src_path, g_clipboard.name);
-        }
+        ok = g_clipboard.is_dir ? fat16_move_dir(src_path, dst_path)
+                                : fat16_move_file(src_path, dst_path);
         if (ok)
             clipboard_clear();
     } else {
-        if (src_drive != dst_drive) {
-            ok = g_clipboard.is_dir
-                     ? fat16_copy_dir_drive(src_drive, src_path, dst_drive,
-                                            g_clipboard.name)
-                     : fat16_copy_file_drive(src_drive, src_path, dst_drive,
-                                             g_clipboard.name);
-        } else {
-            ok = g_clipboard.is_dir
-                     ? fat16_copy_dir(src_path, g_clipboard.name)
-                     : fat16_copy_file(src_path, g_clipboard.name);
-        }
+        ok = g_clipboard.is_dir ? fat16_copy_dir(src_path, dst_path)
+                                : fat16_copy_file(src_path, dst_path);
     }
 
     dir_context.current_cluster = saved;
@@ -1220,7 +1211,8 @@ static bool over_desktop(int mx, int my) {
     return true;
 }
 
-static bool is_ancestor_of(uint16_t src_cluster, uint16_t candidate_cluster) {
+static bool is_ancestor_of(uint8_t drive_id, uint16_t src_cluster,
+                           uint16_t candidate_cluster) {
     if (src_cluster == candidate_cluster)
         return true;
     uint16_t cur = candidate_cluster;
@@ -1231,7 +1223,7 @@ static bool is_ancestor_of(uint16_t src_cluster, uint16_t candidate_cluster) {
         dir_entry_t dotdot;
         char name83[12];
         fat16_make_83("..", name83);
-        if (!fat16_find_in_dir(cur, name83, &dotdot))
+        if (!fat16_find_in_dir(drive_id, cur, name83, &dotdot))
             break;
         uint16_t parent = dotdot.cluster_lo;
         if (parent == cur)
@@ -1254,7 +1246,8 @@ static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
         return false;
     }
     if (it->entry.attr & ATTR_DIRECTORY) {
-        if (is_ancestor_of(it->entry.cluster_lo, dst->dir_cluster)) {
+        if (is_ancestor_of(src->drive_id, it->entry.cluster_lo,
+                           dst->dir_cluster)) {
             ff_reload(src);
             ff_reload(dst);
             strcpy(src->status, "Can't move into subfolder.");
@@ -1268,27 +1261,16 @@ static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
         sprintf(src_path, "%s/%s", src->path, it->name);
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = dst->dir_cluster;
-    dir_entry_t de;
-    if (fat16_find(it->name, &de)) {
-        dir_context.current_cluster = saved;
-        strcpy(src->status, "Name exists in target.");
-        return false;
-    }
-    uint8_t src_drive = src->drive_id;
-    uint8_t dst_drive = dst->drive_id;
-    bool ok;
 
-    if (src_drive != dst_drive) {
-        ok =
-            (it->entry.attr & ATTR_DIRECTORY)
-                ? fat16_move_dir_drive(src_drive, src_path, dst_drive, it->name)
-                : fat16_move_file_drive(src_drive, src_path, dst_drive,
-                                        it->name);
-    } else {
-        ok = (it->entry.attr & ATTR_DIRECTORY)
-                 ? fat16_move_dir(src_path, it->name)
-                 : fat16_move_file(src_path, it->name);
-    }
+    char dst_path[270];
+    if (dst->path[0] == '/' && dst->path[1] == '\0')
+        sprintf(dst_path, "/%s", it->name);
+    else
+        sprintf(dst_path, "%s/%s", dst->path, it->name);
+    bool ok;
+    ok = (it->entry.attr & ATTR_DIRECTORY)
+             ? fat16_move_dir(src_path, dst_path)
+             : fat16_move_file(src_path, dst_path);
     return ok;
 }
 
@@ -1316,7 +1298,8 @@ static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
     return ok;
 }
 
-/* ── scroll ─────────────────────────────────────────────────────────────── */
+/* ── scroll ───────────────────────────────────────────────────────────────
+ */
 
 static void ff_scroll(ff_inst_t *s, int delta) {
     int view_h = content_view_h(s);
@@ -1330,7 +1313,8 @@ static void ff_scroll(ff_inst_t *s, int delta) {
         s->scroll_y = max_scroll;
 }
 
-/* ── on_frame ────────────────────────────────────────────────────────────── */
+/* ── on_frame
+ * ────────────────────────────────────────────────────────────── */
 
 static void ff_on_frame(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
@@ -1627,7 +1611,8 @@ static void ff_on_frame(void *state) {
     ff_draw_window(s->win, s);
 }
 
-/* ── init / destroy ─────────────────────────────────────────────────────── */
+/* ── init / destroy ───────────────────────────────────────────────────────
+ */
 
 static void ff_init(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;

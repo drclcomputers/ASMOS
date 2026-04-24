@@ -9,6 +9,7 @@ static bool s_dirty = false;
 static uint16_t s_cluster = 0;
 static bool s_inited = false;
 
+/* ── Internal helpers ────────────────────────────────────────────────────── */
 static void entry_display_name(const dir_entry_t *e, char *out) {
     int j = 0;
     for (int k = 0; k < 8 && e->name[k] != ' '; k++)
@@ -40,7 +41,10 @@ static void grid_slot(int n, int *out_x, int *out_y) {
 static void create_default_shortcuts(void) {
     static const char *defaults[] = {"FILEF", "ASMDRAW", NULL};
 
-    uint16_t saved = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
+    uint16_t saved_cluster = dir_context.current_cluster;
+
+    dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = s_cluster;
 
     for (int i = 0; defaults[i]; i++) {
@@ -65,9 +69,11 @@ static void create_default_shortcuts(void) {
         fat16_close(&f);
     }
 
-    dir_context.current_cluster = saved;
+    dir_context.drive_id = saved_drive;
+    dir_context.current_cluster = saved_cluster;
 }
 
+/* ── Init / reload ───────────────────────────────────────────────────────── */
 void desktop_fs_init(void) {
     if (s_inited)
         return;
@@ -77,16 +83,21 @@ void desktop_fs_init(void) {
     bool exists = fat16_find(DESKTOP_PATH, &de);
 
     if (!exists || !(de.attr & ATTR_DIRECTORY)) {
-        uint16_t saved = dir_context.current_cluster;
+        uint8_t saved_drive = dir_context.drive_id;
+        uint16_t saved_cluster = dir_context.current_cluster;
+        dir_context.drive_id = DRIVE_HDA;
         dir_context.current_cluster = 0;
-        fat16_mkdir("DESKTOP");
-        dir_context.current_cluster = saved;
 
-        if (!fat16_find(DESKTOP_PATH, &de)) {
+        fat16_mkdir("DESKTOP");
+
+        dir_context.drive_id = saved_drive;
+        dir_context.current_cluster = saved_cluster;
+
+        if (!fat16_find(DESKTOP_PATH, &de))
             s_cluster = 0;
-        } else {
+        else
             s_cluster = de.cluster_lo;
-        }
+
         create_default_shortcuts();
     } else {
         s_cluster = de.cluster_lo;
@@ -96,20 +107,13 @@ void desktop_fs_init(void) {
 }
 
 void desktop_fs_reload(void) {
-    uint8_t saved_drive = fat16_current_drive();
-    fat16_select_drive(DRIVE_HDA);
-
     s_dirty = false;
     s_count = 0;
     memset(s_items, 0, sizeof(s_items));
 
     dir_entry_t raw[DESKTOP_MAX_ITEMS];
     int raw_count = 0;
-
-    uint16_t saved = dir_context.current_cluster;
-    dir_context.current_cluster = s_cluster;
-    fat16_list_dir(s_cluster, raw, DESKTOP_MAX_ITEMS, &raw_count);
-    dir_context.current_cluster = saved;
+    fat16_list_dir(DRIVE_HDA, s_cluster, raw, DESKTOP_MAX_ITEMS, &raw_count);
 
     int slot = 0;
     for (int i = 0; i < raw_count && s_count < DESKTOP_MAX_ITEMS; i++) {
@@ -154,19 +158,16 @@ void desktop_fs_reload(void) {
         s_count++;
     }
 
-    if (!fat16_drive_mounted(DRIVE_HDB)) {
-        fat16_select_drive(saved_drive);
-        return;
+    if (fat16_drive_mounted(DRIVE_HDB) && s_count < DESKTOP_MAX_ITEMS) {
+        desktop_item_t *it = &s_items[s_count];
+        memset(it, 0, sizeof(desktop_item_t));
+        strncpy(it->name, fat16_drive_label(DRIVE_HDB), DESKTOP_NAME_MAX - 1);
+        it->kind = DESKTOP_ITEM_HDD;
+        it->drive_id = DRIVE_HDB;
+        it->used = true;
+        grid_slot(slot++, &it->x, &it->y);
+        s_count++;
     }
-    desktop_item_t *it = &s_items[s_count];
-    memset(it, 0, sizeof(desktop_item_t));
-    strncpy(it->name, fat16_drive_label(DRIVE_HDB), DESKTOP_NAME_MAX - 1);
-    it->kind = DESKTOP_ITEM_HDD;
-    it->drive_id = 1;
-    it->used = true;
-    grid_slot(slot++, &it->x, &it->y);
-    s_count++;
-    fat16_select_drive(saved_drive);
 }
 
 void desktop_fs_set_dirty(void) { s_dirty = true; }
@@ -177,6 +178,7 @@ int desktop_fs_count(void) { return s_count; }
 uint16_t desktop_fs_cluster(void) { return s_cluster; }
 const char *desktop_fs_path(void) { return DESKTOP_PATH; }
 
+/* ── Mutations ───────────────────────────────────────────────────────────── */
 bool desktop_fs_add_app(const char *app_name) {
     if (!app_name)
         return false;
@@ -195,7 +197,9 @@ bool desktop_fs_add_app(const char *app_name) {
     fname[fi++] = 'P';
     fname[fi] = '\0';
 
-    uint16_t saved = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
+    uint16_t saved_cluster = dir_context.current_cluster;
+    dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = s_cluster;
 
     fat16_file_t f;
@@ -203,7 +207,8 @@ bool desktop_fs_add_app(const char *app_name) {
     if (ok)
         fat16_close(&f);
 
-    dir_context.current_cluster = saved;
+    dir_context.drive_id = saved_drive;
+    dir_context.current_cluster = saved_cluster;
 
     if (ok)
         desktop_fs_reload();
@@ -215,34 +220,36 @@ bool desktop_fs_delete(int idx) {
         return false;
     desktop_item_t *it = &s_items[idx];
 
-    uint16_t saved = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
+    uint16_t saved_cluster = dir_context.current_cluster;
+    dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = s_cluster;
 
     bool ok = false;
     if (it->kind == DESKTOP_ITEM_DIR) {
         ok = fat16_rm_rf(it->name);
-    } else {
+    } else if (it->kind == DESKTOP_ITEM_APP) {
         char fname[DESKTOP_NAME_MAX];
-        if (it->kind == DESKTOP_ITEM_APP) {
-            int fi = 0;
-            for (int k = 0; it->name[k] && fi < 8; k++) {
-                char c = it->name[k];
-                if (c >= 'a' && c <= 'z')
-                    c -= 32;
-                fname[fi++] = c;
-            }
-            fname[fi++] = '.';
-            fname[fi++] = 'A';
-            fname[fi++] = 'P';
-            fname[fi++] = 'P';
-            fname[fi] = '\0';
-            ok = fat16_delete(fname);
-        } else {
-            ok = fat16_delete(it->name);
+        int fi = 0;
+        for (int k = 0; it->name[k] && fi < 8; k++) {
+            char c = it->name[k];
+            if (c >= 'a' && c <= 'z')
+                c -= 32;
+            fname[fi++] = c;
         }
+        fname[fi++] = '.';
+        fname[fi++] = 'A';
+        fname[fi++] = 'P';
+        fname[fi++] = 'P';
+        fname[fi] = '\0';
+        ok = fat16_delete(fname);
+    } else {
+        ok = fat16_delete(it->name);
     }
 
-    dir_context.current_cluster = saved;
+    dir_context.drive_id = saved_drive;
+    dir_context.current_cluster = saved_cluster;
+
     if (ok)
         desktop_fs_reload();
     return ok;
@@ -252,12 +259,16 @@ bool desktop_fs_rename(int idx, const char *new_name) {
     if (idx < 0 || idx >= s_count || !s_items[idx].used)
         return false;
 
-    uint16_t saved = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
+    uint16_t saved_cluster = dir_context.current_cluster;
+    dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = s_cluster;
 
     bool ok = fat16_rename(s_items[idx].name, new_name);
 
-    dir_context.current_cluster = saved;
+    dir_context.drive_id = saved_drive;
+    dir_context.current_cluster = saved_cluster;
+
     if (ok)
         desktop_fs_reload();
     return ok;
@@ -268,5 +279,4 @@ void desktop_fs_move_icon(int idx, int new_x, int new_y) {
         return;
     s_items[idx].x = new_x;
     s_items[idx].y = new_y;
-    /* Positions are runtime-only (no sidecar persistence in this version) */
 }

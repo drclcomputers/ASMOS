@@ -194,15 +194,17 @@ static void open_item(desktop_item_t *it) {
             sprintf(path, "%s/%s", desktop_fs_path(), it->name);
             ff_open_dir_pub(de.cluster_lo, path);
         }
-    } else if (it->kind == DESKTOP_ITEM_FDD) {
+    } else if (it->kind == DESKTOP_ITEM_FDD || it->kind == DESKTOP_ITEM_HDD) {
         extern void ff_open_dir_pub(uint16_t cluster, const char *path);
-        uint8_t prev = fat16_current_drive();
-        if (fat16_select_drive(it->drive_id)) {
-            char path[16];
-            sprintf(path, "/%s", it->name);
-            ff_open_dir_pub(0, path);
-            fat16_select_drive(prev);
+        const char *vfs_path = NULL;
+        for (int m = 0; m < VFS_MOUNT_COUNT; m++) {
+            if (g_vfs_mounts[m].drive_id == it->drive_id) {
+                vfs_path = g_vfs_mounts[m].path;
+                break;
+            }
         }
+        if (vfs_path && fat16_drive_mounted(it->drive_id))
+            ff_open_dir_pub(0, vfs_path);
     } else {
         extern void ff_open_dir_pub(uint16_t cluster, const char *path);
         ff_open_dir_pub(desktop_fs_cluster(), desktop_fs_path());
@@ -286,40 +288,28 @@ static int desktop_hit(int mx, int my) {
 
 bool desktop_accept_drop(const char *src_path, const char *src_name,
                          uint8_t src_drive) {
+    (void)src_drive;
     if (!src_path || !src_name)
         return false;
 
-    uint16_t saved = dir_context.current_cluster;
-    dir_context.current_cluster = desktop_fs_cluster();
+    char dst_path[270];
+    snprintf(dst_path, sizeof(dst_path), "%s/%s", desktop_fs_path(), src_name);
 
     dir_entry_t de;
-    if (fat16_find(src_name, &de)) {
-        dir_context.current_cluster = saved;
+    if (fat16_find(dst_path, &de)) {
         return false;
     }
 
     dir_entry_t src_de;
-    if (!fat16_find(src_path, &src_de)) {
-        dir_context.current_cluster = saved;
+    if (!fat16_find(src_path, &src_de))
         return false;
-    }
-
-    uint8_t dst_drive = DRIVE_HDA;
 
     bool ok;
-    if (src_drive != dst_drive) {
-        ok =
-            (src_de.attr & ATTR_DIRECTORY)
-                ? fat16_move_dir_drive(src_drive, src_path, dst_drive, src_name)
-                : fat16_move_file_drive(src_drive, src_path, dst_drive,
-                                        src_name);
-    } else {
-        ok = (src_de.attr & ATTR_DIRECTORY)
-                 ? fat16_move_dir(src_path, src_name)
-                 : fat16_move_file(src_path, src_name);
-    }
+    if (src_de.attr & ATTR_DIRECTORY)
+        ok = fat16_move_dir(src_path, dst_path);
+    else
+        ok = fat16_move_file(src_path, dst_path);
 
-    dir_context.current_cluster = saved;
     if (ok)
         desktop_fs_set_dirty();
     return ok;
@@ -334,9 +324,7 @@ static int selected_idx(void) {
     return -1;
 }
 
-/* ── menu actions ─────────────────────────────────────────────────────────
- */
-
+/* ── menu actions ───────────────────────────────────────────────────────── */
 static void do_delete(void) {
     int sel = selected_idx();
     if (sel < 0) {
@@ -444,59 +432,35 @@ static void menu_paste(void) {
     else
         sprintf(src_path, "%s/%s", g_clipboard.src_path, g_clipboard.name);
 
-    uint16_t saved = dir_context.current_cluster;
-    dir_context.current_cluster = desktop_fs_cluster();
+    char dst_path[270];
+    sprintf(dst_path, "%s/%s", desktop_fs_path(), g_clipboard.name);
 
     dir_entry_t de;
-    if (fat16_find(g_clipboard.name, &de)) {
-        dir_context.current_cluster = saved;
-        modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL,
-                   NULL);
+    if (fat16_find(dst_path, &de)) {
+        modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL, NULL);
         return;
     }
 
-    uint8_t src_drive = g_clipboard.src_drive;
-    uint8_t dst_drive = DRIVE_HDA;
     bool ok;
-
     if (g_clipboard.is_cut) {
-        if (src_drive != dst_drive) {
-            ok = g_clipboard.is_dir
-                     ? fat16_move_dir_drive(src_drive, src_path, dst_drive,
-                                            g_clipboard.name)
-                     : fat16_move_file_drive(src_drive, src_path, dst_drive,
-                                             g_clipboard.name);
-        } else {
-            ok = g_clipboard.is_dir
-                     ? fat16_move_dir(src_path, g_clipboard.name)
-                     : fat16_move_file(src_path, g_clipboard.name);
-        }
-        if (ok) {
+        if (g_clipboard.is_dir)
+            ok = fat16_move_dir(src_path, dst_path);
+        else
+            ok = fat16_move_file(src_path, dst_path);
+        if (ok)
             clipboard_clear();
-        }
     } else {
-        if (src_drive != dst_drive) {
-            ok = g_clipboard.is_dir
-                     ? fat16_copy_dir_drive(src_drive, src_path, dst_drive,
-                                            g_clipboard.name)
-                     : fat16_copy_file_drive(src_drive, src_path, dst_drive,
-                                             g_clipboard.name);
-        } else {
-            ok = g_clipboard.is_dir
-                     ? fat16_copy_dir(src_path, g_clipboard.name)
-                     : fat16_copy_file(src_path, g_clipboard.name);
-        }
+        if (g_clipboard.is_dir)
+            ok = fat16_copy_dir(src_path, dst_path);
+        else
+            ok = fat16_copy_file(src_path, dst_path);
     }
-
-    dir_context.current_cluster = saved;
 
     if (ok) {
         desktop_fs_set_dirty();
-        modal_show(MODAL_INFO, "Paste", "Item pasted successfully.", NULL,
-                   NULL);
+        modal_show(MODAL_INFO, "Paste", "Item pasted successfully.", NULL, NULL);
     } else {
-        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL,
-                   NULL);
+        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL, NULL);
     }
 }
 

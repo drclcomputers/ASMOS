@@ -3,6 +3,7 @@
 
 #include "lib/core.h"
 
+/* ── BPB (BIOS Parameter Block) ─────────────────────────────────────────── */
 typedef struct __attribute__((packed)) {
     uint8_t jmp[3];
     uint8_t oem[8];
@@ -26,6 +27,7 @@ typedef struct __attribute__((packed)) {
     uint8_t fs_type[8];
 } bpb_t;
 
+/* ── Directory entry attributes ─────────────────────────────────────────── */
 #define ATTR_READ_ONLY 0x01
 #define ATTR_HIDDEN 0x02
 #define ATTR_SYSTEM 0x04
@@ -52,6 +54,7 @@ typedef struct __attribute__((packed)) {
     uint32_t file_size;
 } dir_entry_t;
 
+/* ── FAT sentinel values ─────────────────────────────────────────────────── */
 #define FAT16_FREE 0x0000
 #define FAT16_RESERVED 0xFFF0
 #define FAT16_BAD 0xFFF7
@@ -62,17 +65,20 @@ typedef struct __attribute__((packed)) {
 #define FAT12_BAD 0xFF7
 #define FAT12_EOC 0xFF8
 
+/* ── Physical drive IDs ──────────────────────────────────────────────────── */
 #define DRIVE_HDA 0  /* Primary ATA master  (boot drive) */
-#define DRIVE_HDB 1  /* Primary ATA slave */
-#define DRIVE_FDD0 2 /* Floppy A: */
-#define DRIVE_FDD1 3 /* Floppy B: */
+#define DRIVE_HDB 1  /* Primary ATA slave                */
+#define DRIVE_FDD0 2 /* Floppy A:                        */
+#define DRIVE_FDD1 3 /* Floppy B:                        */
 #define DRIVE_COUNT 4
 
+/* ── FAT type ────────────────────────────────────────────────────────────── */
 typedef enum {
     FAT_TYPE_FAT12 = 12,
     FAT_TYPE_FAT16 = 16,
 } fat_type_t;
 
+/* ── Per-volume state ────────────────────────────────────────────────────── */
 typedef struct {
     bpb_t bpb;
     uint32_t fat_lba;
@@ -80,11 +86,12 @@ typedef struct {
     uint32_t data_lba;
     uint32_t cluster_count;
     bool mounted;
-    uint8_t drive_id; /* physical drive */
-    char label[12];   /* volume label */
+    uint8_t drive_id;
+    char label[12]; /* volume label (cosmetic, for desktop display) */
     fat_type_t fat_type;
 } fat16_fs_t;
 
+/* ── Open file handle ────────────────────────────────────────────────────── */
 typedef struct {
     dir_entry_t entry;
     uint32_t dir_entry_lba;
@@ -98,27 +105,28 @@ typedef struct {
 } fat16_file_t;
 
 typedef struct {
-    uint16_t current_cluster;
-    char path[256];
-    uint8_t drive_id;
+    uint8_t drive_id;         /* physical drive of current dir */
+    uint16_t current_cluster; /* 0 = root of that drive */
+    char path[256];           /* canonical VFS path */
 } fat16_dir_context_t;
 
 typedef struct {
-    const char *name;
+    const char *path;
     uint8_t drive_id;
-} fat16_mount_point_t;
+} vfs_mount_t;
 
-extern fat16_mount_point_t g_mount_points[];
-bool fat16_is_mount_point(const char *name, uint8_t *drive_id_out);
+#define VFS_MOUNT_COUNT 3 /* HDB, FDD0, FDD1 */
+extern vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT];
 
-extern fat16_fs_t fs;                    /* current active volume   */
-extern fat16_fs_t g_drives[DRIVE_COUNT]; /* all mounted volumes     */
-extern fat16_dir_context_t dir_context;
-
-#define PROTECTED_PATH_COUNT 8
+#define PROTECTED_PATH_COUNT 5
 extern const char *g_protected_paths[PROTECTED_PATH_COUNT];
 
 bool path_is_protected(const char *name_or_path);
+
+/* ── Global state ────────────────────────────────────────────────────────── */
+extern fat16_fs_t fs;                    /* currently active volume */
+extern fat16_fs_t g_drives[DRIVE_COUNT]; /* all mounted volumes     */
+extern fat16_dir_context_t dir_context;  /* current working dir     */
 
 /* Drive management */
 bool fat16_mount_drive(uint8_t drive_id);
@@ -127,27 +135,30 @@ uint8_t fat16_current_drive(void);
 const char *fat16_drive_label(uint8_t drive_id);
 bool fat16_drive_mounted(uint8_t drive_id);
 
-/* init */
+/* Init / info */
 bool fat16_mount(void);
 bool fat16_get_usage(uint32_t *total_bytes, uint32_t *used_bytes);
 
-/* path */
+/* Path utilities */
 void fat16_make_83(const char *filename, char *out83);
-bool fat16_resolve(const char *path, uint16_t *out_cluster, char *out_name83);
+
+bool fat16_resolve(const char *path, uint8_t *out_drive,
+                   uint16_t *out_parent_cluster, char out_name83[12]);
+
 bool fat16_chdir(const char *path);
 bool fat16_pwd(char *buf, int buflen);
 
-/* dirs */
+/* Directory operations */
 bool fat16_mkdir(const char *path);
-bool fat16_find_in_dir(uint16_t dir_cluster, const char *name83,
-                       dir_entry_t *out);
+bool fat16_find_in_dir(uint8_t drive_id, uint16_t dir_cluster,
+                       const char *name83, dir_entry_t *out);
 bool fat16_find(const char *path, dir_entry_t *out);
-bool fat16_list_dir(uint16_t dir_cluster, dir_entry_t *buf, int max,
-                    int *count);
-bool is_dir_empty(uint16_t cluster);
-void fat16_wipe_cluster(uint16_t cluster);
+bool fat16_list_dir(uint8_t drive_id, uint16_t dir_cluster, dir_entry_t *buf,
+                    int max, int *count);
+bool is_dir_empty(uint8_t drive_id, uint16_t cluster);
+void fat16_wipe_cluster(uint8_t drive_id, uint16_t cluster);
 
-/* files */
+/* File operations */
 bool fat16_open(const char *path, fat16_file_t *f);
 bool fat16_create(const char *path, fat16_file_t *f);
 int fat16_read(fat16_file_t *f, void *buf, int len);
@@ -155,28 +166,18 @@ int fat16_write(fat16_file_t *f, const void *buf, int len);
 bool fat16_seek(fat16_file_t *f, uint32_t offset);
 int fat16_tell(fat16_file_t *f);
 bool fat16_close(fat16_file_t *f);
-bool fat16_copy_file_drive(uint8_t src_drive, const char *src_path,
-                           uint8_t dst_drive, const char *dst_path);
-bool fat16_move_file_drive(uint8_t src_drive, const char *src_path,
-                           uint8_t dst_drive, const char *dst_path);
-bool fat16_copy_dir_drive(uint8_t src_drive, const char *src_path,
-                          uint8_t dst_drive, const char *dst_path);
-bool fat16_move_dir_drive(uint8_t src_drive, const char *src_path,
-                          uint8_t dst_drive, const char *dst_path);
 
-/* file and dir */
+/* File and directory mutations */
 bool fat16_rename(const char *path, const char *new_name);
 bool fat16_delete(const char *path);
 bool fat16_rmdir(const char *path);
 bool fat16_rm_rf(const char *path);
 
-bool fat16_copy_file(const char *src_path, const char *dest_path);
-bool fat16_move_file(const char *src_path, const char *dest_path);
+bool fat16_copy_file(const char *src_path, const char *dst_path);
+bool fat16_move_file(const char *src_path, const char *dst_path);
+bool fat16_copy_dir(const char *src_path, const char *dst_path);
+bool fat16_move_dir(const char *src_path, const char *dst_path);
 
-bool fat16_copy_dir(const char *src_path, const char *dest_path);
-bool fat16_move_dir(const char *src_path, const char *dest_path);
-
-/* hidden file helpers */
 bool fat16_set_hidden(const char *path, bool hidden);
 bool fat16_is_hidden(const char *path);
 

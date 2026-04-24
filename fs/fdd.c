@@ -3,9 +3,9 @@
 #include "lib/memory.h"
 #include "lib/time.h"
 
-#define s_dma_buf       ((uint8_t *)0x7000)
-#define s_present       ((bool *)0x7200)
-#define s_motor_on      ((bool *)0x7204)
+#define s_dma_buf ((uint8_t *)0x7000)
+#define s_present ((bool *)0x7200)
+#define s_motor_on ((bool *)0x7204)
 #define s_current_track ((int *)0x7208)
 
 static void fdd_busy_wait(uint32_t ms) {
@@ -57,7 +57,6 @@ static void fdc_sense_interrupt(uint8_t *st0, uint8_t *cyl) {
 }
 
 /* ── IRQ wait (polled — we don't use IRQ handler for FDD) ─────────────── */
-
 static bool fdc_wait_interrupt(void) {
     /* Poll MSR for completion: wait until BUSY clears */
     uint32_t timeout = 0x200000;
@@ -71,7 +70,6 @@ static bool fdc_wait_interrupt(void) {
 }
 
 /* ── motor control ──────────────────────────────────────────────────────── */
-
 static void fdd_motor_start(uint8_t drive_id) {
     if (s_motor_on[drive_id])
         return;
@@ -93,7 +91,6 @@ void fdd_motor_off(uint8_t drive_id) {
 }
 
 /* ── recalibrate (seek to track 0) ─────────────────────────────────────── */
-
 static bool fdd_recalibrate(uint8_t drive_id) {
     fdd_motor_start(drive_id);
     for (int attempt = 0; attempt < 3; attempt++) {
@@ -113,7 +110,6 @@ static bool fdd_recalibrate(uint8_t drive_id) {
 }
 
 /* ── seek ───────────────────────────────────────────────────────────────── */
-
 static bool fdd_seek(uint8_t drive_id, uint8_t track) {
     if (s_current_track[drive_id] == (int)track)
         return true;
@@ -137,7 +133,6 @@ static bool fdd_seek(uint8_t drive_id, uint8_t track) {
 }
 
 /* ── DMA setup ──────────────────────────────────────────────────────────── */
-
 static void dma_setup_read(void *buf, uint16_t count) {
     uint32_t addr = (uint32_t)buf;
     uint8_t page = (addr >> 16) & 0xFF;
@@ -180,7 +175,6 @@ static void dma_setup_write(const void *buf, uint16_t count) {
 }
 
 /* ── LBA to CHS ─────────────────────────────────────────────────────────── */
-
 static void lba_to_chs(uint32_t lba, uint8_t *cyl, uint8_t *head,
                        uint8_t *sector) {
     *cyl = (uint8_t)(lba / (FDD_HEADS * FDD_SECTORS));
@@ -189,7 +183,6 @@ static void lba_to_chs(uint32_t lba, uint8_t *cyl, uint8_t *head,
 }
 
 /* ── read/write sector ──────────────────────────────────────────────────── */
-
 bool fdd_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
     if (drive_id > 1 || !s_present[drive_id])
         return false;
@@ -305,7 +298,6 @@ bool fdd_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
 }
 
 /* ── init / detect ──────────────────────────────────────────────────────── */
-
 bool fdd_is_present(uint8_t drive_id) {
     if (drive_id > 1)
         return false;
