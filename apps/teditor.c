@@ -157,11 +157,11 @@ static void np_delete_fwd(teditor_state_t *s) {
 }
 
 static bool np_load(teditor_state_t *s, const char *path) {
-    fat16_file_t f;
-    if (!fat16_open(path, &f))
+    fs_file_t f;
+    if (!fs_open(path, &f))
         return false;
-    int n = fat16_read(&f, s->text, TEXT_CAP - 1);
-    fat16_close(&f);
+    int n = fs_read(&f, s->text, TEXT_CAP - 1);
+    fs_close(&f);
     if (n < 0)
         n = 0;
     s->text_len = n;
@@ -176,13 +176,13 @@ static bool np_load(teditor_state_t *s, const char *path) {
 
 static bool np_save(teditor_state_t *s, const char *path) {
     dir_entry_t de;
-    if (fat16_find(path, &de))
-        fat16_delete(path);
-    fat16_file_t f;
-    if (!fat16_create(path, &f))
+    if (fs_find(path, &de))
+        fs_delete(path);
+    fs_file_t f;
+    if (!fs_create(path, &f))
         return false;
-    int written = fat16_write(&f, s->text, s->text_len);
-    fat16_close(&f);
+    int written = fs_write(&f, s->text, s->text_len);
+    fs_close(&f);
     if (written < s->text_len)
         return false;
     s->dirty = false;

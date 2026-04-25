@@ -187,7 +187,7 @@ static void open_item(desktop_item_t *it) {
         dir_entry_t de;
         uint16_t saved = dir_context.current_cluster;
         dir_context.current_cluster = desktop_fs_cluster();
-        bool found = fat16_find(it->name, &de);
+        bool found = fs_find(it->name, &de);
         dir_context.current_cluster = saved;
         if (found && (de.attr & ATTR_DIRECTORY)) {
             char path[280];
@@ -203,7 +203,7 @@ static void open_item(desktop_item_t *it) {
                 break;
             }
         }
-        if (vfs_path && fat16_drive_mounted(it->drive_id))
+        if (vfs_path && fs_drive_mounted(it->drive_id))
             ff_open_dir_pub(0, vfs_path);
     } else {
         extern void ff_open_dir_pub(uint16_t cluster, const char *path);
@@ -296,19 +296,19 @@ bool desktop_accept_drop(const char *src_path, const char *src_name,
     snprintf(dst_path, sizeof(dst_path), "%s/%s", desktop_fs_path(), src_name);
 
     dir_entry_t de;
-    if (fat16_find(dst_path, &de)) {
+    if (fs_find(dst_path, &de)) {
         return false;
     }
 
     dir_entry_t src_de;
-    if (!fat16_find(src_path, &src_de))
+    if (!fs_find(src_path, &src_de))
         return false;
 
     bool ok;
     if (src_de.attr & ATTR_DIRECTORY)
-        ok = fat16_move_dir(src_path, dst_path);
+        ok = fs_move_dir(src_path, dst_path);
     else
-        ok = fat16_move_file(src_path, dst_path);
+        ok = fs_move_file(src_path, dst_path);
 
     if (ok)
         desktop_fs_set_dirty();
@@ -436,7 +436,7 @@ static void menu_paste(void) {
     sprintf(dst_path, "%s/%s", desktop_fs_path(), g_clipboard.name);
 
     dir_entry_t de;
-    if (fat16_find(dst_path, &de)) {
+    if (fs_find(dst_path, &de)) {
         modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL, NULL);
         return;
     }
@@ -444,16 +444,16 @@ static void menu_paste(void) {
     bool ok;
     if (g_clipboard.is_cut) {
         if (g_clipboard.is_dir)
-            ok = fat16_move_dir(src_path, dst_path);
+            ok = fs_move_dir(src_path, dst_path);
         else
-            ok = fat16_move_file(src_path, dst_path);
+            ok = fs_move_file(src_path, dst_path);
         if (ok)
             clipboard_clear();
     } else {
         if (g_clipboard.is_dir)
-            ok = fat16_copy_dir(src_path, dst_path);
+            ok = fs_copy_dir(src_path, dst_path);
         else
-            ok = fat16_copy_file(src_path, dst_path);
+            ok = fs_copy_file(src_path, dst_path);
     }
 
     if (ok) {
@@ -516,12 +516,12 @@ static void handle_newname(void) {
     dir_context.current_cluster = desktop_fs_cluster();
     bool ok;
     if (s_newname_is_dir) {
-        ok = fat16_mkdir(s_newname_buf);
+        ok = fs_mkdir(s_newname_buf);
     } else {
-        fat16_file_t f;
-        ok = fat16_create(s_newname_buf, &f);
+        fat_file_t f;
+        ok = fs_create(s_newname_buf, &f);
         if (ok)
-            fat16_close(&f);
+            fs_close(&f);
     }
     dir_context.current_cluster = saved;
     s_mode = DESK_MODE_NORMAL;

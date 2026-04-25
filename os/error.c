@@ -1,7 +1,7 @@
 #include "os/error.h"
 #include "config/config.h"
 #include "fs/ata.h"
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/core.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
@@ -20,13 +20,13 @@ static const char *err_code_str[ERR_COUNT] = {
     [ERR_ATA_TIMEOUT] = "ATA timeout",
     [ERR_ATA_READ] = "ATA read error",
     [ERR_ATA_WRITE] = "ATA write error",
-    [ERR_FAT_MOUNT] = "FAT16 mount failed",
-    [ERR_FAT_NO_SPACE] = "FAT16 out of space",
-    [ERR_FAT_CORRUPT] = "FAT16 corrupt",
+    [ERR_FAT_MOUNT] = "FS mount failed",
+    [ERR_FAT_NO_SPACE] = "FS out of space",
+    [ERR_FAT_CORRUPT] = "FS corrupt",
     [ERR_FAT_NOT_FOUND] = "File not found",
     [ERR_FAT_EXISTS] = "File already exists",
-    [ERR_FAT_WRITE] = "FAT16 write error",
-    [ERR_FAT_READ] = "FAT16 read error",
+    [ERR_FAT_WRITE] = "FS write error",
+    [ERR_FAT_READ] = "FS read error",
     [ERR_OOM] = "Out of memory",
     [ERR_HEAP_CORRUPT] = "Heap corruption",
     [ERR_WM_MAX_WINDOWS] = "Too many windows",
@@ -166,18 +166,18 @@ void boot_check_ata(void) {
 }
 
 void boot_check_fat(void) {
-    boot_puts("FAT16 Filesystem\n", LIGHT_GRAY);
+    boot_puts("Filesystem\n", LIGHT_GRAY);
 
     bool mounted = g_drives[0].mounted;
     boot_check_line("Mounted", mounted,
-                    mounted ? NULL : "fat16_mount() failed to mount HDA");
+                    mounted ? NULL : "fs_mount() failed to mount HDA");
 
     if (!mounted) {
         error_report(ERR_FATAL, ERR_FAT_MOUNT, "boot_check_fat");
         return;
     }
 
-    fat16_fs_t *boot_fs = &g_drives[0];
+    fat_vol_t *boot_fs = &g_drives[0];
 
     bool bps_ok = (boot_fs->bpb.bytes_per_sector == 512);
     boot_check_line("Bytes/sector = 512", bps_ok,
@@ -199,7 +199,7 @@ void boot_check_fat(void) {
         error_report(ERR_FATAL, ERR_FAT_CORRUPT, "fat_count");
 
     uint32_t total = 0, used = 0;
-    bool usage_ok = fat16_get_usage(&total, &used);
+    bool usage_ok = fs_get_usage(&total, &used);
     boot_check_line("Usage readable", usage_ok,
                     usage_ok ? NULL : "FAT scan error");
 
@@ -209,9 +209,9 @@ void boot_check_fat(void) {
     }
 
     bool clust_ok =
-        (boot_fs->cluster_count >= 4096 && boot_fs->cluster_count <= 65524);
+        (boot_fs->cluster_count >= 1 && boot_fs->cluster_count <= 65524);
     boot_check_line("Cluster count sane", clust_ok,
-                    clust_ok ? NULL : "not a valid FAT16 range");
+                    clust_ok ? NULL : "cluster_count out of range");
     if (!clust_ok)
         error_report(ERR_WARNING, ERR_FAT_CORRUPT, "cluster_count");
 }

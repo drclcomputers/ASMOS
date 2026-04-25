@@ -1,7 +1,7 @@
 #include "shell/asm/asm.h"
 #include "shell/binrun.h"
 
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 
@@ -1641,14 +1641,14 @@ static bool do_assemble_src(const char *src_text, uint8_t *out_buf,
 
 bool asm_assemble_file(const char *src_path, uint8_t *out_buf, int *out_len,
                        int buf_max, char *err_msg, int err_max) {
-    fat16_file_t f;
-    if (!fat16_open(src_path, &f)) {
+    fat_file_t f;
+    if (!fs_open(src_path, &f)) {
         sprintf(err_msg, "cannot open '%s'", src_path);
         return false;
     }
     static char fbuf[32768];
-    int flen = fat16_read(&f, fbuf, sizeof(fbuf) - 1);
-    fat16_close(&f);
+    int flen = fs_read(&f, fbuf, sizeof(fbuf) - 1);
+    fs_close(&f);
     if (flen <= 0) {
         strncpy(err_msg, "file is empty", err_max - 1);
         return false;
@@ -1705,14 +1705,14 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
     }
 
     dir_entry_t de;
-    if (fat16_find(dst, &de))
-        fat16_delete(dst);
-    fat16_file_t wf;
-    if (!fat16_create(dst, &wf)) {
+    if (fs_find(dst, &de))
+        fs_delete(dst);
+    fat_file_t wf;
+    if (!fs_create(dst, &wf)) {
         sprintf(out, "asm: cannot create '%s'\n", dst);
         return;
     }
-    fat16_write(&wf, obuf, olen);
-    fat16_close(&wf);
+    fs_write(&wf, obuf, olen);
+    fs_close(&wf);
     sprintf(out, "asm: %s -> %s (%d bytes)\n", src, dst, olen);
 }

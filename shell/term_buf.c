@@ -1,5 +1,5 @@
 #include "shell/term_buf.h"
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 
@@ -100,10 +100,10 @@ bool term_buf_save(const char *path) {
     if (!path)
         return false;
     dir_entry_t de;
-    if (fat16_find(path, &de))
-        fat16_delete(path);
-    fat16_file_t f;
-    if (!fat16_create(path, &f))
+    if (fs_find(path, &de))
+        fs_delete(path);
+    fat_file_t f;
+    if (!fs_create(path, &f))
         return false;
     char lb[TERM_BUF_LINE_W + 1];
     bool ok = true;
@@ -114,12 +114,12 @@ bool term_buf_save(const char *path) {
         int len = (int)strlen(l);
         strncpy(lb, l, TERM_BUF_LINE_W);
         lb[len] = '\n';
-        if (fat16_write(&f, lb, len + 1) != len + 1) {
+        if (fs_write(&f, lb, len + 1) != len + 1) {
             ok = false;
             break;
         }
     }
-    fat16_close(&f);
+    fs_close(&f);
     return ok;
 }
 

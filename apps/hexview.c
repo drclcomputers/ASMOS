@@ -114,12 +114,12 @@ static void hv_scroll_to_sel(hexview_state_t *s) {
 }
 
 static bool hv_load(hexview_state_t *s, const char *path) {
-    fat16_file_t f;
-    if (!fat16_open(path, &f))
+    fs_file_t f;
+    if (!fs_open(path, &f))
         return false;
     uint32_t fsize = f.entry.file_size;
     if (fsize == 0) {
-        fat16_close(&f);
+        fs_close(&f);
         if (s->data) {
             kfree(s->data);
             s->data = NULL;
@@ -132,11 +132,11 @@ static bool hv_load(hexview_state_t *s, const char *path) {
     uint32_t cap = fsize > MAX_FILE_SIZE ? MAX_FILE_SIZE : fsize;
     uint8_t *buf = (uint8_t *)kmalloc(cap);
     if (!buf) {
-        fat16_close(&f);
+        fs_close(&f);
         return false;
     }
-    int got = fat16_read(&f, buf, (int)cap);
-    fat16_close(&f);
+    int got = fs_read(&f, buf, (int)cap);
+    fs_close(&f);
     if (got < 0)
         got = 0;
     if (s->data)

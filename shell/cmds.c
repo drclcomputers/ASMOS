@@ -1,6 +1,6 @@
 #include "shell/cmds.h"
 
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -40,7 +40,7 @@ void cmd_help(char *out, size_t max) {
 
 void cmd_pwd(char *out, size_t max) {
     char pwd[256];
-    if (fat16_pwd(pwd, sizeof(pwd))) {
+    if (fs_pwd(pwd, sizeof(pwd))) {
         append(out, max, pwd);
         append(out, max, "\n\n");
     }
@@ -51,14 +51,15 @@ void cmd_cd(const char *path, char *out, size_t max) {
         append(out, max, "Usage: cd <path>\n\n");
         return;
     }
-    if (!fat16_chdir(path))
+    if (!fs_chdir(path))
         append(out, max, "Error: directory not found\n\n");
 }
 
 void cmd_ls(char *out, size_t max) {
     dir_entry_t entries[32];
     int count = 0;
-    if (!fat16_list_dir(dir_context.drive_id, dir_context.current_cluster, entries, 32, &count)) {
+    if (!fs_list_dir(dir_context.drive_id, dir_context.current_cluster, entries,
+                     32, &count)) {
         append(out, max, "Error listing files\n\n");
         return;
     }
@@ -92,15 +93,15 @@ void cmd_cat(const char *filename, char *out, size_t max) {
         append(out, max, "Usage: cat <filename>\n\n");
         return;
     }
-    fat16_file_t file;
-    if (!fat16_open(filename, &file)) {
+    fs_file_t file;
+    if (!fs_open(filename, &file)) {
         append(out, max, "Error: file not found\n\n");
         return;
     }
     char buf[512];
     char tmp[513];
     int n;
-    while ((n = fat16_read(&file, buf, 512)) > 0) {
+    while ((n = fs_read(&file, buf, 512)) > 0) {
         int ti = 0;
         for (int i = 0; i < n; i++)
             if (buf[i] == '\n' || (buf[i] >= 32 && buf[i] < 127))
@@ -108,7 +109,7 @@ void cmd_cat(const char *filename, char *out, size_t max) {
         tmp[ti] = '\0';
         append(out, max, tmp);
     }
-    fat16_close(&file);
+    fs_close(&file);
     append(out, max, "\n\n");
 }
 
@@ -139,15 +140,15 @@ void cmd_write(const char *args, char *out, size_t max) {
         append(out, max, "Usage: write <file> <text>\n\n");
         return;
     }
-    fat16_file_t file;
+    fs_file_t file;
     dir_entry_t entry;
-    if (fat16_find(fn, &entry)) {
-        if (!fat16_open(fn, &file)) {
+    if (fs_find(fn, &entry)) {
+        if (!fs_open(fn, &file)) {
             append(out, max, "Error: cannot open\n\n");
             return;
         }
     } else {
-        if (!fat16_create(fn, &file)) {
+        if (!fs_create(fn, &file)) {
             append(out, max, "Error: cannot create\n\n");
             return;
         }
@@ -155,8 +156,8 @@ void cmd_write(const char *args, char *out, size_t max) {
     int tl = 0;
     while (args[i + tl] != '\0')
         tl++;
-    int written = fat16_write(&file, &args[i], tl);
-    fat16_close(&file);
+    int written = fs_write(&file, &args[i], tl);
+    fs_close(&file);
     char tmp[64];
     sprintf(tmp, "Wrote %d bytes\n\n", written);
     append(out, max, tmp);
@@ -167,12 +168,12 @@ void cmd_touch(const char *filename, char *out, size_t max) {
         append(out, max, "Usage: touch <filename>\n\n");
         return;
     }
-    fat16_file_t file;
-    if (!fat16_create(filename, &file)) {
+    fs_file_t file;
+    if (!fs_create(filename, &file)) {
         append(out, max, "Error: exists or invalid\n\n");
         return;
     }
-    fat16_close(&file);
+    fs_close(&file);
     append(out, max, "Created: ");
     append(out, max, filename);
     append(out, max, "\n\n");
@@ -184,7 +185,7 @@ void cmd_rm(const char *args, char *out, size_t max) {
         return;
     }
     if (strncmp(args, "-r ", 3) == 0) {
-        if (!fat16_rm_rf(args + 3)) {
+        if (!fs_rm_rf(args + 3)) {
             append(out, max, "Error: delete failed\n\n");
             return;
         }
@@ -192,7 +193,7 @@ void cmd_rm(const char *args, char *out, size_t max) {
         append(out, max, args + 3);
         append(out, max, "\n\n");
     } else {
-        if (!fat16_delete(args)) {
+        if (!fs_delete(args)) {
             append(out, max, "Error: file not found\n\n");
             return;
         }
@@ -207,7 +208,7 @@ void cmd_mkdir(const char *dirname, char *out, size_t max) {
         append(out, max, "Usage: mkdir <dirname>\n\n");
         return;
     }
-    if (!fat16_mkdir(dirname)) {
+    if (!fs_mkdir(dirname)) {
         append(out, max, "Error: could not create '");
         append(out, max, dirname);
         append(out, max, "'\n\n");
@@ -223,7 +224,7 @@ void cmd_rmdir(const char *dirname, char *out, size_t max) {
         append(out, max, "Usage: rmdir <dirname>\n\n");
         return;
     }
-    if (!fat16_rmdir(dirname)) {
+    if (!fs_rmdir(dirname)) {
         append(out, max, "Error: '");
         append(out, max, dirname);
         append(out, max, "' not found/not empty\n\n");
@@ -266,12 +267,12 @@ void cmd_cp(const char *args, char *out, size_t max) {
     memcpy(dst, &args[ds], dl);
     dst[dl] = '\0';
     dir_entry_t e;
-    if (!fat16_find(src, &e)) {
+    if (!fs_find(src, &e)) {
         append(out, max, "Error: source not found\n\n");
         return;
     }
-    bool ok = (e.attr & ATTR_DIRECTORY) ? fat16_copy_dir(src, dst)
-                                        : fat16_copy_file(src, dst);
+    bool ok = (e.attr & ATTR_DIRECTORY) ? fs_copy_dir(src, dst)
+                                        : fs_copy_file(src, dst);
     if (ok) {
         char tmp[150];
         sprintf(tmp, "Copied: %s -> %s\n\n", src, dst);
@@ -313,12 +314,12 @@ void cmd_mv(const char *args, char *out, size_t max) {
     memcpy(dst, &args[ds], dl);
     dst[dl] = '\0';
     dir_entry_t e;
-    if (!fat16_find(src, &e)) {
+    if (!fs_find(src, &e)) {
         append(out, max, "Error: source not found\n\n");
         return;
     }
-    bool ok = (e.attr & ATTR_DIRECTORY) ? fat16_move_dir(src, dst)
-                                        : fat16_move_file(src, dst);
+    bool ok = (e.attr & ATTR_DIRECTORY) ? fs_move_dir(src, dst)
+                                        : fs_move_file(src, dst);
     if (ok) {
         char tmp[150];
         sprintf(tmp, "Moved: %s -> %s\n\n", src, dst);
@@ -330,7 +331,7 @@ void cmd_mv(const char *args, char *out, size_t max) {
 
 void cmd_df(char *out, size_t max) {
     uint32_t tot = 0, used = 0;
-    if (!fat16_get_usage(&tot, &used)) {
+    if (!fs_get_usage(&tot, &used)) {
         append(out, max, "Error reading storage\n\n");
         return;
     }

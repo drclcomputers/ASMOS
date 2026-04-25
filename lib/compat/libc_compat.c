@@ -1,5 +1,5 @@
 #include "lib/compat/libc_compat.h"
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -49,28 +49,28 @@ FILE *fopen(const char *path, const char *mode) {
 
     if (mode[0] == 'w') {
         dir_entry_t de;
-        if (fat16_find(path, &de))
-            fat16_delete(path);
-        if (!fat16_create(path, &f->f)) {
+        if (fs_find(path, &de))
+            fs_delete(path);
+        if (!fs_create(path, &f->f)) {
             kfree(f);
             return NULL;
         }
     } else if (mode[0] == 'a') {
         dir_entry_t de;
-        if (fat16_find(path, &de)) {
-            if (!fat16_open(path, &f->f)) {
+        if (fs_find(path, &de)) {
+            if (!fs_open(path, &f->f)) {
                 kfree(f);
                 return NULL;
             }
-            fat16_seek(&f->f, f->f.entry.file_size);
+            fs_seek(&f->f, f->f.entry.file_size);
         } else {
-            if (!fat16_create(path, &f->f)) {
+            if (!fs_create(path, &f->f)) {
                 kfree(f);
                 return NULL;
             }
         }
     } else {
-        if (!fat16_open(path, &f->f)) {
+        if (!fs_open(path, &f->f)) {
             kfree(f);
             return NULL;
         }
@@ -84,7 +84,7 @@ int fclose(FILE *f) {
         return EOF;
     if (f == stdin || f == stdout || f == stderr)
         return 0;
-    fat16_close(&f->f);
+    fs_close(&f->f);
     f->is_open = false;
     kfree(f);
     return 0;
@@ -95,7 +95,7 @@ size_t fread(void *buf, size_t size, size_t count, FILE *f) {
     if (f == stdin)
         return 0; /* no stdin support */
     int total = (int)(size * count);
-    int n = fat16_read(&f->f, buf, total);
+    int n = fs_read(&f->f, buf, total);
     if (n < total)
         f->eof = true;
     if (n < 0) {
@@ -114,7 +114,7 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *f) {
             term_putchar(p[i]);
         return count;
     }
-    int n = fat16_write(&f->f, buf, total);
+    int n = fs_write(&f->f, buf, total);
     if (n < 0) {
         f->error = true;
         return 0;
@@ -141,14 +141,14 @@ int fseek(FILE *f, long offset, int whence) {
         return -1;
     }
     f->eof = false;
-    return fat16_seek(&f->f, target) ? 0 : -1;
+    return fs_seek(&f->f, target) ? 0 : -1;
 }
 long ftell(FILE *f) {
     if (!f || !f->is_open)
         return -1;
     if (f == stdin || f == stdout || f == stderr)
         return -1;
-    return (long)fat16_tell(&f->f);
+    return (long)fs_tell(&f->f);
 }
 int feof(FILE *f) { return f && f->eof ? 1 : 0; }
 int ferror(FILE *f) { return f && f->error ? 1 : 0; }
@@ -180,7 +180,7 @@ int fgetc(FILE *f) {
     if (f == stdin)
         return EOF;
     uint8_t c;
-    int n = fat16_read(&f->f, &c, 1);
+    int n = fs_read(&f->f, &c, 1);
     if (n <= 0) {
         f->eof = true;
         return EOF;
@@ -223,12 +223,12 @@ int vfprintf(FILE *f, const char *fmt, va_list ap) {
     return n;
 }
 void perror(const char *s) { fprintf(stderr, "%s: error\n", s ? s : ""); }
-int remove(const char *path) { return fat16_delete(path) ? 0 : -1; }
+int remove(const char *path) { return fs_delete(path) ? 0 : -1; }
 
 int rename(const char *old, const char *newname) {
     const char *base = strrchr(newname, '/');
     base = base ? base + 1 : newname;
-    return fat16_rename(old, base) ? 0 : -1;
+    return fs_rename(old, base) ? 0 : -1;
 }
 
 // memory

@@ -13,7 +13,7 @@
 #include "io/ps2.h"
 
 #include "config/config.h"
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "os/os.h"
 #include "os/scheduler.h"
 
@@ -69,7 +69,7 @@ static void cli_println(const char *str) {
 
 static void shell_draw_prompt(void) {
     char pwd[256];
-    if (fat16_pwd(pwd, sizeof(pwd)))
+    if (fs_pwd(pwd, sizeof(pwd)))
         cli_print(pwd);
     cli_print("> ");
 }

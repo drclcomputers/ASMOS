@@ -45,7 +45,7 @@ static void monitor_refresh(monitor_state_t *s) {
     update_label_text(s->win, MEM_LABEL_IDX, s->memory_str);
 
     uint32_t stor_total = 0, stor_used = 0;
-    if (fat16_get_usage(&stor_total, &stor_used)) {
+    if (fs_get_usage(&stor_total, &stor_used)) {
         stor_total /= 1024;
         stor_used /= 1024;
         fmt_bytes(s->storage_str, (int)sizeof(s->storage_str), stor_used,

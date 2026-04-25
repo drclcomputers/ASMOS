@@ -46,8 +46,9 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/fonts/fonts.o                \
       \
       $(BUILD_DIR)/fs/ata.o                     \
-      $(BUILD_DIR)/fs/fat16.o                   \
+      $(BUILD_DIR)/fs/fat_io.o                  \
       $(BUILD_DIR)/fs/fdd.o                     \
+      $(BUILD_DIR)/fs/fs.o                      \
       \
       $(BUILD_DIR)/io/ps2.o                     \
       $(BUILD_DIR)/io/mouse.o                   \
@@ -130,6 +131,13 @@ qemu: all
 	qemu-system-i386 \
 	    -drive format=raw,file=os_image.bin \
 	    -drive format=raw,file=floppy.img,if=floppy \
+	    -m 4M -machine pc \
+	    -audiodev coreaudio,id=snd0 \
+	    -machine pcspk-audiodev=snd0 \
+
+qemu-nonfdd: all
+	qemu-system-i386 \
+	    -drive format=raw,file=os_image.bin \
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \

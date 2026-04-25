@@ -1,6 +1,6 @@
 #include "shell/binrun.h"
 
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "os/scheduler.h"
@@ -87,13 +87,13 @@ static void bin_task_entry(void *arg) {
 
 static void do_run(term_context_t *tctx, const char *path, char *out,
                    size_t max) {
-    fat16_file_t f;
-    if (!fat16_open(path, &f)) {
+    fat_file_t f;
+    if (!fs_open(path, &f)) {
         sprintf(out, "run: cannot open '%s'\n", path);
         return;
     }
     uint32_t file_size = f.entry.file_size;
-    fat16_close(&f);
+    fs_close(&f);
 
     if (file_size == 0) {
         sprintf(out, "run: '%s' is empty\n", path);
@@ -110,13 +110,13 @@ static void do_run(term_context_t *tctx, const char *path, char *out,
         return;
     }
 
-    if (!fat16_open(path, &f)) {
+    if (!fs_open(path, &f)) {
         kfree(buf);
         sprintf(out, "run: re-open failed\n");
         return;
     }
-    int got = fat16_read(&f, buf, (int)file_size);
-    fat16_close(&f);
+    int got = fs_read(&f, buf, (int)file_size);
+    fs_close(&f);
 
     if (got != (int)file_size) {
         kfree(buf);

@@ -348,10 +348,10 @@ static void asmdraw_save(asmdraw_state_t *s, const char *path) {
     }
 
     dir_entry_t de;
-    if (fat16_find(path, &de))
-        fat16_delete(path);
-    fat16_file_t f;
-    if (!fat16_create(path, &f)) {
+    if (fs_find(path, &de))
+        fs_delete(path);
+    fat_file_t f;
+    if (!fs_create(path, &f)) {
         draw_set_status(s, "Save failed.");
         return;
     }
@@ -361,32 +361,32 @@ static void asmdraw_save(asmdraw_state_t *s, const char *path) {
     hdr[1] = (uint8_t)((s->canvas_w >> 8) & 0xFF);
     hdr[2] = (uint8_t)(s->canvas_h & 0xFF);
     hdr[3] = (uint8_t)((s->canvas_h >> 8) & 0xFF);
-    fat16_write(&f, hdr, 4);
+    fs_write(&f, hdr, 4);
 
     for (int y = 0; y < s->canvas_h; y++)
-        fat16_write(&f, s->canvas[y], s->canvas_w);
+        fs_write(&f, s->canvas[y], s->canvas_w);
 
-    fat16_close(&f);
+    fs_close(&f);
     draw_set_status(s, "Saved.");
 }
 
 static void asmdraw_load(asmdraw_state_t *s, const char *path) {
-    fat16_file_t f;
-    if (!fat16_open(path, &f)) {
+    fat_file_t f;
+    if (!fs_open(path, &f)) {
         draw_set_status(s, "File not found.");
         return;
     }
 
     uint8_t hdr[4];
-    if (fat16_read(&f, hdr, 4) < 4) {
-        fat16_close(&f);
+    if (fs_read(&f, hdr, 4) < 4) {
+        fs_close(&f);
         draw_set_status(s, "Bad file.");
         return;
     }
     int fw = hdr[0] | (hdr[1] << 8);
     int fh = hdr[2] | (hdr[3] << 8);
     if (fw < 1 || fw > CANVAS_MAX_W || fh < 1 || fh > CANVAS_MAX_H) {
-        fat16_close(&f);
+        fs_close(&f);
         draw_set_status(s, "Unsupported size.");
         return;
     }
@@ -397,13 +397,13 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
 
     for (int y = 0; y < fh; y++) {
         uint8_t row[CANVAS_MAX_W];
-        int got = fat16_read(&f, row, fw);
+        int got = fs_read(&f, row, fw);
         if (got < fw)
             break;
         for (int x = 0; x < fw; x++)
             s->canvas[y][x] = row[x];
     }
-    fat16_close(&f);
+    fs_close(&f);
     draw_set_status(s, "Opened.");
 }
 

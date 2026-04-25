@@ -87,7 +87,7 @@ void kmain(void) {
     sleep_s(1);
 
     boot_check_heap();     // Validate allocator
-    fat16_mount();         // Mount FAT16 from sector 0 BPB
+    fs_mount();         // Mount FAT16 from sector 0 BPB
     boot_check_ata();      // Sector 0 read + 0xAA55 signature
     boot_check_fat();      // BPB sanity, cluster count, disk usage
 
@@ -319,7 +319,7 @@ speaker_beep_async / speaker_update:  tick-based non-blocking variant
 ASMusic app drives speaker_tone_start/stop each frame via PIT ticks.
 
 
-6. FILESYSTEM (fs/fat16.c)
+6. FILESYSTEM (fs/fs.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 FAT16 layout on disk (BPB from boot sector):
@@ -357,7 +357,7 @@ Special first-byte values:
 Key attribute bits: ATTR_DIRECTORY (0x10), ATTR_ARCHIVE (0x20),
   ATTR_VOLUME_ID (0x08), ATTR_READ_ONLY (0x01)
 
-Path resolution (fat16_resolve):
+Path resolution (fs_resolve):
   Walks path components from dir_context.current_cluster
   Absolute paths (leading '/') reset to cluster 0 (root)
   Returns parent_cluster + 11-byte 8.3 name for final component
@@ -367,20 +367,20 @@ Directory iteration (dir_iterate, cluster_iterate):
   Skips DIR_ENTRY_FREE and ATTR_VOLUME_ID entries
 
 High-level operations:
-  fat16_open / fat16_create / fat16_read / fat16_write
-  fat16_seek / fat16_tell / fat16_close
-  fat16_find / fat16_find_in_dir / fat16_list_dir
-  fat16_rename / fat16_delete / fat16_rmdir / fat16_rm_rf
-  fat16_mkdir / fat16_copy_file / fat16_copy_dir
-  fat16_move_file / fat16_move_dir
-  fat16_get_usage (FAT scan for used cluster count)
+  fs_open / fs_create / fs_read / fs_write
+  fs_seek / fs_tell / fs_close
+  fs_find / fs_find_in_dir / fs_list_dir
+  fs_rename / fs_delete / fs_rmdir / fs_rm_rf
+  fs_mkdir / fs_copy_file / fs_copy_dir
+  fs_move_file / fs_move_dir
+  fs_get_usage (FAT scan for used cluster count)
 
-Current directory: global fat16_dir_context_t { current_cluster, path[256] }
-  fat16_chdir resolves ".." via dotdot entries; normalises path string.
+Current directory: global fs_dir_context_t { current_cluster, path[256] }
+  fs_chdir resolves ".." via dotdot entries; normalises path string.
 
-Write path for fat16_write:
+Write path for fs_write:
   Allocates new clusters on demand via fat_alloc()
-  Updates dir entry file_size + timestamps on fat16_close()
+  Updates dir entry file_size + timestamps on fs_close()
   Both FAT copies kept in sync by fat_set()
 
 
@@ -665,7 +665,7 @@ Binary calling convention (for `run`):
 ═══════════════════════════════════════════════════════════════════════════
 
 cmd_run(ctx, path, out, max):
-  1. fat16_open → read file_size bytes into kmalloc'd buffer
+  1. fs_open → read file_size bytes into kmalloc'd buffer
   2. kmalloc a bin_task_ctx_t context
   3. scheduler_add_task(bin_task_entry, ctx)  → new cooperative task
   4. Returns immediately; binary runs concurrently
@@ -739,7 +739,7 @@ State is a privately defined struct, zero-initialised by the OS.
   Sort modes: by Name, Date, Size (bubble sort on ff_item_t array).
   Double-click: open directory (new FileF instance) or launch .APP.
   Drag-and-drop: move files between FileF windows or to Desktop.
-  Drag-to-desktop: calls desktop_accept_drop (fat16_move_file/dir).
+  Drag-to-desktop: calls desktop_accept_drop (fs_move_file/dir).
   Clipboard: global g_clip (copy/cut/paste within and across windows).
   Modes: NORMAL, RENAME (inline text edit under icon), CONFIRM (delete),
          NEWNAME (new file/folder dialog), INFO (Get Info overlay).
@@ -755,7 +755,7 @@ State is a privately defined struct, zero-initialised by the OS.
 
 15.8 Monitor (apps/monitor.c)
   System resource monitor.
-  Reads heap_used() + heap_remaining() and fat16_get_usage() each frame.
+  Reads heap_used() + heap_remaining() and fs_get_usage() each frame.
   Displays as "used KB / total KB" labels via update_label_text.
   UPDATE_INTERVAL = TARGET_FPS (updates once per second).
 
@@ -805,7 +805,7 @@ Desktop FS (/DESKTOP directory):
 Double-click detection: 60-tick (600 ms) window comparing last click index.
 
 Desktop drag-and-drop: icon positions updated in memory;
-  fat16_move_* called when dragging from FileF onto desktop area.
+  fs_move_* called when dragging from FileF onto desktop area.
 
 HELLO.ASM embedded macro (desktop_fs.h): position-independent x86 demo
   that prints "Enter Name:" prompt, reads input via sc_readline,
@@ -925,7 +925,7 @@ LIMITS (compile-time constants):
   Term buffer           256 lines × 128 chars
 
 FILESYSTEM:
-  - Only root FAT16 volume; no subdirectory paths beyond what fat16_resolve supports
+  - Only root FAT16 volume; no subdirectory paths beyond what fs_resolve supports
   - No file locking; concurrent writes from multiple apps unsupported
   - FAT16 only (no FAT32, ext2, etc.)
   - 8.3 filenames only

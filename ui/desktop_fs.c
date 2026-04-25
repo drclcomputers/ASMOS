@@ -1,5 +1,5 @@
 #include "ui/desktop_fs.h"
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 
@@ -58,15 +58,9 @@ static void create_default_shortcuts(void) {
         fname[fi++] = 'P';
         fname[fi] = '\0';
 
-        fat16_file_t f;
-        if (fat16_create(fname, &f))
-            fat16_close(&f);
-    }
-
-    fat16_file_t f;
-    if (fat16_create("Hello.asm", &f)) {
-        fat16_write(&f, HELLO_ASM, strlen(HELLO_ASM));
-        fat16_close(&f);
+        fat_file_t f;
+        if (fs_create(fname, &f))
+            fs_close(&f);
     }
 
     dir_context.drive_id = saved_drive;
@@ -80,7 +74,7 @@ void desktop_fs_init(void) {
     s_inited = true;
 
     dir_entry_t de;
-    bool exists = fat16_find(DESKTOP_PATH, &de);
+    bool exists = fs_find(DESKTOP_PATH, &de);
 
     if (!exists || !(de.attr & ATTR_DIRECTORY)) {
         uint8_t saved_drive = dir_context.drive_id;
@@ -88,12 +82,12 @@ void desktop_fs_init(void) {
         dir_context.drive_id = DRIVE_HDA;
         dir_context.current_cluster = 0;
 
-        fat16_mkdir("DESKTOP");
+        fs_mkdir("DESKTOP");
 
         dir_context.drive_id = saved_drive;
         dir_context.current_cluster = saved_cluster;
 
-        if (!fat16_find(DESKTOP_PATH, &de))
+        if (!fs_find(DESKTOP_PATH, &de))
             s_cluster = 0;
         else
             s_cluster = de.cluster_lo;
@@ -113,7 +107,7 @@ void desktop_fs_reload(void) {
 
     dir_entry_t raw[DESKTOP_MAX_ITEMS];
     int raw_count = 0;
-    fat16_list_dir(DRIVE_HDA, s_cluster, raw, DESKTOP_MAX_ITEMS, &raw_count);
+    fs_list_dir(DRIVE_HDA, s_cluster, raw, DESKTOP_MAX_ITEMS, &raw_count);
 
     int slot = 0;
     for (int i = 0; i < raw_count && s_count < DESKTOP_MAX_ITEMS; i++) {
@@ -146,11 +140,11 @@ void desktop_fs_reload(void) {
 
     for (uint8_t d = DRIVE_FDD0; d <= DRIVE_FDD1 && s_count < DESKTOP_MAX_ITEMS;
          d++) {
-        if (!fat16_drive_mounted(d))
+        if (!fs_drive_mounted(d))
             continue;
         desktop_item_t *it = &s_items[s_count];
         memset(it, 0, sizeof(desktop_item_t));
-        strncpy(it->name, fat16_drive_label(d), DESKTOP_NAME_MAX - 1);
+        strncpy(it->name, fs_drive_label(d), DESKTOP_NAME_MAX - 1);
         it->kind = DESKTOP_ITEM_FDD;
         it->drive_id = d;
         it->used = true;
@@ -158,10 +152,10 @@ void desktop_fs_reload(void) {
         s_count++;
     }
 
-    if (fat16_drive_mounted(DRIVE_HDB) && s_count < DESKTOP_MAX_ITEMS) {
+    if (fs_drive_mounted(DRIVE_HDB) && s_count < DESKTOP_MAX_ITEMS) {
         desktop_item_t *it = &s_items[s_count];
         memset(it, 0, sizeof(desktop_item_t));
-        strncpy(it->name, fat16_drive_label(DRIVE_HDB), DESKTOP_NAME_MAX - 1);
+        strncpy(it->name, fs_drive_label(DRIVE_HDB), DESKTOP_NAME_MAX - 1);
         it->kind = DESKTOP_ITEM_HDD;
         it->drive_id = DRIVE_HDB;
         it->used = true;
@@ -176,7 +170,7 @@ bool desktop_fs_is_dirty(void) { return s_dirty; }
 desktop_item_t *desktop_fs_items(void) { return s_items; }
 int desktop_fs_count(void) { return s_count; }
 uint16_t desktop_fs_cluster(void) {
-    fat16_select_drive(DRIVE_HDA);
+    fs_select_drive(DRIVE_HDA);
     return s_cluster;
 }
 const char *desktop_fs_path(void) { return DESKTOP_PATH; }
@@ -205,10 +199,10 @@ bool desktop_fs_add_app(const char *app_name) {
     dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = s_cluster;
 
-    fat16_file_t f;
-    bool ok = fat16_create(fname, &f);
+    fat_file_t f;
+    bool ok = fs_create(fname, &f);
     if (ok)
-        fat16_close(&f);
+        fs_close(&f);
 
     dir_context.drive_id = saved_drive;
     dir_context.current_cluster = saved_cluster;
@@ -230,7 +224,7 @@ bool desktop_fs_delete(int idx) {
 
     bool ok = false;
     if (it->kind == DESKTOP_ITEM_DIR) {
-        ok = fat16_rm_rf(it->name);
+        ok = fs_rm_rf(it->name);
     } else if (it->kind == DESKTOP_ITEM_APP) {
         char fname[DESKTOP_NAME_MAX];
         int fi = 0;
@@ -245,9 +239,9 @@ bool desktop_fs_delete(int idx) {
         fname[fi++] = 'P';
         fname[fi++] = 'P';
         fname[fi] = '\0';
-        ok = fat16_delete(fname);
+        ok = fs_delete(fname);
     } else {
-        ok = fat16_delete(it->name);
+        ok = fs_delete(it->name);
     }
 
     dir_context.drive_id = saved_drive;
@@ -267,7 +261,7 @@ bool desktop_fs_rename(int idx, const char *new_name) {
     dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = s_cluster;
 
-    bool ok = fat16_rename(s_items[idx].name, new_name);
+    bool ok = fs_rename(s_items[idx].name, new_name);
 
     dir_context.drive_id = saved_drive;
     dir_context.current_cluster = saved_cluster;

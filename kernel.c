@@ -1,4 +1,4 @@
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "io/ps2.h"
 
 #include "os/app_registry.h"
@@ -63,7 +63,7 @@ void kmain(void) {
     sleep_s(1);
 
     boot_check_heap();
-    fat16_mount();
+    fs_mount();
     boot_check_ata();
     boot_check_fat();
 

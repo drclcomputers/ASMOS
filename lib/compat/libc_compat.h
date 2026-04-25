@@ -5,7 +5,7 @@
 // Provides a stdlib/stdio/string interface that TCC and NASM-compiled code can
 // link against without pulling in a real libc.
 
-#include "fs/fat16.h"
+#include "fs/fs.h"
 #include "lib/compat/libcore.h"
 #include "lib/core.h"
 #include "lib/memory.h"
@@ -26,7 +26,7 @@
 // FILE
 
 typedef struct {
-    fat16_file_t f;
+    fat_file_t f;
     bool is_open;
     bool is_write;
     bool is_stderr;

@@ -131,7 +131,7 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
     s->path[255] = '\0';
     s->win->title = s->path;
     const mount_point_t *mp = find_mount_point(path);
-    s->drive_id = mp ? mp->drive_id : fat16_current_drive();
+    s->drive_id = mp ? mp->drive_id : fs_current_drive();
     ff_reload(s);
 }
 
@@ -141,6 +141,10 @@ static void ff_navigate(ff_inst_t *s, uint16_t cluster, const char *path) {
     s->path[255] = '\0';
     s->win->title = s->path;
     s->scroll_y = 0;
+
+    const mount_point_t *mp = find_mount_point(path);
+    s->drive_id = mp ? mp->drive_id : fs_current_drive();
+
     ff_reload(s);
 }
 
@@ -162,8 +166,7 @@ static void cancel_confirm(void *ud);
 static int ff_hit(ff_inst_t *s, int mx, int my);
 static bool in_content(ff_inst_t *s, int mx, int my);
 
-/* ── Internal Helpers
- * ──────────────────────────────────────────────────────────── */
+/* ── Internal Helpers * ──────────────────────────────────────────────────────────── */
 static void maybe_notify_desktop(ff_inst_t *s) {
     if (strcmp(s->path, desktop_fs_path()) == 0)
         desktop_fs_set_dirty();
@@ -325,7 +328,8 @@ static void ff_sort(ff_inst_t *s) {
 
 static int content_view_h(ff_inst_t *s) {
     int wh = s->win->h - 16;
-    return wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - DRIVEBAR_H - 1;
+    //return wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - DRIVEBAR_H - 1;
+    return wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - 1;
 }
 
 static void ff_layout(ff_inst_t *s) {
@@ -353,13 +357,15 @@ static void ff_layout(ff_inst_t *s) {
 }
 
 static void ff_reload(ff_inst_t *s) {
-    fat16_select_drive(s->drive_id);
-    uint16_t saved = dir_context.current_cluster;
+    uint16_t saved_cluster = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
+
     dir_context.current_cluster = s->dir_cluster;
+    dir_context.drive_id = s->drive_id;
 
     dir_entry_t raw[MAX_ENTRIES];
     int count = 0;
-    fat16_list_dir(s->drive_id, s->dir_cluster, raw, MAX_ENTRIES, &count);
+    fs_list_dir(s->drive_id, s->dir_cluster, raw, MAX_ENTRIES, &count);
 
     s->item_count = 0;
 
@@ -385,7 +391,9 @@ static void ff_reload(ff_inst_t *s) {
         ff_make_label(it->name, it->label);
     }
 
-    dir_context.current_cluster = saved;
+    dir_context.current_cluster = saved_cluster;
+    dir_context.drive_id = saved_drive;
+
     ff_sort(s);
     ff_layout(s);
     s->drag_idx = -1;
@@ -400,15 +408,15 @@ static bool item_is_app(const ff_item_t *it) {
             it->entry.ext[2] == 'P');
 }
 
-/* ── drive bar ──────────────────────────────────────────────────────────── */
+/* ── drive bar ────────────────────────────────────────────────────────────
 static void ff_draw_drivebar(ff_inst_t *s, int wx, int wy, int ww) {
     int bx = wx, by = wy + CONTENT_TOP - DRIVEBAR_H + 4;
     fill_rect(bx, by, ww, DRIVEBAR_H, DARK_GRAY);
     int tx = bx + 2;
     for (uint8_t d = 0; d < DRIVE_COUNT; d++) {
-        if (!fat16_drive_mounted(d))
+        if (!fs_drive_mounted(d))
             continue;
-        const char *lbl = fat16_drive_label(d);
+        const char *lbl = fs_drive_label(d);
         int lw = (int)strlen(lbl) * CHAR_W + 6;
         if (tx + lw >= 70) {
             uint8_t bg = (d == s->drive_id) ? LIGHT_BLUE : DARK_GRAY;
@@ -428,9 +436,9 @@ static bool ff_drivebar_click(ff_inst_t *s, int mx, int my, int wx, int wy,
         return false;
     int tx = wx + 2;
     for (uint8_t d = 0; d < DRIVE_COUNT; d++) {
-        if (!fat16_drive_mounted(d))
+        if (!fs_drive_mounted(d))
             continue;
-        const char *lbl = fat16_drive_label(d);
+        const char *lbl = fs_drive_label(d);
         int lw = (int)strlen(lbl) * CHAR_W + 6;
         if (mx >= tx && mx < tx + lw) {
             if (d != s->drive_id) {
@@ -441,7 +449,7 @@ static bool ff_drivebar_click(ff_inst_t *s, int mx, int my, int wx, int wy,
                     s->win->title = s->path;
                     ff_reload(s);
                 } else {
-                    const char *label = fat16_drive_label(d);
+                    const char *label = fs_drive_label(d);
                     if (label[0]) {
                         char mnt_path[270];
                         sprintf(mnt_path, "/%s", label);
@@ -459,7 +467,7 @@ static bool ff_drivebar_click(ff_inst_t *s, int mx, int my, int wx, int wy,
         tx += lw + 2;
     }
     return false;
-}
+} */
 
 /* ── drawing ────────────────────────────────────────────────────────────── */
 static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
@@ -649,11 +657,12 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
 }
 
 static void ff_draw_scrollbar(ff_inst_t *s, int wx, int wy, int ww, int wh) {
-    int view_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - DRIVEBAR_H + 1;
+    //int view_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - DRIVEBAR_H + 1;
+    int view_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H + 1;
     if (view_h < 1)
         view_h = 1;
     int sb_x = wx + ww - SCROLLBAR_W - 1;
-    int sb_y = wy + CONTENT_TOP + 5;
+    int sb_y = wy + 2;
     int sb_h = view_h;
     fill_rect(sb_x, sb_y, SCROLLBAR_W, sb_h, LIGHT_GRAY);
     if (s->content_h_total > view_h) {
@@ -679,13 +688,14 @@ static void ff_draw_window(window *win, void *ud) {
         return;
     int wx = win->x + 1, wy = win->y + MENUBAR_H + 16, ww = win->w - 2,
         wh = win->h - 16;
-    int content_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - DRIVEBAR_H;
+    //int content_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H - DRIVEBAR_H;
+    int content_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H;
 
-    fill_rect(wx, wy, ww, wh, WHITE);
-    ff_draw_drivebar(s, wx, wy, ww);
-    draw_line(wx, wy - 1, wx + ww - 1, wy - 1, BLACK);
-    draw_line(wx, wy + CONTENT_TOP + 4, wx + ww - 1, wy + CONTENT_TOP + 4,
-              LIGHT_GRAY);
+    //fill_rect(wx, wy, ww, wh, WHITE);
+    //ff_draw_drivebar(s, wx, wy, ww);
+    //draw_line(wx, wy - 1, wx + ww - 1, wy - 1, BLACK);
+    /*draw_line(wx, wy + CONTENT_TOP + 4, wx + ww - 1, wy + CONTENT_TOP + 4,
+              LIGHT_GRAY);*/
     int stat_y = wy + wh - STATUS_H - CONTENT_BOT;
     fill_rect(wx, stat_y, ww, STATUS_H + CONTENT_BOT, LIGHT_GRAY);
     draw_line(wx, stat_y, wx + ww - 1, stat_y, LIGHT_GRAY);
@@ -705,15 +715,15 @@ static void ff_draw_window(window *win, void *ud) {
     for (int i = 0; i < s->item_count; i++) {
         if (s->items[i].dragging)
             continue;
-        ff_draw_item(s, i, wx, wy + CONTENT_TOP - s->scroll_y, clip_bottom);
+        ff_draw_item(s, i, wx, wy - s->scroll_y, clip_bottom);
     }
     if (s->drag_idx >= 0) {
         ff_item_t *it = &s->items[s->drag_idx];
         int ax = mouse.x - it->drag_off_x, ay = mouse.y - it->drag_off_y;
         int save_x = it->icon_x, save_y = it->icon_y;
         it->icon_x = ax - wx;
-        it->icon_y = ay - (wy + CONTENT_TOP) + s->scroll_y;
-        ff_draw_item(s, s->drag_idx, wx, wy + CONTENT_TOP - s->scroll_y,
+        it->icon_y = ay - wy + s->scroll_y;
+        ff_draw_item(s, s->drag_idx, wx, wy - s->scroll_y,
                      clip_bottom);
         it->icon_x = save_x;
         it->icon_y = save_y;
@@ -800,12 +810,19 @@ static void do_delete(void *ud) {
         s->mode = MODE_NORMAL;
         return;
     }
-    uint16_t saved = dir_context.current_cluster;
+
+    uint16_t saved_cluster = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
     dir_context.current_cluster = s->dir_cluster;
+    dir_context.drive_id = s->drive_id;
+
     ff_item_t *it = &s->items[sel];
-    bool ok = (it->entry.attr & ATTR_DIRECTORY) ? fat16_rm_rf(it->name)
-                                                : fat16_delete(it->name);
-    dir_context.current_cluster = saved;
+    bool ok = (it->entry.attr & ATTR_DIRECTORY) ? fs_rm_rf(it->name)
+                                                : fs_delete(it->name);
+
+    dir_context.current_cluster = saved_cluster;
+    dir_context.drive_id = saved_drive;
+
     strcpy(s->status, ok ? "Deleted." : "Delete failed.");
     s->mode = MODE_NORMAL;
     maybe_notify_desktop(s);
@@ -903,11 +920,18 @@ static void menu_toggle_hidden(void) {
         strcpy(s->status, "Protected item.");
         return;
     }
-    uint16_t saved = dir_context.current_cluster;
+
+    uint16_t saved_cluster = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
     dir_context.current_cluster = s->dir_cluster;
+    dir_context.drive_id = s->drive_id;
+
     bool new_hidden = !s->items[sel].hidden;
-    bool ok = fat16_set_hidden(s->items[sel].name, new_hidden);
-    dir_context.current_cluster = saved;
+    bool ok = fs_set_hidden(s->items[sel].name, new_hidden);
+
+    dir_context.current_cluster = saved_cluster;
+    dir_context.drive_id = saved_drive;
+
     strcpy(s->status, ok ? (new_hidden ? "Marked hidden." : "Unmarked hidden.")
                          : "Failed.");
     ff_reload(s);
@@ -944,7 +968,6 @@ static void menu_copy(void) {
                        s->drive_id);
     strcpy(s->status, "Copied.");
 }
-
 static void menu_cut(void) {
     ff_inst_t *s = active_finder();
     if (!s)
@@ -964,11 +987,10 @@ static void menu_cut(void) {
         return;
     }
     clipboard_set_file(s->path, s->items[sel].name,
-                       (s->items[sel].entry.attr & ATTR_DIRECTORY) != 0, false,
+                       (s->items[sel].entry.attr & ATTR_DIRECTORY) != 0, true,
                        s->drive_id);
     strcpy(s->status, "Cut.");
 }
-
 static void menu_paste(void) {
     ff_inst_t *s = active_finder();
     if (!s)
@@ -992,12 +1014,15 @@ static void menu_paste(void) {
         return;
     }
 
-    uint16_t saved = dir_context.current_cluster;
+    uint16_t saved_cluster = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
     dir_context.current_cluster = s->dir_cluster;
+    dir_context.drive_id = s->drive_id;
 
     dir_entry_t de;
-    if (fat16_find(g_clipboard.name, &de)) {
-        dir_context.current_cluster = saved;
+    if (fs_find(g_clipboard.name, &de)) {
+        dir_context.current_cluster = saved_cluster;
+        dir_context.drive_id = saved_drive;
         strcpy(s->status, "Name already exists.");
         modal_show(MODAL_ERROR, "Paste Failed",
                    "A file with that name already exists here.", NULL, NULL);
@@ -1012,16 +1037,17 @@ static void menu_paste(void) {
 
     bool ok;
     if (g_clipboard.is_cut) {
-        ok = g_clipboard.is_dir ? fat16_move_dir(src_path, dst_path)
-                                : fat16_move_file(src_path, dst_path);
+        ok = g_clipboard.is_dir ? fs_move_dir(src_path, dst_path)
+                                : fs_move_file(src_path, dst_path);
         if (ok)
             clipboard_clear();
     } else {
-        ok = g_clipboard.is_dir ? fat16_copy_dir(src_path, dst_path)
-                                : fat16_copy_file(src_path, dst_path);
+        ok = g_clipboard.is_dir ? fs_copy_dir(src_path, dst_path)
+                                : fs_copy_file(src_path, dst_path);
     }
 
-    dir_context.current_cluster = saved;
+    dir_context.current_cluster = saved_cluster;
+    dir_context.drive_id = saved_drive;
 
     if (ok) {
         strcpy(s->status, "Pasted.");
@@ -1034,7 +1060,6 @@ static void menu_paste(void) {
                    NULL);
     }
 }
-
 static void menu_delete(void) {
     ff_inst_t *s = active_finder();
     if (!s)
@@ -1118,20 +1143,27 @@ static void ff_handle_newname(ff_inst_t *s) {
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
     }
-    uint16_t saved = dir_context.current_cluster;
+
+    uint16_t saved_cluster = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
     dir_context.current_cluster = s->dir_cluster;
+    dir_context.drive_id = s->drive_id;
+
     bool ok;
     if (s->newname_is_dir) {
-        ok = fat16_mkdir(s->newname_buf);
+        ok = fs_mkdir(s->newname_buf);
     } else {
-        fat16_file_t f;
-        ok = fat16_create(s->newname_buf, &f);
+        fs_file_t f;
+        ok = fs_create(s->newname_buf, &f);
         if (ok)
-            fat16_close(&f);
+            fs_close(&f);
     }
     if (ok && s->newname_hidden)
-        fat16_set_hidden(s->newname_buf, true);
-    dir_context.current_cluster = saved;
+        fs_set_hidden(s->newname_buf, true);
+
+    dir_context.current_cluster = saved_cluster;
+    dir_context.drive_id = saved_drive;
+
     if (!ok) {
         s->mode = MODE_NORMAL;
         modal_show(MODAL_ERROR, "Create Failed",
@@ -1153,10 +1185,17 @@ static void ff_handle_rename(ff_inst_t *s) {
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
     }
-    uint16_t saved = dir_context.current_cluster;
+
+    uint16_t saved_cluster = dir_context.current_cluster;
+    uint8_t saved_drive = dir_context.drive_id;
     dir_context.current_cluster = s->dir_cluster;
-    bool ok = fat16_rename(s->items[s->rename_idx].name, s->rename_buf);
-    dir_context.current_cluster = saved;
+    dir_context.drive_id = s->drive_id;
+
+    bool ok = fs_rename(s->items[s->rename_idx].name, s->rename_buf);
+
+    dir_context.current_cluster = saved_cluster;
+    dir_context.drive_id = saved_drive;
+
     if (!ok) {
         s->mode = MODE_NORMAL;
         modal_show(MODAL_ERROR, "Rename Failed",
@@ -1209,8 +1248,8 @@ static bool is_ancestor_of(uint8_t drive_id, uint16_t src_cluster,
             return true;
         dir_entry_t dotdot;
         char name83[12];
-        fat16_make_83("..", name83);
-        if (!fat16_find_in_dir(drive_id, cur, name83, &dotdot))
+        fs_make_83("..", name83);
+        if (!fs_find_in_dir(drive_id, cur, name83, &dotdot))
             break;
         uint16_t parent = dotdot.cluster_lo;
         if (parent == cur)
@@ -1255,9 +1294,8 @@ static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
     else
         sprintf(dst_path, "%s/%s", dst->path, it->name);
     bool ok;
-    ok = (it->entry.attr & ATTR_DIRECTORY)
-             ? fat16_move_dir(src_path, dst_path)
-             : fat16_move_file(src_path, dst_path);
+    ok = (it->entry.attr & ATTR_DIRECTORY) ? fs_move_dir(src_path, dst_path)
+                                           : fs_move_file(src_path, dst_path);
     return ok;
 }
 
@@ -1298,8 +1336,7 @@ static void ff_scroll(ff_inst_t *s, int delta) {
         s->scroll_y = max_scroll;
 }
 
-/* ── on_frame * ──────────────────────────────────────────────────────────────
- */
+/* ── on_frame * ────────────────────────────────────────────────────────────*/
 static void ff_on_frame(void *state) {
     ff_inst_t *s = (ff_inst_t *)state;
     if (!s->win || !s->win->visible)
@@ -1323,13 +1360,13 @@ static void ff_on_frame(void *state) {
     if (strcmp(s->path, desktop_fs_path()) == 0 && desktop_fs_is_dirty())
         ff_reload(s);
 
-    int wx = s->win->x + 1, wy_top = s->win->y + MENUBAR_H + 16 + CONTENT_TOP,
+    int wx = s->win->x + 1, wy_top = s->win->y + MENUBAR_H + 16,
         wh_cont = content_view_h(s);
     int conf_by = wy_top + wh_cont / 2 - 16;
 
     {
         int ww = s->win->w - 2, wy = s->win->y + MENUBAR_H + 16;
-        int sb_x = wx + ww - SCROLLBAR_W - 1, sb_y = wy + CONTENT_TOP,
+        int sb_x = wx + ww - SCROLLBAR_W - 1, sb_y = wy,
             sb_h = wh_cont;
         if ((mouse.left_clicked || mouse.left) && mouse.x >= sb_x &&
             mouse.x < sb_x + SCROLLBAR_W + 1 && mouse.y >= sb_y &&
@@ -1344,14 +1381,14 @@ static void ff_on_frame(void *state) {
         }
     }
 
-    {
+    /*{
         int ww = s->win->w - 2, wy = s->win->y + MENUBAR_H + 16;
         if (mouse.left_clicked &&
             ff_drivebar_click(s, mouse.x, mouse.y, wx, wy, ww)) {
             ff_draw_window(s->win, s);
             return;
         }
-    }
+    }*/
 
     if (kb.key_pressed) {
         if (kb.last_scancode == F5)
@@ -1526,7 +1563,7 @@ static void ff_on_frame(void *state) {
                     }
                     uint16_t saved = dir_context.current_cluster;
                     dir_context.current_cluster = s->dir_cluster;
-                    fat16_chdir("..");
+                    fs_chdir("..");
                     uint16_t parent_cluster = dir_context.current_cluster;
                     dir_context.current_cluster = saved;
                     if (g_cfg.filef_single_window)

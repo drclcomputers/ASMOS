@@ -27,7 +27,7 @@
 #include "ui/ui.h"
 
 // Storage & Filesystem
-#include "fs/fat16.h"
+#include "fs/fs.h"
 
 // OS Services
 #include "os/clipboard.h"
