@@ -145,6 +145,25 @@ app_descriptor *os_find_app(const char *name) {
 
 void os_request_exit(void) { gui_should_exit = true; }
 
+bool window_is_focused(window *win) {
+    return win && (win == wm_focused_window());
+}
+
+bool os_close_own_instance(window *win) {
+    if (!win) return false;
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *a = &running_apps[i];
+        if (!a->running || a->wants_quit) continue;
+        if (!a->state) continue;
+        window **wp = (window **)a->state;
+        if (*wp == win) {
+            os_quit_app(a);
+            return true;
+        }
+    }
+    return false;
+}
+
 void os_tick_apps(void) {
     uint32_t now = time_millis();
     static uint32_t last_run_time[MAX_RUNNING_APPS];

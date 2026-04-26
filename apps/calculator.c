@@ -374,13 +374,15 @@ static void calc_on_frame(void *state) {
     if (!s->win || !s->win->visible)
         return;
 
-    if (mouse.left_clicked) {
+    bool focused = window_is_focused(s->win);
+
+    if (mouse.left_clicked && focused) {
         int hit = calc_hit_button(s, mouse.x, mouse.y);
         if (hit >= 0)
             calc_on_button(s, BUTTONS[hit].label);
     }
 
-    if (kb.key_pressed) {
+    if (kb.key_pressed && focused) {
         char c = kb.last_char;
         if (c >= '0' && c <= '9') {
             char tmp[2] = {c, '\0'};
@@ -428,4 +430,5 @@ app_descriptor calculator_app = {
     .init = calc_init,
     .on_frame = calc_on_frame,
     .destroy = calc_destroy,
+    .single_instance = true,
 };

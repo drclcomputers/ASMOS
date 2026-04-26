@@ -54,10 +54,10 @@ SECTIONS {
        This section is NOLOAD because the loader doesn't include it in the binary;
        it's just a fixed address range we reserve for the kernel stack.
     */
-    .kstack 0xB8000 (NOLOAD) : {
+    .kstack 0x88000 (NOLOAD) : { /* Moves stack top to 0x90000 */
         _kstack_bottom = .;
-        . += 0x8000;        /* 32 KB kernel stack */
-        _kstack_top = .;    /* = 0xC0000 */
+        . += 0x8000;
+        _kstack_top = .;
     }
 
     /* Safety check: ensure heap doesn't grow into the VGA region or kernel stack.

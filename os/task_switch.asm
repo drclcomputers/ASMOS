@@ -67,7 +67,7 @@ global task_trampoline
 extern task_trampoline_c
 
 task_trampoline:
-    add  esp, 4
+    ; add  esp, 4
     jmp  task_trampoline_c
 
 .hang:

@@ -20,7 +20,7 @@
  *                         char *err_msg,    int  err_max);
  */
 
-#define ASM_OUT_MAX 65536
+#define ASM_OUT_MAX 16384
 
 bool asm_assemble_file(const char *src_path, uint8_t *out_buf, int *out_len,
                        int buf_max, char *err_msg, int err_max);

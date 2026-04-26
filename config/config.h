@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "0.7.5"
+#define VER "0.8.2"
 
 // Memory
 #define BACKBUF ((uint8_t *)0x100000)

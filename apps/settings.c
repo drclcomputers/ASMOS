@@ -130,11 +130,13 @@ static void settings_on_frame(void *state) {
     if (s->status_timer > 0)
         s->status_timer--;
 
+    bool focused = window_is_focused(s->win);
+
     int wx = s->win->x + 1, wy = s->win->y + MENUBAR_H + 16, ww = s->win->w - 2,
         wh = s->win->h - 16;
 
 #define ROW_Y(r) (wy + 4 + (r) * ROW_H + 8)
-    if (mouse.left_clicked) {
+    if (mouse.left_clicked && focused) {
         int row = 1;
         row++;
         if (btn(wx + VAL_X, ROW_Y(row) - 1, 10, 9, "<", DARK_GRAY)) {

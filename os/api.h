@@ -37,4 +37,6 @@
 // Shell / CLI / Assembler
 #include "shell/cli.h"
 
+extern bool window_is_focused(window *win);
+
 #endif

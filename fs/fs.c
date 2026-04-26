@@ -508,7 +508,11 @@ bool fs_resolve(const char *path, uint8_t *out_drive,
             return true;
         }
 
+        // ── Handle drive‑prefix components ─────────────────────
         if (cur_drive == DRIVE_HDA && cur_cluster == 0) {
+            if (strcmp(component, "HDA") == 0)
+                continue;
+
             bool crossed = false;
             for (int m = 0; m < VFS_MOUNT_COUNT; m++) {
                 const char *mp_name = g_vfs_mounts[m].path + 1;

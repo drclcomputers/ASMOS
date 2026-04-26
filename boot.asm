@@ -119,7 +119,7 @@ init_pm:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, 0x7BF0        ; temporary stack until loader sets _kstack_top
+    mov esp, 0x90000
     jmp KERNEL_OFFSET
 
 [bits 16]

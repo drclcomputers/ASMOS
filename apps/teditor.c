@@ -53,6 +53,7 @@ typedef struct {
     char status[64];
     uint32_t status_timer;
 
+    int sel_anchor;
 } teditor_state_t;
 
 app_descriptor teditor_app;
@@ -155,6 +156,54 @@ static void np_delete_fwd(teditor_state_t *s) {
     s->dirty = true;
     np_reindex(s);
 }
+
+/* ── Selection helpers ─────────────────────────────────────────── */
+static void np_get_sel_range(teditor_state_t *s, int *start, int *end) {
+    if (s->sel_anchor < 0) {
+        *start = *end = -1;
+        return;
+    }
+    int a = s->sel_anchor, b = s->cursor;
+    if (a > b) {
+        int t = a;
+        a = b;
+        b = t;
+    }
+    *start = a;
+    *end = b;
+}
+
+static void np_copy_selection(teditor_state_t *s) {
+    int st, en;
+    np_get_sel_range(s, &st, &en);
+    if (st >= 0 && en > st) {
+        char tmp[512];
+        int len = en - st;
+        if (len > 511)
+            len = 511;
+        memcpy(tmp, s->text + st, len);
+        tmp[len] = '\0';
+        clipboard_set_text(tmp, len);
+    }
+}
+
+static void np_delete_selection(teditor_state_t *s) {
+    int st, en;
+    np_get_sel_range(s, &st, &en);
+    if (st >= 0 && en > st) {
+        int len = en - st;
+        memmove(s->text + st, s->text + en, s->text_len - en);
+        s->text_len -= len;
+        s->text[s->text_len] = '\0';
+        s->cursor = st;
+        s->sel_anchor = -1;
+        s->dirty = true;
+        np_reindex(s);
+        np_scroll_to_cursor(s);
+    }
+}
+
+/* ── File helpers ─────────────────────────────────────────── */
 
 static bool np_load(teditor_state_t *s, const char *path) {
     fs_file_t f;
@@ -345,6 +394,38 @@ static void np_draw(window *win, void *ud) {
         if (to_copy > 0)
             memcpy(draw_buf, s->text + ls + src_start, to_copy);
         draw_buf[to_copy] = '\0';
+
+        // Draw selection background
+        if (s->sel_anchor >= 0) {
+            int st, en;
+            np_get_sel_range(s, &st, &en);
+            if (st < en) {
+                int line_start_pos = s->line_start[ln];
+                int line_end_pos = (ln + 1 < s->line_count)
+                                       ? s->line_start[ln + 1] - 1
+                                       : s->text_len;
+                if (line_end_pos > line_start_pos && st < line_end_pos &&
+                    en > line_start_pos) {
+                    int sel_st = (st > line_start_pos) ? st : line_start_pos;
+                    int sel_en = (en < line_end_pos) ? en : line_end_pos;
+                    if (sel_st < sel_en) {
+                        int vis_st_col =
+                            sel_st - line_start_pos - s->scroll_col;
+                        int vis_en_col =
+                            sel_en - line_start_pos - s->scroll_col;
+                        if (vis_st_col < 0)
+                            vis_st_col = 0;
+                        if (vis_en_col > max_vis_chars)
+                            vis_en_col = max_vis_chars;
+                        if (vis_st_col < vis_en_col) {
+                            int x0 = text_x + vis_st_col * CHAR_W;
+                            int x1 = text_x + vis_en_col * CHAR_W;
+                            fill_rect(x0, py, x1 - x0, LINE_H, LIGHT_GRAY);
+                        }
+                    }
+                }
+            }
+        }
 
         draw_string(text_x, py, draw_buf, BLACK, 2);
 
@@ -560,6 +641,7 @@ static void teditor_init(void *state) {
     s->text_len = 0;
     s->cursor = 0;
     s->scroll_col = 0;
+    s->sel_anchor = -1;
     s->dirty = false;
     s->fname_mode = FNAME_MODE_NONE;
     np_reindex(s);
@@ -595,14 +677,13 @@ static void teditor_on_frame(void *state) {
     if (!s->win || !s->win->visible)
         return;
 
-    {
-        int wh = s->win->h - 16;
-        int text_h =
-            wh - MARGIN_Y * 2 - STATUS_H - 3 - SCROLLBAR_H - 1 - MARGIN_Y;
-        s->visible_rows = text_h / LINE_H;
-        if (s->visible_rows < 1)
-            s->visible_rows = 1;
-    }
+    bool focused = window_is_focused(s->win);
+
+    int wh = s->win->h - 16;
+    int text_h = wh - MARGIN_Y * 2 - STATUS_H - 3 - SCROLLBAR_H - 1 - MARGIN_Y;
+    s->visible_rows = text_h / LINE_H;
+    if (s->visible_rows < 1)
+        s->visible_rows = 1;
 
     if (s->status_timer > 0)
         s->status_timer--;
@@ -610,59 +691,73 @@ static void teditor_on_frame(void *state) {
     // changecursor(state);
 
     if (s->fname_mode != FNAME_MODE_NONE) {
-        if (kb.key_pressed) {
-            if (kb.last_scancode == ESC) {
-                s->fname_mode = FNAME_MODE_NONE;
-            } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
-                commit_fname(s);
-                return;
-            } else if (kb.last_scancode == BACKSPACE) {
-                if (s->fname_len > 0)
-                    s->fname_buf[--s->fname_len] = '\0';
-            } else if (kb.last_char >= 32 && kb.last_char < 127 &&
-                       s->fname_len < FNAME_BUF_CAP - 1) {
-                char c = kb.last_char;
-                bool ok = (c == '/' || c == '.' || (c >= 'A' && c <= 'Z') ||
-                           (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                           c == '!' || c == '#' || c == '$' || c == '%' ||
-                           c == '&' || c == '\'' || c == '(' || c == ')' ||
-                           c == '-' || c == '@' || c == '^' || c == '_' ||
-                           c == '`' || c == '{' || c == '}' || c == '~');
-                if (ok) {
-                    s->fname_buf[s->fname_len++] = c;
-                    s->fname_buf[s->fname_len] = '\0';
+        if (focused) {
+            if (kb.key_pressed) {
+                if (kb.ctrl && kb.key_pressed && kb.last_scancode == V_KEY) {
+                    if (clipboard_has_text()) {
+                        for (int i = 0; i < g_clipboard.text_len &&
+                                        s->fname_len < FNAME_BUF_CAP - 1;
+                             i++) {
+                            s->fname_buf[s->fname_len++] = g_clipboard.text[i];
+                        }
+                        s->fname_buf[s->fname_len] = '\0';
+                    }
+                }
+
+                if (kb.last_scancode == ESC) {
+                    s->fname_mode = FNAME_MODE_NONE;
+                } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
+                    commit_fname(s);
+                    return;
+                } else if (kb.last_scancode == BACKSPACE) {
+                    if (s->fname_len > 0)
+                        s->fname_buf[--s->fname_len] = '\0';
+                } else if (kb.last_char >= 32 && kb.last_char < 127 &&
+                           s->fname_len < FNAME_BUF_CAP - 1) {
+                    char c = kb.last_char;
+                    bool ok =
+                        (c == '/' || c == '.' || (c >= 'A' && c <= 'Z') ||
+                         (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                         c == '!' || c == '#' || c == '$' || c == '%' ||
+                         c == '&' || c == '\'' || c == '(' || c == ')' ||
+                         c == '-' || c == '@' || c == '^' || c == '_' ||
+                         c == '`' || c == '{' || c == '}' || c == '~');
+                    if (ok) {
+                        s->fname_buf[s->fname_len++] = c;
+                        s->fname_buf[s->fname_len] = '\0';
+                    }
                 }
             }
-        }
 
-        if (mouse.left_clicked) {
-            int wx2 = s->win->x + 1;
-            int wy2 = s->win->y + MENUBAR_H + 16;
-            int ww2 = s->win->w - 2;
-            int wh2 = s->win->h - 16;
-            int bw = ww2 - 8;
-            int bh = 40;
-            int bx = wx2 + 4;
-            int by = wy2 + wh2 / 2 - bh / 2;
+            if (mouse.left_clicked) {
+                int wx2 = s->win->x + 1;
+                int wy2 = s->win->y + MENUBAR_H + 16;
+                int ww2 = s->win->w - 2;
+                int wh2 = s->win->h - 16;
+                int bw = ww2 - 8;
+                int bh = 40;
+                int bx = wx2 + 4;
+                int by = wy2 + wh2 / 2 - bh / 2;
 
-            bool ok_hit = (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
-                           mouse.y >= by + 28 && mouse.y < by + 36);
-            bool can_hit = (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
-                            mouse.y >= by + 28 && mouse.y < by + 36);
+                bool ok_hit = (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
+                               mouse.y >= by + 28 && mouse.y < by + 36);
+                bool can_hit = (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
+                                mouse.y >= by + 28 && mouse.y < by + 36);
 
-            if (can_hit) {
-                s->fname_mode = FNAME_MODE_NONE;
-            } else if (ok_hit && s->fname_len > 0) {
-                commit_fname(s);
-                return;
+                if (can_hit) {
+                    s->fname_mode = FNAME_MODE_NONE;
+                } else if (ok_hit && s->fname_len > 0) {
+                    commit_fname(s);
+                    return;
+                }
             }
-        }
 
-        np_draw(s->win, s);
-        return;
+            np_draw(s->win, s);
+            return;
+        }
     }
 
-    int text_x, text_y, text_w, text_h;
+    int text_x, text_y, text_w;
     int vsb_x, vsb_y, vsb_h;
     int hsb_x, hsb_y, hsb_w;
     int status_y;
@@ -673,144 +768,199 @@ static void teditor_on_frame(void *state) {
     if (max_vis_chars < 1)
         max_vis_chars = 1;
 
-    if ((mouse.left_clicked || mouse.left) && mouse.x >= vsb_x &&
-        mouse.x < vsb_x + SCROLLBAR_W && mouse.y >= vsb_y &&
-        mouse.y < vsb_y + vsb_h && s->line_count > s->visible_rows) {
-        int max_scroll = s->line_count - s->visible_rows;
-        int new_scroll = ((mouse.y - vsb_y) * max_scroll) / vsb_h;
-        if (new_scroll < 0)
-            new_scroll = 0;
-        if (new_scroll > max_scroll)
-            new_scroll = max_scroll;
-        s->scroll_line = new_scroll;
-    }
-
-    if ((mouse.left_clicked || mouse.left) && mouse.x >= hsb_x &&
-        mouse.x < hsb_x + hsb_w && mouse.y >= hsb_y &&
-        mouse.y < hsb_y + SCROLLBAR_H && s->max_line_len > max_vis_chars) {
-        int max_h_scroll = s->max_line_len - max_vis_chars;
-        int track_w = hsb_w - 4;
-        int new_scroll = ((mouse.x - hsb_x - 2) * max_h_scroll) / track_w;
-        if (new_scroll < 0)
-            new_scroll = 0;
-        if (new_scroll > max_h_scroll)
-            new_scroll = max_h_scroll;
-        s->scroll_col = new_scroll;
-    }
-
-    if (mouse.left_clicked && mouse.x >= text_x && mouse.x < text_x + text_w &&
-        mouse.y >= text_y && mouse.y < text_y + text_h) {
-        int row = (mouse.y - text_y) / LINE_H;
-        int ln = s->scroll_line + row;
-        if (ln >= s->line_count)
-            ln = s->line_count - 1;
-        if (ln < 0)
-            ln = 0;
-
-        int col = (mouse.x - text_x) / CHAR_W + s->scroll_col;
-
-        int ls = s->line_start[ln];
-        int le =
-            (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1 : s->text_len;
-        int ll = le - ls;
-        if (col > ll)
-            col = ll;
-        if (col < 0)
-            col = 0;
-        s->cursor = ls + col;
-    }
-
-    if (kb.key_pressed) {
-        uint8_t sc = kb.last_scancode;
-
-        if (sc == ENTER) {
-            np_insert(s, "\n", 1);
-        } else if (sc == BACKSPACE) {
-            np_backspace(s);
-        } else if (sc == DELETE) {
-            np_delete_fwd(s);
-        } else if (sc == UP_ARROW) {
-            int ln = np_line_of(s, s->cursor);
-            int col = np_col_of(s, s->cursor);
-            if (ln > 0) {
-                ln--;
-                int ls = s->line_start[ln];
-                int le = (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1
-                                                  : s->text_len;
-                int ll = le - ls;
-                if (col > ll)
-                    col = ll;
-                s->cursor = ls + col;
-                np_scroll_to_cursor(s);
-            }
-        } else if (sc == DOWN_ARROW) {
-            int ln = np_line_of(s, s->cursor);
-            int col = np_col_of(s, s->cursor);
-            if (ln + 1 < s->line_count) {
-                ln++;
-                int ls = s->line_start[ln];
-                int le = (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1
-                                                  : s->text_len;
-                int ll = le - ls;
-                if (col > ll)
-                    col = ll;
-                s->cursor = ls + col;
-                np_scroll_to_cursor(s);
-            }
-        } else if (sc == LEFT_ARROW) {
-            if (s->cursor > 0) {
-                s->cursor--;
-                np_scroll_to_cursor(s);
-            }
-        } else if (sc == RIGHT_ARROW) {
-            if (s->cursor < s->text_len) {
-                s->cursor++;
-                np_scroll_to_cursor(s);
-            }
-        } else if (sc == HOME) {
-            int ln = np_line_of(s, s->cursor);
-            s->cursor = s->line_start[ln];
-            s->scroll_col = 0;
-            np_scroll_to_cursor(s);
-        } else if (sc == END) {
-            int ln = np_line_of(s, s->cursor);
-            int le = (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1
-                                              : s->text_len;
-            s->cursor = le;
-            np_scroll_to_cursor(s);
-        } else if (sc == PAGE_UP) {
-            s->scroll_line -= s->visible_rows;
-            if (s->scroll_line < 0)
-                s->scroll_line = 0;
-            if (np_line_of(s, s->cursor) < s->scroll_line)
-                s->cursor = s->line_start[s->scroll_line];
-        } else if (sc == PAGE_DOWN) {
+    if (focused) {
+        if ((mouse.left_clicked || mouse.left) && mouse.x >= vsb_x &&
+            mouse.x < vsb_x + SCROLLBAR_W && mouse.y >= vsb_y &&
+            mouse.y < vsb_y + vsb_h && s->line_count > s->visible_rows) {
             int max_scroll = s->line_count - s->visible_rows;
-            if (max_scroll < 0)
-                max_scroll = 0;
-            s->scroll_line += s->visible_rows;
-            if (s->scroll_line > max_scroll)
-                s->scroll_line = max_scroll;
-            int bot = s->scroll_line + s->visible_rows - 1;
-            if (bot >= s->line_count)
-                bot = s->line_count - 1;
-            if (np_line_of(s, s->cursor) > bot)
-                s->cursor = s->line_start[bot];
-        } else if (sc == TAB) {
-            np_insert(s, "    ", 4);
-        } else if (kb.last_char >= 32 && kb.last_char < 127) {
-            char c = kb.last_char;
-            np_insert(s, &c, 1);
+            int new_scroll = ((mouse.y - vsb_y) * max_scroll) / vsb_h;
+            if (new_scroll < 0)
+                new_scroll = 0;
+            if (new_scroll > max_scroll)
+                new_scroll = max_scroll;
+            s->scroll_line = new_scroll;
         }
 
-        {
-            int col = np_col_of(s, s->cursor);
-            if (col < s->scroll_col)
-                s->scroll_col = col;
-            if (col >= s->scroll_col + max_vis_chars)
-                s->scroll_col = col - max_vis_chars + 1;
-            if (s->scroll_col < 0)
+        if ((mouse.left_clicked || mouse.left) && mouse.x >= hsb_x &&
+            mouse.x < hsb_x + hsb_w && mouse.y >= hsb_y &&
+            mouse.y < hsb_y + SCROLLBAR_H && s->max_line_len > max_vis_chars) {
+            int max_h_scroll = s->max_line_len - max_vis_chars;
+            int track_w = hsb_w - 4;
+            int new_scroll = ((mouse.x - hsb_x - 2) * max_h_scroll) / track_w;
+            if (new_scroll < 0)
+                new_scroll = 0;
+            if (new_scroll > max_h_scroll)
+                new_scroll = max_h_scroll;
+            s->scroll_col = new_scroll;
+        }
+
+        if (mouse.left_clicked && mouse.x >= text_x &&
+            mouse.x < text_x + text_w && mouse.y >= text_y &&
+            mouse.y < text_y + text_h) {
+            int row = (mouse.y - text_y) / LINE_H;
+            int ln = s->scroll_line + row;
+            if (ln >= s->line_count)
+                ln = s->line_count - 1;
+            if (ln < 0)
+                ln = 0;
+
+            int col = (mouse.x - text_x) / CHAR_W + s->scroll_col;
+
+            int ls = s->line_start[ln];
+            int le = (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1
+                                              : s->text_len;
+            int ll = le - ls;
+            if (col > ll)
+                col = ll;
+            if (col < 0)
+                col = 0;
+            s->cursor = ls + col;
+        }
+
+        if (kb.key_pressed) {
+            if (kb.ctrl) {
+                if (kb.last_scancode == C_KEY) {
+                    np_copy_selection(s);
+                    np_draw(s->win, s);
+                    return;
+                }
+                if (kb.last_scancode == X_KEY) {
+                    np_copy_selection(s);
+                    np_delete_selection(s);
+                    np_draw(s->win, s);
+                    return;
+                }
+                if (kb.last_scancode == V_KEY) {
+                    if (clipboard_has_text()) {
+                        np_delete_selection(s);
+                        np_insert(s, g_clipboard.text, g_clipboard.text_len);
+                    }
+                    np_draw(s->win, s);
+                    return;
+                }
+            }
+
+            // ── Selection / cursor movement ─────────────
+            bool shift = kb.shift;
+            if (kb.last_scancode == UP_ARROW ||
+                kb.last_scancode == DOWN_ARROW ||
+                kb.last_scancode == LEFT_ARROW ||
+                kb.last_scancode == RIGHT_ARROW || kb.last_scancode == HOME ||
+                kb.last_scancode == END || kb.last_scancode == PAGE_UP ||
+                kb.last_scancode == PAGE_DOWN) {
+                if (!shift)
+                    s->sel_anchor = -1;
+            }
+
+            uint8_t sc = kb.last_scancode;
+
+            if (sc == ENTER) {
+                np_insert(s, "\n", 1);
+            } else if (sc == BACKSPACE) {
+                np_backspace(s);
+            } else if (sc == DELETE) {
+                np_delete_fwd(s);
+            } else if (sc == UP_ARROW) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                int ln = np_line_of(s, s->cursor);
+                int col = np_col_of(s, s->cursor);
+                if (ln > 0) {
+                    ln--;
+                    int ls = s->line_start[ln];
+                    int le = (ln + 1 < s->line_count)
+                                 ? s->line_start[ln + 1] - 1
+                                 : s->text_len;
+                    int ll = le - ls;
+                    if (col > ll)
+                        col = ll;
+                    s->cursor = ls + col;
+                    np_scroll_to_cursor(s);
+                }
+            } else if (sc == DOWN_ARROW) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                int ln = np_line_of(s, s->cursor);
+                int col = np_col_of(s, s->cursor);
+                if (ln + 1 < s->line_count) {
+                    ln++;
+                    int ls = s->line_start[ln];
+                    int le = (ln + 1 < s->line_count)
+                                 ? s->line_start[ln + 1] - 1
+                                 : s->text_len;
+                    int ll = le - ls;
+                    if (col > ll)
+                        col = ll;
+                    s->cursor = ls + col;
+                    np_scroll_to_cursor(s);
+                }
+            } else if (sc == LEFT_ARROW) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                if (s->cursor > 0) {
+                    s->cursor--;
+                    np_scroll_to_cursor(s);
+                }
+            } else if (sc == RIGHT_ARROW) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                if (s->cursor < s->text_len) {
+                    s->cursor++;
+                    np_scroll_to_cursor(s);
+                }
+            } else if (sc == HOME) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                int ln = np_line_of(s, s->cursor);
+                s->cursor = s->line_start[ln];
                 s->scroll_col = 0;
+                np_scroll_to_cursor(s);
+            } else if (sc == END) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                int ln = np_line_of(s, s->cursor);
+                int le = (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1
+                                                  : s->text_len;
+                s->cursor = le;
+                np_scroll_to_cursor(s);
+            } else if (sc == PAGE_UP) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                s->scroll_line -= s->visible_rows;
+                if (s->scroll_line < 0)
+                    s->scroll_line = 0;
+                if (np_line_of(s, s->cursor) < s->scroll_line)
+                    s->cursor = s->line_start[s->scroll_line];
+            } else if (sc == PAGE_DOWN) {
+                if (shift && s->sel_anchor < 0)
+                    s->sel_anchor = s->cursor;
+                int max_scroll = s->line_count - s->visible_rows;
+                if (max_scroll < 0)
+                    max_scroll = 0;
+                s->scroll_line += s->visible_rows;
+                if (s->scroll_line > max_scroll)
+                    s->scroll_line = max_scroll;
+                int bot = s->scroll_line + s->visible_rows - 1;
+                if (bot >= s->line_count)
+                    bot = s->line_count - 1;
+                if (np_line_of(s, s->cursor) > bot)
+                    s->cursor = s->line_start[bot];
+            } else if (sc == TAB) {
+                np_insert(s, "    ", 4);
+            } else if (kb.last_char >= 32 && kb.last_char < 127) {
+                char c = kb.last_char;
+                np_insert(s, &c, 1);
+            }
+
+            {
+                int col = np_col_of(s, s->cursor);
+                if (col < s->scroll_col)
+                    s->scroll_col = col;
+                if (col >= s->scroll_col + max_vis_chars)
+                    s->scroll_col = col - max_vis_chars + 1;
+                if (s->scroll_col < 0)
+                    s->scroll_col = 0;
+            }
         }
     }
 

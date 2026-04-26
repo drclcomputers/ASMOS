@@ -5,9 +5,9 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 
-#define ASM_MAX_LABELS 512
-#define ASM_MAX_FIXUPS 512
-#define ASM_MAX_LINE 256
+#define ASM_MAX_LABELS 128
+#define ASM_MAX_FIXUPS 128
+#define ASM_MAX_LINE 512
 #define ASM_MAX_TOKENS 64
 
 static uint8_t a_out[ASM_OUT_MAX];

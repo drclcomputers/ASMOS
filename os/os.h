@@ -6,8 +6,8 @@
 #include "ui/menubar.h"
 #include "ui/window.h"
 
-#define MAX_INSTALLED_APPS 64
-#define MAX_RUNNING_APPS 32
+#define MAX_INSTALLED_APPS 256
+#define MAX_RUNNING_APPS 48
 
 typedef void (*app_init_fn)(void *state);
 typedef void (*app_frame_fn)(void *state);
@@ -38,6 +38,8 @@ app_instance_t *os_find_instance(app_descriptor *desc);
 int os_find_instances(app_descriptor *desc, app_instance_t **out, int max);
 app_descriptor *os_find_app(const char *name);
 void os_request_exit(void);
+bool window_is_focused(window *win);
+bool os_close_own_instance(window *win);
 
 void os_tick_apps(void);
 void os_reap_dead_apps(void);

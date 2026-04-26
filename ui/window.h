@@ -32,6 +32,7 @@ typedef struct {
     bool visible;
     win_callback_t on_close;
     win_callback_t on_minimize;
+    void *app_instance;
 } window_spec_t;
 
 struct window {
@@ -65,6 +66,7 @@ struct window {
 
     menu win_menus[MAX_WIN_MENUS];
     int win_menu_count;
+    void *app_instance;
 };
 
 extern window *win_stack[MAX_WINDOWS];

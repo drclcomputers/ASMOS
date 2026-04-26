@@ -488,7 +488,7 @@ static void on_about_draw(void) {
 
 static bool asmdraw_close(window *w) {
     (void)w;
-    os_quit_app_by_desc(&asmdraw_app);
+    os_close_own_instance(w);
     return true;
 }
 
@@ -592,53 +592,67 @@ static void asmdraw_on_frame(void *state) {
     if (!s->win || !s->win->visible)
         return;
 
+    bool focused = window_is_focused(s->win);
+
     update_canvas_size(s);
     if (s->status_timer > 0)
         s->status_timer--;
 
     if (s->fname_mode != 0) {
-        if (kb.key_pressed) {
-            if (kb.last_scancode == ESC) {
-                s->fname_mode = 0;
-            } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
-                commit_fname(s);
-            } else if (kb.last_scancode == BACKSPACE) {
-                if (s->fname_len > 0)
-                    s->fname_buf[--s->fname_len] = '\0';
-            } else if (kb.last_char >= 32 && kb.last_char < 127 &&
-                       s->fname_len < 63) {
-                char c = kb.last_char;
-                bool ok = (c == '/' || c == '.' || (c >= 'A' && c <= 'Z') ||
-                           (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                           c == '_' || c == '-');
-                if (ok) {
-                    s->fname_buf[s->fname_len++] = c;
-                    s->fname_buf[s->fname_len] = '\0';
+        if (focused) {
+            if (kb.key_pressed) {
+                if (kb.ctrl && kb.key_pressed && kb.last_scancode == V_KEY) {
+                    if (clipboard_has_text()) {
+                        for (int i = 0;
+                             i < g_clipboard.text_len && s->fname_len < 63;
+                             i++) {
+                            s->fname_buf[s->fname_len++] = g_clipboard.text[i];
+                        }
+                        s->fname_buf[s->fname_len] = '\0';
+                    }
+                }
+                if (kb.last_scancode == ESC) {
+                    s->fname_mode = 0;
+                } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
+                    commit_fname(s);
+                } else if (kb.last_scancode == BACKSPACE) {
+                    if (s->fname_len > 0)
+                        s->fname_buf[--s->fname_len] = '\0';
+                } else if (kb.last_char >= 32 && kb.last_char < 127 &&
+                           s->fname_len < 63) {
+                    char c = kb.last_char;
+                    bool ok = (c == '/' || c == '.' || (c >= 'A' && c <= 'Z') ||
+                               (c >= 'a' && c <= 'z') ||
+                               (c >= '0' && c <= '9') || c == '_' || c == '-');
+                    if (ok) {
+                        s->fname_buf[s->fname_len++] = c;
+                        s->fname_buf[s->fname_len] = '\0';
+                    }
                 }
             }
-        }
-        if (mouse.left_clicked) {
-            int wx2 = s->win->x + 1;
-            int wy2 = s->win->y + MENUBAR_H + 16;
-            int ww2 = s->win->w - 2;
-            int wh2 = s->win->h - 16;
-            int bx = wx2 + 20;
-            int by = wy2 + wh2 / 2 - 20;
-            bool ok_hit = (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
-                           mouse.y >= by + 28 && mouse.y < by + 36);
-            bool can_hit = (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
-                            mouse.y >= by + 28 && mouse.y < by + 36);
-            if (can_hit) {
-                s->fname_mode = 0;
-            } else if (ok_hit && s->fname_len > 0) {
-                commit_fname(s);
+            if (mouse.left_clicked) {
+                int wx2 = s->win->x + 1;
+                int wy2 = s->win->y + MENUBAR_H + 16;
+                int ww2 = s->win->w - 2;
+                int wh2 = s->win->h - 16;
+                int bx = wx2 + 20;
+                int by = wy2 + wh2 / 2 - 20;
+                bool ok_hit = (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
+                               mouse.y >= by + 28 && mouse.y < by + 36);
+                bool can_hit = (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
+                                mouse.y >= by + 28 && mouse.y < by + 36);
+                if (can_hit) {
+                    s->fname_mode = 0;
+                } else if (ok_hit && s->fname_len > 0) {
+                    commit_fname(s);
+                }
             }
+            asmdraw_draw(s->win, s);
+            return;
         }
-        asmdraw_draw(s->win, s);
-        return;
     }
 
-    if (mouse.left_clicked) {
+    if (mouse.left_clicked && focused) {
         int t = toolbar_hit_tool(s, mouse.x, mouse.y);
         if (t >= 0) {
             s->tool = t;
@@ -663,7 +677,7 @@ static void asmdraw_on_frame(void *state) {
             return;
         }
     }
-    if (mouse.right_clicked) {
+    if (mouse.right_clicked && focused) {
         int p = palette_hit(s, mouse.x, mouse.y);
         if (p >= 0) {
             s->bg_color = PALETTE_COLORS[p];
@@ -675,35 +689,40 @@ static void asmdraw_on_frame(void *state) {
     int cx, cy;
     bool on_canvas = mouse_to_canvas(s, mouse.x, mouse.y, &cx, &cy);
 
-    if (s->tool == TOOL_PENCIL || s->tool == TOOL_ERASER) {
-        uint8_t color = (s->tool == TOOL_ERASER) ? s->bg_color : s->fg_color;
-        if (mouse.left && on_canvas) {
-            if (s->last_cx >= 0 && s->last_cy >= 0)
-                canvas_line(s, s->last_cx, s->last_cy, cx, cy, color);
-            else
-                canvas_paint(s, cx, cy, color);
-            s->last_cx = cx;
-            s->last_cy = cy;
-        } else {
-            s->last_cx = -1;
-            s->last_cy = -1;
-        }
-    } else if (s->tool == TOOL_FILL) {
-        if (mouse.left_clicked && on_canvas)
-            canvas_fill(s, cx, cy, s->fg_color);
-    } else if (s->tool == TOOL_LINE || s->tool == TOOL_RECT) {
-        if (mouse.left_clicked && on_canvas && !s->drawing) {
-            s->drawing = true;
-            s->start_x = cx;
-            s->start_y = cy;
-        } else if (!mouse.left && s->drawing) {
-            if (on_canvas) {
-                if (s->tool == TOOL_LINE)
-                    canvas_line(s, s->start_x, s->start_y, cx, cy, s->fg_color);
+    if (focused) {
+        if (s->tool == TOOL_PENCIL || s->tool == TOOL_ERASER) {
+            uint8_t color =
+                (s->tool == TOOL_ERASER) ? s->bg_color : s->fg_color;
+            if (mouse.left && on_canvas) {
+                if (s->last_cx >= 0 && s->last_cy >= 0)
+                    canvas_line(s, s->last_cx, s->last_cy, cx, cy, color);
                 else
-                    canvas_rect(s, s->start_x, s->start_y, cx, cy, s->fg_color);
+                    canvas_paint(s, cx, cy, color);
+                s->last_cx = cx;
+                s->last_cy = cy;
+            } else {
+                s->last_cx = -1;
+                s->last_cy = -1;
             }
-            s->drawing = false;
+        } else if (s->tool == TOOL_FILL) {
+            if (mouse.left_clicked && on_canvas)
+                canvas_fill(s, cx, cy, s->fg_color);
+        } else if (s->tool == TOOL_LINE || s->tool == TOOL_RECT) {
+            if (mouse.left_clicked && on_canvas && !s->drawing) {
+                s->drawing = true;
+                s->start_x = cx;
+                s->start_y = cy;
+            } else if (!mouse.left && s->drawing) {
+                if (on_canvas) {
+                    if (s->tool == TOOL_LINE)
+                        canvas_line(s, s->start_x, s->start_y, cx, cy,
+                                    s->fg_color);
+                    else
+                        canvas_rect(s, s->start_x, s->start_y, cx, cy,
+                                    s->fg_color);
+                }
+                s->drawing = false;
+            }
         }
     }
 

@@ -411,7 +411,7 @@ static void asmterm_init(void *state) {
         .bar_color = DARK_GRAY,
         .content_color = BLACK,
         .visible = true,
-        .on_close = asmterm_close,
+        .on_close = os_close_own_instance,
     };
     s->win = wm_register(&spec);
     if (!s->win)

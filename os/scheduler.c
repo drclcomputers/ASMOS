@@ -27,8 +27,7 @@ void scheduler_init(void) {
 
     tasks[0].alive = true;
     tasks[0].stack_base = NULL;
-    /* tasks[0].esp is written by the first task_switch out of the kernel task
-     */
+    /* tasks[0].esp is written by the first task_switch out of the kernel task */
     current_task = 0;
     task_count = 1;
 }

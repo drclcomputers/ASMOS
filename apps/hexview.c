@@ -725,16 +725,29 @@ static void hexview_on_frame(void *state) {
     if (!s->win_hex->visible && !s->win_asc->visible)
         return;
 
+    bool focused = window_is_focused(s->win_hex) || window_is_focused(s->win_asc);
+
     if (s->status_timer > 0)
         s->status_timer--;
 
     if (s->fname_mode != FNAME_MODE_NONE) {
-        if (kb.key_pressed) {
+        if (kb.key_pressed && focused) {
+            if (kb.ctrl && kb.key_pressed && kb.last_scancode == V_KEY) {
+                if (clipboard_has_text()) {
+                    for (int i = 0; i < g_clipboard.text_len &&
+                                    s->fname_len < FNAME_BUF_CAP - 1;
+                         i++) {
+                        s->fname_buf[s->fname_len++] = g_clipboard.text[i];
+                    }
+                    s->fname_buf[s->fname_len] = '\0';
+                }
+            }
             if (kb.last_scancode == ESC) {
                 s->fname_mode = FNAME_MODE_NONE;
             } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
                 commit_fname(s);
-                goto redraw;
+                hv_draw_hex(s->win_hex, s);
+                hv_draw_asc(s->win_asc, s);
             } else if (kb.last_scancode == BACKSPACE) {
                 if (s->fname_len > 0)
                     s->fname_buf[--s->fname_len] = '\0';
@@ -753,7 +766,7 @@ static void hexview_on_frame(void *state) {
                 }
             }
         }
-        if (mouse.left_clicked) {
+        if (mouse.left_clicked && focused) {
             window *hw = s->win_hex;
             int wx2 = hw->x + 1, wy2 = hw->y + MENUBAR_H + 16;
             int ww2 = hw->w - 2, wh2 = hw->h - 16;
@@ -767,13 +780,15 @@ static void hexview_on_frame(void *state) {
                 s->fname_mode = FNAME_MODE_NONE;
             else if (ok_h && s->fname_len > 0) {
                 commit_fname(s);
-                goto redraw;
+                hv_draw_hex(s->win_hex, s);
+                hv_draw_asc(s->win_asc, s);
             }
         }
-        goto redraw;
+        hv_draw_hex(s->win_hex, s);
+        hv_draw_asc(s->win_asc, s);
     }
 
-    {
+    if (focused) {
         int clip_x, clip_w, hdr_y, data_y, data_h;
         int vsb_x, vsb_y, vsb_h, hsb_x, hsb_y, hsb_w, stat_y;
         hex_layout(s, &clip_x, &clip_w, &hdr_y, &data_y, &data_h, &vsb_x,
@@ -822,11 +837,7 @@ static void hexview_on_frame(void *state) {
                 }
             }
         }
-    }
 
-    {
-        int clip_x, clip_w, hdr_y, data_y, data_h;
-        int hsb_x, hsb_y, hsb_w, stat_y;
         asc_layout(s, &clip_x, &clip_w, &hdr_y, &data_y, &data_h, &hsb_x,
                    &hsb_y, &hsb_w, &stat_y);
 
@@ -856,9 +867,7 @@ static void hexview_on_frame(void *state) {
                 }
             }
         }
-    }
 
-    {
         window *fw = wm_focused_window();
         bool our_win = (fw == s->win_hex || fw == s->win_asc);
         if (our_win && kb.key_pressed && s->data_len > 0) {
@@ -894,10 +903,6 @@ static void hexview_on_frame(void *state) {
             hv_scroll_to_sel(s);
         }
     }
-
-redraw:
-    hv_draw_hex(s->win_hex, s);
-    hv_draw_asc(s->win_asc, s);
 }
 
 /* ── destroy ──────────────────────────────────────────────────────────── */

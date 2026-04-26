@@ -3,7 +3,7 @@
 
 #include "lib/core.h"
 
-#define MAX_TASKS 32
+#define MAX_TASKS 64
 #define TASK_STACK_SIZE (8 * 1024)
 #define STACK_CANARY 0xDEADBEEFU
 

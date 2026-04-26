@@ -312,7 +312,7 @@ static void menu_close_asmusic(void) {
     asmusic_state_t *s = active_asmusic();
     if (!s)
         return;
-    os_quit_app_by_desc(&asmusic_app);
+    os_close_own_instance(s->win);
 }
 
 static void on_about_asmusic(void) {
@@ -324,7 +324,7 @@ static void on_about_asmusic(void) {
 static bool asmusic_close(window *w) {
     (void)w;
     speaker_tone_stop();
-    os_quit_app_by_desc(&asmusic_app);
+    os_close_own_instance(w);
     return true;
 }
 
@@ -401,6 +401,8 @@ static void asmusic_on_frame(void *state) {
     if (!s->win || !s->win->visible)
         return;
 
+    bool focused = window_is_focused(s->win);
+
     asmusic_tick_playback(s);
 
     if (s->win->minimized)
@@ -409,7 +411,7 @@ static void asmusic_on_frame(void *state) {
     if (s->status_timer > 0)
         s->status_timer--;
 
-    if (mouse.left_clicked) {
+    if (mouse.left_clicked && focused) {
         int cx = win_cx(s);
         int cy = win_cy(s);
 
@@ -459,7 +461,7 @@ static void asmusic_on_frame(void *state) {
         }
     }
 
-    if (kb.key_pressed) {
+    if (kb.key_pressed && focused) {
         if (kb.last_char == ' ') {
             menu_play_stop();
         } else if (kb.last_char == 'c' || kb.last_char == 'C') {

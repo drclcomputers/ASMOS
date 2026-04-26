@@ -585,9 +585,6 @@ void desktop_init(void) {
     menu_add_item(file_menu, "Reload", menu_reload);
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "About Desktop", menu_about_desktop);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "Restart", menu_restart);
-    menu_add_item(file_menu, "Shut Down", menu_shutdown);
 
     menu *edit_menu = window_add_menu(win, "Edit");
     menu_add_item(edit_menu, "Copy", menu_copy);
@@ -596,8 +593,11 @@ void desktop_init(void) {
     menu_add_separator(edit_menu);
     menu_add_item(edit_menu, "Delete", menu_delete);
 
-    menu *view_menu = window_add_menu(win, "View");
-    menu_add_item(view_menu, "Reload", menu_sort_name);
+    menu *action_menu = window_add_menu(win, "Action");
+    menu_add_item(action_menu, "Reload", menu_sort_name);
+    menu_add_separator(action_menu);
+    menu_add_item(action_menu, "Restart", menu_restart);
+    menu_add_item(action_menu, "Shut Down", menu_shutdown);
 
     desktop_fs_init();
 }
