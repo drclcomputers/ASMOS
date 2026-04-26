@@ -27,6 +27,8 @@ void scheduler_init(void) {
 
     tasks[0].alive = true;
     tasks[0].stack_base = NULL;
+    /* tasks[0].esp is written by the first task_switch out of the kernel task
+     */
     current_task = 0;
     task_count = 1;
 }
@@ -83,6 +85,9 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
     tasks[slot].arg = arg;
     tasks[slot].stack_base = stack;
 
+    /* Write canary at the bottom of the stack to detect overflow */
+    *(uint32_t *)stack = STACK_CANARY;
+
     uint32_t *sp = (uint32_t *)(stack + TASK_STACK_SIZE);
     extern void task_trampoline(void);
 
@@ -104,6 +109,13 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
 
 void task_yield(void) {
     int old = current_task;
+
+    /* Check canary of current task before leaving it */
+    if (old > 0 && tasks[old].stack_base &&
+        *(uint32_t *)tasks[old].stack_base != STACK_CANARY) {
+        error_report(ERR_FATAL, ERR_TASK_STACK_OVERFLOW, "task stack overflow");
+    }
+
     int next = old;
 
     for (int tries = 0; tries < MAX_TASKS; tries++) {

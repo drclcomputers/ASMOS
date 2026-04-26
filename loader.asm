@@ -3,9 +3,10 @@ global _start
 extern kmain
 extern _bss_start
 extern _bss_end
+extern _kstack_top
 
 _start:
-    mov ebp, 0x90000
+    mov ebp, _kstack_top
     mov esp, ebp
 
     xor eax, eax

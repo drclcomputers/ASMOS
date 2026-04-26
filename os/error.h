@@ -26,6 +26,7 @@ typedef enum {
 
     ERR_OOM,
     ERR_HEAP_CORRUPT,
+    ERR_TASK_STACK_OVERFLOW,
 
     ERR_WM_MAX_WINDOWS,
     ERR_WM_ALLOC,
@@ -49,7 +50,6 @@ void error_report(err_severity_t sev, err_code_t code, const char *context);
 #define ERR_WARN_REPORT(code, ctx) error_report(ERR_WARNING, code, ctx)
 #define ERR_FATAL_REPORT(code, ctx) error_report(ERR_FATAL, code, ctx)
 
-// triggers FATAL if condition is false.
 #define ASSERT(cond, code, ctx)                                                \
     do {                                                                       \
         if (!(cond))                                                           \
@@ -57,7 +57,6 @@ void error_report(err_severity_t sev, err_code_t code, const char *context);
     } while (0)
 #define ASSERT_NOT_NULL(ptr, ctx) ASSERT((ptr) != NULL, ERR_NULL_PTR, ctx)
 
-// warns but does not halt.
 #define WARN_IF(cond, code, ctx)                                               \
     do {                                                                       \
         if (cond)                                                              \

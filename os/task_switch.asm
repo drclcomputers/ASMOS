@@ -3,7 +3,7 @@
 ;   [esp+4]  old_esp_ptr  — pointer where we save the current ESP
 ;   [esp+8]  new_esp      — ESP of the task we switch into
 ;
-; We push 5 things (eflags + 4 callee-saved regs) so esp drops 20 bytes.
+; Push 5 things (eflags + 4 callee-saved regs) so esp drops 20 bytes.
 ; After those pushes the args are at:
 ;   [esp+20] ret-addr
 ;   [esp+24] old_esp_ptr
@@ -67,17 +67,7 @@ global task_trampoline
 extern task_trampoline_c
 
 task_trampoline:
-    ; esp+0  = our own address (ret-addr we were jumped to via ret)
-    ; esp+4  = slot  ← already the first cdecl argument
-    ; esp+8  = fake ret-addr for task_trampoline_c
-    ;
-    ; We adjust esp by 4 so that from task_trampoline_c's perspective
-    ; the call looks normal (ret-addr at [esp], first arg at [esp+4]):
-    ; add  esp, 4
-
-    ; Now the stack looks exactly like a normal cdecl call frame:
-    ;   [esp+0] = fake ret-addr (0)
-    ;   [esp+4] = slot
+    add  esp, 4
     jmp  task_trampoline_c
 
 .hang:

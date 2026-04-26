@@ -171,6 +171,21 @@ void draw_cfg_icon(int ax, int ay, bool sel) {
     fill_rect(cx - 1, cy - 1, 3, 3, bg);
 }
 
+void draw_hdd_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
+    uint8_t plat = sel ? LIGHT_GRAY : WHITE;
+    /* box */
+    fill_rect(ax + 1, ay + 2, ICO_W - 2, ICO_H - 4, bg);
+    draw_rect(ax + 1, ay + 2, ICO_W - 2, ICO_H - 4, BLACK);
+    /* platters */
+    fill_rect(ax + 4, ay + 5, ICO_W - 8, 4, plat);
+    draw_rect(ax + 4, ay + 5, ICO_W - 8, 4, DARK_GRAY);
+    fill_rect(ax + 4, ay + 11, ICO_W - 8, 4, plat);
+    draw_rect(ax + 4, ay + 11, ICO_W - 8, 4, DARK_GRAY);
+    /* LED */
+    fill_rect(ax + ICO_W - 6, ay + 3, 3, 3, sel ? DARK_GRAY : LIGHT_GREEN);
+}
+
 void draw_floppy_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
     fill_rect(ax + 1, ay, ICO_W - 2, ICO_H, bg);

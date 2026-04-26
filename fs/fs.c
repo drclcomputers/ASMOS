@@ -10,7 +10,6 @@ fat_vol_t g_drives[DRIVE_COUNT];
 fat_dir_ctx_t dir_context = {DRIVE_HDA, 0, "/"};
 
 static uint8_t s_current_drive = DRIVE_HDA;
-static uint8_t sector_buf[512];
 
 vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT] = {
     {"/HDB", DRIVE_HDB},
@@ -95,6 +94,7 @@ static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
                         void *user) {
     fat_vol_t *v = vol(drive_id);
     uint32_t lba;
+    uint8_t sector_buf[512];
 
     if (dir_cluster == 0) {
         uint32_t root_sectors = (v->bpb.root_entry_count * 32 + 511) / 512;
@@ -118,7 +118,8 @@ static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
         }
     } else {
         uint16_t cluster = dir_cluster;
-        while (vol_cluster_active(v, cluster)) {
+        int safety = 0;
+        while (vol_cluster_active(v, cluster) && safety++ < 65536) {
             uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
             for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
                 lba = start_lba + s;
@@ -148,7 +149,9 @@ typedef bool (*cluster_cb)(uint8_t drive_id, dir_entry_t *e, uint16_t cluster,
 static bool cluster_iterate(uint8_t drive_id, uint16_t cluster, cluster_cb cb,
                             void *user) {
     fat_vol_t *v = vol(drive_id);
-    while (vol_cluster_active(v, cluster)) {
+    uint8_t sector_buf[512];
+    int safety = 0;
+    while (vol_cluster_active(v, cluster) && safety++ < 65536) {
         uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
         for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
             if (!fs_read_sector(drive_id, start_lba + s, sector_buf))
@@ -175,6 +178,7 @@ static bool alloc_dir_entry(uint8_t drive_id, uint16_t dir_cluster,
                             uint32_t *out_lba, int *out_idx) {
     fat_vol_t *v = vol(drive_id);
     uint32_t lba;
+    uint8_t sector_buf[512];
 
     if (dir_cluster == 0) {
         uint32_t root_sectors = (v->bpb.root_entry_count * 32 + 511) / 512;
@@ -279,14 +283,17 @@ static bool list_cb(uint8_t drive_id, dir_entry_t *e, uint32_t lba, int idx,
 }
 static bool modify_cb(uint8_t drive_id, dir_entry_t *e, uint32_t lba, int idx,
                       void *user) {
-    (void)idx;
     modify_ctx *ctx = user;
     if (name83_eq(e->name, ctx->name)) {
+        uint8_t sector_buf[512];
+        if (!fs_read_sector(drive_id, lba, sector_buf))
+            return false;
+        dir_entry_t *entries = (dir_entry_t *)sector_buf;
         if (ctx->action == 0 || ctx->action == 2) {
-            fat_free_chain(drive_id, e->cluster_lo);
-            e->name[0] = DIR_ENTRY_FREE;
+            fat_free_chain(drive_id, entries[idx].cluster_lo);
+            entries[idx].name[0] = DIR_ENTRY_FREE;
         } else if (ctx->action == 1) {
-            memcpy(e->name, ctx->new_name, 11);
+            memcpy(entries[idx].name, ctx->new_name, 11);
         }
         fs_write_sector(drive_id, lba, sector_buf);
         ctx->done = true;
@@ -644,7 +651,9 @@ bool fs_is_dir_empty(uint8_t drive_id, uint16_t cluster) {
         return false;
     fat_vol_t *v = vol(drive_id);
     uint16_t cur = cluster;
-    while (vol_cluster_active(v, cur)) {
+    uint8_t sector_buf[512];
+    int safety = 0;
+    while (vol_cluster_active(v, cur) && safety++ < 65536) {
         uint32_t start_lba = fat_cluster_to_lba(drive_id, cur);
         for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
             if (!fs_read_sector(drive_id, start_lba + s, sector_buf))
@@ -669,7 +678,8 @@ void fs_wipe_cluster(uint8_t drive_id, uint16_t cluster) {
     if (!vol_cluster_active(v, cluster))
         return;
     uint16_t cur = cluster;
-    while (vol_cluster_active(v, cur)) {
+    int safety = 0;
+    while (vol_cluster_active(v, cur) && safety++ < 65536) {
         uint32_t start_lba = fat_cluster_to_lba(drive_id, cur);
         for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
             uint8_t local_buf[512];
@@ -724,6 +734,8 @@ bool fs_create(const char *path, fat_file_t *f) {
     uint8_t drive_id;
     uint16_t dir_cluster;
     char name83[12];
+    uint8_t sector_buf[512];
+
     if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
         return false;
     dir_entry_t existing;
@@ -826,11 +838,9 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
     uint32_t cluster_bytes = v->bpb.sectors_per_cluster * 512;
 
     while (len > 0) {
-        /* Advance or allocate at cluster boundary */
         if (f->cur_offset > 0 && f->cur_offset % cluster_bytes == 0) {
             uint16_t next = fat_get(f->drive_id, f->cur_cluster);
             if (vol_is_eoc(v, next) || next == 0) {
-                /* Need a new cluster — allocate and link */
                 uint16_t new_cluster = fat_alloc(f->drive_id);
                 if (new_cluster == 0)
                     break;
@@ -842,8 +852,6 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             }
         } else if (f->cur_offset == 0 &&
                    !vol_cluster_active(v, f->cur_cluster)) {
-            /* First cluster not yet allocated (fresh file with cluster_lo==0)
-             */
             uint16_t new_cluster = fat_alloc(f->drive_id);
             if (new_cluster == 0)
                 break;
@@ -935,6 +943,7 @@ bool fs_mkdir(const char *path) {
     uint8_t drive_id;
     uint16_t dir_cluster;
     char name83[12];
+    uint8_t sector_buf[512];
     if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
         return false;
     dir_entry_t existing;
@@ -1216,6 +1225,7 @@ bool fs_move_file(const char *src_path, const char *dst_path) {
     uint8_t src_drive, dst_drive;
     uint16_t src_dir, dst_dir;
     char src83[12], dst83[12];
+    uint8_t sector_buf[512];
 
     if (!fs_resolve(src_path, &src_drive, &src_dir, src83))
         return false;
@@ -1318,6 +1328,7 @@ bool fs_move_dir(const char *src_path, const char *dst_path) {
     uint8_t src_drive, dst_drive;
     uint16_t src_dir, dst_dir;
     char src83[12], dst83[12];
+    uint8_t sector_buf[512];
 
     if (!fs_resolve(src_path, &src_drive, &src_dir, src83))
         return false;
@@ -1391,6 +1402,7 @@ bool fs_set_hidden(const char *path, bool hidden) {
     uint8_t drive_id;
     uint16_t dir_cluster;
     char name83[12];
+    uint8_t sector_buf[512];
     if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
         return false;
     locate_ctx loc = {name83, 0, 0, false};

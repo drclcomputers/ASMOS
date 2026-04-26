@@ -29,6 +29,7 @@ static const char *err_code_str[ERR_COUNT] = {
     [ERR_FAT_READ] = "FS read error",
     [ERR_OOM] = "Out of memory",
     [ERR_HEAP_CORRUPT] = "Heap corruption",
+    [ERR_TASK_STACK_OVERFLOW] = "Task stack overflow",
     [ERR_WM_MAX_WINDOWS] = "Too many windows",
     [ERR_WM_ALLOC] = "Window alloc failed",
     [ERR_APP_MAX_RUNNING] = "Too many apps",

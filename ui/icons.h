@@ -54,6 +54,7 @@ typedef struct {
 
 void draw_file_icon(int ax, int ay, bool sel);
 void draw_folder_icon(int ax, int ay, bool sel);
+void draw_hdd_icon(int ax, int ay, bool sel);
 void draw_floppy_icon(int ax, int ay, bool sel);
 void draw_app_icon(int ax, int ay, bool sel);
 void draw_dotdot_icon(int ax, int ay, bool sel);
