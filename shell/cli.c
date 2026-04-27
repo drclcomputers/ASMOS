@@ -68,9 +68,9 @@ static void cli_println(const char *str) {
 }
 
 static void shell_draw_prompt(void) {
-    char pwd[256];
-    if (fs_pwd(pwd, sizeof(pwd)))
-        cli_print(pwd);
+    cli_print(g_drive_paths[dir_context.drive_id]);
+    if (strcmp(dir_context.path, "/") != 0)
+        cli_print(dir_context.path);
     cli_print("> ");
 }
 
@@ -324,7 +324,7 @@ cmd_status_t cli_execute_command(const char *cmd, char *out_buffer,
     else if (!strcmp(command, "cd"))
         cmd_cd(argument, out_buffer, max_len);
     else if (!strcmp(command, "ls"))
-        cmd_ls(out_buffer, max_len);
+        cmd_ls(argument, out_buffer, max_len);
     else if (!strcmp(command, "cat"))
         cmd_cat(argument, out_buffer, max_len);
     else if (!strcmp(command, "touch"))

@@ -108,6 +108,8 @@ typedef struct {
     uint8_t drive_id;
 } vfs_mount_t;
 
+extern const char *g_drive_paths[DRIVE_COUNT];
+
 #define VFS_MOUNT_COUNT 3
 extern vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT];
 
@@ -125,7 +127,9 @@ bool fs_select_drive(uint8_t drive_id);
 uint8_t fs_current_drive(void);
 const char *fs_drive_label(uint8_t drive_id);
 bool fs_drive_mounted(uint8_t drive_id);
+bool fs_resolve_dir(const char *path, uint8_t *out_drive, uint16_t *out_cluster);
 bool fs_get_usage(uint32_t *total_bytes, uint32_t *used_bytes);
+bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes, uint32_t *used_bytes);
 
 bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf);
 bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);

@@ -21,6 +21,13 @@ const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
     "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1",
 };
 
+const char *g_drive_paths[DRIVE_COUNT] = {
+    [DRIVE_HDA]  = "/HDA",
+    [DRIVE_HDB]  = "/HDB",
+    [DRIVE_FDD0] = "/FDD0",
+    [DRIVE_FDD1] = "/FDD1",
+};
+
 bool path_is_protected(const char *name_or_path) {
     if (!name_or_path)
         return false;
@@ -416,6 +423,58 @@ bool fs_mount(void) {
     return true;
 }
 
+bool fs_resolve_dir(const char *path, uint8_t *out_drive, uint16_t *out_cluster) {
+    uint8_t drive;
+    uint16_t cluster = 0;
+    if (!path || !*path) return false;
+    if (*path == '/') {
+        drive = DRIVE_HDA;
+        path++;
+        if (!*path) { *out_drive = DRIVE_HDA; *out_cluster = 0; return true; }
+    } else {
+        drive = dir_context.drive_id;
+        cluster = dir_context.current_cluster;
+    }
+
+    char component[256];
+    while (*path) {
+        while (*path == '/') path++;
+        if (!*path) break;
+        int ci = 0;
+        while (*path && *path != '/' && ci < 255)
+            component[ci++] = *path++;
+        component[ci] = '\0';
+
+        if (cluster == 0 && drive == DRIVE_HDA && strcmp(component, "HDA") == 0)
+            continue;
+        bool crossed = false;
+        for (int m = 0; m < VFS_MOUNT_COUNT; m++) {
+            const char *mp = g_vfs_mounts[m].path + 1;
+            if (strcasecmp(component, mp) == 0) {
+                uint8_t target = g_vfs_mounts[m].drive_id;
+                if (!fs_drive_mounted(target)) return false;
+                drive = target;
+                cluster = 0;
+                crossed = true;
+                break;
+            }
+        }
+        if (crossed) continue;
+
+        char name83[12];
+        fs_make_83(component, name83);
+        dir_entry_t de;
+        if (!fs_find_in_dir(drive, cluster, name83, &de))
+            return false;
+        if (!(de.attr & ATTR_DIRECTORY))
+            return false;
+        cluster = de.cluster_lo;
+    }
+    *out_drive = drive;
+    *out_cluster = cluster;
+    return true;
+}
+
 bool fs_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
     uint8_t d = dir_context.drive_id;
     fat_vol_t *v = vol(d);
@@ -427,6 +486,23 @@ bool fs_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
     uint32_t used = 0;
     for (uint16_t c = 2; c < (uint16_t)(v->cluster_count + 2); c++) {
         uint16_t val = fat_get(d, c);
+        if (val != FAT16_FREE && val != FAT16_BAD)
+            used++;
+    }
+    *used_bytes = used * v->bpb.bytes_per_sector * v->bpb.sectors_per_cluster;
+    return true;
+}
+
+bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes, uint32_t *used_bytes) {
+    if (drive_id >= DRIVE_COUNT || !g_drives[drive_id].mounted)
+        return false;
+    fat_vol_t *v = &g_drives[drive_id];
+    *total_bytes = (v->bpb.total_sectors_32 ? v->bpb.total_sectors_32
+                                            : v->bpb.total_sectors_16)
+                   * v->bpb.bytes_per_sector;
+    uint32_t used = 0;
+    for (uint16_t c = 2; c < (uint16_t)(v->cluster_count + 2); c++) {
+        uint16_t val = fat_get(drive_id, c);
         if (val != FAT16_FREE && val != FAT16_BAD)
             used++;
     }

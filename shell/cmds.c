@@ -39,11 +39,12 @@ void cmd_help(char *out, size_t max) {
 }
 
 void cmd_pwd(char *out, size_t max) {
-    char pwd[256];
-    if (fs_pwd(pwd, sizeof(pwd))) {
-        append(out, max, pwd);
-        append(out, max, "\n\n");
-    }
+    const char *drv = g_drive_paths[dir_context.drive_id];
+    if (!drv) drv = "/?";
+    if (strcmp(dir_context.path, "/") == 0)
+        snprintf(out, max, "%s\n\n", drv);
+    else
+        snprintf(out, max, "%s%s\n\n", drv, dir_context.path);
 }
 
 void cmd_cd(const char *path, char *out, size_t max) {
@@ -51,18 +52,46 @@ void cmd_cd(const char *path, char *out, size_t max) {
         append(out, max, "Usage: cd <path>\n\n");
         return;
     }
+
+    for (int d = 0; d < DRIVE_COUNT; d++) {
+        if (!fs_drive_mounted(d)) continue;
+        const char *root = g_drive_paths[d];
+        int rlen = strlen(root);
+        if (strncmp(path, root, rlen) == 0 &&
+            (path[rlen] == '\0' || path[rlen] == '/')) {
+            dir_context.drive_id = d;
+            dir_context.current_cluster = 0;
+            if (path[rlen] == '\0') {
+                strcpy(dir_context.path, "/");
+            } else {
+                if (!fs_chdir(path + rlen)) {
+                    append(out, max, "Error: directory not found\n\n");
+                }
+            }
+            return;
+        }
+    }
+
     if (!fs_chdir(path))
         append(out, max, "Error: directory not found\n\n");
 }
 
-void cmd_ls(char *out, size_t max) {
+void cmd_ls(const char *path, char *out, size_t max) {
+    uint8_t drive = dir_context.drive_id;
+    uint16_t cluster = dir_context.current_cluster;
+    if (path && path[0] != '\0') {
+        if (!fs_resolve_dir(path, &drive, &cluster)) {
+            append(out, max, "Error: path not found\n\n");
+            return;
+        }
+    }
     dir_entry_t entries[32];
     int count = 0;
-    if (!fs_list_dir(dir_context.drive_id, dir_context.current_cluster, entries,
-                     32, &count)) {
+    if (!fs_list_dir(drive, cluster, entries, 32, &count)) {
         append(out, max, "Error listing files\n\n");
         return;
     }
+
     append(out, max, "Files:\n");
     for (int i = 0; i < count; i++) {
         char nb[16];
@@ -77,9 +106,9 @@ void cmd_ls(char *out, size_t max) {
         nb[j] = '\0';
         append(out, max, "  ");
         append(out, max, nb);
-        if (entries[i].attr & ATTR_DIRECTORY) {
+        if (entries[i].attr & ATTR_DIRECTORY)
             append(out, max, " [DIR]\n");
-        } else {
+        else {
             char ss[32];
             sprintf(ss, " (%ub)\n", entries[i].file_size);
             append(out, max, ss);
@@ -330,15 +359,19 @@ void cmd_mv(const char *args, char *out, size_t max) {
 }
 
 void cmd_df(char *out, size_t max) {
-    uint32_t tot = 0, used = 0;
-    if (!fs_get_usage(&tot, &used)) {
-        append(out, max, "Error reading storage\n\n");
-        return;
-    }
     char buf[128];
-    sprintf(buf, "Total: %u B  Used: %u B  Free: %u B\n\n", tot, used,
-            tot - used);
-    append(out, max, buf);
+    for (int d = 0; d < DRIVE_COUNT; d++) {
+        if (!fs_drive_mounted(d)) continue;
+        uint32_t tot = 0, used = 0;
+        if (!fs_get_usage_drive(d, &tot, &used)) continue;
+        const char *label = fs_drive_label(d);
+        const char *vpath = g_drive_paths[d];
+        uint32_t free_bytes = tot - used;
+        sprintf(buf,
+                "Drive %s (%s):\n  Total: %uB\n  Used:%uB ân Free: %uB\n\n",
+                label, vpath, tot, used, free_bytes);
+        append(out, max, buf);
+    }
 }
 
 void cmd_mem(char *out, size_t max) {
