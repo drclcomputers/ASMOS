@@ -58,6 +58,8 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/lib/core/io.o                \
 	  $(BUILD_DIR)/lib/core/types.o             \
       \
+      $(BUILD_DIR)/lib/cpu/cpu_metrics.o        \
+      \
       $(BUILD_DIR)/lib/memory/mem.o             \
       $(BUILD_DIR)/lib/memory/alloc.o           \
       \

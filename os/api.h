@@ -18,6 +18,7 @@
 // Device Control
 #include "lib/time.h"
 #include "lib/device.h"
+#include "lib/cpu.h"
 
 // Input & Interaction
 #include "io/keyboard.h"
