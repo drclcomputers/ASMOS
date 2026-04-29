@@ -26,6 +26,7 @@ typedef struct {
     window *win;
     int tab;
     int selected;
+    int scroll_top;
 
     char cpu_str[64];
     char mem_str[64];
@@ -174,12 +175,23 @@ static void do_end_task(void) {
         os_quit_app(a);
     }
     s->selected = -1;
+    int count = count_running();
+    if (s->scroll_top > 0 && s->scroll_top >= count - LIST_VISIBLE)
+        s->scroll_top = count - LIST_VISIBLE - 1;
+    if (s->scroll_top < 0)
+        s->scroll_top = 0;
 }
 
 static void do_cancel(void) {
     monitor_state_t *s = active_monitor();
-    if (s)
+    if (s) {
         s->selected = -1;
+        int count = count_running();
+        if (s->scroll_top > 0 && s->scroll_top >= count - LIST_VISIBLE)
+            s->scroll_top = count - LIST_VISIBLE - 1;
+        if (s->scroll_top < 0)
+            s->scroll_top = 0;
+    }
 }
 
 static void menu_refresh(void) {
@@ -251,23 +263,40 @@ static void monitor_draw(window *win, void *ud) {
     if (s->tab == 0) {
         int lx = panel_x + LIST_PAD;
         int ly = wy + LIST_Y;
-        int lw = panel_w - LIST_PAD * 2;
+        int lw = panel_w - LIST_PAD * 2 - SCROLLBAR_W;
 
         fill_rect(lx, ly, lw, LIST_H, WHITE);
         draw_rect(lx, ly, lw, LIST_H, BLACK);
 
         int count = count_running();
-        for (int i = 0; i < LIST_VISIBLE && i < count; i++) {
-            app_instance_t *a = get_nth(i);
+        for (int i = 0; i < LIST_VISIBLE; i++) {
+            int idx = s->scroll_top + i;
+            if (idx >= count)
+                break;
+            app_instance_t *a = get_nth(idx);
             if (!a || !a->desc)
                 continue;
             int iy = ly + i * LIST_ITEM_H;
-            if (i == s->selected) {
+            if (idx == s->selected) {
                 fill_rect(lx + 1, iy, lw - 2, LIST_ITEM_H, DARK_GRAY);
                 draw_string(lx + 4, iy + 2, (char *)a->desc->name, WHITE, 2);
             } else {
                 draw_string(lx + 4, iy + 2, (char *)a->desc->name, BLACK, 2);
             }
+        }
+
+        // Scrollbar
+        int sbx = lx + lw;
+        fill_rect(sbx, ly, SCROLLBAR_W, LIST_H, LIGHT_GRAY);
+        draw_rect(sbx, ly, SCROLLBAR_W, LIST_H, BLACK);
+        if (count > LIST_VISIBLE) {
+            int max_scroll = count - LIST_VISIBLE;
+            int thumb_h = (LIST_VISIBLE * LIST_H) / count;
+            if (thumb_h < 4)
+                thumb_h = 4;
+            int thumb_range = LIST_H - thumb_h;
+            int thumb_y = ly + (s->scroll_top * thumb_range) / max_scroll;
+            fill_rect(sbx + 1, thumb_y, SCROLLBAR_W - 2, thumb_h, DARK_GRAY);
         }
 
         int b1x = lx;
@@ -297,6 +326,7 @@ static void monitor_draw(window *win, void *ud) {
 static void monitor_init(void *state) {
     monitor_state_t *s = (monitor_state_t *)state;
     s->selected = -1;
+    s->scroll_top = 0;
     s->tab = 0;
 
     int drives = 0;
@@ -362,14 +392,31 @@ static void monitor_on_frame(void *state) {
         int panel_w = s->win->w - 2 - CONTENT_X * 2;
         int lx = panel_x + LIST_PAD;
         int ly = wy + LIST_Y;
-        int lw = panel_w - LIST_PAD * 2;
+        int lw = panel_w - LIST_PAD * 2 - SCROLLBAR_W;
+        int sbx = lx + lw;
 
+        int count = count_running();
+
+        // Scrollbar drag
+        if ((mouse.left_clicked || mouse.left) && mouse.x >= sbx &&
+            mouse.x < sbx + SCROLLBAR_W && mouse.y >= ly &&
+            mouse.y < ly + LIST_H && count > LIST_VISIBLE) {
+            int max_scroll = count - LIST_VISIBLE + 1;
+            int new_scroll = ((mouse.y - ly) * max_scroll) / LIST_H;
+            if (new_scroll < 0)
+                new_scroll = 0;
+            if (new_scroll > max_scroll)
+                new_scroll = max_scroll;
+            s->scroll_top = new_scroll;
+        }
+
+        // List click
         if (mouse.left_clicked && mouse.x >= lx && mouse.x < lx + lw &&
             mouse.y >= ly && mouse.y < ly + LIST_H) {
             int row = (mouse.y - ly) / LIST_ITEM_H;
-            int count = count_running();
-            if (row >= 0 && row < count)
-                s->selected = row;
+            int idx = s->scroll_top + row;
+            if (idx >= 0 && idx < count)
+                s->selected = idx;
         }
 
         int b1x = lx;

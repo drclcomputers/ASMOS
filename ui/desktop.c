@@ -211,8 +211,7 @@ static void open_item(desktop_item_t *it) {
     }
 }
 
-/* ── drawing ──────────────────────────────────────────────────────────────
- */
+/* ── drawing ────────────────────────────────────────────────────────────── */
 
 static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     int ax = DESK_ORIGIN_X + it->x;
@@ -502,8 +501,7 @@ static void menu_restart(void) {
     modal_show(MODAL_CONFIRM, "Restart", "Restart ASMOS?", do_restart, NULL);
 }
 
-/* ── new name dialog ──────────────────────────────────────────────────────
- */
+/* ── new name dialog ────────────────────────────────────────────────────── */
 
 static void handle_newname(void) {
     const char *err = NULL;
@@ -551,8 +549,7 @@ static void draw_newname_dialog(void) {
     }
 }
 
-/* ── desktop init ─────────────────────────────────────────────────────────
- */
+/* ── desktop init ───────────────────────────────────────────────────────── */
 
 static menu *s_apps_menu;
 
@@ -649,8 +646,7 @@ void desktop_on_frame(void) {
         return;
     }
 
-    /* ── drag
-     * ────────────────────────────────────────────────────────────── */
+    /* ── drag * ────────────────────────────────────────────────────────────── */
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
         if (mouse.left) {
