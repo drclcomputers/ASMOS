@@ -7,8 +7,8 @@
 
 #define ASM_MAX_LABELS 128
 #define ASM_MAX_FIXUPS 128
-#define ASM_MAX_LINE 512
-#define ASM_MAX_TOKENS 64
+#define ASM_MAX_LINE 256
+#define ASM_MAX_TOKENS 32
 
 static uint8_t a_out[ASM_OUT_MAX];
 static int a_out_len;
@@ -147,10 +147,8 @@ static void a_tokenise(char *line) {
 
     char *p = line;
     while (*p) {
-        while (*p && (*p == ' ' || *p == '\t' || *p == ',')) {
+        while (*p && (*p == ' ' || *p == '\t' || *p == ','))
             p++;
-        }
-
         if (!*p)
             break;
 
@@ -227,15 +225,13 @@ static void a_tokenise(char *line) {
                 dst[di++] = *p++;
         } else {
             while (*p && *p != ' ' && *p != '\t' && *p != ',' && *p != ';' &&
-                   di < ASM_MAX_LINE - 1) {
+                   di < ASM_MAX_LINE - 1)
                 dst[di++] = *p++;
-            }
         }
 
         dst[di] = '\0';
-        if (di > 0) {
+        if (di > 0)
             a_tok_count++;
-        }
     }
 }
 
@@ -514,9 +510,8 @@ static void a_parse_mem(const char *s, op_t *op) {
         char term[64];
         int ti = 0;
         while (*p && *p != '+' && *p != '-' && ti < 63) {
-            if (*p == '-') {
+            if (*p == '-')
                 break;
-            }
             term[ti++] = *p++;
         }
         if (*p == '+') {
@@ -591,6 +586,7 @@ static void a_parse_op(const char *s, op_t *op) {
         while (*s == ' ')
             s++;
     }
+
     if ((s[0] == 'c' || s[0] == 'd' || s[0] == 'e' || s[0] == 'f' ||
          s[0] == 'g' || s[0] == 's') &&
         s[1] == 's' && s[2] == ':') {
@@ -732,7 +728,6 @@ static void a_alu(int grp, op_t *dst, op_t *src) {
             int sz = dst->size;
             if (sz == 16)
                 a_emit_b(0x66);
-
             if (sz == 8) {
                 if (dst->reg == R_AL && !fwd) {
                     a_emit_b(0x04 | (grp << 3));
@@ -973,7 +968,6 @@ static void a_line(void) {
         a_label_def(mn, v);
         return;
     }
-
     if (strcmp(mn, "bits") == 0) {
         if (a_tok_count >= 2)
             a_bits = str_to_int(a_tokens[1]);
@@ -1061,142 +1055,35 @@ static void a_line(void) {
         return;
     }
 
-    if (strcmp(mn, "nop") == 0) {
-        a_emit_b(0x90);
-        return;
+    struct {
+        const char *mn;
+        uint8_t b;
+    } const singles[] = {
+        {"nop", 0x90},   {"ret", 0xC3},   {"retf", 0xCB},   {"hlt", 0xF4},
+        {"cli", 0xFA},   {"sti", 0xFB},   {"clc", 0xF8},    {"stc", 0xF9},
+        {"cld", 0xFC},   {"std", 0xFD},   {"cmc", 0xF5},    {"sahf", 0x9E},
+        {"lahf", 0x9F},  {"pusha", 0x60}, {"pushad", 0x60}, {"popa", 0x61},
+        {"popad", 0x61}, {"pushf", 0x9C}, {"pushfd", 0x9C}, {"popf", 0x9D},
+        {"popfd", 0x9D}, {"cbw", 0x98},   {"cwde", 0x98},   {"cdq", 0x99},
+        {"leave", 0xC9}, {"wait", 0x9B},  {"xlat", 0xD7},   {"stosb", 0xAA},
+        {"stosd", 0xAB}, {"movsb", 0xA4}, {"movsd", 0xA5},  {"scasb", 0xAE},
+        {"scasd", 0xAF}, {"lodsb", 0xAC}, {"lodsd", 0xAD},  {"cmpsb", 0xA6},
+        {"iret", 0xCF},  {"iretd", 0xCF}, {NULL, 0}};
+    for (int i = 0; singles[i].mn; i++) {
+        if (strcmp(mn, singles[i].mn) == 0) {
+            a_emit_b(singles[i].b);
+            return;
+        }
     }
-    if (strcmp(mn, "ret") == 0 && a_tok_count == 1) {
-        a_emit_b(0xC3);
-        return;
-    }
-    if (strcmp(mn, "retf") == 0) {
-        a_emit_b(0xCB);
-        return;
-    }
-    if (strcmp(mn, "hlt") == 0) {
-        a_emit_b(0xF4);
-        return;
-    }
-    if (strcmp(mn, "cli") == 0) {
-        a_emit_b(0xFA);
-        return;
-    }
-    if (strcmp(mn, "sti") == 0) {
-        a_emit_b(0xFB);
-        return;
-    }
-    if (strcmp(mn, "clc") == 0) {
-        a_emit_b(0xF8);
-        return;
-    }
-    if (strcmp(mn, "stc") == 0) {
-        a_emit_b(0xF9);
-        return;
-    }
-    if (strcmp(mn, "cld") == 0) {
-        a_emit_b(0xFC);
-        return;
-    }
-    if (strcmp(mn, "std") == 0) {
-        a_emit_b(0xFD);
-        return;
-    }
-    if (strcmp(mn, "cmc") == 0) {
-        a_emit_b(0xF5);
-        return;
-    }
-    if (strcmp(mn, "sahf") == 0) {
-        a_emit_b(0x9E);
-        return;
-    }
-    if (strcmp(mn, "lahf") == 0) {
-        a_emit_b(0x9F);
-        return;
-    }
-    if (strcmp(mn, "pusha") == 0 || strcmp(mn, "pushad") == 0) {
-        a_emit_b(0x60);
-        return;
-    }
-    if (strcmp(mn, "popa") == 0 || strcmp(mn, "popad") == 0) {
-        a_emit_b(0x61);
-        return;
-    }
-    if (strcmp(mn, "pushf") == 0 || strcmp(mn, "pushfd") == 0) {
-        a_emit_b(0x9C);
-        return;
-    }
-    if (strcmp(mn, "popf") == 0 || strcmp(mn, "popfd") == 0) {
-        a_emit_b(0x9D);
-        return;
-    }
-    if (strcmp(mn, "cbw") == 0 || strcmp(mn, "cwde") == 0) {
-        a_emit_b(0x98);
-        return;
-    }
-    if (strcmp(mn, "cdq") == 0) {
-        a_emit_b(0x99);
-        return;
-    }
-    if (strcmp(mn, "leave") == 0) {
-        a_emit_b(0xC9);
-        return;
-    }
-    if (strcmp(mn, "wait") == 0) {
-        a_emit_b(0x9B);
-        return;
-    }
-    if (strcmp(mn, "xlat") == 0) {
-        a_emit_b(0xD7);
-        return;
-    }
-    if (strcmp(mn, "stosb") == 0) {
-        a_emit_b(0xAA);
-        return;
-    }
+
     if (strcmp(mn, "stosw") == 0) {
         a_emit_b(0x66);
         a_emit_b(0xAB);
         return;
     }
-    if (strcmp(mn, "stosd") == 0) {
-        a_emit_b(0xAB);
-        return;
-    }
-    if (strcmp(mn, "movsb") == 0) {
-        a_emit_b(0xA4);
-        return;
-    }
     if (strcmp(mn, "movsw") == 0) {
         a_emit_b(0x66);
         a_emit_b(0xA5);
-        return;
-    }
-    if (strcmp(mn, "movsd") == 0) {
-        a_emit_b(0xA5);
-        return;
-    }
-    if (strcmp(mn, "scasb") == 0) {
-        a_emit_b(0xAE);
-        return;
-    }
-    if (strcmp(mn, "scasd") == 0) {
-        a_emit_b(0xAF);
-        return;
-    }
-    if (strcmp(mn, "lodsb") == 0) {
-        a_emit_b(0xAC);
-        return;
-    }
-    if (strcmp(mn, "lodsd") == 0) {
-        a_emit_b(0xAD);
-        return;
-    }
-    if (strcmp(mn, "cmpsb") == 0) {
-        a_emit_b(0xA6);
-        return;
-    }
-    if (strcmp(mn, "iret") == 0 || strcmp(mn, "iretd") == 0) {
-        a_emit_b(0xCF);
         return;
     }
 
@@ -1341,41 +1228,41 @@ static void a_line(void) {
     }
 
     if (strcmp(mn, "mov") == 0 && a_tok_count >= 3) {
-        op_t d, s;
+        op_t d, s2;
         a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s);
-        a_mov(&d, &s);
+        a_parse_op(a_tokens[2], &s2);
+        a_mov(&d, &s2);
         return;
     }
     if (strcmp(mn, "lea") == 0 && a_tok_count >= 3) {
-        op_t d, s;
+        op_t d, s2;
         a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s);
-        if (d.type == OP_REG && s.type == OP_MEM) {
+        a_parse_op(a_tokens[2], &s2);
+        if (d.type == OP_REG && s2.type == OP_MEM) {
             if (d.size == 16)
                 a_emit_b(0x66);
-            a_rm(0x8D, &s, re(d.reg));
+            a_rm(0x8D, &s2, re(d.reg));
         } else
             a_error("lea: bad operands");
         return;
     }
     if (strcmp(mn, "xchg") == 0 && a_tok_count >= 3) {
-        op_t a, b;
-        a_parse_op(a_tokens[1], &a);
-        a_parse_op(a_tokens[2], &b);
-        if (a.type == OP_REG && b.type == OP_REG) {
-            if (a.reg == R_EAX) {
-                a_emit_b(0x90 | re(b.reg));
+        op_t a2, b2;
+        a_parse_op(a_tokens[1], &a2);
+        a_parse_op(a_tokens[2], &b2);
+        if (a2.type == OP_REG && b2.type == OP_REG) {
+            if (a2.reg == R_EAX) {
+                a_emit_b(0x90 | re(b2.reg));
                 return;
             }
-            if (b.reg == R_EAX) {
-                a_emit_b(0x90 | re(a.reg));
+            if (b2.reg == R_EAX) {
+                a_emit_b(0x90 | re(a2.reg));
                 return;
             }
-            a_emit_b(a.size == 8 ? 0x86 : 0x87);
-            a_emit_b(0xC0 | (re(a.reg) << 3) | re(b.reg));
-        } else if (a.type == OP_REG && b.type == OP_MEM) {
-            a_rm(a.size == 8 ? 0x86 : 0x87, &b, re(a.reg));
+            a_emit_b(a2.size == 8 ? 0x86 : 0x87);
+            a_emit_b(0xC0 | (re(a2.reg) << 3) | re(b2.reg));
+        } else if (a2.type == OP_REG && b2.type == OP_MEM) {
+            a_rm(a2.size == 8 ? 0x86 : 0x87, &b2, re(a2.reg));
         }
         return;
     }
@@ -1387,38 +1274,38 @@ static void a_line(void) {
                {"sub", 5}, {"xor", 6}, {"cmp", 7}, {NULL, 0}};
     for (int i = 0; alu[i].mn; i++) {
         if (strcmp(mn, alu[i].mn) == 0 && a_tok_count >= 3) {
-            op_t d, s;
+            op_t d, s2;
             a_parse_op(a_tokens[1], &d);
-            a_parse_op(a_tokens[2], &s);
-            a_alu(alu[i].grp, &d, &s);
+            a_parse_op(a_tokens[2], &s2);
+            a_alu(alu[i].grp, &d, &s2);
             return;
         }
     }
 
     if (strcmp(mn, "test") == 0 && a_tok_count >= 3) {
-        op_t d, s;
+        op_t d, s2;
         a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s);
-        if (d.type == OP_REG && s.type == OP_IMM) {
+        a_parse_op(a_tokens[2], &s2);
+        if (d.type == OP_REG && s2.type == OP_IMM) {
             if (d.reg == R_AL) {
                 a_emit_b(0xA8);
-                a_emit_b((uint8_t)s.imm);
+                a_emit_b((uint8_t)s2.imm);
             } else if (d.reg == R_EAX) {
                 a_emit_b(0xA9);
-                a_emit_d(s.imm);
+                a_emit_d(s2.imm);
             } else {
                 a_emit_b(d.size == 8 ? 0xF6 : 0xF7);
                 a_emit_b(0xC0 | (0 << 3) | re(d.reg));
                 if (d.size == 8)
-                    a_emit_b((uint8_t)s.imm);
+                    a_emit_b((uint8_t)s2.imm);
                 else
-                    a_emit_d(s.imm);
+                    a_emit_d(s2.imm);
             }
-        } else if (d.type == OP_REG && s.type == OP_REG) {
+        } else if (d.type == OP_REG && s2.type == OP_REG) {
             a_emit_b(d.size == 8 ? 0x84 : 0x85);
-            a_emit_b(0xC0 | (re(s.reg) << 3) | re(d.reg));
-        } else if (d.type == OP_MEM && s.type == OP_REG) {
-            a_rm(s.size == 8 ? 0x84 : 0x85, &d, re(s.reg));
+            a_emit_b(0xC0 | (re(s2.reg) << 3) | re(d.reg));
+        } else if (d.type == OP_MEM && s2.type == OP_REG) {
+            a_rm(s2.size == 8 ? 0x84 : 0x85, &d, re(s2.reg));
         }
         return;
     }
@@ -1528,37 +1415,37 @@ static void a_line(void) {
     }
 
     if (strcmp(mn, "in") == 0 && a_tok_count >= 3) {
-        op_t d, s;
+        op_t d, s2;
         a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s);
-        if (s.type == OP_REG && s.reg == R_DX)
+        a_parse_op(a_tokens[2], &s2);
+        if (s2.type == OP_REG && s2.reg == R_DX)
             a_emit_b(d.size == 8 ? 0xEC : 0xED);
         else {
             a_emit_b(d.size == 8 ? 0xE4 : 0xE5);
-            a_emit_b((uint8_t)s.imm);
+            a_emit_b((uint8_t)s2.imm);
         }
         return;
     }
     if (strcmp(mn, "out") == 0 && a_tok_count >= 3) {
-        op_t d, s;
+        op_t d, s2;
         a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s);
+        a_parse_op(a_tokens[2], &s2);
         if (d.type == OP_REG && d.reg == R_DX)
-            a_emit_b(s.size == 8 ? 0xEE : 0xEF);
+            a_emit_b(s2.size == 8 ? 0xEE : 0xEF);
         else {
-            a_emit_b(s.size == 8 ? 0xE6 : 0xE7);
+            a_emit_b(s2.size == 8 ? 0xE6 : 0xE7);
             a_emit_b((uint8_t)d.imm);
         }
         return;
     }
     if ((strcmp(mn, "movzx") == 0 || strcmp(mn, "movsx") == 0) &&
         a_tok_count >= 3) {
-        op_t d, s;
+        op_t d, s2;
         a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s);
+        a_parse_op(a_tokens[2], &s2);
         uint8_t ext = strcmp(mn, "movsx") == 0 ? 0xBE : 0xB6;
         a_emit_b(0x0F);
-        a_rm(ext | (s.size == 16 ? 1 : 0), &s, re(d.reg));
+        a_rm(ext | (s2.size == 16 ? 1 : 0), &s2, re(d.reg));
         return;
     }
 
@@ -1628,14 +1515,12 @@ static bool do_assemble_src(const char *src_text, uint8_t *out_buf,
         err_msg[err_max - 1] = '\0';
         return false;
     }
-
-    int copy = a_out_len;
-    if (copy > buf_max) {
+    if (a_out_len > buf_max) {
         strncpy(err_msg, "output too large", err_max - 1);
         return false;
     }
-    memcpy(out_buf, a_out, copy);
-    *out_len = copy;
+    memcpy(out_buf, a_out, a_out_len);
+    *out_len = a_out_len;
     return true;
 }
 
@@ -1643,18 +1528,31 @@ bool asm_assemble_file(const char *src_path, uint8_t *out_buf, int *out_len,
                        int buf_max, char *err_msg, int err_max) {
     fat_file_t f;
     if (!fs_open(src_path, &f)) {
-        sprintf(err_msg, "cannot open '%s'", src_path);
+        snprintf(err_msg, err_max, "cannot open '%s'", src_path);
         return false;
     }
-    static char fbuf[32768];
-    int flen = fs_read(&f, fbuf, sizeof(fbuf) - 1);
+
+    char *fbuf = (char *)kmalloc(32768);
+    if (!fbuf) {
+        fs_close(&f);
+        strncpy(err_msg, "out of memory", err_max - 1);
+        return false;
+    }
+
+    int flen = fs_read(&f, fbuf, 32767);
     fs_close(&f);
+
     if (flen <= 0) {
+        kfree(fbuf);
         strncpy(err_msg, "file is empty", err_max - 1);
         return false;
     }
     fbuf[flen] = '\0';
-    return do_assemble_src(fbuf, out_buf, out_len, buf_max, err_msg, err_max);
+
+    bool ok =
+        do_assemble_src(fbuf, out_buf, out_len, buf_max, err_msg, err_max);
+    kfree(fbuf);
+    return ok;
 }
 
 bool asm_assemble_str(const char *src, uint8_t *out_buf, int *out_len,
@@ -1691,16 +1589,23 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
             strcat(dst, ".BIN");
     }
 
-    static uint8_t obuf[ASM_OUT_MAX];
+    uint8_t *obuf = (uint8_t *)kmalloc(ASM_OUT_MAX);
+    if (!obuf) {
+        strncpy(out, "asm: out of memory\n", max - 1);
+        return;
+    }
+
     int olen = 0;
     char errmsg[128];
     if (!asm_assemble_file(src, obuf, &olen, ASM_OUT_MAX, errmsg,
                            sizeof(errmsg))) {
-        sprintf(out, "asm: error: %s\n", errmsg);
+        snprintf(out, max, "asm: error: %s\n", errmsg);
+        kfree(obuf);
         return;
     }
     if (olen == 0) {
         strncpy(out, "asm: nothing to write\n", max - 1);
+        kfree(obuf);
         return;
     }
 
@@ -1709,10 +1614,13 @@ void cmd_asmasm(const char *args, char *out, size_t max) {
         fs_delete(dst);
     fat_file_t wf;
     if (!fs_create(dst, &wf)) {
-        sprintf(out, "asm: cannot create '%s'\n", dst);
+        snprintf(out, max, "asm: cannot create '%s'\n", dst);
+        kfree(obuf);
         return;
     }
     fs_write(&wf, obuf, olen);
     fs_close(&wf);
-    sprintf(out, "asm: %s -> %s (%d bytes)\n", src, dst, olen);
+    kfree(obuf);
+
+    snprintf(out, max, "asm: %s -> %s (%d bytes)\n", src, dst, olen);
 }

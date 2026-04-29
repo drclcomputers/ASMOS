@@ -40,7 +40,8 @@ void cmd_help(char *out, size_t max) {
 
 void cmd_pwd(char *out, size_t max) {
     const char *drv = g_drive_paths[dir_context.drive_id];
-    if (!drv) drv = "/?";
+    if (!drv)
+        drv = "/?";
     if (strcmp(dir_context.path, "/") == 0)
         snprintf(out, max, "%s\n\n", drv);
     else
@@ -54,7 +55,8 @@ void cmd_cd(const char *path, char *out, size_t max) {
     }
 
     for (int d = 0; d < DRIVE_COUNT; d++) {
-        if (!fs_drive_mounted(d)) continue;
+        if (!fs_drive_mounted(d))
+            continue;
         const char *root = g_drive_paths[d];
         int rlen = strlen(root);
         if (strncmp(path, root, rlen) == 0 &&
@@ -361,15 +363,18 @@ void cmd_mv(const char *args, char *out, size_t max) {
 void cmd_df(char *out, size_t max) {
     char buf[128];
     for (int d = 0; d < DRIVE_COUNT; d++) {
-        if (!fs_drive_mounted(d)) continue;
+        if (!fs_drive_mounted(d))
+            continue;
         uint32_t tot = 0, used = 0;
-        if (!fs_get_usage_drive(d, &tot, &used)) continue;
+        if (!fs_get_usage_drive(d, &tot, &used))
+            continue;
         const char *label = fs_drive_label(d);
         const char *vpath = g_drive_paths[d];
         uint32_t free_bytes = tot - used;
-        sprintf(buf,
-                "Drive %s (%s):\n  Total: %uB\n  Used:%uB ân Free: %uB\n\n",
-                label, vpath, tot, used, free_bytes);
+        sprintf(
+            buf,
+            "Drive %s (%s):\n  Total: %u B\n  Used:  %u B\n  Free:  %u B\n\n",
+            label, vpath, tot, used, free_bytes);
         append(out, max, buf);
     }
 }
