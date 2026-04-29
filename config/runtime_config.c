@@ -12,7 +12,7 @@ void cfg_init_defaults(void) {
     g_cfg.version = CFG_VERSION;
     g_cfg.wallpaper_pattern = 1;
     g_cfg.timezone_offset = 0;
-    g_cfg.start_in_gui = 0;
+    g_cfg.start_in_gui = 1;
     g_cfg.play_bootchime = 0;
     g_cfg.sound_enabled = 1;
     g_cfg.wallpaper_main_color = GREEN;
