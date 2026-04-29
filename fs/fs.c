@@ -908,6 +908,17 @@ int fs_read(fat_file_t *f, void *buf, int len) {
     return total;
 }
 
+static int done_write(fat_file_t *f, int total, fat_vol_t *v) {
+    if (vol_cluster_active(v, f->cur_cluster))
+        fat_set(f->drive_id, f->cur_cluster, FAT16_EOC);
+
+    if (total >= 0) {
+        f->entry.modify_time = now_fat_time();
+        f->entry.modify_date = now_fat_date();
+    }
+    return total;
+}
+
 int fs_write(fat_file_t *f, const void *buf, int len) {
     if (!f->open)
         return -1;
@@ -922,8 +933,10 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             uint16_t next = fat_get(f->drive_id, f->cur_cluster);
             if (vol_is_eoc(v, next) || next == 0) {
                 uint16_t new_cluster = fat_alloc(f->drive_id);
-                if (new_cluster == 0)
-                    break;
+                if (new_cluster == 0) {
+                    total = -1;
+                    done_write(f, total, v);
+                }
                 zero_cluster(f->drive_id, new_cluster);
                 fat_set(f->drive_id, f->cur_cluster, new_cluster);
                 f->cur_cluster = new_cluster;
@@ -933,8 +946,10 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
         } else if (f->cur_offset == 0 &&
                    !vol_cluster_active(v, f->cur_cluster)) {
             uint16_t new_cluster = fat_alloc(f->drive_id);
-            if (new_cluster == 0)
-                break;
+            if (new_cluster == 0) {
+                total = -1;
+                done_write(f, total, v);
+            }
             zero_cluster(f->drive_id, new_cluster);
             f->entry.cluster_lo = new_cluster;
             f->cur_cluster = new_cluster;
@@ -961,8 +976,10 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             can_write = len;
 
         memcpy(write_sector_buf + offset_in_sector, in, can_write);
-        if (!fs_write_sector(f->drive_id, lba, write_sector_buf))
-            break;
+        if (!fs_write_sector(f->drive_id, lba, write_sector_buf)) {
+            total = -1;
+            done_write(f, total, v);
+        }
 
         in += can_write;
         total += can_write;

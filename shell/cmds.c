@@ -30,6 +30,8 @@ void cmd_help(char *out, size_t max) {
     append(out, max, "df            - Disk usage\n");
     append(out, max, "mem           - Memory usage\n");
     append(out, max, "clock         - System time\n");
+    append(out, max, "shutdown [s]  - Shut down (optional delay)\n");
+    append(out, max, "restart [s]   - Restart (optional delay)\n");
     append(out, max, "tee <f>       - Save terminal buffer to file\n");
     append(out, max, "history       - Recent terminal output\n");
     append(out, max, "asm <f> [out] - Assemble .ASM -> .BIN\n");
@@ -401,6 +403,44 @@ void cmd_clock(char *out, size_t max) {
     sprintf(buf, "%04d-%02d-%02d  %02d:%02d:%02d\n\n", t.year, t.month, t.day,
             t.hours, t.minutes, t.seconds);
     append(out, max, buf);
+}
+
+void cmd_shutdown(const char *args, char *out, size_t max) {
+    uint32_t delay_s = 0;
+    if (args && args[0] != '\0')
+        delay_s = (uint32_t)str_to_int(args);
+    if (delay_s > 0) {
+        char tmp[48];
+        sprintf(tmp, "Shutting down in %u seconds...\n", delay_s);
+        append(out, max, tmp);
+        term_buf_push_text(out);
+        out[0] = '\0';
+        sleep_s(delay_s);
+    }
+    append(out, max, "Shutting down...\n");
+    term_buf_push_text(out);
+    out[0] = '\0';
+    sleep_s(1);
+    cpu_shutdown();
+}
+
+void cmd_restart(const char *args, char *out, size_t max) {
+    uint32_t delay_s = 0;
+    if (args && args[0] != '\0')
+        delay_s = (uint32_t)str_to_int(args);
+    if (delay_s > 0) {
+        char tmp[48];
+        sprintf(tmp, "Restarting in %u seconds...\n", delay_s);
+        append(out, max, tmp);
+        term_buf_push_text(out);
+        out[0] = '\0';
+        sleep_s(delay_s);
+    }
+    append(out, max, "Restarting...\n");
+    term_buf_push_text(out);
+    out[0] = '\0';
+    sleep_s(1);
+    cpu_reset();
 }
 
 void cmd_tee(const char *filename, char *out, size_t max) {

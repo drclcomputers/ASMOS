@@ -626,17 +626,6 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
     } else {
         draw_string(lx, ly, it->label, lc, 2);
     }
-
-    if (s->mode == MODE_RENAME && i == s->rename_idx) {
-        fill_rect(ax - 1, ay + ICON_SZ_H, ICON_CELL_W, CHAR_H + 2, WHITE);
-        draw_rect(ax - 1, ay + ICON_SZ_H, ICON_CELL_W, CHAR_H + 2, BLACK);
-        draw_string(ax, ay + ICON_SZ_H + 1, s->rename_buf, BLACK, 2);
-        extern volatile uint32_t pit_ticks;
-        if ((pit_ticks / 50) % 2 == 0) {
-            int cx = ax + s->rename_len * CHAR_W;
-            draw_string(cx, ay + ICON_SZ_H + 1, "|", BLACK, 2);
-        }
-    }
 }
 
 static void ff_draw_info_overlay(ff_inst_t *s, int wx, int wy, int ww, int wh) {
@@ -892,6 +881,20 @@ static void ff_draw_window(window *win, void *ud) {
     }
     if (s->mode == MODE_INFO)
         ff_draw_info_overlay(s, wx, wy, ww, wh);
+    if (s->mode == MODE_RENAME) {
+        int bx = wx + 4, by = wy + content_h / 2 - 16, bw = ww - 8;
+        fill_rect(bx, by, bw, 36, LIGHT_GRAY);
+        draw_rect(bx, by, bw, 36, BLACK);
+        draw_string(bx + 4, by + 4, "Rename:", BLACK, 2);
+        fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
+        draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
+        draw_string(bx + 6, by + 15, s->rename_buf, BLACK, 2);
+        extern volatile uint32_t pit_ticks;
+        if ((pit_ticks / 50) % 2 == 0) {
+            int cx = bx + 6 + s->rename_len * CHAR_W;
+            draw_string(cx, by + 15, "|", BLACK, 2);
+        }
+    }
 }
 
 /* ── Hit testing ─────────────────────────────────────────────────── */
@@ -1683,7 +1686,10 @@ static void ff_on_frame(void *state) {
                 char c = kb.last_char;
                 bool allow =
                     fat_char_ok(c) ||
-                    (c == '.' && s->mode == MODE_NEWNAME && !s->newname_is_dir);
+                    (c == '.' && (s->mode == MODE_NEWNAME
+                                      ? !s->newname_is_dir
+                                      : !(s->items[s->rename_idx].entry.attr &
+                                          ATTR_DIRECTORY)));
                 if (allow) {
                     buf[(*len)++] = c;
                     buf[*len] = '\0';

@@ -26,7 +26,6 @@ extern menubar g_menubar;
 extern bool g_menubar_click_consumed;
 
 /* ── wallpaper ──────────────────────────────────────────────────────────── */
-
 #define WALLPAPER_SOLID 0
 #define WALLPAPER_CHECKERBOARD 1
 #define WALLPAPER_STRIPES 2
@@ -63,7 +62,6 @@ void draw_wallpaper_pattern(void) {
 }
 
 /* ── desktop state ──────────────────────────────────────────────────────── */
-
 #define DESK_ORIGIN_X 0
 #define DESK_ORIGIN_Y MENUBAR_H
 
@@ -74,8 +72,35 @@ static int s_last_click_idx = -1;
 static uint32_t s_last_click_tick = 0;
 #define DBLCLICK_TICKS 60
 
-/* ── name validation ────────────────────────────────────────────────────── */
+/* ── power animations ───────────────────────────────────────────────────── */
+#define BAR_W 160
+#define BAR_H 12
+#define BAR_X ((SCREEN_WIDTH - BAR_W) / 2)
+#define BAR_Y ((SCREEN_HEIGHT / 2) + 16)
+#define STEPS 40
 
+void power_anim_run(bool is_restart) {
+    const char *msg = is_restart ? "Restarting..." : "Shutting down...";
+
+    for (int step = 0; step <= STEPS; step++) {
+        clear_screen(BLACK);
+
+        int msg_x = (SCREEN_WIDTH - (int)strlen(msg) * 5) / 2;
+        draw_string(msg_x, SCREEN_HEIGHT / 2 - 8, (char *)msg, WHITE, 2);
+
+        fill_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, DARK_GRAY);
+        int filled = (step * BAR_W) / STEPS;
+        uint8_t color = is_restart ? LIGHT_BLUE : LIGHT_GREEN;
+        fill_rect(BAR_X, BAR_Y, filled, BAR_H, color);
+        draw_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, WHITE);
+
+        blit();
+        sleep_ms(50);
+    }
+    sleep_s(2);
+}
+
+/* ── name validation ────────────────────────────────────────────────────── */
 static bool fat_char_ok(char c) {
     if (c >= 'A' && c <= 'Z')
         return true;
@@ -486,7 +511,7 @@ static void menu_about_desktop(void) {
 }
 
 static void do_shutdown(void) {
-    sleep_s(2);
+    power_anim_run(false);
     cpu_shutdown();
 }
 static void menu_shutdown(void) {
@@ -494,7 +519,7 @@ static void menu_shutdown(void) {
                NULL);
 }
 static void do_restart(void) {
-    sleep_s(2);
+    power_anim_run(true);
     cpu_reset();
 }
 static void menu_restart(void) {

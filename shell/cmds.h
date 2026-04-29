@@ -19,6 +19,8 @@ void cmd_cp(const char *args, char *out, size_t max);
 void cmd_write(const char *args, char *out, size_t max);
 void cmd_echo(const char *text, char *out, size_t max);
 void cmd_clock(char *out, size_t max);
+void cmd_shutdown(const char *args, char *out, size_t max);
+void cmd_restart(const char *args, char *out, size_t max);
 void cmd_tee(const char *filename, char *out, size_t max);
 void cmd_history(char *out, size_t max);
 void cmd_cd(const char *path, char *out, size_t max);

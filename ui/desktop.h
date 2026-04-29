@@ -10,4 +10,6 @@ void desktop_on_frame(void);
 bool desktop_accept_drop(const char *src_path, const char *src_name,
                          uint8_t src_drive);
 
+void power_anim_run(bool is_restart);
+
 #endif
