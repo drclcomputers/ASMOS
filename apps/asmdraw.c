@@ -249,13 +249,6 @@ static void asmdraw_draw(window *win, void *ud) {
         draw_string(bx + 4, by + 4, lbl, BLACK, 2);
     }
 
-    /*int sw_x = wx + TOOLBAR_PAD;
-    int sw_y = wy + TOOLBAR_PAD + (NUM_TOOLS + BRUSH_SIZES + 2) * (TOOL_BTN_SZ +
-    TOOLBAR_PAD); fill_rect(sw_x + 3, sw_y + 3, TOOL_BTN_SZ - 3, TOOL_BTN_SZ -
-    3, s->bg_color); draw_rect(sw_x + 3, sw_y + 3, TOOL_BTN_SZ - 3, TOOL_BTN_SZ
-    - 3, BLACK); fill_rect(sw_x,     sw_y,     TOOL_BTN_SZ - 3, TOOL_BTN_SZ - 3,
-    s->fg_color); draw_rect(sw_x,     sw_y,     TOOL_BTN_SZ - 3, TOOL_BTN_SZ -
-    3, BLACK);*/
 
     int cax = wx + CANVAS_X_OFF;
     int cay = wy;
@@ -295,8 +288,8 @@ static void asmdraw_draw(window *win, void *ud) {
 
     for (int i = 0; i < PALETTE_COLS; i++) {
         int px = pal_x0 + i * cell_w;
-        fill_rect(px, pal_y, cell_w, PALETTE_H, PALETTE_COLORS[i]);
-        draw_rect(px, pal_y, cell_w, PALETTE_H, BLACK);
+        fill_rect(px-1, pal_y, cell_w, PALETTE_H, PALETTE_COLORS[i]);
+        //draw_rect(px, pal_y, cell_w, PALETTE_H-1, BLACK);
     }
 
     if (s->status_timer > 0) {
@@ -309,7 +302,7 @@ static void asmdraw_draw(window *win, void *ud) {
         } else {
             info[0] = '\0';
         }
-        draw_string(wx + TOOLBAR_W + 4, pal_y - 8, info, DARK_GRAY, 2);
+        draw_string(wx + TOOLBAR_W + 4, pal_y - 9, info, DARK_GRAY, 2);
     }
 
     if (s->fname_mode != 0) {

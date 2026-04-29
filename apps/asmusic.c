@@ -2,8 +2,8 @@
 
 #define MUSIC_DEFAULT_X 10
 #define MUSIC_DEFAULT_Y 10
-#define MUSIC_DEFAULT_W 300
-#define MUSIC_DEFAULT_H 180
+#define MUSIC_DEFAULT_W 255
+#define MUSIC_DEFAULT_H 170
 
 #define ROWS 12
 #define COLS 16
@@ -211,7 +211,7 @@ static void asmusic_draw(window *win, void *ud) {
         draw_string(cx + 2, cy + STATUS_Y, s->status, LIGHT_YELLOW, 2);
     } else {
         draw_string(cx + 2, cy + STATUS_Y,
-                    s->playing ? "playing..." : "click cells to draw a melody",
+                    s->playing ? "Playing..." : "Click cells to draw a melody",
                     DARK_GRAY, 2);
     }
 }
