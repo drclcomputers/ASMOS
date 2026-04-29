@@ -11,7 +11,7 @@
 #define LINE_H 8
 #define INPUT_H 10
 
-#define SCROLL_BAR_W 6
+#define SCROLL_BAR_W 8
 #define OUTPUT_LINES 128
 #define OUTPUT_LINE_W 80
 #define HISTORY_DEPTH 32

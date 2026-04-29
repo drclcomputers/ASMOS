@@ -18,7 +18,7 @@
 #define CHAR_W 5
 #define CHAR_H 6
 #define LABEL_CHARS 8
-#define SCROLLBAR_W 6
+#define SCROLLBAR_W 8
 
 #define MAX_ENTRIES 128
 #define SORT_NAME 0
@@ -1775,7 +1775,7 @@ static void ff_on_frame(void *state) {
     }
 
     /* Click / double-click */
-    if (mouse.left_clicked) {
+    if (mouse.left_clicked && wm_focused_window() == s->win) {
         int hit = ff_hit(s, mouse.x, mouse.y);
         if (hit >= 0) {
             for (int i = 0; i < s->item_count; i++)

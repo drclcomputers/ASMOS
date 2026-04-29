@@ -17,7 +17,7 @@
 #define LINE_H 8
 #define MARGIN_X 4
 #define MARGIN_Y 4
-#define SCROLLBAR_W 6
+#define SCROLLBAR_W 8
 #define SCROLLBAR_H 6
 #define STATUS_H 8
 

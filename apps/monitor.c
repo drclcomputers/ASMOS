@@ -16,6 +16,7 @@
 #define LIST_H (LIST_VISIBLE * LIST_ITEM_H)
 #define LIST_Y (CONTENT_Y + LIST_PAD + 4)
 #define LIST_W (WIN_W - 14)
+#define SCROLLBAR_W 8
 
 #define BTN_W (WIN_W - 2 * LIST_PAD - 3 * 9) / 3
 #define BTN_H 12
@@ -150,7 +151,9 @@ static void do_switch(void) {
     window **wp = (window **)a->state;
     if (*wp) {
         (*wp)->minimized = false;
+        (*wp)->visible = true;
         wm_focus(*wp);
+        mouse.left_clicked = false;
     }
 }
 
