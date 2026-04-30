@@ -1,6 +1,8 @@
 #include "shell/cmds.h"
 
 #include "fs/fs.h"
+
+#include "lib/cpu.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -29,6 +31,7 @@ void cmd_help(char *out, size_t max) {
     append(out, max, "rmdir <d>     - Remove empty dir\n");
     append(out, max, "df            - Disk usage\n");
     append(out, max, "mem           - Memory usage\n");
+    append(out, max, "sysinfo       - CPU model and uptime\n");
     append(out, max, "clock         - System time\n");
     append(out, max, "shutdown [s]  - Shut down (optional delay)\n");
     append(out, max, "restart [s]   - Restart (optional delay)\n");
@@ -402,6 +405,17 @@ void cmd_clock(char *out, size_t max) {
     char buf[64];
     sprintf(buf, "%04d-%02d-%02d  %02d:%02d:%02d\n\n", t.year, t.month, t.day,
             t.hours, t.minutes, t.seconds);
+    append(out, max, buf);
+}
+
+void cmd_sysinfo(char *out, size_t max) {
+    char buf[128];
+    cpu_model_init();
+    append(out, max, "CPU:    ");
+    append(out, max, cpu_model_str());
+    append(out, max, "\n");
+    time_hms_t u = uptime_hms();
+    sprintf(buf, "Uptime: %02u:%02u:%02u\n\n", u.hours, u.minutes, u.seconds);
     append(out, max, buf);
 }
 

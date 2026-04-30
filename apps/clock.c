@@ -92,7 +92,7 @@ static void clock_draw_input(clock_state_t *s) {
     int bx = wx + 4, by = wy + wh / 2 - 14, bw = ww - 8, bh = 28;
     fill_rect(bx, by, bw, bh, LIGHT_GRAY);
     draw_rect(bx, by, bw, bh, BLACK);
-    draw_string(bx + 3, by + 3, "Alarm HH:MM", BLACK, 2);
+    draw_string(bx + 3, by + 3, "Alarm HHMM", BLACK, 2);
     fill_rect(bx + 3, by + 12, bw - 6, 10, WHITE);
     draw_rect(bx + 3, by + 12, bw - 6, 10, BLACK);
     draw_string(bx + 5, by + 13, s->input_buf, BLACK, 2);
