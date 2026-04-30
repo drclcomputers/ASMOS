@@ -125,6 +125,7 @@ app_descriptor filef_app;
 
 static int s_cascade = 0;
 static ff_inst_t *s_last_active = NULL;
+extern void teditor_open_file(const char *path);
 
 /* ── Forward declarations ──────────────────────────────────────── */
 static void ff_reload(ff_inst_t *s);
@@ -693,16 +694,56 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
     ff_item_t *it = &s->items[sel];
     strncpy(s->info_name, it->name, 12);
     s->info_name[12] = '\0';
-    snprintf(s->info_path, sizeof(s->info_path), "%s/%s", s->path, it->name);
+    if (it->is_vdrive)
+        snprintf(s->info_path, sizeof(s->info_path), "/%s", it->name);
+    else
+        snprintf(s->info_path, sizeof(s->info_path), "%s/%s", s->path,
+                 it->name);
+
     if (it->is_vdrive) {
         strcpy(s->info_type, "Drive");
-        strcpy(s->info_size, "-");
+        uint32_t dv_total = 0, dv_used = 0;
+        if (fs_get_usage_drive(it->vdrive_id, &dv_total, &dv_used) &&
+            dv_total > 0) {
+            uint32_t used_kb = dv_used / 1024;
+            uint32_t total_kb = dv_total / 1024;
+            sprintf(s->info_size, "%u / %u KB", used_kb, total_kb);
+        } else {
+            strcpy(s->info_size, "-");
+        }
     } else if (it->is_dotdot) {
         strcpy(s->info_type, "Parent Dir");
         strcpy(s->info_size, "-");
     } else if (it->entry.attr & ATTR_DIRECTORY) {
         strcpy(s->info_type, "Folder");
-        strcpy(s->info_size, "-");
+        uint32_t dir_total = 0;
+        {
+            dir_entry_t stack_entries[128];
+            int stack_count = 0;
+            uint16_t clusters[32];
+            int cluster_top = 0;
+            clusters[cluster_top++] = it->entry.cluster_lo;
+            while (cluster_top > 0) {
+                uint16_t cur = clusters[--cluster_top];
+                stack_count = 0;
+                fs_list_dir(s->drive_id, cur, stack_entries, 128, &stack_count);
+                for (int ei = 0; ei < stack_count; ei++) {
+                    if (stack_entries[ei].name[0] == '.')
+                        continue;
+                    if (stack_entries[ei].attr & ATTR_DIRECTORY) {
+                        if (cluster_top < 32)
+                            clusters[cluster_top++] =
+                                stack_entries[ei].cluster_lo;
+                    } else {
+                        dir_total += stack_entries[ei].file_size;
+                    }
+                }
+            }
+        }
+        if (dir_total >= 1024)
+            sprintf(s->info_size, "%u KB", dir_total / 1024);
+        else
+            sprintf(s->info_size, "%u B", dir_total);
     } else if (item_is_app(it)) {
         strcpy(s->info_type, "Application");
         sprintf(s->info_size, "%u B", it->entry.file_size);
@@ -1857,6 +1898,15 @@ static void ff_on_frame(void *state) {
                                     s->drive_id);
                     else
                         ff_open_dir_pub(child_cluster, child_logical);
+                } else {
+                    bool is_txt =
+                        (it->entry.ext[0] == 'T' && it->entry.ext[1] == 'X' &&
+                         it->entry.ext[2] == 'T');
+                    if (is_txt) {
+                        char fspath[270];
+                        item_fspath(s, it->name, fspath, sizeof(fspath));
+                        teditor_open_file(fspath);
+                    }
                 }
                 s->last_click_idx = -1;
                 s->last_click_tick = 0;

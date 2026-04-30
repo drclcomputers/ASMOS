@@ -324,9 +324,6 @@ void window_draw(window *win) {
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
         draw_rect(win->x, wy, win->w, win->h, BLACK);
 
-        if (win->on_draw)
-            win->on_draw(win, win->on_draw_userdata);
-
         if (win->resizable) {
             int gx = win->x + win->w - RESIZE_BUTTON - 1;
             int gy = win->y + MENUBAR_H_SIZE + win->h - RESIZE_BUTTON;
@@ -336,11 +333,16 @@ void window_draw(window *win) {
             draw_line(gx + 4, gy + 6, gx + 6, gy + 4, DARK_GRAY);
         }
 
-        draw_line(win->x, win->y+win->h+MENUBAR_H_SIZE-1, win->x+win->w-1, win->y+win->h+MENUBAR_H_SIZE-1, BLACK);
+        draw_line(win->x, win->y + win->h + MENUBAR_H_SIZE - 1,
+                  win->x + win->w - 1, win->y + win->h + MENUBAR_H_SIZE - 1,
+                  BLACK);
     }
 
     for (int i = 0; i < win->widget_count; i++)
         widget_draw(&win->widgets[i], win->x, wy);
+
+    if (win->on_draw)
+        win->on_draw(win, win->on_draw_userdata);
 }
 
 bool window_update(window *win) {

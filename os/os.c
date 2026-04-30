@@ -26,6 +26,8 @@ int installed_app_count = 0;
 app_instance_t running_apps[MAX_RUNNING_APPS];
 int running_app_count = 0;
 
+global_alarm_t g_alarm = {0};
+
 void os_install_app(app_descriptor *desc) {
     if (!desc) {
         ERR_WARN_REPORT(ERR_NULL_PTR, "os_install_app");

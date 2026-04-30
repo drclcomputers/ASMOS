@@ -13,6 +13,7 @@
 #include "config/runtime_config.h"
 
 #include "lib/core.h"
+#include "lib/device.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -90,14 +91,14 @@ void power_anim_run(bool is_restart) {
 
         fill_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, DARK_GRAY);
         int filled = (step * BAR_W) / STEPS;
-        uint8_t color = is_restart ? LIGHT_BLUE : LIGHT_GREEN;
+        uint8_t color = is_restart ? LIGHT_BLUE : BLUE;
         fill_rect(BAR_X, BAR_Y, filled, BAR_H, color);
         draw_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, WHITE);
 
         blit();
-        sleep_ms(50);
+        sleep_ms(40);
     }
-    sleep_s(2);
+    sleep_s(1);
 }
 
 /* ── name validation ────────────────────────────────────────────────────── */
@@ -461,7 +462,8 @@ static void menu_paste(void) {
 
     dir_entry_t de;
     if (fs_find(dst_path, &de)) {
-        modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL, NULL);
+        modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL,
+                   NULL);
         return;
     }
 
@@ -482,9 +484,11 @@ static void menu_paste(void) {
 
     if (ok) {
         desktop_fs_set_dirty();
-        modal_show(MODAL_INFO, "Paste", "Item pasted successfully.", NULL, NULL);
+        modal_show(MODAL_INFO, "Paste", "Item pasted successfully.", NULL,
+                   NULL);
     } else {
-        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL, NULL);
+        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL,
+                   NULL);
     }
 }
 
@@ -740,4 +744,17 @@ void desktop_on_frame(void) {
     }
 
     draw_items(count, items);
+
+    if (g_alarm.set && !g_alarm.fired) {
+        time_full_t t = time_rtc_local();
+        if (t.hours == g_alarm.hour && t.minutes == g_alarm.minute &&
+            t.seconds == 0) {
+            g_alarm.fired = true;
+            g_alarm.set = false;
+            speaker_beep(880, 300);
+            speaker_beep(660, 300);
+            speaker_beep(880, 400);
+            modal_show(MODAL_INFO, "Alarm", "Alarm time reached!", NULL, NULL);
+        }
+    }
 }

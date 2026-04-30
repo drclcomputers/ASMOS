@@ -54,4 +54,13 @@ extern menubar g_menubar;
 extern bool g_menubar_click_consumed;
 extern bool gui_should_exit;
 
+typedef struct {
+    bool set;
+    uint8_t hour;
+    uint8_t minute;
+    bool fired;
+} global_alarm_t;
+
+extern global_alarm_t g_alarm;
+
 #endif

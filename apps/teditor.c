@@ -223,6 +223,21 @@ static bool np_load(teditor_state_t *s, const char *path) {
     return true;
 }
 
+void teditor_open_file(const char *path) {
+    app_instance_t *inst = os_launch_app(&teditor_app);
+    if (!inst) return;
+    teditor_state_t *s = (teditor_state_t *)inst->state;
+    if (!s || !s->win) return;
+    strncpy(s->filepath, path, FNAME_BUF_CAP-1);
+    s->filepath[FNAME_BUF_CAP-1] = '\0';
+    const char *base = strrchr(path, '/');
+    base = base ? base+1 : path;
+    strncpy(s->filename, base, FNAME_BUF_CAP-1);
+    s->filename[FNAME_BUF_CAP-1] = '\0';
+    s->win->title = s->filename;
+    np_load(s, path);
+}
+
 static bool np_save(teditor_state_t *s, const char *path) {
     dir_entry_t de;
     if (fs_find(path, &de))
@@ -582,16 +597,31 @@ static void commit_fname(teditor_state_t *s) {
     np_draw(s->win, s);
 }
 
+static app_instance_t *s_pending_close = NULL;
+
+static void teditor_confirm_close(void) {
+    if (s_pending_close) {
+        os_quit_app(s_pending_close);
+        s_pending_close = NULL;
+    }
+}
+
 static bool teditor_close_cb(window *w) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
         if (!a->running || a->desc != &teditor_app)
             continue;
         teditor_state_t *s = (teditor_state_t *)a->state;
-        if (s->win == w) {
-            os_quit_app(a);
+        if (s->win != w)
+            continue;
+        if (s->dirty) {
+            s_pending_close = a;
+            modal_show(MODAL_CONFIRM, "Unsaved Changes",
+                       "Close without saving?", teditor_confirm_close, NULL);
             return true;
         }
+        os_quit_app(a);
+        return true;
     }
     return true;
 }
