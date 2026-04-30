@@ -1699,7 +1699,7 @@ static void ff_on_frame(void *state) {
                 mouse.y >= row_y && mouse.y < row_y + 8) {
                 clipboard_set_text(s->info_path, (int)strlen(s->info_path));
                 strcpy(s->status, "Path copied.");
-                s->mode = MODE_NORMAL;
+                // s->mode = MODE_NORMAL;
             }
         }
         ff_draw_window(s->win, s);

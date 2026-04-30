@@ -3,7 +3,7 @@
 #define UPDATE_INTERVAL 60
 
 #define WIN_W 210
-#define WIN_H 115
+#define WIN_H 120
 
 #define TAB_H 12
 #define TAB_W 80
@@ -29,8 +29,11 @@ typedef struct {
     int scroll_top;
 
     char cpu_str[64];
+    char uptime_str[64];
     char mem_str[64];
     char drive_str[4][64];
+    uint32_t drive_used_kb[4];
+    uint32_t drive_total_kb[4];
     int drive_count;
     uint32_t frame_counter;
 } monitor_state_t;
@@ -65,6 +68,12 @@ static void fmt_bytes(char *dst, int dst_size, uint32_t used, uint32_t total) {
     dst[pos] = '\0';
 }
 
+static void refresh_uptime(monitor_state_t *s) {
+    time_hms_t u = uptime_hms();
+    snprintf(s->uptime_str, sizeof(s->uptime_str),
+             "Uptime: %02u:%02u:%02u", u.hours, u.minutes, u.seconds);
+}
+
 static void refresh_cpu(monitor_state_t *s) {
     cpu_model_init();
     strcpy(s->cpu_str, cpu_model_str());
@@ -87,6 +96,8 @@ static void refresh_drives(monitor_state_t *s) {
         if (fs_get_usage_drive(d, &tot, &used)) {
             used /= 1024;
             tot /= 1024;
+            s->drive_used_kb[line] = used;
+            s->drive_total_kb[line] = tot;
             const char *label = fs_drive_label(d);
             const char *vpath = (d == DRIVE_HDA)    ? "/HDA"
                                 : (d == DRIVE_HDB)  ? "/HDB"
@@ -114,6 +125,8 @@ static void refresh_drives(monitor_state_t *s) {
         } else {
             snprintf(s->drive_str[line], sizeof(s->drive_str[0]),
                      "%s: unavailable", fs_drive_label(d));
+            s->drive_used_kb[line] = 0;
+            s->drive_total_kb[line] = 0;
         }
         if (++line >= 4)
             break;
@@ -198,6 +211,8 @@ static void menu_refresh(void) {
     monitor_state_t *s = active_monitor();
     if (!s)
         return;
+    refresh_uptime(s);
+    refresh_cpu(s);
     refresh_ram(s);
     refresh_drives(s);
 }
@@ -312,13 +327,31 @@ static void monitor_draw(window *win, void *ud) {
         sy += 10;
         draw_string(panel_x, sy, s->mem_str, BLACK, 2);
         sy += 10;
+        draw_string(panel_x, sy, s->uptime_str, BLACK, 2);
+        sy += 10;
         draw_line(panel_x - 2, sy, panel_x + panel_w - 4, sy, DARK_GRAY);
         sy += 6;
         draw_string(panel_x, sy, "Drives:", BLACK, 2);
         sy += 10;
         for (int i = 0; i < s->drive_count; i++) {
             draw_string(panel_x + 4, sy, s->drive_str[i], BLACK, 2);
-            sy += 10;
+            sy += 8;
+            if (s->drive_total_kb[i] > 0) {
+                int bar_w = panel_w - 8;
+                int pct =
+                    (int)(s->drive_used_kb[i] * 100 / s->drive_total_kb[i]);
+                uint8_t bar_col = (pct < 25)   ? LIGHT_GREEN
+                                  : (pct < 80) ? LIGHT_BLUE
+                                  : (pct < 95) ? LIGHT_RED
+                                               : RED;
+                int filled = s->drive_used_kb[i] * bar_w / s->drive_total_kb[i];
+                fill_rect(panel_x + 4, sy, bar_w, 4, DARK_GRAY);
+                fill_rect(panel_x + 4, sy, filled, 4, bar_col);
+                if (pct >= 99)
+                    fill_rect(panel_x + 4, sy, filled, 4, BLACK);
+                sy += 6;
+            }
+            sy += 4;
         }
     }
 }
@@ -361,6 +394,7 @@ static void monitor_init(void *state) {
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "About Monitor", on_about);
 
+    refresh_uptime(s);
     refresh_cpu(s);
     refresh_ram(s);
     refresh_drives(s);
@@ -434,6 +468,7 @@ static void monitor_on_frame(void *state) {
     s->frame_counter++;
     if (s->frame_counter >= UPDATE_INTERVAL) {
         s->frame_counter = 0;
+        refresh_uptime(s);
         refresh_ram(s);
     }
 }

@@ -91,7 +91,7 @@ void power_anim_run(bool is_restart) {
 
         fill_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, DARK_GRAY);
         int filled = (step * BAR_W) / STEPS;
-        uint8_t color = is_restart ? LIGHT_BLUE : BLUE;
+        uint8_t color = is_restart ? LIGHT_GREEN : BLUE;
         fill_rect(BAR_X, BAR_Y, filled, BAR_H, color);
         draw_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, WHITE);
 
