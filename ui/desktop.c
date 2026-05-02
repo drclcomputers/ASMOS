@@ -732,16 +732,6 @@ void desktop_init(void) {
 }
 
 /* ── per-frame ──────────────────────────────────────────────────────────── */
-bool is_desktop_focused() {
-    window *fw = wm_focused_window();
-
-    if (fw != NULL && fw->pinned_bottom) {
-        return true;
-    }
-
-    return false;
-}
-
 static void draw_items(int count, desktop_item_t *items) {
     for (int i = 0; i < count; i++) {
         if (!items[i].used)

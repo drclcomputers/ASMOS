@@ -14,9 +14,9 @@
 #define SCROLLBAR_H 8
 #define STATUS_H 8
 
-#define TEXT_CAP 8192
-#define MAX_LINES 512
-#define MAX_COLS 120
+#define MAX_LINES 65536            // absolute hard limit
+#define MAX_COLS 400               // draw buffer max (stack variable)
+#define TEXT_MAX_CAP (1024 * 1024) // 1 MB hard ceiling for text
 
 #define FNAME_BUF_CAP 256
 
@@ -24,11 +24,15 @@
 #define FNAME_MODE_OPEN 1
 #define FNAME_MODE_SAVEAS 2
 
+#define TEXT_INIT_CAP 4096
+#define LINE_INIT_CAP 256
+
 typedef struct {
     window *win;
 
-    char text[TEXT_CAP];
+    char *text;
     int text_len;
+    int text_cap;
 
     int cursor;
 
@@ -38,8 +42,9 @@ typedef struct {
     int scroll_col;
     int max_line_len;
 
-    int line_start[MAX_LINES];
+    int *line_start;
     int line_count;
+    int line_cap;
 
     bool dirty;
 
@@ -58,23 +63,67 @@ typedef struct {
 
 app_descriptor teditor_app;
 
+/* ── Status ──────────────────────────────────────────────────── */
 static void np_set_status(teditor_state_t *s, const char *msg) {
     strncpy(s->status, msg, 63);
     s->status[63] = '\0';
     s->status_timer = 300;
 }
 
+static bool np_ensure_text_cap(teditor_state_t *s, int needed) {
+    while (needed >= s->text_cap) {
+        int new_cap = s->text_cap * 2;
+        if (new_cap > TEXT_MAX_CAP)
+            new_cap = TEXT_MAX_CAP;
+        if (new_cap <= needed)
+            new_cap = needed + 4096;
+        if (new_cap > TEXT_MAX_CAP)
+            new_cap = TEXT_MAX_CAP;
+        char *new_text = krealloc(s->text, new_cap);
+        if (!new_text) {
+            np_set_status(s, "Out of memory (text)");
+            return false;
+        }
+        s->text = new_text;
+        s->text_cap = new_cap;
+    }
+    return true;
+}
+
+static bool np_ensure_line_cap(teditor_state_t *s, int count) {
+    while (count > s->line_cap) {
+        if (s->line_cap >= MAX_LINES) {
+            np_set_status(s, "Line limit reached");
+            return false;
+        }
+        int new_cap = s->line_cap * 2;
+        if (new_cap > MAX_LINES)
+            new_cap = MAX_LINES;
+        int *new_arr = krealloc(s->line_start, new_cap * sizeof(int));
+        if (!new_arr) {
+            np_set_status(s, "Out of memory (lines)");
+            return false;
+        }
+        s->line_start = new_arr;
+        s->line_cap = new_cap;
+    }
+    return true;
+}
+
+/* ── Line indexing ───────────────────────────────────────────── */
 static void np_reindex(teditor_state_t *s) {
     s->line_count = 0;
     s->max_line_len = 0;
     s->line_start[s->line_count++] = 0;
 
     int cur_len = 0;
-    for (int i = 0; i < s->text_len && s->line_count < MAX_LINES; i++) {
+    for (int i = 0; i < s->text_len; i++) {
         if (s->text[i] == '\n') {
             if (cur_len > s->max_line_len)
                 s->max_line_len = cur_len;
             cur_len = 0;
+            if (!np_ensure_line_cap(s, s->line_count + 1))
+                return;
             s->line_start[s->line_count++] = i + 1;
         } else {
             cur_len++;
@@ -84,6 +133,7 @@ static void np_reindex(teditor_state_t *s) {
         s->max_line_len = cur_len;
 }
 
+/* ── Binary search for line of a character position ──────────── */
 static int np_line_of(teditor_state_t *s, int pos) {
     int lo = 0, hi = s->line_count - 1;
     while (lo < hi) {
@@ -101,6 +151,7 @@ static int np_col_of(teditor_state_t *s, int pos) {
     return pos - s->line_start[ln];
 }
 
+/* ── Scrolling ───────────────────────────────────────────────── */
 static void np_scroll_to_cursor(teditor_state_t *s) {
     int ln = np_line_of(s, s->cursor);
     if (ln < s->scroll_line)
@@ -117,11 +168,11 @@ static void np_scroll_to_cursor(teditor_state_t *s) {
         s->scroll_col = 0;
 }
 
+/* ── Editing operations ──────────────────────────────────────── */
 static void np_insert(teditor_state_t *s, const char *bytes, int len) {
-    if (s->text_len + len >= TEXT_CAP) {
-        np_set_status(s, "Buffer full!");
+    if (!np_ensure_text_cap(s, s->text_len + len + 1))
         return;
-    }
+
     memmove(s->text + s->cursor + len, s->text + s->cursor,
             s->text_len - s->cursor);
     memcpy(s->text + s->cursor, bytes, len);
@@ -157,7 +208,7 @@ static void np_delete_fwd(teditor_state_t *s) {
     np_reindex(s);
 }
 
-/* ── Selection helpers ─────────────────────────────────────────── */
+/* ── Selection ───────────────────────────────────────────────── */
 static void np_get_sel_range(teditor_state_t *s, int *start, int *end) {
     if (s->sel_anchor < 0) {
         *start = *end = -1;
@@ -209,18 +260,32 @@ static void np_select_all(teditor_state_t *s) {
     np_scroll_to_cursor(s);
 }
 
-/* ── File helpers ─────────────────────────────────────────── */
-
+/* ── File I/O ────────────────────────────────────────────────── */
 static bool np_load(teditor_state_t *s, const char *path) {
     fs_file_t f;
     if (!fs_open(path, &f))
         return false;
-    int n = fs_read(&f, s->text, TEXT_CAP - 1);
+
+    s->text_len = 0;
+    s->text[0] = '\0';
+
+#define LOAD_CHUNK 4096
+    for (;;) {
+        if (!np_ensure_text_cap(s, s->text_len + LOAD_CHUNK))
+            break;
+
+        int space = s->text_cap - s->text_len - 1;
+        if (space <= 0)
+            break;
+        int chunk = space < LOAD_CHUNK ? space : LOAD_CHUNK;
+        int n = fs_read(&f, s->text + s->text_len, chunk);
+        if (n <= 0)
+            break;
+        s->text_len += n;
+        s->text[s->text_len] = '\0';
+    }
     fs_close(&f);
-    if (n < 0)
-        n = 0;
-    s->text_len = n;
-    s->text[n] = '\0';
+
     s->cursor = 0;
     s->scroll_col = 0;
     s->dirty = false;
@@ -235,7 +300,8 @@ void teditor_open_file(const char *path) {
 
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &teditor_app) continue;
+        if (!a->running || a->desc != &teditor_app)
+            continue;
         teditor_state_t *s = (teditor_state_t *)a->state;
         if (!s->dirty && s->text_len == 0) {
             target = s;
@@ -245,11 +311,13 @@ void teditor_open_file(const char *path) {
 
     if (!target) {
         inst = os_launch_app(&teditor_app);
-        if (!inst) return;
+        if (!inst)
+            return;
         target = (teditor_state_t *)inst->state;
     }
 
-    if (!target || !target->win) return;
+    if (!target || !target->win)
+        return;
     strncpy(target->filepath, path, FNAME_BUF_CAP - 1);
     target->filepath[FNAME_BUF_CAP - 1] = '\0';
     const char *base = strrchr(path, '/');
@@ -276,6 +344,7 @@ static bool np_save(teditor_state_t *s, const char *path) {
     return true;
 }
 
+/* ── Menu callbacks ──────────────────────────────────────────── */
 static teditor_state_t *active_teditor(void) {
     window *fw = wm_focused_window();
     if (!fw)
@@ -293,18 +362,19 @@ static teditor_state_t *active_teditor(void) {
 
 static bool teditor_close_cb(window *w);
 
-static void menu_new(void) {
-    os_launch_app(&teditor_app);
-}
+static void menu_new(void) { os_launch_app(&teditor_app); }
 
 static void menu_open(void) {
     teditor_state_t *s = active_teditor();
-    if (!s) return;
+    if (!s)
+        return;
     if (s->dirty || s->text_len > 0) {
         app_instance_t *inst = os_launch_app(&teditor_app);
-        if (!inst) return;
+        if (!inst)
+            return;
         teditor_state_t *ns = (teditor_state_t *)inst->state;
-        if (!ns || !ns->win) return;
+        if (!ns || !ns->win)
+            return;
         ns->fname_buf[0] = '\0';
         ns->fname_len = 0;
         ns->fname_mode = FNAME_MODE_OPEN;
@@ -345,10 +415,11 @@ static void menu_close_np(void) {
 }
 
 static void on_about_np(void) {
-    modal_show(MODAL_INFO, "About TEditor", "TEditor v1.1\nASMOS Text Editor",
+    modal_show(MODAL_INFO, "About TEditor", "TEditor v1.2\nDynamic Tiny Editor",
                NULL, NULL);
 }
 
+/* ── Layout & drawing ───────────────────────────────────────────────────── */
 static void get_layout(const teditor_state_t *s, int *text_x, int *text_y,
                        int *text_w, int *text_h, int *vsb_x, int *vsb_y,
                        int *vsb_h, int *hsb_x, int *hsb_y, int *hsb_w,
@@ -423,14 +494,13 @@ static void np_draw(window *win, void *ud) {
         int avail = ll - src_start;
 
         char draw_buf[MAX_COLS + 1];
-        int to_copy = avail < max_vis_chars ? avail : max_vis_chars;
+        int to_copy = (avail < max_vis_chars) ? avail : max_vis_chars;
         if (to_copy > MAX_COLS)
             to_copy = MAX_COLS;
         if (to_copy > 0)
             memcpy(draw_buf, s->text + ls + src_start, to_copy);
         draw_buf[to_copy] = '\0';
 
-        // Draw selection background
         if (s->sel_anchor >= 0) {
             int st, en;
             np_get_sel_range(s, &st, &en);
@@ -464,6 +534,7 @@ static void np_draw(window *win, void *ud) {
 
         draw_string(text_x, py, draw_buf, BLACK, 2);
 
+        /* cursor */
         if (ln == cursor_line) {
             int vis_col = cursor_col - s->scroll_col;
             if (vis_col >= 0 && vis_col <= max_vis_chars) {
@@ -475,9 +546,9 @@ static void np_draw(window *win, void *ud) {
         }
     }
 
+    /* scrollbars & status bar */
     fill_rect(vsb_x, vsb_y, SCROLLBAR_W, vsb_h, LIGHT_GRAY);
     draw_rect(vsb_x, vsb_y, SCROLLBAR_W, vsb_h, DARK_GRAY);
-
     if (s->line_count > s->visible_rows && s->line_count > 0) {
         int max_scroll = s->line_count - s->visible_rows;
         int thumb_h = (s->visible_rows * vsb_h) / s->line_count;
@@ -493,7 +564,6 @@ static void np_draw(window *win, void *ud) {
     fill_rect(hsb_x, hsb_y, hsb_w, SCROLLBAR_H, LIGHT_GRAY);
     draw_rect(hsb_x, hsb_y, hsb_w, SCROLLBAR_H, DARK_GRAY);
     draw_line(hsb_x, hsb_y - 1, hsb_x + hsb_w - 1, hsb_y - 1, DARK_GRAY);
-
     if (s->max_line_len > max_vis_chars && s->max_line_len > 0) {
         int max_h_scroll = s->max_line_len - max_vis_chars;
         int track_w = hsb_w - 4;
@@ -521,6 +591,7 @@ static void np_draw(window *win, void *ud) {
     }
     draw_string(wx + 3, status_y + 1, stat, BLACK, 2);
 
+    /* filename dialog */
     if (s->fname_mode != FNAME_MODE_NONE) {
         int bw = ww - 8;
         int bh = 40;
@@ -548,9 +619,8 @@ static void np_draw(window *win, void *ud) {
             field_chars = 1;
         const char *show = s->fname_buf;
         int slen = s->fname_len;
-        if (slen > field_chars) {
+        if (slen > field_chars)
             show = s->fname_buf + (slen - field_chars);
-        }
         draw_string(field_x + 2, by + 15, (char *)show, BLACK, 2);
 
         extern volatile uint32_t pit_ticks;
@@ -572,6 +642,7 @@ static void np_draw(window *win, void *ud) {
     }
 }
 
+/* ── Filename dialog commit ──────────────────────────────────── */
 static void commit_fname(teditor_state_t *s) {
     const char *last_sep = strrchr(s->fname_buf, '/');
     const char *base = last_sep ? last_sep + 1 : s->fname_buf;
@@ -595,16 +666,14 @@ static void commit_fname(teditor_state_t *s) {
 
     strncpy(s->filepath, s->fname_buf, FNAME_BUF_CAP - 1);
     s->filepath[FNAME_BUF_CAP - 1] = '\0';
-
     strncpy(s->filename, base, FNAME_BUF_CAP - 1);
     s->filename[FNAME_BUF_CAP - 1] = '\0';
-
     s->win->title = s->filename;
 
     if (fm == FNAME_MODE_OPEN) {
-        if (np_load(s, s->filepath)) {
+        if (np_load(s, s->filepath))
             np_set_status(s, "Opened.");
-        } else {
+        else {
             s->filepath[0] = '\0';
             s->filename[0] = '\0';
             s->win->title = "TEditor";
@@ -613,10 +682,10 @@ static void commit_fname(teditor_state_t *s) {
     } else {
         np_set_status(s, np_save(s, s->filepath) ? "Saved." : "Save failed!");
     }
-
     np_draw(s->win, s);
 }
 
+/* ── Close handling ──────────────────────────────────────────── */
 static app_instance_t *s_pending_close = NULL;
 
 static void teditor_confirm_close(void) {
@@ -653,9 +722,11 @@ static void on_file_close_np(void) {
     teditor_close_cb(s->win);
 }
 
+/* ── Init / Destroy ──────────────────────────────────────────── */
 static void teditor_init(void *state) {
     teditor_state_t *s = (teditor_state_t *)state;
 
+    /* window */
     const window_spec_t spec = {
         .x = teditor_DEFAULT_X,
         .y = teditor_DEFAULT_Y,
@@ -678,6 +749,7 @@ static void teditor_init(void *state) {
     s->win->on_draw = np_draw;
     s->win->on_draw_userdata = s;
 
+    /* menus */
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "New", menu_new);
     menu_add_item(file_menu, "Open", menu_open);
@@ -687,8 +759,26 @@ static void teditor_init(void *state) {
     menu_add_item(file_menu, "Close", on_file_close_np);
     menu_add_item(file_menu, "About", on_about_np);
 
+    /* allocate dynamic text buffer */
+    s->text_cap = TEXT_INIT_CAP;
+    s->text = kmalloc(s->text_cap);
+    if (!s->text) {
+        ERR_WARN_REPORT(ERR_WM_ALLOC, "teditor: text buffer");
+        return;
+    }
     s->text[0] = '\0';
     s->text_len = 0;
+
+    /* allocate dynamic line-start array */
+    s->line_cap = LINE_INIT_CAP;
+    s->line_start = kmalloc(s->line_cap * sizeof(int));
+    if (!s->line_start) {
+        kfree(s->text);
+        s->text = NULL;
+        ERR_WARN_REPORT(ERR_WM_ALLOC, "teditor: line array");
+        return;
+    }
+
     s->cursor = 0;
     s->scroll_col = 0;
     s->sel_anchor = -1;
@@ -703,25 +793,24 @@ static void teditor_init(void *state) {
         s->visible_rows = 1;
 }
 
-static void changecursor(void *state) {
+static void teditor_destroy(void *state) {
     teditor_state_t *s = (teditor_state_t *)state;
-    if (!s->win || !s->win->visible)
-        return;
-
-    if (s->win != wm_focused_window()) {
-        CHOSEN_CURSOR = 0;
-        return;
+    if (s->text) {
+        kfree(s->text);
+        s->text = NULL;
     }
-
-    if (mouse.x >= s->win->x &&
-        mouse.x <= s->win->x + s->win->w - SCROLLBAR_W &&
-        mouse.y >= s->win->y + TITLEBAR_H &&
-        mouse.y < s->win->y + s->win->h - SCROLLBAR_H)
-        CHOSEN_CURSOR = 3;
-    else
-        CHOSEN_CURSOR = 0;
+    if (s->line_start) {
+        kfree(s->line_start);
+        s->line_start = NULL;
+    }
+    if (s->win) {
+        wm_unregister(s->win);
+        s->win = NULL;
+    }
+    CHOSEN_CURSOR = 0;
 }
 
+/* ── Frame handler ───────────────────────────────────────────────── */
 static void teditor_on_frame(void *state) {
     teditor_state_t *s = (teditor_state_t *)state;
     if (!s->win || !s->win->visible)
@@ -738,26 +827,21 @@ static void teditor_on_frame(void *state) {
     if (s->status_timer > 0)
         s->status_timer--;
 
-    // changecursor(state);
-
+    /* filename mode */
     if (s->fname_mode != FNAME_MODE_NONE) {
         if (focused) {
             if (kb.key_pressed) {
-                if (kb.ctrl_v) {
-                    if (clipboard_has_text()) {
-                        for (int i = 0; i < g_clipboard.text_len &&
-                                        s->fname_len < FNAME_BUF_CAP - 1;
-                             i++) {
-                            s->fname_buf[s->fname_len++] = g_clipboard.text[i];
-                        }
-                        s->fname_buf[s->fname_len] = '\0';
-                        return;
-                    }
+                if (kb.ctrl_v && clipboard_has_text()) {
+                    for (int i = 0; i < g_clipboard.text_len &&
+                                    s->fname_len < FNAME_BUF_CAP - 1;
+                         i++)
+                        s->fname_buf[s->fname_len++] = g_clipboard.text[i];
+                    s->fname_buf[s->fname_len] = '\0';
+                    return;
                 }
-
-                if (kb.last_scancode == ESC) {
+                if (kb.last_scancode == ESC)
                     s->fname_mode = FNAME_MODE_NONE;
-                } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
+                else if (kb.last_scancode == ENTER && s->fname_len > 0) {
                     commit_fname(s);
                     return;
                 } else if (kb.last_scancode == BACKSPACE) {
@@ -779,42 +863,30 @@ static void teditor_on_frame(void *state) {
                     }
                 }
             }
-
             if (mouse.left_clicked) {
-                int wx2 = s->win->x + 1;
-                int wy2 = s->win->y + MENUBAR_H + 16;
-                int ww2 = s->win->w - 2;
-                int wh2 = s->win->h - 16;
-                int bw = ww2 - 8;
-                int bh = 40;
-                int bx = wx2 + 4;
-                int by = wy2 + wh2 / 2 - bh / 2;
-
-                bool ok_hit = (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
-                               mouse.y >= by + 28 && mouse.y < by + 36);
-                bool can_hit = (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
-                                mouse.y >= by + 28 && mouse.y < by + 36);
-
-                if (can_hit) {
+                int wx2 = s->win->x + 1, wy2 = s->win->y + MENUBAR_H + 16,
+                    ww2 = s->win->w - 2, wh2 = s->win->h - 16;
+                int bw = ww2 - 8, bh = 40, bx = wx2 + 4,
+                    by = wy2 + wh2 / 2 - bh / 2;
+                if (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
+                    mouse.y >= by + 28 && mouse.y < by + 36) {
+                    if (s->fname_len > 0)
+                        commit_fname(s);
+                } else if (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
+                           mouse.y >= by + 28 && mouse.y < by + 36) {
                     s->fname_mode = FNAME_MODE_NONE;
-                } else if (ok_hit && s->fname_len > 0) {
-                    commit_fname(s);
-                    return;
                 }
             }
-
             np_draw(s->win, s);
-            return;
         }
+        return;
     }
 
-    int text_x, text_y, text_w;
-    int vsb_x, vsb_y, vsb_h;
-    int hsb_x, hsb_y, hsb_w;
-    int status_y;
+    /* main editing logic */
+    int text_x, text_y, text_w, vsb_x, vsb_y, vsb_h, hsb_x, hsb_y, hsb_w,
+        status_y;
     get_layout(s, &text_x, &text_y, &text_w, &text_h, &vsb_x, &vsb_y, &vsb_h,
                &hsb_x, &hsb_y, &hsb_w, &status_y);
-
     int max_vis_chars = text_w / CHAR_W;
     if (max_vis_chars < 1)
         max_vis_chars = 1;
@@ -824,27 +896,25 @@ static void teditor_on_frame(void *state) {
             mouse.x < vsb_x + SCROLLBAR_W && mouse.y >= vsb_y &&
             mouse.y < vsb_y + vsb_h && s->line_count > s->visible_rows) {
             int max_scroll = s->line_count - s->visible_rows;
-            int new_scroll = ((mouse.y - vsb_y) * max_scroll) / vsb_h;
-            if (new_scroll < 0)
-                new_scroll = 0;
-            if (new_scroll > max_scroll)
-                new_scroll = max_scroll;
-            s->scroll_line = new_scroll;
+            int ns = ((mouse.y - vsb_y) * max_scroll) / vsb_h;
+            if (ns < 0)
+                ns = 0;
+            if (ns > max_scroll)
+                ns = max_scroll;
+            s->scroll_line = ns;
         }
-
         if ((mouse.left_clicked || mouse.left) && mouse.x >= hsb_x &&
             mouse.x < hsb_x + hsb_w && mouse.y >= hsb_y &&
             mouse.y < hsb_y + SCROLLBAR_H && s->max_line_len > max_vis_chars) {
-            int max_h_scroll = s->max_line_len - max_vis_chars;
+            int max_h = s->max_line_len - max_vis_chars;
             int track_w = hsb_w - 4;
-            int new_scroll = ((mouse.x - hsb_x - 2) * max_h_scroll) / track_w;
-            if (new_scroll < 0)
-                new_scroll = 0;
-            if (new_scroll > max_h_scroll)
-                new_scroll = max_h_scroll;
-            s->scroll_col = new_scroll;
+            int ns = ((mouse.x - hsb_x - 2) * max_h) / track_w;
+            if (ns < 0)
+                ns = 0;
+            if (ns > max_h)
+                ns = max_h;
+            s->scroll_col = ns;
         }
-
         if (mouse.left_clicked && mouse.x >= text_x &&
             mouse.x < text_x + text_w && mouse.y >= text_y &&
             mouse.y < text_y + text_h) {
@@ -854,12 +924,10 @@ static void teditor_on_frame(void *state) {
                 ln = s->line_count - 1;
             if (ln < 0)
                 ln = 0;
-
             int col = (mouse.x - text_x) / CHAR_W + s->scroll_col;
-
-            int ls = s->line_start[ln];
-            int le = (ln + 1 < s->line_count) ? s->line_start[ln + 1] - 1
-                                              : s->text_len;
+            int ls = s->line_start[ln], le = (ln + 1 < s->line_count)
+                                                 ? s->line_start[ln + 1] - 1
+                                                 : s->text_len;
             int ll = le - ls;
             if (col > ll)
                 col = ll;
@@ -872,12 +940,14 @@ static void teditor_on_frame(void *state) {
             if (kb.ctrl_c) {
                 np_copy_selection(s);
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
             if (kb.ctrl_x) {
                 np_copy_selection(s);
                 np_delete_selection(s);
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
             if (kb.ctrl_v) {
@@ -886,80 +956,77 @@ static void teditor_on_frame(void *state) {
                     np_insert(s, g_clipboard.text, g_clipboard.text_len);
                 }
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
             if (kb.ctrl_s) {
                 menu_save();
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
             if (kb.ctrl_n) {
                 menu_new();
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
             if (kb.ctrl_o) {
                 menu_open();
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
             if (kb.ctrl_a) {
                 np_select_all(s);
                 np_draw(s->win, s);
+                kb.key_pressed = false;
                 return;
             }
 
-            // ── Selection / cursor movement ─────────────
             bool shift = kb.shift;
-            if (kb.last_scancode == UP_ARROW ||
-                kb.last_scancode == DOWN_ARROW ||
-                kb.last_scancode == LEFT_ARROW ||
-                kb.last_scancode == RIGHT_ARROW || kb.last_scancode == HOME ||
-                kb.last_scancode == END || kb.last_scancode == PAGE_UP ||
-                kb.last_scancode == PAGE_DOWN) {
+            uint8_t sc = kb.last_scancode;
+            if (sc == UP_ARROW || sc == DOWN_ARROW || sc == LEFT_ARROW ||
+                sc == RIGHT_ARROW || sc == HOME || sc == END || sc == PAGE_UP ||
+                sc == PAGE_DOWN)
                 if (!shift)
                     s->sel_anchor = -1;
-            }
 
-            uint8_t sc = kb.last_scancode;
-
-            if (sc == ENTER) {
+            if (sc == ENTER)
                 np_insert(s, "\n", 1);
-            } else if (sc == BACKSPACE) {
+            else if (sc == BACKSPACE)
                 np_backspace(s);
-            } else if (sc == DELETE) {
+            else if (sc == DELETE)
                 np_delete_fwd(s);
-            } else if (sc == UP_ARROW) {
+            else if (sc == UP_ARROW) {
                 if (shift && s->sel_anchor < 0)
                     s->sel_anchor = s->cursor;
-                int ln = np_line_of(s, s->cursor);
-                int col = np_col_of(s, s->cursor);
+                int ln = np_line_of(s, s->cursor),
+                    col = np_col_of(s, s->cursor);
                 if (ln > 0) {
                     ln--;
-                    int ls = s->line_start[ln];
-                    int le = (ln + 1 < s->line_count)
+                    int ls = s->line_start[ln],
+                        le = (ln + 1 < s->line_count)
                                  ? s->line_start[ln + 1] - 1
                                  : s->text_len;
-                    int ll = le - ls;
-                    if (col > ll)
-                        col = ll;
+                    if (col > le - ls)
+                        col = le - ls;
                     s->cursor = ls + col;
                     np_scroll_to_cursor(s);
                 }
             } else if (sc == DOWN_ARROW) {
                 if (shift && s->sel_anchor < 0)
                     s->sel_anchor = s->cursor;
-                int ln = np_line_of(s, s->cursor);
-                int col = np_col_of(s, s->cursor);
+                int ln = np_line_of(s, s->cursor),
+                    col = np_col_of(s, s->cursor);
                 if (ln + 1 < s->line_count) {
                     ln++;
-                    int ls = s->line_start[ln];
-                    int le = (ln + 1 < s->line_count)
+                    int ls = s->line_start[ln],
+                        le = (ln + 1 < s->line_count)
                                  ? s->line_start[ln + 1] - 1
                                  : s->text_len;
-                    int ll = le - ls;
-                    if (col > ll)
-                        col = ll;
+                    if (col > le - ls)
+                        col = le - ls;
                     s->cursor = ls + col;
                     np_scroll_to_cursor(s);
                 }
@@ -992,7 +1059,7 @@ static void teditor_on_frame(void *state) {
                                                   : s->text_len;
                 s->cursor = le;
                 np_scroll_to_cursor(s);
-            } else if (sc == PAGE_UP) {
+            } else if (sc == PAGE_UP || sc == F5) {
                 if (shift && s->sel_anchor < 0)
                     s->sel_anchor = s->cursor;
                 s->scroll_line -= s->visible_rows;
@@ -1000,7 +1067,7 @@ static void teditor_on_frame(void *state) {
                     s->scroll_line = 0;
                 if (np_line_of(s, s->cursor) < s->scroll_line)
                     s->cursor = s->line_start[s->scroll_line];
-            } else if (sc == PAGE_DOWN) {
+            } else if (sc == PAGE_DOWN || sc == F6) {
                 if (shift && s->sel_anchor < 0)
                     s->sel_anchor = s->cursor;
                 int max_scroll = s->line_count - s->visible_rows;
@@ -1014,9 +1081,9 @@ static void teditor_on_frame(void *state) {
                     bot = s->line_count - 1;
                 if (np_line_of(s, s->cursor) > bot)
                     s->cursor = s->line_start[bot];
-            } else if (sc == TAB) {
+            } else if (sc == TAB)
                 np_insert(s, "    ", 4);
-            } else if (kb.last_char >= 32 && kb.last_char < 127) {
+            else if (kb.last_char >= 32 && kb.last_char < 127) {
                 char c = kb.last_char;
                 np_insert(s, &c, 1);
             }
@@ -1034,15 +1101,6 @@ static void teditor_on_frame(void *state) {
     }
 
     np_draw(s->win, s);
-}
-
-static void teditor_destroy(void *state) {
-    CHOSEN_CURSOR = 0;
-    teditor_state_t *s = (teditor_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
 }
 
 app_descriptor teditor_app = {

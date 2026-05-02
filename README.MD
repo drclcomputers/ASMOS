@@ -1,8 +1,8 @@
 ═══════════════════════════════════════════════════════════════════════════
-  ASMOS v0.6.8 - COMPLETE ARCHITECTURE DOCUMENTATION
+  ASMOS v0.9.5 - COMPLETE ARCHITECTURE DOCUMENTATION
 ═══════════════════════════════════════════════════════════════════════════
 
-Last updated to reflect: config/config.h VER "0.6.8"
+Last updated to reflect: config/config.h VER "0.9.5"
 Covers: boot, kernel, HAL, memory, filesystem, scheduler, windowing,
         shell, assembler, runtime config, and all bundled applications.
 
@@ -69,8 +69,9 @@ Entry Point: 0x8000  (linked first via linker.ld)
 CPU Mode: 32-bit Protected Mode
 
 1. EBP = ESP = 0x90000   (re-establish stack pointer)
-2. CALL kmain
-3. JMP $  (safety hang if kmain ever returns)
+2. BSS zero-fill (rep stosb from _bss_start to _bss_end)
+3. CALL kmain
+4. JMP $  (safety hang if kmain ever returns)
 
 
 2. KERNEL INITIALIZATION (kernel.c::kmain)
@@ -87,7 +88,7 @@ void kmain(void) {
     sleep_s(1);
 
     boot_check_heap();     // Validate allocator
-    fs_mount();         // Mount FAT16 from sector 0 BPB
+    fs_mount();            // Mount FAT16 from sector 0 BPB
     boot_check_ata();      // Sector 0 read + 0xAA55 signature
     boot_check_fat();      // BPB sanity, cluster count, disk usage
 
@@ -111,7 +112,7 @@ void kmain(void) {
     error_set_gui_mode(true);
 
     for each app in app_registry[]
-        os_install_app(desc);   // Register 10 built-in apps
+        os_install_app(desc);   // Register 11 built-in apps
 
     scheduler_init();           // Task 0 = kernel task
     scheduler_kernel_task();    // Enter main event loop (never returns)
@@ -124,17 +125,19 @@ E820 Heap Detection (detect_heap_end):
 - Clamps to 32-bit; passes result to alloc_set_end()
 
 Runtime Configuration (config/runtime_config.h):
-- File path:  /ASMOS.CFG  (64-byte packed struct, magic 0x4153434F)
+- File path:  /ASMOS.CFG  (packed struct, magic 0x4153434F)
 - Fields:
-    wallpaper_pattern        (0=solid, 1=checker, 2=stripes, 3=dots)
-    wallpaper_main_color     (0–15 palette index)
+    wallpaper_pattern           (0=solid, 1=checker, 2=stripes, 3=dots)
+    wallpaper_main_color        (0–15 palette index)
     wallpaper_secondary_color
-    timezone_offset          (signed int8, UTC±N hours)
-    start_in_gui             (1 = skip CLI)
-    play_bootchime           (0/1)
-    sound_enabled            (0/1)
+    timezone_offset             (signed int8, UTC±N hours)
+    start_in_gui                (1 = skip CLI)
+    play_bootchime              (0/1)
+    sound_enabled               (0/1)
+    filef_single_window         (0=multi-window, 1=single-window mode)
+    reduce_motion               (0/1 — disables window animations)
 - cfg_load() / cfg_save() use FAT16 directly
-- Defaults: checker wallpaper, green/light-green, UTC+0, start in GUI
+- Defaults: dots wallpaper, light-blue/light-cyan, UTC+0, start in GUI
 
 
 3. INTERRUPT / TIMER SUBSYSTEM (interrupts/)
@@ -216,7 +219,7 @@ libc Compatibility Layer (lib/compat/):
 
 4.2 TASK STACKS
 ---------------
-Each scheduler task gets a 16 KB stack (TASK_STACK_SIZE) allocated
+Each scheduler task gets an 8 KB stack (TASK_STACK_SIZE) allocated
 via kmalloc at task creation; freed asynchronously after task exit
 (deferred via s_pending_free[] array, freed in scheduler_reap()).
 
@@ -226,7 +229,7 @@ via kmalloc at task creation; freed asynchronously after task exit
 
 5.1 PS/2 CONTROLLER (io/ps2.c, keyboard.c, mouse.c)
 ------------------------------------------------------
-Ports: 0x60 data, 0x64 status/command  
+Ports: 0x60 data, 0x64 status/command
 
 Polling (ps2_update, called every frame from scheduler_kernel_task):
   kb_update()   – clears per-frame flags
@@ -242,6 +245,8 @@ Keyboard (kb_process_byte):
 - Release: bit 7 set; key maps cleared
 - lower[128] / upper[128] ASCII tables
 - Populates kb.last_char, kb.last_scancode, kb.key_pressed
+- Per-frame shortcut flags: ctrl_c, ctrl_x, ctrl_v, ctrl_a, ctrl_s,
+  ctrl_z, ctrl_q, ctrl_n, ctrl_o, ctrl_f, ctrl_shift_c/v/z/s
 
 Mouse (mouse_process_byte):
 - 3-byte packets; byte 0 must have bit 3 set (sync guard)
@@ -253,11 +258,11 @@ Mouse (mouse_process_byte):
 
 5.2 ATA PIO (fs/ata.c)
 -----------------------
-Primary channel: 0x1F0–0x1F7  (same register map as prior doc)
+Primary channel: 0x1F0–0x1F7
 
-ata_read_sector(lba, buf):
+ata_read_sector(drive_id, lba, buf):
   1. ata_wait_ready (BSY=0, no ERR)
-  2. OUT 0x1F6: 0xE0 | (lba >> 24) & 0xF   (LBA28, master drive)
+  2. OUT 0x1F6: 0xE0|(drive_id<<4)|(lba>>24)&0xF  (LBA28)
   3. OUT 0x1F2: 1   (sector count)
   4. OUT 0x1F3/4/5: LBA bits 0–23
   5. OUT 0x1F7: 0x20 (READ PIO)
@@ -268,6 +273,7 @@ ata_write_sector: same sequence with cmd 0x30; after write send
   OUT 0x1F7: 0xE7 (FLUSH CACHE) + ata_wait_ready.
 
 Multi-sector helpers: ata_read_sectors / ata_write_sectors (loop).
+Supports DRIVE_HDA (0) and DRIVE_HDB (1) on primary channel.
 
 
 5.3 VGA MODE 13h (lib/graphics/)
@@ -277,10 +283,10 @@ Front buffer: 0xA0000 (VGA MMIO, 64 KB)
 Back  buffer: 0x100000 (BACKBUF, 64 KB extended RAM)
 
 Palette (16 named entries, defined in config.h + color.h):
-  0=BLACK  1=BLUE  2=GREEN  3=YELLOW  4=RED  5=MAGENTA
-  6=CYAN   7=LIGHT_GRAY     8=DARK_GRAY      9=LIGHT_BLUE
-  10=LIGHT_GREEN  11=LIGHT_YELLOW  12=LIGHT_RED  13=LIGHT_MAGENTA
-  14=LIGHT_CYAN   15=WHITE
+  0=BLACK  1=BLUE  2=GREEN  3=CYAN  4=RED  5=MAGENTA
+  6=BROWN  7=LIGHT_GRAY    8=DARK_GRAY     9=LIGHT_BLUE
+  10=LIGHT_GREEN  11=LIGHT_CYAN  12=LIGHT_RED  13=LIGHT_MAGENTA
+  14=YELLOW  15=WHITE
 
 color.h utilities: color_blend, color_from_rgb, color_lighten,
   color_darken, color_invert, color_contrast_fg (luma-based)
@@ -343,6 +349,9 @@ FAT entry values:
   0xFFF7  bad cluster
   0xFFF0–0xFFF6  reserved
 
+Supports both FAT12 and FAT16 (fat_type_t, detected at mount time).
+FAT12 handling covers floppy images; FAT16 for the main HDA volume.
+
 Directory entry (32 bytes packed):
   name[8] + ext[3]  (uppercase, space-padded 8.3)
   attr, reserved, create_time_ms
@@ -355,16 +364,21 @@ Special first-byte values:
   0xE5  deleted entry (free slot)
 
 Key attribute bits: ATTR_DIRECTORY (0x10), ATTR_ARCHIVE (0x20),
-  ATTR_VOLUME_ID (0x08), ATTR_READ_ONLY (0x01)
+  ATTR_VOLUME_ID (0x08), ATTR_READ_ONLY (0x01), ATTR_HIDDEN (0x02)
+
+Multi-drive support:
+  DRIVE_HDA (0) – primary HDD, main FAT16 volume
+  DRIVE_HDB (1) – secondary HDD (optional)
+  DRIVE_FDD0 (2) – floppy drive A
+  DRIVE_FDD1 (3) – floppy drive B
+  Each drive mounted independently via fs_mount_drive()
+  VFS mount table maps logical paths /HDB, /FDD0, /FDD1
 
 Path resolution (fs_resolve):
   Walks path components from dir_context.current_cluster
   Absolute paths (leading '/') reset to cluster 0 (root)
+  Handles VFS cross-drive path segments transparently
   Returns parent_cluster + 11-byte 8.3 name for final component
-
-Directory iteration (dir_iterate, cluster_iterate):
-  Callback-based walker; stops on DIR_ENTRY_END sentinel
-  Skips DIR_ENTRY_FREE and ATTR_VOLUME_ID entries
 
 High-level operations:
   fs_open / fs_create / fs_read / fs_write
@@ -373,25 +387,49 @@ High-level operations:
   fs_rename / fs_delete / fs_rmdir / fs_rm_rf
   fs_mkdir / fs_copy_file / fs_copy_dir
   fs_move_file / fs_move_dir
-  fs_get_usage (FAT scan for used cluster count)
+  fs_set_hidden / fs_is_hidden
+  fs_get_usage / fs_get_usage_drive
+  fs_resolve_dir (path → drive_id + cluster)
 
-Current directory: global fs_dir_context_t { current_cluster, path[256] }
+Current directory: global fat_dir_ctx_t { drive_id, current_cluster, path[256] }
   fs_chdir resolves ".." via dotdot entries; normalises path string.
 
-Write path for fs_write:
-  Allocates new clusters on demand via fat_alloc()
-  Updates dir entry file_size + timestamps on fs_close()
-  Both FAT copies kept in sync by fat_set()
+Protected paths: DESKTOP, HDB, FDD0, FDD1 — cannot be deleted/renamed.
 
 
-7. MULTITASKING SCHEDULER (os/scheduler.c)
+7. FLOPPY DISK (fs/fdd.c)
+═══════════════════════════════════════════════════════════════════════════
+
+FDC (Floppy Disk Controller) at ports 0x3F0–0x3F7.
+Geometry: 80 tracks × 2 heads × 18 sectors × 512 bytes = 1.44 MB.
+
+DMA buffer at physical 0x7000 (fits in low 64 KB for ISA DMA).
+Channel 2 DMA used for data transfer.
+
+fdd_init(drive_id):
+  - CMOS check for drive presence (register 0x10)
+  - FDC reset via DOR port
+  - SPECIFY command: SRT/HLT/HUT timings
+  - Set 500 Kbps data rate (CCR register)
+  - Recalibrate to track 0
+
+fdd_read_sector / fdd_write_sector:
+  - Motor start (300 ms spin-up delay)
+  - Seek to cylinder
+  - DMA setup (read: 0x56, write: 0x5A mode byte)
+  - FDC READ/WRITE DATA command (9 bytes)
+  - Poll for completion; check ST0/ST1/ST2 status bytes
+  - Up to 3 retry attempts with recalibrate on failure
+
+
+8. MULTITASKING SCHEDULER (os/scheduler.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 Model: cooperative, round-robin, up to MAX_TASKS=64 tasks
 
 Task descriptor (task_t):
   uint32_t esp         (saved stack pointer)
-  uint8_t *stack_base  (kmalloc'd 16 KB block)
+  uint8_t *stack_base  (kmalloc'd 8 KB block)
   bool     alive
   void (*entry)(void *)
   void    *arg
@@ -401,7 +439,7 @@ Tasks 1–63: app tasks (allocated by scheduler_add_task)
 
 scheduler_add_task(entry, arg):
   1. Find free slot
-  2. kmalloc 16 KB stack
+  2. kmalloc 8 KB stack; write STACK_CANARY (0xDEADBEEF) at base
   3. Build initial stack frame (task_switch-compatible):
      [ edi=0 | esi=0 | ebx=0 | ebp=0 | eflags=0x202 ]  ← saved ESP
      [ &task_trampoline ] ← ret address after task_switch
@@ -410,6 +448,7 @@ scheduler_add_task(entry, arg):
   4. Set tasks[slot].esp, alive=true
 
 task_yield():
+  Checks canary before yielding (catches stack overflow)
   Round-robin search for next alive task
   Calls task_switch(&tasks[old].esp, tasks[next].esp)
 
@@ -422,6 +461,7 @@ Kernel Task Event Loop (scheduler_kernel_task):
     frame_start = time_millis();
     ps2_update();          // Input
     speaker_update();      // Async beep timeouts
+    handle_global_shortcuts();  // Ctrl+Q = close focused window
     wm_sync_menubar();     // Sync focused window menus → global menubar
     menubar_layout();
     if (!modal_active()) {
@@ -442,7 +482,7 @@ Kernel Task Event Loop (scheduler_kernel_task):
 TARGET_FPS = 60, FRAME_TIME_MS = 16 ms
 
 
-8. APPLICATION FRAMEWORK (os/os.c)
+9. APPLICATION FRAMEWORK (os/os.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 App descriptor (app_descriptor):
@@ -451,6 +491,7 @@ App descriptor (app_descriptor):
     void (*init)(void *state)
     void (*on_frame)(void *state)
     void (*destroy)(void *state)
+    bool        single_instance
 
 App instance (app_instance_t):
     app_descriptor *desc
@@ -459,8 +500,8 @@ App instance (app_instance_t):
     bool            wants_quit
     int             task_slot  (-1 = no dedicated task)
 
-Registry: app_registry[] in os/app_registry.c lists 10 built-in apps.
-  os_install_app registers them into installed_apps[MAX_INSTALLED_APPS=64].
+Registry: app_registry[] in os/app_registry.c lists 11 built-in apps.
+  os_install_app registers them into installed_apps[MAX_INSTALLED_APPS=256].
   os_launch_app allocates state, calls init(), sets running=true.
   os_quit_app / os_quit_app_by_desc: set wants_quit flag.
   os_reap_dead_apps: calls destroy(), kfrees state, decrements count.
@@ -471,10 +512,15 @@ os_tick_apps: called every frame; rate-limited by FRAME_TIME_MS.
 os_find_app(name): linear search through installed_apps by name string.
   Used by FileF and Desktop when double-clicking .APP shortcuts.
 
-Apps can request their own quit via os_request_exit() (sets gui_should_exit).
+os_close_own_instance(win): finds the app instance whose state->win
+  matches the given window pointer and calls os_quit_app on it.
+  Handles the common pattern of apps embedding their window as first field.
+
+Global alarm (g_alarm): set by Clock app; fires once per minute match,
+  plays beeps and shows a modal dialog. Checked each frame in desktop_on_frame.
 
 
-9. WINDOW MANAGER (ui/window.c)
+10. WINDOW MANAGER (ui/window.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 Window struct (partial):
@@ -483,10 +529,19 @@ Window struct (partial):
   visible, minimized, dragging, resizing, resizable
   show_order (z-order integer)
   pinned_bottom (desktop background window flag)
+  animate_open_close (bool — respects g_cfg.reduce_motion)
+  anim_state: NONE / OPEN / CLOSE / MINIMIZE / RESTORE
+  anim_no_of_frames (default: WIN_ANIM_DEFAULT_FRAMES = 20)
   on_close / on_minimize callbacks
   on_draw(win, userdata) custom content render hook
   widgets[MAX_WIN_WIDGETS=128], widget_count
   win_menus[MAX_WIN_MENUS=16], win_menu_count
+
+Animations (draw_anim):
+  OPEN/CLOSE:    lerp window rect from/to centre point
+  MINIMIZE:      lerp window rect to/from taskbar button position
+  RESTORE:       reverse of MINIMIZE
+  All animations disabled when g_cfg.reduce_motion = 1
 
 Stack: win_stack[MAX_WINDOWS=32], sorted by show_order ascending.
   Highest show_order = topmost window.
@@ -499,6 +554,7 @@ wm_sync_menubar(mb): copies menus from focused window into global menubar,
 
 wm_draw_all:
   For each window in stack order (back-to-front):
+    If animating: draw_anim(win) and skip full draw
     window_draw(win):
       - Title bar (bar_color, 16 px high)
       - Close button [X] (RED, 10×10 at x+3, y+3)
@@ -506,15 +562,16 @@ wm_draw_all:
       - Title string (centred, truncated with "..." if needed)
       - Content fill (content_color below title bar)
       - Custom on_draw callback
-      - Resize grip (10×10 bottom-right, if resizable)
+      - Resize grip (8×8 bottom-right, if resizable)
       - Widget draw loop
   Taskbar: minimised windows drawn as labelled buttons at screen bottom.
 
 wm_update_all:
-  1. Taskbar click → restore minimised window
+  1. Taskbar click → restore minimised window (triggers RESTORE anim)
   2. Click in window area → wm_focus
   3. Delegate to window_update(focused_window):
-     - Close / Minimise button hit test
+     - Close button → WIN_ANIM_CLOSE (or immediate if reduce_motion)
+     - Minimise button → WIN_ANIM_MINIMIZE (or immediate)
      - window_resize: drag resize grip
      - window_dragged: drag title bar
      - Widget update loop
@@ -525,7 +582,7 @@ Window coordinates:
   Effective content y = win->y + 26
 
 
-10. MENUBAR (ui/menubar.c)
+11. MENUBAR (ui/menubar.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 Global menubar (g_menubar): populated by wm_sync_menubar each frame.
@@ -543,15 +600,16 @@ Click propagation flag: g_menubar_click_consumed prevents desktop /
   window layers from acting on the same click.
 
 
-11. MODAL DIALOG (ui/modal.c)
+12. MODAL DIALOG (ui/modal.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 Singleton modal: only one dialog at a time.
 Types: MODAL_INFO, MODAL_WARNING, MODAL_ERROR, MODAL_CONFIRM.
 
-Dimensions: 200×90, centred on screen.
-Layout: coloured title bar (14 px) + wrapped message (3 lines, 36 chars)
+Dimensions: 220×110, centred on screen.
+Layout: coloured title bar (16 px) + wrapped message (4 lines max)
   + OK button (or OK + Cancel for CONFIRM).
+Title bar also features an [X] close button (calls on_cancel).
 
 modal_active(): returns true → scheduler_kernel_task skips app ticks
   and window updates, keeping dialog exclusive.
@@ -560,7 +618,7 @@ modal_show(MODAL_ERROR):  plays descending triple beep via speaker.
 modal_show(MODAL_WARNING): plays two-tone warning beep.
 
 
-12. SHELL / CLI (shell/cli.c + cmds.c)
+13. SHELL / CLI (shell/cli.c + cmds.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 cli_run(): blocking pre-GUI text shell.
@@ -571,8 +629,9 @@ cli_run(): blocking pre-GUI text shell.
 Commands (shell/cmds.c):
   File ops:    ls, cat, touch, rm [-r], write, cp, mv
   Directory:   pwd, cd, mkdir, rmdir
-  System:      df, mem, clock, clear, help, gui, exit
+  System:      df, mem, sysinfo, clock, clear, help, gui, exit
   Terminal:    history, tee <file>  (writes term_buf to FAT16 file)
+  Power:       shutdown [s], restart [s]  (optional delay in seconds)
   Assembler:   asm <src.asm> [out.bin]
   Binary run:  run <file.bin>
 
@@ -590,7 +649,7 @@ cli_execute_command: shared by both CLI and ASMTerm on_frame,
   returning CMD_STATUS_OK / EXIT / GUI / CLEAR.
 
 
-13. x86 ASSEMBLER (shell/asm/asm.c)
+14. x86 ASSEMBLER (shell/asm/asm.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 A self-hosted two-pass flat-binary x86 assembler running inside ASMOS.
@@ -598,14 +657,14 @@ Source written in TEditor, assembled via `asm` CLI command or ASMTerm,
 output .BIN file executed by `run`.
 
 Input:  FAT16 source file (.ASM) or in-memory string
-Output: flat binary up to ASM_OUT_MAX = 65536 bytes
+Output: flat binary up to ASM_OUT_MAX = 16384 bytes
 
 Two-pass algorithm:
   Pass 0: emit code, record label addresses, note forward references
   Pass 1: re-emit code (with all labels now known), apply fixups
 
-Label table: ASM_MAX_LABELS=512 entries  { name[64], addr, defined }
-Fixup table: ASM_MAX_FIXUPS=512 entries
+Label table: ASM_MAX_LABELS=128 entries  { name[64], addr, defined }
+Fixup table: ASM_MAX_FIXUPS=128 entries
   Types: FIX_REL8 (short jump), FIX_REL32 (near jmp/call), FIX_ABS32 (dd/imm32)
   Applied after pass 1 by patching bytes in a_out[]
 
@@ -614,7 +673,7 @@ Tokeniser (a_tokenise):
   - Handles quoted strings (single + double), escape sequences \n \t \0
   - Square-bracket expressions: memory operands [base+idx*scale+disp]
                                  directives [bits N] [org N] stripped
-  - Comma/space delimiters; up to ASM_MAX_TOKENS=64 tokens per line
+  - Comma/space delimiters; up to ASM_MAX_TOKENS=32 tokens per line
 
 Expression evaluator (a_eval):
   - Supports +/- binary operators (right-to-left split at lowest-prec op)
@@ -625,15 +684,6 @@ Expression evaluator (a_eval):
 
 Register parser (a_reg): recognises all 8 × 32-bit, 16-bit, and 8-bit
   general-purpose registers (EAX–EDI, AX–DI, AL/AH–BL/BH).
-
-Operand parser (a_parse_op):
-  - size overrides: byte/word/dword
-  - segment overrides: cs:/ds:/es:/fs:/gs:/ss:
-  - memory: [base ± idx*scale ± disp]
-  - register, immediate, or forward-ref immediate
-
-ModRM / SIB encoder (a_modrm):
-  Covers: [reg], [reg+disp8], [reg+disp32], [disp32], SIB addressing
 
 Supported instruction set (subset of 32-bit IA-32):
   Data mov:   MOV, LEA, XCHG, MOVZX, MOVSX
@@ -661,7 +711,7 @@ Binary calling convention (for `run`):
     sub  ebx, (.here - $$)   ; ebx = runtime base address
 
 
-14. BINARY RUNNER (shell/binrun.c)
+15. BINARY RUNNER (shell/binrun.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 cmd_run(ctx, path, out, max):
@@ -684,13 +734,13 @@ bin_syscall_t (function pointer table passed to binary):
 Binary size limit: BINRUN_MAX_SIZE = 65536 bytes.
 
 
-15. BUILT-IN APPLICATIONS
+16. BUILT-IN APPLICATIONS
 ═══════════════════════════════════════════════════════════════════════════
 
 All apps follow the app_descriptor pattern (init / on_frame / destroy).
 State is a privately defined struct, zero-initialised by the OS.
 
-15.1 ASMDraw (apps/asmdraw.c)
+16.1 ASMDraw (apps/asmdraw.c)
   Pixel art / paint application.
   Canvas: up to 320×200 8-bit palette pixels stored in
     uint8_t canvas[200][320] inside app state.
@@ -700,91 +750,112 @@ State is a privately defined struct, zero-initialised by the OS.
   Save/Load: custom .PIC format  (4-byte header: width[2] + height[2], then raw pixels).
   Toolbar drawn at left edge (TOOLBAR_W=18 px); canvas offset by CANVAS_X_OFF.
 
-15.2 ASMTerm (apps/asmterm.c)
+16.2 ASMTerm (apps/asmterm.c)
   Terminal emulator with full shell + assembler + binary runner access.
   Output ring buffer: 128 lines × 80 chars.
   Input queue (INPUT_QUEUE_CAP=256) fed by keyboard, consumed by
     tctx_readline / tctx_getchar callbacks used by binrun.
   Binary waiting mode: shows "BIN>" prompt; input forwarded to running binary.
   History: 32 entries, up/down arrow navigation.
-  Scrollable output with F5/F6 or scrollbar.
+  Scrollable output with scrollbar; click-to-scroll also supported.
   Resizable window; visible_rows recalculated from window height each frame.
   Executes all cli_execute_command verbs including `asm` and `run`.
 
-15.3 ASMusic (apps/asmusic.c)
+16.3 ASMusic (apps/asmusic.c)
   16-step × 12-note monophonic step sequencer.
   Notes: D4–A5 (12 fixed frequencies mapped to PC speaker Hz).
   BPM range: 60–180 in 21 steps; ticks_per_step = (6000/BPM)/4.
   Playback: pit_ticks drive tick_accum; each step fires speaker_tone_start
     for the lowest active note in that column; note_off after 60% of step.
-  Demo pattern pre-loaded at init (Linkin Park-inspired riff).
+  Demo pattern pre-loaded at init (Linkin Park "In the End" inspired riff).
   Keyboard shortcuts: Space=play/stop, C=clear, ←/→=BPM.
 
-15.4 Calculator (apps/calculator.c)
+16.4 Calculator (apps/calculator.c)
   4-function calculator (+ − × ÷) with %, +/− sign toggle.
   State machine: accumulator + pending_op + fresh_operand flag.
   Custom double→string conversion (no libc printf needed).
   Display: 16-char right-aligned readout.
   Keyboard entry supported alongside mouse.
+  Single-instance app.
 
-15.5 Clock (apps/clock.c)
+16.5 Clock (apps/clock.c)
   Minimal clock window using widget labels.
   Reads time_rtc_local() every frame (no rate-limit; low cost).
   Displays HH:MM:SS and DD/MM/YYYY via update_label_text.
+  Alarm menu: set/clear a global alarm (g_alarm); fires once per day
+    at specified HH:MM, triggers beeps and a modal notification.
+  Single-instance app.
 
-15.6 FileF (apps/filef.c)
-  Icon-based file manager; supports multiple simultaneous instances.
+16.6 FileF (apps/filef.c)
+  Icon-based file manager; supports multiple simultaneous instances
+  (or single-window mode controlled by g_cfg.filef_single_window).
+  Virtual root ("/") shows all mounted drives as icons.
+  Drives: HDA, HDB, FDD0, FDD1 — each accessible as /HDA, /HDB, etc.
+  Navigation history: 32-entry back/forward stack; navbar buttons + Home/Desk.
   Icons: 20×20 px per entry, 44×30 px cells; up to 128 entries per directory.
   Scrollable content area with 4 px scrollbar.
   Sort modes: by Name, Date, Size (bubble sort on ff_item_t array).
-  Double-click: open directory (new FileF instance) or launch .APP.
+  Double-click: open directory (new FileF instance or same window) or launch .APP.
   Drag-and-drop: move files between FileF windows or to Desktop.
   Drag-to-desktop: calls desktop_accept_drop (fs_move_file/dir).
-  Clipboard: global g_clip (copy/cut/paste within and across windows).
-  Modes: NORMAL, RENAME (inline text edit under icon), CONFIRM (delete),
-         NEWNAME (new file/folder dialog), INFO (Get Info overlay).
-  Cycle cascade position (FF_CASCADE=16 px) for each new window.
+  Clipboard: global g_clipboard (copy/cut/paste within and across windows).
+  Modes: NORMAL, RENAME (inline text edit), CONFIRM (delete), NEWNAME,
+         INFO (Get Info overlay with path copy button).
+  Hidden files: shown/hidden via "Show Hidden" toggle; togglable via Edit menu.
+  Keyboard shortcuts: Ctrl+C/X/V, Delete.
+  Cascade position (FF_CASCADE=16 px) for each new window.
 
-15.7 HexView (apps/hexview.c)
+16.7 HexView (apps/hexview.c)
   Two-window hex viewer (address+hex | ASCII) for up to 64 KB files.
   Hex window: shows 16-byte rows with 4-digit address and colour-coded bytes.
   ASCII window: printable chars in LIGHT_GREEN; non-printable as '.'.
   Horizontal scrollbars on both panes; vertical scrollbar on hex pane.
   Arrow/PgUp/PgDn/Home/End/F5/F6 keyboard navigation.
-  File open via in-window dialog; data held in kmalloc'd buffer.
+  File open via in-window dialog with Ctrl+V paste support; data in kmalloc'd buffer.
 
-15.8 Monitor (apps/monitor.c)
-  System resource monitor.
-  Reads heap_used() + heap_remaining() and fs_get_usage() each frame.
-  Displays as "used KB / total KB" labels via update_label_text.
-  UPDATE_INTERVAL = TARGET_FPS (updates once per second).
+16.8 Monitor (apps/monitor.c)
+  System resource monitor with two tabs.
+  Task List tab: lists all running apps; Switch To / End Task / Cancel buttons.
+    Clicking "Switch To" focuses the selected app's window.
+    Clicking "End Task" calls the app's on_close or os_quit_app.
+  System tab: CPU model (CPUID), memory usage (heap_used/remaining),
+    per-drive usage with colour-coded bar charts; uptime display.
+  UPDATE_INTERVAL = 60 frames (~1 second refresh).
+  Single-instance app.
 
-15.9 Settings (apps/settings.c)
+16.9 Settings (apps/settings.c)
   Runtime configuration editor.
   Reflects and mutates g_cfg directly via button clicks.
-  Settings: wallpaper pattern, colours A/B, timezone, boot chime, sound,
-    start-in-GUI toggle.
-  Dirty flag + "Save" button calls cfg_save() → writes /ASMOS.CFG.
+  Settings: wallpaper pattern, colours A/B (0–15), timezone offset (±14),
+    boot chime, sound enabled, start-in-GUI toggle,
+    FileF single/multi window mode, reduce motion toggle.
+  Dirty flag + "Save" button (turns RED when unsaved) calls cfg_save().
+  Single-instance app.
 
-15.10 TEditor (apps/teditor.c)
+16.10 TEditor (apps/teditor.c)
   Plain-text editor; 8 KB buffer (TEXT_CAP), up to 512 lines (MAX_LINES).
   Line index: line_start[MAX_LINES] rebuilt by np_reindex after every edit.
   Binary search np_line_of + np_col_of for O(log n) cursor queries.
   Cursor: character position (byte offset into text[]).
   Vertical + horizontal scrollbars; horizontal auto-scrolls to cursor.
-  Highlight current line (LIGHT_YELLOW band).
-  File dialog: Open / Save As with auto-.TXT extension.
+  Highlight current line (LIGHT_CYAN band).
+  Selection: Shift+arrow, Shift+Home/End, Ctrl+A; shown as LIGHT_GRAY band.
+  Clipboard: Ctrl+C copy, Ctrl+X cut, Ctrl+V paste.
+  File dialog: Open / Save / Save As with auto-.TXT extension.
   Keyboard: arrows, Home, End, PgUp/PgDn, Tab (4 spaces), Delete, Backspace.
+  Multi-instance; unsaved-changes confirm dialog on close.
+  Can be opened directly by FileF on double-click of .TXT files.
   Dirty marker '*' in status bar.
 
 
-16. DESKTOP SYSTEM (ui/desktop.c + desktop_fs.c)
+17. DESKTOP SYSTEM (ui/desktop.c + desktop_fs.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 Desktop Window:
   Pinned-bottom, covers full screen minus menubar and taskbar.
   show_order = −1 (always behind all real windows).
-  Owns the "Apps", "File", "Edit", "View" global menus.
+  Owns "Apps", "File", "Edit", "Action" global menus.
+  File menu includes Rename for selected desktop items.
 
 Wallpaper Rendering (draw_wallpaper_pattern):
   Pattern 0 – Solid:       clear_screen(main_color)
@@ -792,27 +863,37 @@ Wallpaper Rendering (draw_wallpaper_pattern):
   Pattern 2 – Stripes:      horizontal 5-px stripes
   Pattern 3 – Dots:         solid fill + dot every 10 px
 
+Power Animations (power_anim_run):
+  Phase 1: scanline fade to black (8 passes, every 3rd row cleared per pass)
+  Phase 2: animated progress bar with leading pulse edge, dot spinner,
+           percentage counter, and scanline overlay (40 steps)
+  Phase 3: 3-frame flash (DARK_GRAY/BLACK alternating)
+  Phase 4: final hold with coloured message text
+  Restart uses LIGHT_GREEN/GREEN; shutdown uses LIGHT_CYAN/CYAN.
+
 Desktop FS (/DESKTOP directory):
-  Created at first boot; populated with FILEF.APP + ASMDRAW.APP shortcuts
-  and a HELLO.ASM source file demo.
+  Created at first boot; populated with FILEF.APP + ASMDRAW.APP shortcuts.
   desktop_fs_reload(): reads FAT16 directory, builds desktop_item_t array.
     .APP files → DESKTOP_ITEM_APP (extension stripped for display)
     directories → DESKTOP_ITEM_DIR
     other files → DESKTOP_ITEM_FILE (PIC/TXT/CFG icons differentiated)
+    Floppy drives → DESKTOP_ITEM_FDD (one per mounted FDD)
+    DRIVE_HDB → DESKTOP_ITEM_HDD (if mounted)
   grid_slot(n): column-major layout (col = n / rows_avail).
   Icons persist position in memory only (no sidecar metadata file).
 
-Double-click detection: 60-tick (600 ms) window comparing last click index.
+Rename dialog: inline text box, same validation as FileF newname dialog.
+
+Double-click detection: TARGET_FPS ticks window (~1 second at 60 fps).
+
+Desktop keyboard shortcuts (when desktop is focused):
+  Ctrl+C / Ctrl+X / Ctrl+V / Delete — same operations as Edit menu.
 
 Desktop drag-and-drop: icon positions updated in memory;
   fs_move_* called when dragging from FileF onto desktop area.
 
-HELLO.ASM embedded macro (desktop_fs.h): position-independent x86 demo
-  that prints "Enter Name:" prompt, reads input via sc_readline,
-  then prints numbers 1–5 using sc_itoa + sc_putchar.
 
-
-17. CURSOR (ui/cursor.c)
+18. CURSOR (ui/cursor.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 4 cursor types (CHOSEN_CURSOR global):
@@ -825,24 +906,24 @@ Each cursor is an 8-row × 9-column bitmap stored as two uint16_t[8] arrays:
 Rendering: draw_dot per set bit, bounds-clamped, drawn last each frame.
 
 
-18. ICON SYSTEM (ui/icons.c + icons.h)
+19. ICON SYSTEM (ui/icons.c + icons.h)
 ═══════════════════════════════════════════════════════════════════════════
 
 icon_view_t: reusable icon grid embedded in both desktop and FileF.
   MAX_ICONS_PER_VIEW=32 icons per view, 20×20 px each.
-  Double-click threshold: TARGET_FPS60 ticks.
+  Double-click threshold: TARGET_FPS ticks.
   Drag threshold: DRAG_THRESHOLD=4 px movement.
   icon_view_update: hit-test, click/double-click/drag state machine.
 
 Per-extension file icons drawn inline:
   draw_folder_icon, draw_app_icon, draw_file_icon, draw_dotdot_icon,
   draw_pic_icon (.PIC), draw_txt_icon (.TXT), draw_cfg_icon (.CFG),
-  draw_unknown_icon (fallback).
+  draw_hdd_icon, draw_floppy_icon, draw_unknown_icon (fallback).
   All use 20×20 px (ICO_W × ICO_H) bounding boxes.
   Selected state: darker fill + no drop-shadow on label.
 
 
-19. ERROR HANDLING (os/error.c)
+20. ERROR HANDLING (os/error.c)
 ═══════════════════════════════════════════════════════════════════════════
 
 err_severity_t: ERR_INFO, ERR_WARNING, ERR_FATAL
@@ -866,7 +947,7 @@ Assertion macros: ASSERT(cond, code, ctx) → ERR_FATAL if false
   WARN_IF(cond, code, ctx)
 
 
-20. STRING / MATH / TIME LIBRARIES
+21. STRING / MATH / TIME LIBRARIES
 ═══════════════════════════════════════════════════════════════════════════
 
 lib/string/string.c:
@@ -897,40 +978,49 @@ lib/time/time.c:
   Uptime: time_seconds() / time_millis() / uptime_hms()
   sleep_ms / sleep_s (pit_ticks busy-wait)
 
+lib/cpu/cpu_metrics.c:
+  cpu_model_init(): reads CPU brand string via CPUID leaves 0x80000002–4
+  cpu_metrics_update(): idle-loop calibration for approximate CPU usage %
+  cpu_model_str() / cpu_usage_percent()
 
-21. KNOWN LIMITATIONS
+
+22. KNOWN LIMITATIONS
 ═══════════════════════════════════════════════════════════════════════════
 
 ARCHITECTURE:
   - All code runs in ring 0 (no memory protection or user mode)
   - No page tables / virtual memory / address space isolation
-  - No DMA; all disk I/O is PIO (CPU-driven, blocking)
+  - No DMA for ATA; all disk I/O is PIO (CPU-driven, blocking)
   - PS/2 is polled every frame, not interrupt-driven
   - Cooperative multitasking: a task that never yields blocks everything
+  - No floating-point save/restore in task switch (apps must avoid FPU)
 
 LIMITS (compile-time constants):
   MAX_WINDOWS           32
   MAX_WIN_WIDGETS       128
   MAX_WIN_MENUS         16 per window / 8 in global menubar
   MAX_MENU_ITEMS        12 per menu
-  MAX_INSTALLED_APPS    64
-  MAX_RUNNING_APPS      32
+  MAX_INSTALLED_APPS    256
+  MAX_RUNNING_APPS      48
   MAX_TASKS             64
   FAT16 volume          32 MB (65536 sectors × 512 bytes)
   Heap                  ~3 MB default (E820-detected upper bound)
-  TEditor buffer        8 KB / 512 lines
+  TEditor               Max 1MB file (however, it may take a week to load :) )
   ASMDraw canvas        320×200 px (64 KB in app state)
-  Assembler output      64 KB
+  Assembler output      16 KB
   HexView file          64 KB
   Term buffer           256 lines × 128 chars
+  FileF entries/dir     128
+  Navigation history    32 entries per FileF instance
 
 FILESYSTEM:
-  - Only root FAT16 volume; no subdirectory paths beyond what fs_resolve supports
-  - No file locking; concurrent writes from multiple apps unsupported
-  - FAT16 only (no FAT32, ext2, etc.)
+  - FAT16/FAT12 only (no FAT32, ext2, etc.)
   - 8.3 filenames only
+  - No file locking; concurrent writes from multiple apps unsupported
+  - No journaling; power loss during write may corrupt FAT
 
 DISPLAY:
-  - Fixed 320×200 resolution, 16-colour palette (hardware VGA mode 13h supports 256)
+  - Fixed 320×200 resolution, 16-colour palette (mode 13h supports 256)
   - No hardware acceleration; all rendering is software
-  - Back buffer at 1 MB requires PC to have extended memory (always true on x86)
+  - Back buffer at 1 MB requires PC to have extended memory (always true)
+  - No sub-pixel rendering or anti-aliasing

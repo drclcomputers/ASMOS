@@ -84,6 +84,8 @@ extern window *win_stack[MAX_WINDOWS];
 extern int win_count;
 extern window *focused_window;
 
+bool is_desktop_focused();
+
 window *wm_register(const window_spec_t *spec);
 
 void wm_unregister(window *win);

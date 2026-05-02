@@ -130,7 +130,7 @@ os_image.bin: boot.bin kernel.bin
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-qemu: all
+qemu-fdd: all
 	qemu-system-i386 \
 	    -drive format=raw,file=os_image.bin \
 	    -drive format=raw,file=floppy.img,if=floppy \
@@ -138,7 +138,7 @@ qemu: all
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
 
-qemu-nonfdd: all
+qemu: all
 	qemu-system-i386 \
 	    -drive format=raw,file=os_image.bin \
 	    -m 4M -machine pc \

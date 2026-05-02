@@ -79,6 +79,16 @@ static int taskbar_x_for(const window *target) {
     return tx;
 }
 
+bool is_desktop_focused() {
+    window *fw = wm_focused_window();
+
+    if (fw != NULL && fw->pinned_bottom) {
+        return true;
+    }
+
+    return false;
+}
+
 static void draw_anim(window *win) {
     int wy = win->y + MENUBAR_H_SIZE;
 
@@ -481,7 +491,7 @@ bool window_update(window *win) {
 
     int wy = win->y + MENUBAR_H_SIZE;
 
-    if (clicked_titlebar_btn(win->x + 3, wy + 3, 10, 10)) {
+    if (!is_desktop_focused() && clicked_titlebar_btn(win->x + 3, wy + 3, 10, 10)) {
         if (win->animate_open_close && !g_cfg.reduce_motion) {
             win->anim_state = WIN_ANIM_CLOSE;
             win->anim_frame = 0;
@@ -494,7 +504,7 @@ bool window_update(window *win) {
         return true;
     }
 
-    if (clicked_titlebar_btn(win->x + 16, wy + 3, 10, 10)) {
+    if (!is_desktop_focused() && clicked_titlebar_btn(win->x + 16, wy + 3, 10, 10)) {
         if (win->on_minimize) {
             win->on_minimize(win);
         } else if (win->animate_open_close && !g_cfg.reduce_motion) {
