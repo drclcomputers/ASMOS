@@ -2,7 +2,7 @@
   ASMOS v0.9.5 - COMPLETE ARCHITECTURE DOCUMENTATION
 ═══════════════════════════════════════════════════════════════════════════
 
-Last updated to reflect: config/config.h VER "0.9.5"
+Last updated to reflect: config/config.h VER "0.9.6"
 Covers: boot, kernel, HAL, memory, filesystem, scheduler, windowing,
         shell, assembler, runtime config, and all bundled applications.
 
