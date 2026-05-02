@@ -22,8 +22,8 @@ const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
 };
 
 const char *g_drive_paths[DRIVE_COUNT] = {
-    [DRIVE_HDA]  = "/HDA",
-    [DRIVE_HDB]  = "/HDB",
+    [DRIVE_HDA] = "/HDA",
+    [DRIVE_HDB] = "/HDB",
     [DRIVE_FDD0] = "/FDD0",
     [DRIVE_FDD1] = "/FDD1",
 };
@@ -126,7 +126,7 @@ static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
     } else {
         uint16_t cluster = dir_cluster;
         int safety = 0;
-        while (vol_cluster_active(v, cluster) && safety++ < 65536) {
+        while (vol_cluster_active(v, cluster) && safety++ < v->cluster_count) {
             uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
             for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
                 lba = start_lba + s;
@@ -158,7 +158,7 @@ static bool cluster_iterate(uint8_t drive_id, uint16_t cluster, cluster_cb cb,
     fat_vol_t *v = vol(drive_id);
     uint8_t sector_buf[512];
     int safety = 0;
-    while (vol_cluster_active(v, cluster) && safety++ < 65536) {
+    while (vol_cluster_active(v, cluster) && safety++ < v->cluster_count) {
         uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
         for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
             if (!fs_read_sector(drive_id, start_lba + s, sector_buf))
@@ -423,14 +423,20 @@ bool fs_mount(void) {
     return true;
 }
 
-bool fs_resolve_dir(const char *path, uint8_t *out_drive, uint16_t *out_cluster) {
+bool fs_resolve_dir(const char *path, uint8_t *out_drive,
+                    uint16_t *out_cluster) {
     uint8_t drive;
     uint16_t cluster = 0;
-    if (!path || !*path) return false;
+    if (!path || !*path)
+        return false;
     if (*path == '/') {
         drive = DRIVE_HDA;
         path++;
-        if (!*path) { *out_drive = DRIVE_HDA; *out_cluster = 0; return true; }
+        if (!*path) {
+            *out_drive = DRIVE_HDA;
+            *out_cluster = 0;
+            return true;
+        }
     } else {
         drive = dir_context.drive_id;
         cluster = dir_context.current_cluster;
@@ -438,8 +444,10 @@ bool fs_resolve_dir(const char *path, uint8_t *out_drive, uint16_t *out_cluster)
 
     char component[256];
     while (*path) {
-        while (*path == '/') path++;
-        if (!*path) break;
+        while (*path == '/')
+            path++;
+        if (!*path)
+            break;
         int ci = 0;
         while (*path && *path != '/' && ci < 255)
             component[ci++] = *path++;
@@ -452,14 +460,16 @@ bool fs_resolve_dir(const char *path, uint8_t *out_drive, uint16_t *out_cluster)
             const char *mp = g_vfs_mounts[m].path + 1;
             if (strcasecmp(component, mp) == 0) {
                 uint8_t target = g_vfs_mounts[m].drive_id;
-                if (!fs_drive_mounted(target)) return false;
+                if (!fs_drive_mounted(target))
+                    return false;
                 drive = target;
                 cluster = 0;
                 crossed = true;
                 break;
             }
         }
-        if (crossed) continue;
+        if (crossed)
+            continue;
 
         char name83[12];
         fs_make_83(component, name83);
@@ -493,13 +503,14 @@ bool fs_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
     return true;
 }
 
-bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes, uint32_t *used_bytes) {
+bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes,
+                        uint32_t *used_bytes) {
     if (drive_id >= DRIVE_COUNT || !g_drives[drive_id].mounted)
         return false;
     fat_vol_t *v = &g_drives[drive_id];
     *total_bytes = (v->bpb.total_sectors_32 ? v->bpb.total_sectors_32
-                                            : v->bpb.total_sectors_16)
-                   * v->bpb.bytes_per_sector;
+                                            : v->bpb.total_sectors_16) *
+                   v->bpb.bytes_per_sector;
     uint32_t used = 0;
     for (uint16_t c = 2; c < (uint16_t)(v->cluster_count + 2); c++) {
         uint16_t val = fat_get(drive_id, c);
@@ -934,8 +945,7 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             if (vol_is_eoc(v, next) || next == 0) {
                 uint16_t new_cluster = fat_alloc(f->drive_id);
                 if (new_cluster == 0) {
-                    total = -1;
-                    done_write(f, total, v);
+                    return done_write(f, -1, v);
                 }
                 zero_cluster(f->drive_id, new_cluster);
                 fat_set(f->drive_id, f->cur_cluster, new_cluster);
@@ -947,8 +957,7 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
                    !vol_cluster_active(v, f->cur_cluster)) {
             uint16_t new_cluster = fat_alloc(f->drive_id);
             if (new_cluster == 0) {
-                total = -1;
-                done_write(f, total, v);
+                return done_write(f, -1, v);
             }
             zero_cluster(f->drive_id, new_cluster);
             f->entry.cluster_lo = new_cluster;
@@ -976,9 +985,8 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             can_write = len;
 
         memcpy(write_sector_buf + offset_in_sector, in, can_write);
-        if (!fs_write_sector(f->drive_id, lba, write_sector_buf)) {
-            total = -1;
-            done_write(f, total, v);
+        if(!fs_write_sector(f->drive_id, lba, write_sector_buf)) {
+            return done_write(f, -1, v);
         }
 
         in += can_write;

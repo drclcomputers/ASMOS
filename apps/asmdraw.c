@@ -156,7 +156,7 @@ static void canvas_fill(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
         if (s->canvas[y][x] != target)
             continue;
         s->canvas[y][x] = color;
-        if (top + 4 < (int)(sizeof(stack) / sizeof(stack[0]))) {
+        if (top + 4 < (int)(sizeof(stack) / sizeof(stack[0])) - 4) {
             stack[top].x = (int16_t)(x + 1);
             stack[top].y = (int16_t)y;
             top++;
@@ -287,7 +287,7 @@ static void asmdraw_draw(window *win, void *ud) {
 
     for (int i = 0; i < PALETTE_COLS; i++) {
         int px = pal_x0 + i * cell_w;
-        fill_rect(px - 1, pal_y, cell_w, PALETTE_H, PALETTE_COLORS[i]);
+        fill_rect(px - 1, pal_y, cell_w, PALETTE_H-1, PALETTE_COLORS[i]);
         // draw_rect(px, pal_y, cell_w, PALETTE_H-1, BLACK);
     }
 

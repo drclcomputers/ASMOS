@@ -933,6 +933,7 @@ static void teditor_on_frame(void *state) {
                 col = ll;
             if (col < 0)
                 col = 0;
+            s->sel_anchor = -1;
             s->cursor = ls + col;
         }
 
