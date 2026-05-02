@@ -830,7 +830,7 @@ Rendering: draw_dot per set bit, bounds-clamped, drawn last each frame.
 
 icon_view_t: reusable icon grid embedded in both desktop and FileF.
   MAX_ICONS_PER_VIEW=32 icons per view, 20×20 px each.
-  Double-click threshold: DBLCLICK_TICKS=60 ticks.
+  Double-click threshold: TARGET_FPS60 ticks.
   Drag threshold: DRAG_THRESHOLD=4 px movement.
   icon_view_update: hit-test, click/double-click/drag state machine.
 

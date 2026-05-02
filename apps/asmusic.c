@@ -208,7 +208,7 @@ static void asmusic_draw(window *win, void *ud) {
     }
 
     if (s->status_timer > 0) {
-        draw_string(cx + 2, cy + STATUS_Y, s->status, LIGHT_YELLOW, 2);
+        draw_string(cx + 2, cy + STATUS_Y, s->status, YELLOW, 2);
     } else {
         draw_string(cx + 2, cy + STATUS_Y,
                     s->playing ? "Playing..." : "Click cells to draw a melody",

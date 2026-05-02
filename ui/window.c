@@ -9,28 +9,12 @@
 #include "lib/string.h"
 
 #include "config/config.h"
+#include "config/runtime_config.h"
 #include "io/mouse.h"
 
 window *win_stack[MAX_WINDOWS];
 int win_count = 0;
 window *focused_window = NULL;
-
-static void draw_anim_rect(int x, int y, int w, int h, int frame, int total,
-                           bool opening) {
-    int t = opening ? frame : (total - frame);
-    int cx = x + w / 2;
-    int cy = y + h / 2;
-    int rw = (w * t) / total;
-    int rh = (h * t) / total;
-    if (rw < 2)
-        rw = 2;
-    if (rh < 2)
-        rh = 2;
-    int rx = cx - rw / 2;
-    int ry = cy - rh / 2;
-    draw_rect(rx, ry, rw, rh, WHITE);
-    draw_rect(rx + 1, ry + 1, rw - 2, rh - 2, DARK_GRAY);
-}
 
 static void wm_sort(void) {
     for (int i = 0; i < win_count - 1; i++) {
@@ -83,12 +67,80 @@ static int taskbar_label_width(const window *win) {
     return (int)strlen(win->title) * 5 + 8;
 }
 
+static int taskbar_x_for(const window *target) {
+    int tx = 0;
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (w == target)
+            break;
+        if (w->visible && w->minimized)
+            tx += taskbar_label_width(w) + 1;
+    }
+    return tx;
+}
+
+static void draw_anim(window *win) {
+    int wy = win->y + MENUBAR_H_SIZE;
+
+    int win_rx = win->x, win_ry = wy, win_rw = win->w, win_rh = win->h;
+
+    int tb_x = taskbar_x_for(win);
+    int tb_y = SCREEN_HEIGHT - TASKBAR_H;
+    int tb_w = taskbar_label_width(win);
+    int tb_h = TASKBAR_H;
+
+    int cx = win->x + win->w / 2;
+    int cy = wy + win->h / 2;
+
+    int f = win->anim_frame;
+    int t = win->anim_no_of_frames;
+
+    int rx, ry, rw, rh;
+
+    switch (win->anim_state) {
+    case WIN_ANIM_OPEN:
+        rw = lerp_i(2, win_rw, f, t);
+        rh = lerp_i(2, win_rh, f, t);
+        rx = cx - rw / 2;
+        ry = cy - rh / 2;
+        break;
+    case WIN_ANIM_CLOSE:
+        rw = lerp_i(win_rw, 2, f, t);
+        rh = lerp_i(win_rh, 2, f, t);
+        rx = cx - rw / 2;
+        ry = cy - rh / 2;
+        break;
+    case WIN_ANIM_MINIMIZE:
+        rx = lerp_i(win_rx, tb_x, f, t);
+        ry = lerp_i(win_ry, tb_y, f, t);
+        rw = lerp_i(win_rw, tb_w, f, t);
+        rh = lerp_i(win_rh, tb_h, f, t);
+        break;
+    case WIN_ANIM_RESTORE:
+        rx = lerp_i(tb_x, win_rx, f, t);
+        ry = lerp_i(tb_y, win_ry, f, t);
+        rw = lerp_i(tb_w, win_rw, f, t);
+        rh = lerp_i(tb_h, win_rh, f, t);
+        break;
+    default:
+        return;
+    }
+
+    if (rw < 2)
+        rw = 2;
+    if (rh < 2)
+        rh = 2;
+
+    draw_rect(rx + 2, ry + 2, rw, rh, BLACK);
+    draw_rect(rx, ry, rw, rh, WHITE);
+    draw_rect(rx + 1, ry + 1, rw - 2, rh - 2, win->bar_color);
+}
+
 void wm_init(void) {
     win_count = 0;
     focused_window = NULL;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
+    for (int i = 0; i < MAX_WINDOWS; i++)
         win_stack[i] = NULL;
-    }
 }
 
 window *wm_register(const window_spec_t *spec) {
@@ -131,20 +183,26 @@ window *wm_register(const window_spec_t *spec) {
     win->on_close = spec->on_close;
     win->on_minimize = spec->on_minimize;
     win->show_order = win_count;
+    win->animate_open_close = true;
+    win->anim_no_of_frames = WIN_ANIM_DEFAULT_FRAMES;
 
     wm_clamp(win);
 
     win->pinned_bottom = spec->pinned_bottom;
-    win->anim_state =
-        (spec->visible && !spec->pinned_bottom) ? WIN_ANIM_OPEN : WIN_ANIM_NONE;
-    win->anim_frame = 0;
+
+    if (spec->visible && !spec->pinned_bottom && win->animate_open_close &&
+        !g_cfg.reduce_motion) {
+        win->anim_state = WIN_ANIM_OPEN;
+        win->anim_frame = 0;
+    } else {
+        win->anim_state = WIN_ANIM_NONE;
+    }
 
     win_stack[win_count++] = win;
     wm_sort();
 
-    if (spec->visible && !win->pinned_bottom) {
+    if (spec->visible && !win->pinned_bottom)
         wm_focus(win);
-    }
 
     return win;
 }
@@ -234,16 +292,45 @@ void wm_sync_menubar(menubar *mb) {
 void wm_draw_all(void) {
     for (int i = 0; i < win_count; i++) {
         window *win = win_stack[i];
-        if (!win->visible || win->minimized)
+        if (!win->visible)
             continue;
 
-        if (win->anim_state == WIN_ANIM_OPEN) {
+        bool animating = win->anim_state != WIN_ANIM_NONE &&
+                         win->animate_open_close && !g_cfg.reduce_motion;
+
+        if (win->minimized && !animating)
+            continue;
+
+        if (animating) {
             win->anim_frame++;
-            if (win->anim_frame >= WIN_ANIM_FRAMES)
+
+            if (win->anim_frame >= win->anim_no_of_frames) {
+                if (win->anim_state == WIN_ANIM_MINIMIZE) {
+                    win->anim_state = WIN_ANIM_NONE;
+                    win->minimized = true;
+                    continue;
+                } else if (win->anim_state == WIN_ANIM_CLOSE) {
+                    win->anim_state = WIN_ANIM_NONE;
+                    if (win->on_close)
+                        win->on_close(win);
+                    else
+                        win->visible = false;
+                    continue;
+                } else {
+                    win->anim_state = WIN_ANIM_NONE;
+                }
+            } else {
+                draw_anim(win);
+                continue;
+            }
+        }
+
+        if (win->anim_state != WIN_ANIM_NONE) {
+            if (win->anim_state == WIN_ANIM_MINIMIZE) {
                 win->anim_state = WIN_ANIM_NONE;
-        } else if (win->anim_state == WIN_ANIM_CLOSE) {
-            win->anim_frame++;
-            if (win->anim_frame >= WIN_ANIM_FRAMES) {
+                win->minimized = true;
+                continue;
+            } else if (win->anim_state == WIN_ANIM_CLOSE) {
                 win->anim_state = WIN_ANIM_NONE;
                 if (win->on_close)
                     win->on_close(win);
@@ -251,9 +338,11 @@ void wm_draw_all(void) {
                     win->visible = false;
                 continue;
             }
+            win->anim_state = WIN_ANIM_NONE;
         }
 
-        window_draw(win);
+        if (!win->minimized)
+            window_draw(win);
     }
 
     int taskbar_x = 0;
@@ -284,6 +373,10 @@ void wm_update_all(void) {
             if (mouse.x >= tx && mouse.x < tx + lw) {
                 win->minimized = false;
                 wm_focus(win);
+                if (win->animate_open_close && !g_cfg.reduce_motion) {
+                    win->anim_state = WIN_ANIM_RESTORE;
+                    win->anim_frame = 0;
+                }
                 click_consumed = true;
                 break;
             }
@@ -293,9 +386,8 @@ void wm_update_all(void) {
             return;
     }
 
-    if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
+    if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE)
         return;
-    }
 
     if (!g_menubar_click_consumed) {
         for (int i = win_count - 1; i >= 0; i--) {
@@ -321,13 +413,6 @@ void window_draw(window *win) {
     if (!win || !win->visible || win->minimized)
         return;
 
-    if (win->anim_state == WIN_ANIM_OPEN || win->anim_state == WIN_ANIM_CLOSE) {
-        int wy = win->y + MENUBAR_H_SIZE;
-        draw_anim_rect(win->x, wy, win->w, win->h, win->anim_frame,
-                       WIN_ANIM_FRAMES, win->anim_state == WIN_ANIM_OPEN);
-        return;
-    }
-
     int wy = win->y + MENUBAR_H_SIZE;
 
     if (win->dragging) {
@@ -343,9 +428,7 @@ void window_draw(window *win) {
 
         const char *title = win->title;
         char title_buf[256];
-
         int char_pixel_w = 6;
-
         int max_width = win->w - 30;
         int max_chars = max_width / char_pixel_w;
 
@@ -361,16 +444,13 @@ void window_draw(window *win) {
         int title_area_center = (button_offset + win->w) / 2;
         int tx = win->x + title_area_center -
                  (int)(strlen(title) * (char_pixel_w / 2));
-
-        if (tx < win->x + button_offset + 5) {
+        if (tx < win->x + button_offset + 5)
             tx = win->x + button_offset + 5;
-        }
 
         draw_string(tx, wy + 6, (char *)title, win->title_color, 2);
 
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
         draw_rect(win->x, wy, win->w, win->h, BLACK);
-
         draw_line(win->x, win->y + win->h + MENUBAR_H_SIZE - 1,
                   win->x + win->w - 1, win->y + win->h + MENUBAR_H_SIZE - 1,
                   BLACK);
@@ -396,21 +476,33 @@ bool window_update(window *win) {
     if (!win || !win->visible || win->minimized)
         return false;
 
-    if (win->anim_state == WIN_ANIM_OPEN || win->anim_state == WIN_ANIM_CLOSE)
+    if (win->anim_state != WIN_ANIM_NONE)
         return true;
 
     int wy = win->y + MENUBAR_H_SIZE;
 
     if (clicked_titlebar_btn(win->x + 3, wy + 3, 10, 10)) {
-        win->anim_state = WIN_ANIM_CLOSE;
-        win->anim_frame = 0;
+        if (win->animate_open_close && !g_cfg.reduce_motion) {
+            win->anim_state = WIN_ANIM_CLOSE;
+            win->anim_frame = 0;
+        } else {
+            if (win->on_close)
+                win->on_close(win);
+            else
+                win->visible = false;
+        }
         return true;
     }
+
     if (clicked_titlebar_btn(win->x + 16, wy + 3, 10, 10)) {
-        if (win->on_minimize)
+        if (win->on_minimize) {
             win->on_minimize(win);
-        else
+        } else if (win->animate_open_close && !g_cfg.reduce_motion) {
+            win->anim_state = WIN_ANIM_MINIMIZE;
+            win->anim_frame = 0;
+        } else {
             win->minimized = true;
+        }
         return true;
     }
 

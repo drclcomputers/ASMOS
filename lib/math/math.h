@@ -17,8 +17,8 @@ static inline uint32_t clamp_u(uint32_t x, uint32_t lo, uint32_t hi) {
     return (x < lo) ? lo : (x > hi) ? hi : x;
 }
 
-static inline int lerp_i(int a, int b, int t_256) {
-    return a + ((b - a) * t_256) / 256;
+static inline int lerp_i(int a, int b, int c, int total) {
+    return a + (b - a) * c / total;
 }
 
 static inline int sign(int x) { return (x > 0) - (x < 0); }

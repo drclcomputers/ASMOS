@@ -10,13 +10,13 @@ typedef struct {
 
 static const rgb_t PALETTE_RGB[16] = {
     [BLACK] = {0, 0, 0},           [BLUE] = {0, 0, 170},
-    [GREEN] = {0, 170, 0},         [YELLOW] = {170, 170, 0},
+    [GREEN] = {0, 170, 0},         [CYAN] = {0, 170, 170},
     [RED] = {170, 0, 0},           [MAGENTA] = {170, 0, 170},
-    [CYAN] = {0, 170, 170},        [LIGHT_GRAY] = {170, 170, 170},
+    [BROWN] = {170, 85, 0},        [LIGHT_GRAY] = {170, 170, 170},
     [DARK_GRAY] = {85, 85, 85},    [LIGHT_BLUE] = {85, 85, 255},
-    [LIGHT_GREEN] = {85, 255, 85}, [LIGHT_YELLOW] = {255, 255, 85},
+    [LIGHT_GREEN] = {85, 255, 85}, [LIGHT_CYAN] = {85, 255, 255},
     [LIGHT_RED] = {255, 85, 85},   [LIGHT_MAGENTA] = {255, 85, 255},
-    [LIGHT_CYAN] = {85, 255, 255}, [WHITE] = {255, 255, 255},
+    [YELLOW] = {255, 255, 85},     [WHITE] = {255, 255, 255},
 };
 
 static inline uint8_t color_blend(uint8_t a, uint8_t b, uint8_t alpha) {
@@ -71,18 +71,20 @@ static inline uint8_t color_lighten(uint8_t c) {
         return LIGHT_BLUE;
     case GREEN:
         return LIGHT_GREEN;
+    case CYAN:
+        return LIGHT_CYAN;
     case RED:
         return LIGHT_RED;
     case MAGENTA:
         return LIGHT_MAGENTA;
-    case CYAN:
-        return LIGHT_CYAN;
-    case YELLOW:
-        return LIGHT_YELLOW;
+    case BROWN:
+        return YELLOW;
+    case LIGHT_GRAY:
+        return WHITE;
     case DARK_GRAY:
         return LIGHT_GRAY;
     default:
-        return WHITE;
+        return c;
     }
 }
 
@@ -98,14 +100,14 @@ static inline uint8_t color_darken(uint8_t c) {
         return BLUE;
     case LIGHT_GREEN:
         return GREEN;
+    case LIGHT_CYAN:
+        return CYAN;
     case LIGHT_RED:
         return RED;
     case LIGHT_MAGENTA:
         return MAGENTA;
-    case LIGHT_CYAN:
-        return CYAN;
-    case LIGHT_YELLOW:
-        return YELLOW;
+    case YELLOW:
+        return BROWN;
     default:
         return BLACK;
     }

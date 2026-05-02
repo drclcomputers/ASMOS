@@ -18,9 +18,8 @@ typedef struct __attribute__((packed)) {
     uint8_t sound_enabled;
     uint8_t wallpaper_main_color;
     uint8_t wallpaper_secondary_color;
-
     uint8_t filef_single_window;
-
+    uint8_t reduce_motion;
     uint8_t _reserved[53];
 } os_config_t;
 

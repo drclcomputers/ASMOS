@@ -408,7 +408,7 @@ static void np_draw(window *win, void *ud) {
         int py = text_y + row * LINE_H;
 
         if (ln == cursor_line)
-            fill_rect(wx + 1, py, ww - SCROLLBAR_W - 3, LINE_H, LIGHT_YELLOW);
+            fill_rect(wx + 1, py, ww - SCROLLBAR_W - 3, LINE_H, LIGHT_CYAN);
 
         int ls = s->line_start[ln];
         int le =

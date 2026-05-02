@@ -18,6 +18,8 @@
 #define WIN_ANIM_NONE 0
 #define WIN_ANIM_OPEN 1
 #define WIN_ANIM_CLOSE 2
+#define WIN_ANIM_MINIMIZE 3
+#define WIN_ANIM_RESTORE 4
 
 typedef struct window window;
 
@@ -62,6 +64,7 @@ struct window {
     bool animate_open_close;
     uint8_t anim_state;
     uint8_t anim_frame;
+    uint8_t anim_no_of_frames;
 
     win_callback_t on_close;
     win_callback_t on_minimize;

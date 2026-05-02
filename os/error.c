@@ -98,7 +98,7 @@ void error_report(err_severity_t sev, err_code_t code, const char *context) {
 
     if (!s_gui_mode) {
         uint8_t color = (sev == ERR_FATAL)     ? LIGHT_RED
-                        : (sev == ERR_WARNING) ? LIGHT_YELLOW
+                        : (sev == ERR_WARNING) ? YELLOW
                                                : LIGHT_CYAN;
         boot_puts(sev_prefix[sev], color);
         boot_puts(code_s, color);

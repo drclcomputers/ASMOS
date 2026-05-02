@@ -27,11 +27,6 @@ extern menubar g_menubar;
 extern bool g_menubar_click_consumed;
 
 /* ── wallpaper ──────────────────────────────────────────────────────────── */
-#define WALLPAPER_SOLID 0
-#define WALLPAPER_CHECKERBOARD 1
-#define WALLPAPER_STRIPES 2
-#define WALLPAPER_DOTS 3
-
 void draw_wallpaper_pattern(void) {
     uint8_t main_col = g_cfg.wallpaper_main_color;
     uint8_t sec_col = g_cfg.wallpaper_secondary_color;
@@ -71,7 +66,9 @@ static int s_drag_off_x = 0;
 static int s_drag_off_y = 0;
 static int s_last_click_idx = -1;
 static uint32_t s_last_click_tick = 0;
-#define DBLCLICK_TICKS 60
+static int s_rename_idx = -1;
+static char s_rename_buf[13] = {0};
+static int s_rename_len = 0;
 
 /* ── power animations ───────────────────────────────────────────────────── */
 #define BAR_W 160
@@ -82,23 +79,76 @@ static uint32_t s_last_click_tick = 0;
 
 void power_anim_run(bool is_restart) {
     const char *msg = is_restart ? "Restarting..." : "Shutting down...";
+    uint8_t bar_col = is_restart ? LIGHT_GREEN : LIGHT_CYAN;
+    uint8_t glow_col = is_restart ? GREEN : CYAN;
+
+    for (int fade = 0; fade < 8; fade++) {
+        uint8_t *buf = (uint8_t *)BACKBUF;
+        for (int y = 0; y < SCREEN_HEIGHT; y++) {
+            if ((y + fade) % 3 == 0) {
+                for (int x = 0; x < SCREEN_WIDTH; x++)
+                    buf[y * SCREEN_WIDTH + x] = BLACK;
+            }
+        }
+        blit();
+        sleep_ms(50);
+    }
 
     for (int step = 0; step <= STEPS; step++) {
         clear_screen(BLACK);
 
+        for (int y = 1; y < SCREEN_HEIGHT; y += 3)
+            draw_line(0, y, SCREEN_WIDTH - 1, y, DARK_GRAY);
+
         int msg_x = (SCREEN_WIDTH - (int)strlen(msg) * 5) / 2;
-        draw_string(msg_x, SCREEN_HEIGHT / 2 - 8, (char *)msg, WHITE, 2);
+        draw_string(msg_x, SCREEN_HEIGHT / 2 - 24, (char *)msg, WHITE, 2);
+
+        char pct[5];
+        int p = (step * 100) / STEPS;
+        pct[0] = '0' + p / 100;
+        pct[1] = '0' + (p / 10) % 10;
+        pct[2] = '0' + p % 10;
+        pct[3] = '%';
+        pct[4] = '\0';
+        int px = (SCREEN_WIDTH - 4 * 5) / 2;
+        draw_string(px, SCREEN_HEIGHT / 2 - 10, pct, LIGHT_GRAY, 2);
+
+        fill_rect(BAR_X + 2, BAR_Y + 2, BAR_W, BAR_H, DARK_GRAY);
 
         fill_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, DARK_GRAY);
+        fill_rect(BAR_X, BAR_Y, BAR_W, BAR_H, BLACK);
+
         int filled = (step * BAR_W) / STEPS;
-        uint8_t color = is_restart ? LIGHT_GREEN : BLUE;
-        fill_rect(BAR_X, BAR_Y, filled, BAR_H, color);
-        draw_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, WHITE);
+        fill_rect(BAR_X, BAR_Y, filled, BAR_H, bar_col);
+
+        if (filled > 2)
+            fill_rect(BAR_X + filled - 2, BAR_Y, 2, BAR_H, WHITE);
+
+        draw_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, glow_col);
+
+        static const int dot_x[] = {-6, -2, 2, 6};
+        for (int d = 0; d < 4; d++) {
+            uint8_t dcol = ((step / 4 + d) % 4 == 0) ? WHITE : DARK_GRAY;
+            int sx = SCREEN_WIDTH / 2 + dot_x[d];
+            int sy = BAR_Y + BAR_H + 10;
+            fill_rect(sx, sy, 2, 2, dcol);
+        }
 
         blit();
-        sleep_ms(40);
+        sleep_ms(50);
     }
-    sleep_s(1);
+
+    for (int f = 0; f < 3; f++) {
+        clear_screen(f % 2 == 0 ? DARK_GRAY : BLACK);
+        blit();
+        sleep_ms(120);
+    }
+
+    clear_screen(BLACK);
+    int msg_x = (SCREEN_WIDTH - (int)strlen(msg) * 5) / 2;
+    draw_string(msg_x, SCREEN_HEIGHT / 2 - 4, (char *)msg, bar_col, 2);
+    blit();
+    sleep_s(2);
 }
 
 /* ── name validation ────────────────────────────────────────────────────── */
@@ -166,6 +216,7 @@ static bool validate_fat_name(const char *name_buf, bool is_dir,
 #define DESK_MODE_NORMAL 0
 #define DESK_MODE_CONFIRM 1
 #define DESK_MODE_NEWNAME 2
+#define DESK_MODE_RENAME 3
 
 static int s_mode = DESK_MODE_NORMAL;
 static char s_newname_buf[13];
@@ -371,6 +422,37 @@ static void menu_new_folder(void) {
     s_newname_is_dir = true;
     s_mode = DESK_MODE_NEWNAME;
 }
+static void menu_rename(void) {
+    if (s_mode != DESK_MODE_NORMAL)
+        return;
+
+    desktop_item_t *items = desktop_fs_items();
+    int count = desktop_fs_count();
+    int sel = -1;
+
+    for (int i = 0; i < count; i++) {
+        if (items[i].used && items[i].selected) {
+            sel = i;
+            break;
+        }
+    }
+
+    if (sel < 0) {
+        return;
+    }
+
+    if (items[sel].kind == DESKTOP_ITEM_FDD ||
+        items[sel].kind == DESKTOP_ITEM_HDD) {
+        return;
+    }
+
+    s_rename_idx = sel;
+    strncpy(s_rename_buf, items[sel].name, 12);
+    s_rename_buf[12] = '\0';
+    s_rename_len = (int)strlen(s_rename_buf);
+
+    s_mode = DESK_MODE_RENAME;
+}
 static void menu_reload(void) { desktop_fs_set_dirty(); }
 
 static void menu_copy(void) {
@@ -519,19 +601,21 @@ static void do_shutdown(void) {
     cpu_shutdown();
 }
 static void menu_shutdown(void) {
-    modal_show(MODAL_CONFIRM, "Shut Down", "Shut down ASMOS?\n\nAny usnaved work will be lost!", do_shutdown,
-               NULL);
+    modal_show(MODAL_CONFIRM, "Shut Down",
+               "Shut down ASMOS?\n\nAny usnaved work will be lost!",
+               do_shutdown, NULL);
 }
 static void do_restart(void) {
     power_anim_run(true);
     cpu_reset();
 }
 static void menu_restart(void) {
-    modal_show(MODAL_CONFIRM, "Restart", "Restart ASMOS?\n\nAny usnaved work will be lost!", do_restart, NULL);
+    modal_show(MODAL_CONFIRM, "Restart",
+               "Restart ASMOS?\n\nAny usnaved work will be lost!", do_restart,
+               NULL);
 }
 
-/* ── new name dialog ────────────────────────────────────────────────────── */
-
+/* ── new name / rename dialog * ─────────────────────────────────────────── */
 static void handle_newname(void) {
     const char *err = NULL;
     if (!validate_fat_name(s_newname_buf, s_newname_is_dir, &err)) {
@@ -577,9 +661,28 @@ static void draw_newname_dialog(void) {
             draw_string(cx, by + 16, "|", BLACK, 2);
     }
 }
+static void draw_rename_dialog(void) {
+    int bx = 60, by = 80, bw = 200, bh = 36;
+
+    fill_rect(bx + 3, by + 3, bw, bh, BLACK);
+    fill_rect(bx, by, bw, bh, LIGHT_GRAY);
+    draw_rect(bx, by, bw, bh, BLACK);
+
+    draw_string(bx + 4, by + 4, "Rename item:", BLACK, 2);
+
+    fill_rect(bx + 4, by + 14, bw - 8, 12, WHITE);
+    draw_rect(bx + 4, by + 14, bw - 8, 12, BLACK);
+
+    draw_string(bx + 6, by + 16, s_rename_buf, BLACK, 2);
+    extern volatile uint32_t pit_ticks;
+    if ((pit_ticks / 50) % 2 == 0) {
+        int cx = bx + 6 + s_rename_len * CHAR_W;
+        if (cx < bx + bw - 10)
+            draw_string(cx, by + 16, "|", BLACK, 2);
+    }
+}
 
 /* ── desktop init ───────────────────────────────────────────────────────── */
-
 static menu *s_apps_menu;
 
 void desktop_init(void) {
@@ -609,6 +712,7 @@ void desktop_init(void) {
     menu *file_menu = window_add_menu(win, "File");
     menu_add_item(file_menu, "New File", menu_new_file);
     menu_add_item(file_menu, "New Folder", menu_new_folder);
+    menu_add_item(file_menu, "Rename", menu_rename);
     menu_add_item(file_menu, "Reload", menu_reload);
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "About Desktop", menu_about_desktop);
@@ -621,8 +725,6 @@ void desktop_init(void) {
     menu_add_item(edit_menu, "Delete", menu_delete);
 
     menu *action_menu = window_add_menu(win, "Action");
-    menu_add_item(action_menu, "Reload", menu_sort_name);
-    menu_add_separator(action_menu);
     menu_add_item(action_menu, "Restart", menu_restart);
     menu_add_item(action_menu, "Shut Down", menu_shutdown);
 
@@ -630,6 +732,16 @@ void desktop_init(void) {
 }
 
 /* ── per-frame ──────────────────────────────────────────────────────────── */
+bool is_desktop_focused() {
+    window *fw = wm_focused_window();
+
+    if (fw != NULL && fw->pinned_bottom) {
+        return true;
+    }
+
+    return false;
+}
+
 static void draw_items(int count, desktop_item_t *items) {
     for (int i = 0; i < count; i++) {
         if (!items[i].used)
@@ -676,7 +788,35 @@ void desktop_on_frame(void) {
         return;
     }
 
-    /* ── drag * ────────────────────────────────────────────────────────────── */
+    if (s_mode == DESK_MODE_RENAME) {
+        draw_items(count, items);
+
+        if (kb.key_pressed) {
+            if (kb.last_scancode == ENTER && s_rename_len > 0) {
+                bool ok = desktop_fs_rename(s_rename_idx, s_rename_buf);
+                if (!ok) {
+                    modal_show(MODAL_ERROR, "Rename Failed",
+                               "Invalid name or item protected.", NULL, NULL);
+                }
+                s_mode = DESK_MODE_NORMAL;
+            } else if (kb.last_scancode == ESC) {
+                s_mode = DESK_MODE_NORMAL;
+            } else if (kb.last_scancode == BACKSPACE) {
+                if (s_rename_len > 0) {
+                    s_rename_buf[--s_rename_len] = '\0';
+                }
+            } else if (kb.last_char >= 32 && kb.last_char < 127 &&
+                       s_rename_len < 12) {
+                s_rename_buf[s_rename_len++] = kb.last_char;
+                s_rename_buf[s_rename_len] = '\0';
+            }
+        }
+
+        draw_rename_dialog();
+        return;
+    }
+
+    /* ── drag * ──────────────────────────────────────────────────────────── */
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
         if (mouse.left) {
@@ -729,7 +869,7 @@ void desktop_on_frame(void) {
 
             uint32_t now = pit_ticks;
             if (hit == s_last_click_idx &&
-                (now - s_last_click_tick) <= DBLCLICK_TICKS) {
+                (now - s_last_click_tick) <= TARGET_FPS) {
                 open_item(&items[hit]);
                 s_last_click_idx = -1;
                 s_last_click_tick = 0;
@@ -741,6 +881,18 @@ void desktop_on_frame(void) {
             for (int i = 0; i < count; i++)
                 items[i].selected = false;
             s_last_click_idx = -1;
+        }
+    }
+
+    if (is_desktop_focused() && s_mode == DESK_MODE_NORMAL && kb.key_pressed) {
+        if (kb.ctrl_c) {
+            menu_copy();
+        } else if (kb.ctrl_x) {
+            menu_cut();
+        } else if (kb.ctrl_v) {
+            menu_paste();
+        } else if (kb.last_scancode == DELETE) {
+            menu_delete();
         }
     }
 

@@ -2,7 +2,7 @@
 #include "os/api.h"
 
 #define SET_W 220
-#define SET_H 180
+#define SET_H 170
 #define SET_X 30
 #define SET_Y 20
 
@@ -39,12 +39,9 @@ static void settings_draw(window *win, void *ud) {
     settings_state_t *s = (settings_state_t *)ud;
     if (!s)
         return;
-    int wx = win->x + 1, wy = win->y + MENUBAR_H + 16, ww = win->w - 2,
+    int wx = win->x + 1, wy = win->y + MENUBAR_H + 6, ww = win->w - 2,
         wh = win->h - 16;
-    fill_rect(wx, wy, ww, wh, LIGHT_GRAY);
-    fill_rect(wx, wy, ww, 10, DARK_GRAY);
-    draw_string(wx + 4, wy + 2, "System Settings", WHITE, 2);
-    int row = 1;
+    int row = 0;
 #define ROW_Y(r) (wy + 4 + (r) * ROW_H + 8)
 
     draw_string(wx + LBL_X, ROW_Y(row), "Wallpaper:", DARK_GRAY, 2);
@@ -56,14 +53,14 @@ static void settings_draw(window *win, void *ud) {
     btn(wx + VAL_X + 12, ROW_Y(row) - 1, 10, 9, ">", DARK_GRAY);
     row++;
 
-    draw_string(wx + LBL_X, ROW_Y(row), "Wall Color A:", DARK_GRAY, 2);
+    draw_string(wx + LBL_X, ROW_Y(row), "Wallpaper Color A:", DARK_GRAY, 2);
     fill_rect(wx + VAL_X, ROW_Y(row) - 1, 16, 9, g_cfg.wallpaper_main_color);
     draw_rect(wx + VAL_X, ROW_Y(row) - 1, 16, 9, BLACK);
     btn(wx + VAL_X + 18, ROW_Y(row) - 1, 10, 9, "-", DARK_GRAY);
     btn(wx + VAL_X + 30, ROW_Y(row) - 1, 10, 9, "+", DARK_GRAY);
     row++;
 
-    draw_string(wx + LBL_X, ROW_Y(row), "Wall Color B:", DARK_GRAY, 2);
+    draw_string(wx + LBL_X, ROW_Y(row), "Wallpaper Color B:", DARK_GRAY, 2);
     fill_rect(wx + VAL_X, ROW_Y(row) - 1, 16, 9,
               g_cfg.wallpaper_secondary_color);
     draw_rect(wx + VAL_X, ROW_Y(row) - 1, 16, 9, BLACK);
@@ -106,17 +103,25 @@ static void settings_draw(window *win, void *ud) {
                 g_cfg.filef_single_window ? "Single" : "Multi", BLACK, 2);
     btn(wx + VAL_X + 30, ROW_Y(row) - 1, 36, 9,
         g_cfg.filef_single_window ? "Multi" : "Single", DARK_GRAY);
+    row++;
+
+    draw_string(wx + LBL_X, ROW_Y(row), "Reduce Motion:", DARK_GRAY, 2);
+    draw_string(wx + VAL_X, ROW_Y(row), g_cfg.reduce_motion ? "ON" : "OFF",
+                BLACK, 2);
+    btn(wx + VAL_X + 20, ROW_Y(row) - 1, 24, 9,
+        g_cfg.reduce_motion ? "Off" : "On", DARK_GRAY);
+
     row += 2;
 
     uint8_t save_bg = s->dirty ? RED : DARK_GRAY;
     btn(wx + ww / 2 - 30, ROW_Y(row) - 1, 60, 10, "Save", save_bg);
 
-    int sy = wy + wh - 10;
+    int sy = wy + wh;
     fill_rect(wx, sy, ww, 10, DARK_GRAY);
     if (s->status_timer > 0)
         draw_string(wx + 4, sy + 2, s->status, LIGHT_GREEN, 2);
     else if (s->dirty)
-        draw_string(wx + 4, sy + 2, "Unsaved changes", LIGHT_YELLOW, 2);
+        draw_string(wx + 4, sy + 2, "Unsaved changes", YELLOW, 2);
     else
         draw_string(wx + 4, sy + 2, "All saved", LIGHT_GRAY, 2);
 
@@ -137,7 +142,7 @@ static void settings_on_frame(void *state) {
 
 #define ROW_Y(r) (wy + 4 + (r) * ROW_H + 8)
     if (mouse.left_clicked && focused) {
-        int row = 1;
+        int row = 0;
         row++;
         if (btn(wx + VAL_X, ROW_Y(row) - 1, 10, 9, "<", DARK_GRAY)) {
             g_cfg.wallpaper_pattern = (g_cfg.wallpaper_pattern + 3) % 4;
@@ -210,6 +215,12 @@ static void settings_on_frame(void *state) {
         if (btn(wx + VAL_X + 30, ROW_Y(row) - 1, 36, 9,
                 g_cfg.filef_single_window ? "Multi" : "Single", DARK_GRAY)) {
             g_cfg.filef_single_window ^= 1;
+            s->dirty = true;
+        }
+        row++;
+        if (btn(wx + VAL_X + 20, ROW_Y(row) - 1, 24, 9,
+                g_cfg.reduce_motion ? "Off" : "On", DARK_GRAY)) {
+            g_cfg.reduce_motion ^= 1;
             s->dirty = true;
         }
         row += 2;

@@ -28,8 +28,8 @@
 #define BRUSH_SIZES 3
 
 static const uint8_t PALETTE_COLORS[PALETTE_COLS] = {
-    BLACK,   WHITE,         DARK_GRAY, LIGHT_GRAY, RED,    LIGHT_RED,
-    GREEN,   LIGHT_GREEN,   BLUE,      LIGHT_BLUE, YELLOW, LIGHT_YELLOW,
+    BLACK,   WHITE,         DARK_GRAY, LIGHT_GRAY, RED,   LIGHT_RED,
+    GREEN,   LIGHT_GREEN,   BLUE,      LIGHT_BLUE, BROWN, YELLOW,
     MAGENTA, LIGHT_MAGENTA, CYAN,      LIGHT_CYAN,
 };
 
@@ -249,7 +249,6 @@ static void asmdraw_draw(window *win, void *ud) {
         draw_string(bx + 4, by + 4, lbl, BLACK, 2);
     }
 
-
     int cax = wx + CANVAS_X_OFF;
     int cay = wy;
     int cw = s->canvas_w;
@@ -288,8 +287,8 @@ static void asmdraw_draw(window *win, void *ud) {
 
     for (int i = 0; i < PALETTE_COLS; i++) {
         int px = pal_x0 + i * cell_w;
-        fill_rect(px-1, pal_y, cell_w, PALETTE_H, PALETTE_COLORS[i]);
-        //draw_rect(px, pal_y, cell_w, PALETTE_H-1, BLACK);
+        fill_rect(px - 1, pal_y, cell_w, PALETTE_H, PALETTE_COLORS[i]);
+        // draw_rect(px, pal_y, cell_w, PALETTE_H-1, BLACK);
     }
 
     if (s->status_timer > 0) {

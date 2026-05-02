@@ -10,14 +10,15 @@ void cfg_init_defaults(void) {
     memset(&g_cfg, 0, sizeof(g_cfg));
     g_cfg.magic = CFG_MAGIC;
     g_cfg.version = CFG_VERSION;
-    g_cfg.wallpaper_pattern = 1;
+    g_cfg.wallpaper_pattern = WALLPAPER_DOTS;
     g_cfg.timezone_offset = 0;
     g_cfg.start_in_gui = 1;
-    g_cfg.play_bootchime = 0;
+    g_cfg.play_bootchime = 1;
     g_cfg.sound_enabled = 1;
-    g_cfg.wallpaper_main_color = GREEN;
-    g_cfg.wallpaper_secondary_color = LIGHT_GREEN;
+    g_cfg.wallpaper_main_color = LIGHT_BLUE;
+    g_cfg.wallpaper_secondary_color = LIGHT_CYAN;
     g_cfg.filef_single_window = 0;
+    g_cfg.reduce_motion = 0;
 }
 
 bool cfg_load(void) {

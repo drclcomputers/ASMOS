@@ -136,7 +136,7 @@ void draw_pic_icon(int ax, int ay, bool sel) {
     fill_rect(ax + ICO_W - 4, ay, 3, 4, bg);
     fill_rect(ax + 3, ay + 3, ICO_W - 8, 5, sel ? DARK_GRAY : LIGHT_BLUE);
     fill_rect(ax + 3, ay + 8, ICO_W - 8, 4, sel ? DARK_GRAY : LIGHT_GREEN);
-    draw_dot(ax + 4, ay + 4, sel ? WHITE : LIGHT_YELLOW);
+    draw_dot(ax + 4, ay + 4, sel ? WHITE : YELLOW);
 }
 
 void draw_txt_icon(int ax, int ay, bool sel) {
@@ -396,7 +396,7 @@ void icon_view_update(icon_view_t *v, bool blocked) {
 
             uint32_t now = pit_ticks;
             if (v->_last_click_idx == i &&
-                (now - v->_last_click_tick) <= DBLCLICK_TICKS) {
+                (now - v->_last_click_tick) <= TARGET_FPS) {
                 if (ic->on_launch)
                     ic->on_launch();
                 v->_last_click_idx = -1;

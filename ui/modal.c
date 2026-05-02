@@ -212,7 +212,8 @@ void modal_draw(void) {
     fill_rect(MODAL_X, MODAL_Y, MODAL_W, MODAL_H, LIGHT_GRAY);
     draw_rect(MODAL_X, MODAL_Y, MODAL_W, MODAL_H, BLACK);
 
-    fill_rect(MODAL_X, MODAL_Y, MODAL_W, MODAL_TITLE_H, bar_color());
+    draw_rect(MODAL_X, MODAL_Y, MODAL_W, MODAL_TITLE_H, BLACK);
+    fill_rect(MODAL_X+1, MODAL_Y+1, MODAL_W-2, MODAL_TITLE_H-1, bar_color());
     draw_line(MODAL_X, MODAL_Y + MODAL_TITLE_H, MODAL_X + MODAL_W - 1,
               MODAL_Y + MODAL_TITLE_H, BLACK);
 

@@ -13,7 +13,6 @@
 #define ICON_LABEL_DISPLAY_MAX 8
 
 #define MAX_ICONS_PER_VIEW 32
-#define DBLCLICK_TICKS 60
 #define DRAG_THRESHOLD 4
 
 typedef void (*icon_action_t)(void);

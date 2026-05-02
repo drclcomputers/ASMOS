@@ -129,7 +129,7 @@ static void clock_init(void *state) {
         .resizable = false,
     };
     s->win = wm_register(&spec);
-    s->win->animate_open_close = false;
+    s->win->anim_no_of_frames = 10;
     if (!s->win)
         return;
     s->win->on_draw = clock_on_draw;

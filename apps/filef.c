@@ -1924,6 +1924,7 @@ static void ff_on_frame(void *state) {
         if (kb.ctrl_c) { menu_copy(); }
         else if (kb.ctrl_x) { menu_cut(); }
         else if (kb.ctrl_v) { menu_paste(); }
+        else if (kb.last_scancode == DELETE) { menu_delete(); }
     }
 
     ff_draw_window(s->win, s);
