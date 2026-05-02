@@ -40,6 +40,10 @@ void kb_update(void) {
     kb.last_char = 0;
     kb.last_scancode = 0;
     kb.key_pressed = false;
+    kb.ctrl_c = false;
+    kb.ctrl_x = false;
+    kb.ctrl_v = false;
+    kb.ctrl_a = false;
 }
 
 void kb_process_byte(uint8_t raw) {

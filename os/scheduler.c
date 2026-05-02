@@ -27,7 +27,8 @@ void scheduler_init(void) {
 
     tasks[0].alive = true;
     tasks[0].stack_base = NULL;
-    /* tasks[0].esp is written by the first task_switch out of the kernel task */
+    /* tasks[0].esp is written by the first task_switch out of the kernel task
+     */
     current_task = 0;
     task_count = 1;
 }
@@ -84,7 +85,6 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
     tasks[slot].arg = arg;
     tasks[slot].stack_base = stack;
 
-    /* Write canary at the bottom of the stack to detect overflow */
     *(uint32_t *)stack = STACK_CANARY;
 
     uint32_t *sp = (uint32_t *)(stack + TASK_STACK_SIZE);
@@ -109,7 +109,6 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
 void task_yield(void) {
     int old = current_task;
 
-    /* Check canary of current task before leaving it */
     if (old > 0 && tasks[old].stack_base &&
         *(uint32_t *)tasks[old].stack_base != STACK_CANARY) {
         error_report(ERR_FATAL, ERR_TASK_STACK_OVERFLOW, "task stack overflow");
@@ -159,6 +158,37 @@ void scheduler_exit_current(void) {
         task_yield();
 }
 
+static void handle_global_shortcuts(void) {
+    if (kb.key_pressed && kb.ctrl && kb.last_scancode == Q_KEY) {
+        window *fw = wm_focused_window();
+        if (fw && fw->on_close) {
+            kb.key_pressed = false;
+            fw->on_close(fw);
+        }
+    }
+}
+
+/*static void handle_global_shortcuts(void) {
+    if (!kb.key_pressed)
+        return;
+
+    if (kb.ctrl) {
+        uint8_t sc = kb.last_scancode;
+        if (sc == Q_KEY) {
+            window *fw = wm_focused_window();
+            if (fw && fw->on_close) {
+                kb.key_pressed = false;
+                fw->on_close(fw);
+            }
+            return;
+        }
+        if (sc == C_KEY) { kb.ctrl_c = true; kb.key_pressed = false; return; }
+        if (sc == X_KEY) { kb.ctrl_x = true; kb.key_pressed = false; return; }
+        if (sc == V_KEY) { kb.ctrl_v = true; kb.key_pressed = false; return; }
+        if (sc == A_KEY) { kb.ctrl_a = true; kb.key_pressed = false; return; }
+    }
+} */
+
 void scheduler_kernel_task(void) {
     extern menubar g_menubar;
 
@@ -168,6 +198,8 @@ void scheduler_kernel_task(void) {
         g_menubar_click_consumed = false;
         ps2_update();
         speaker_update();
+
+        handle_global_shortcuts();
 
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);

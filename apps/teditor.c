@@ -731,6 +731,7 @@ static void teditor_on_frame(void *state) {
                             s->fname_buf[s->fname_len++] = g_clipboard.text[i];
                         }
                         s->fname_buf[s->fname_len] = '\0';
+                        return;
                     }
                 }
 

@@ -92,6 +92,10 @@ typedef struct {
     char last_char;
     uint8_t last_scancode;
     bool key_pressed;
+    bool ctrl_c;
+    bool ctrl_x;
+    bool ctrl_v;
+    bool ctrl_a;
 } keyboardvar;
 
 extern keyboardvar kb;
