@@ -86,6 +86,7 @@ typedef struct {
 } asmterm_state_t;
 
 app_descriptor asmterm_app;
+static asmterm_state_t *s_asmterm_active = NULL;
 
 static inline int line_idx(const asmterm_state_t *s, int n) {
     return (s->line_head + n) % OUTPUT_LINES;
@@ -395,6 +396,20 @@ static void on_about(void) {
         NULL);
 }
 
+static void on_paste_clip(void) {
+    if (!s_asmterm_active || !clipboard_has_text())
+        return;
+    asmterm_state_t *s = s_asmterm_active;
+    for (int i = 0; i < g_clipboard.text_len && s->input_len < INPUT_CAP - 1;
+         i++) {
+        char c = g_clipboard.text[i];
+        if (c < 32 || c >= 127)
+            continue;
+        s->input[s->input_len++] = c;
+    }
+    s->input[s->input_len] = '\0';
+}
+
 static void asmterm_init(void *state) {
     asmterm_state_t *s = (asmterm_state_t *)state;
 
@@ -414,15 +429,18 @@ static void asmterm_init(void *state) {
         .on_close = os_close_own_instance,
     };
     s->win = wm_register(&spec);
+    s_asmterm_active = s;
     if (!s->win)
         return;
     s->win->on_draw = asmterm_window_draw;
     s->win->on_draw_userdata = s;
 
     menu *fm = window_add_menu(s->win, "File");
-    menu_add_item(fm, "Close", on_file_close);
+    menu_add_item(fm, "Paste", on_paste_clip);
     menu_add_separator(fm);
     menu_add_item(fm, "About ASMTerm", on_about);
+    menu_add_separator(fm);
+    menu_add_item(fm, "Close", on_file_close);
 
     int ch = s->win->h - 16, oah = ch - INPUT_H - 4;
     s->visible_rows = oah / LINE_H;
@@ -455,6 +473,8 @@ static void asmterm_on_frame(void *state) {
         asmterm_close(NULL);
         return;
     }
+
+    s_asmterm_active = s;
 
     if (mouse.left_clicked) {
         int wx = s->win->x, wy = s->win->y + MENUBAR_H + 16, ww = s->win->w,

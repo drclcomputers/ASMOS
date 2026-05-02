@@ -13,6 +13,7 @@
 #define SCREEN_HEIGHT 200
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
+#define WIN_ANIM_FRAMES 20
 
 #define BLACK 0
 #define BLUE 1

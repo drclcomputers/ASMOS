@@ -203,6 +203,12 @@ static void np_delete_selection(teditor_state_t *s) {
     }
 }
 
+static void np_select_all(teditor_state_t *s) {
+    s->sel_anchor = 0;
+    s->cursor = s->text_len;
+    np_scroll_to_cursor(s);
+}
+
 /* ── File helpers ─────────────────────────────────────────── */
 
 static bool np_load(teditor_state_t *s, const char *path) {
@@ -224,18 +230,35 @@ static bool np_load(teditor_state_t *s, const char *path) {
 }
 
 void teditor_open_file(const char *path) {
-    app_instance_t *inst = os_launch_app(&teditor_app);
-    if (!inst) return;
-    teditor_state_t *s = (teditor_state_t *)inst->state;
-    if (!s || !s->win) return;
-    strncpy(s->filepath, path, FNAME_BUF_CAP-1);
-    s->filepath[FNAME_BUF_CAP-1] = '\0';
+    teditor_state_t *target = NULL;
+    app_instance_t *inst = NULL;
+
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *a = &running_apps[i];
+        if (!a->running || a->desc != &teditor_app) continue;
+        teditor_state_t *s = (teditor_state_t *)a->state;
+        if (!s->dirty && s->text_len == 0) {
+            target = s;
+            break;
+        }
+    }
+
+    if (!target) {
+        inst = os_launch_app(&teditor_app);
+        if (!inst) return;
+        target = (teditor_state_t *)inst->state;
+    }
+
+    if (!target || !target->win) return;
+    strncpy(target->filepath, path, FNAME_BUF_CAP - 1);
+    target->filepath[FNAME_BUF_CAP - 1] = '\0';
     const char *base = strrchr(path, '/');
-    base = base ? base+1 : path;
-    strncpy(s->filename, base, FNAME_BUF_CAP-1);
-    s->filename[FNAME_BUF_CAP-1] = '\0';
-    s->win->title = s->filename;
-    np_load(s, path);
+    base = base ? base + 1 : path;
+    strncpy(target->filename, base, FNAME_BUF_CAP - 1);
+    target->filename[FNAME_BUF_CAP - 1] = '\0';
+    target->win->title = target->filename;
+    np_load(target, path);
+    wm_focus(target->win);
 }
 
 static bool np_save(teditor_state_t *s, const char *path) {
@@ -271,25 +294,22 @@ static teditor_state_t *active_teditor(void) {
 static bool teditor_close_cb(window *w);
 
 static void menu_new(void) {
-    teditor_state_t *s = active_teditor();
-    if (!s)
-        return;
-    s->text[0] = '\0';
-    s->text_len = 0;
-    s->cursor = 0;
-    s->scroll_col = 0;
-    s->dirty = false;
-    s->filepath[0] = '\0';
-    s->filename[0] = '\0';
-    s->win->title = "TEditor";
-    np_reindex(s);
-    np_set_status(s, "New document.");
+    os_launch_app(&teditor_app);
 }
 
 static void menu_open(void) {
     teditor_state_t *s = active_teditor();
-    if (!s)
+    if (!s) return;
+    if (s->dirty || s->text_len > 0) {
+        app_instance_t *inst = os_launch_app(&teditor_app);
+        if (!inst) return;
+        teditor_state_t *ns = (teditor_state_t *)inst->state;
+        if (!ns || !ns->win) return;
+        ns->fname_buf[0] = '\0';
+        ns->fname_len = 0;
+        ns->fname_mode = FNAME_MODE_OPEN;
         return;
+    }
     s->fname_buf[0] = '\0';
     s->fname_len = 0;
     s->fname_mode = FNAME_MODE_OPEN;
@@ -723,7 +743,7 @@ static void teditor_on_frame(void *state) {
     if (s->fname_mode != FNAME_MODE_NONE) {
         if (focused) {
             if (kb.key_pressed) {
-                if (kb.ctrl && kb.key_pressed && kb.last_scancode == V_KEY) {
+                if (kb.ctrl_v) {
                     if (clipboard_has_text()) {
                         for (int i = 0; i < g_clipboard.text_len &&
                                         s->fname_len < FNAME_BUF_CAP - 1;
@@ -849,26 +869,44 @@ static void teditor_on_frame(void *state) {
         }
 
         if (kb.key_pressed) {
-            if (kb.ctrl) {
-                if (kb.last_scancode == C_KEY) {
-                    np_copy_selection(s);
-                    np_draw(s->win, s);
-                    return;
-                }
-                if (kb.last_scancode == X_KEY) {
-                    np_copy_selection(s);
+            if (kb.ctrl_c) {
+                np_copy_selection(s);
+                np_draw(s->win, s);
+                return;
+            }
+            if (kb.ctrl_x) {
+                np_copy_selection(s);
+                np_delete_selection(s);
+                np_draw(s->win, s);
+                return;
+            }
+            if (kb.ctrl_v) {
+                if (clipboard_has_text()) {
                     np_delete_selection(s);
-                    np_draw(s->win, s);
-                    return;
+                    np_insert(s, g_clipboard.text, g_clipboard.text_len);
                 }
-                if (kb.last_scancode == V_KEY) {
-                    if (clipboard_has_text()) {
-                        np_delete_selection(s);
-                        np_insert(s, g_clipboard.text, g_clipboard.text_len);
-                    }
-                    np_draw(s->win, s);
-                    return;
-                }
+                np_draw(s->win, s);
+                return;
+            }
+            if (kb.ctrl_s) {
+                menu_save();
+                np_draw(s->win, s);
+                return;
+            }
+            if (kb.ctrl_n) {
+                menu_new();
+                np_draw(s->win, s);
+                return;
+            }
+            if (kb.ctrl_o) {
+                menu_open();
+                np_draw(s->win, s);
+                return;
+            }
+            if (kb.ctrl_a) {
+                np_select_all(s);
+                np_draw(s->win, s);
+                return;
             }
 
             // ── Selection / cursor movement ─────────────

@@ -386,6 +386,7 @@ static void monitor_init(void *state) {
 
     s->win->on_draw = monitor_draw;
     s->win->on_draw_userdata = s;
+    s->win->animate_open_close = false;
 
     menu *file_menu = window_add_menu(s->win, "File");
     menu_add_item(file_menu, "Refresh", menu_refresh);

@@ -44,6 +44,16 @@ void kb_update(void) {
     kb.ctrl_x = false;
     kb.ctrl_v = false;
     kb.ctrl_a = false;
+    kb.ctrl_s = false;
+    kb.ctrl_z = false;
+    kb.ctrl_q = false;
+    kb.ctrl_n = false;
+    kb.ctrl_o = false;
+    kb.ctrl_f = false;
+    kb.ctrl_shift_c = false;
+    kb.ctrl_shift_v = false;
+    kb.ctrl_shift_z = false;
+    kb.ctrl_shift_s = false;
 }
 
 void kb_process_byte(uint8_t raw) {
@@ -83,6 +93,23 @@ void kb_process_byte(uint8_t raw) {
 
     kb.last_scancode = sc;
     kb.key_pressed = true;
+
+    if (kb.ctrl) {
+        kb.ctrl_c = (sc == C_KEY);
+        kb.ctrl_x = (sc == X_KEY);
+        kb.ctrl_v = (sc == V_KEY);
+        kb.ctrl_a = (sc == A_KEY);
+        kb.ctrl_s = (sc == S_KEY);
+        kb.ctrl_z = (sc == Z_KEY);
+        kb.ctrl_q = (sc == Q_KEY);
+        kb.ctrl_n = (sc == N_KEY);
+        kb.ctrl_o = (sc == O_KEY);
+        kb.ctrl_f = (sc == F_KEY);
+        kb.ctrl_shift_c = (kb.shift && sc == C_KEY);
+        kb.ctrl_shift_v = (kb.shift && sc == V_KEY);
+        kb.ctrl_shift_z = (kb.shift && sc == Z_KEY);
+        kb.ctrl_shift_s = (kb.shift && sc == S_KEY);
+    }
 
     bool use_upper = kb.shift ^ kb.capslock;
     if (sc < 128)

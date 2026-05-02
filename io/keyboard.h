@@ -96,6 +96,16 @@ typedef struct {
     bool ctrl_x;
     bool ctrl_v;
     bool ctrl_a;
+    bool ctrl_s;
+    bool ctrl_z;
+    bool ctrl_q;
+    bool ctrl_n;
+    bool ctrl_o;
+    bool ctrl_f;
+    bool ctrl_shift_c;
+    bool ctrl_shift_v;
+    bool ctrl_shift_z;
+    bool ctrl_shift_s;
 } keyboardvar;
 
 extern keyboardvar kb;

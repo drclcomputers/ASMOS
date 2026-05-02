@@ -519,7 +519,7 @@ static void do_shutdown(void) {
     cpu_shutdown();
 }
 static void menu_shutdown(void) {
-    modal_show(MODAL_CONFIRM, "Shut Down", "Shut down ASMOS?", do_shutdown,
+    modal_show(MODAL_CONFIRM, "Shut Down", "Shut down ASMOS?\n\nAny usnaved work will be lost!", do_shutdown,
                NULL);
 }
 static void do_restart(void) {
@@ -527,7 +527,7 @@ static void do_restart(void) {
     cpu_reset();
 }
 static void menu_restart(void) {
-    modal_show(MODAL_CONFIRM, "Restart", "Restart ASMOS?", do_restart, NULL);
+    modal_show(MODAL_CONFIRM, "Restart", "Restart ASMOS?\n\nAny usnaved work will be lost!", do_restart, NULL);
 }
 
 /* ── new name dialog ────────────────────────────────────────────────────── */
@@ -590,6 +590,7 @@ void desktop_init(void) {
         .h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H,
         .title = "",
         .visible = true,
+        .pinned_bottom = true,
     };
     window *win = wm_register(&spec);
     if (!win)

@@ -15,6 +15,23 @@ window *win_stack[MAX_WINDOWS];
 int win_count = 0;
 window *focused_window = NULL;
 
+static void draw_anim_rect(int x, int y, int w, int h, int frame, int total,
+                           bool opening) {
+    int t = opening ? frame : (total - frame);
+    int cx = x + w / 2;
+    int cy = y + h / 2;
+    int rw = (w * t) / total;
+    int rh = (h * t) / total;
+    if (rw < 2)
+        rw = 2;
+    if (rh < 2)
+        rh = 2;
+    int rx = cx - rw / 2;
+    int ry = cy - rh / 2;
+    draw_rect(rx, ry, rw, rh, WHITE);
+    draw_rect(rx + 1, ry + 1, rw - 2, rh - 2, DARK_GRAY);
+}
+
 static void wm_sort(void) {
     for (int i = 0; i < win_count - 1; i++) {
         for (int j = i + 1; j < win_count; j++) {
@@ -117,6 +134,11 @@ window *wm_register(const window_spec_t *spec) {
 
     wm_clamp(win);
 
+    win->pinned_bottom = spec->pinned_bottom;
+    win->anim_state =
+        (spec->visible && !spec->pinned_bottom) ? WIN_ANIM_OPEN : WIN_ANIM_NONE;
+    win->anim_frame = 0;
+
     win_stack[win_count++] = win;
     wm_sort();
 
@@ -212,8 +234,26 @@ void wm_sync_menubar(menubar *mb) {
 void wm_draw_all(void) {
     for (int i = 0; i < win_count; i++) {
         window *win = win_stack[i];
-        if (win->visible && !win->minimized)
-            window_draw(win);
+        if (!win->visible || win->minimized)
+            continue;
+
+        if (win->anim_state == WIN_ANIM_OPEN) {
+            win->anim_frame++;
+            if (win->anim_frame >= WIN_ANIM_FRAMES)
+                win->anim_state = WIN_ANIM_NONE;
+        } else if (win->anim_state == WIN_ANIM_CLOSE) {
+            win->anim_frame++;
+            if (win->anim_frame >= WIN_ANIM_FRAMES) {
+                win->anim_state = WIN_ANIM_NONE;
+                if (win->on_close)
+                    win->on_close(win);
+                else
+                    win->visible = false;
+                continue;
+            }
+        }
+
+        window_draw(win);
     }
 
     int taskbar_x = 0;
@@ -280,6 +320,13 @@ void wm_update_all(void) {
 void window_draw(window *win) {
     if (!win || !win->visible || win->minimized)
         return;
+
+    if (win->anim_state == WIN_ANIM_OPEN || win->anim_state == WIN_ANIM_CLOSE) {
+        int wy = win->y + MENUBAR_H_SIZE;
+        draw_anim_rect(win->x, wy, win->w, win->h, win->anim_frame,
+                       WIN_ANIM_FRAMES, win->anim_state == WIN_ANIM_OPEN);
+        return;
+    }
 
     int wy = win->y + MENUBAR_H_SIZE;
 
@@ -349,14 +396,15 @@ bool window_update(window *win) {
     if (!win || !win->visible || win->minimized)
         return false;
 
+    if (win->anim_state == WIN_ANIM_OPEN || win->anim_state == WIN_ANIM_CLOSE)
+        return true;
+
     int wy = win->y + MENUBAR_H_SIZE;
 
     if (clicked_titlebar_btn(win->x + 3, wy + 3, 10, 10)) {
-        if (win->on_close)
-            win->on_close(win);
-        else
-            win->visible = false;
-        return false;
+        win->anim_state = WIN_ANIM_CLOSE;
+        win->anim_frame = 0;
+        return true;
     }
     if (clicked_titlebar_btn(win->x + 16, wy + 3, 10, 10)) {
         if (win->on_minimize)

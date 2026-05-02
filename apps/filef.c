@@ -1920,6 +1920,12 @@ static void ff_on_frame(void *state) {
         }
     }
 
+    if (wm_focused_window() == s->win && kb.key_pressed && s->mode == MODE_NORMAL) {
+        if (kb.ctrl_c) { menu_copy(); }
+        else if (kb.ctrl_x) { menu_cut(); }
+        else if (kb.ctrl_v) { menu_paste(); }
+    }
+
     ff_draw_window(s->win, s);
 }
 

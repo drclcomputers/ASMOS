@@ -15,6 +15,10 @@
 #define MAX_WIN_MENUS 16
 #define RESIZE_BUTTON 8
 
+#define WIN_ANIM_NONE 0
+#define WIN_ANIM_OPEN 1
+#define WIN_ANIM_CLOSE 2
+
 typedef struct window window;
 
 typedef bool (*win_callback_t)(window *win);
@@ -30,6 +34,7 @@ typedef struct {
     uint8_t bar_color;
     uint8_t content_color;
     bool visible;
+    bool pinned_bottom;
     win_callback_t on_close;
     win_callback_t on_minimize;
     void *app_instance;
@@ -54,6 +59,9 @@ struct window {
     bool resizable;
     int show_order;
     bool pinned_bottom;
+    bool animate_open_close;
+    uint8_t anim_state;
+    uint8_t anim_frame;
 
     win_callback_t on_close;
     win_callback_t on_minimize;
