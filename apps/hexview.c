@@ -786,6 +786,7 @@ static void hexview_on_frame(void *state) {
         }
         hv_draw_hex(s->win_hex, s);
         hv_draw_asc(s->win_asc, s);
+        return;
     }
 
     if (focused) {
