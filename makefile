@@ -43,6 +43,8 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
 	  $(BUILD_DIR)/config/config.o              \
 	  $(BUILD_DIR)/config/runtime_config.o      \
+	  \
+	  $(BUILD_DIR)/drivers/gpu.o                \
       \
       $(BUILD_DIR)/fonts/fonts.o                \
       \

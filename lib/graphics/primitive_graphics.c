@@ -1,4 +1,5 @@
 #include "lib/graphics/primitive_graphics.h"
+#include "drivers/gpu.h"
 #include "fonts/fonts.h"
 #include "lib/core.h"
 #include "lib/math.h"
@@ -92,37 +93,7 @@ void draw_string(int x, int y, char *str, unsigned char color, int size) {
     }
 }
 
-extern uint32_t g_vesa_fb;
-
-void blit(void) {
-    while (inb(0x3DA) & 0x08) {
-        __asm__ volatile("pause");
-    }
-
-    uint32_t pixels = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT);
-    uint32_t dwords = pixels / 4;
-    uint32_t remain = pixels % 4;
-
-    uint32_t *src = (uint32_t *)BACKBUF;
-    uint32_t *dst = (uint32_t *)g_vesa_fb;
-
-    __asm__ volatile("cld\n\t"
-                     "rep movsd"
-                     : "+S"(src), "+D"(dst), "+c"(dwords)
-                     :
-                     : "memory");
-
-    if (remain) {
-        unsigned char *s8 = (unsigned char *)src;
-        unsigned char *d8 = (unsigned char *)dst;
-        for (uint32_t i = 0; i < remain; i++)
-            d8[i] = s8[i];
-    }
-
-    while (!(inb(0x3DA) & 0x08)) {
-        __asm__ volatile("pause");
-    }
-}
+void blit(void) { gpu_blit(); }
 
 void clear_screen(unsigned char color) {
     uint32_t *buf = (uint32_t *)BACKBUF;

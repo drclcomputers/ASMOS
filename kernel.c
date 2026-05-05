@@ -1,6 +1,8 @@
 #include "fs/fs.h"
 #include "io/ps2.h"
 
+#include "drivers/gpu.h"
+
 #include "os/app_registry.h"
 #include "os/error.h"
 #include "os/os.h"
@@ -47,14 +49,6 @@ static void detect_heap_end(void) {
 
 uint32_t g_vesa_fb = 0;
 
-static void detect_vesa_fb(void) {
-    g_vesa_fb = *(volatile uint32_t *)0x600;
-    if (!g_vesa_fb) {
-        for (;;)
-            __asm__("hlt");
-    }
-}
-
 static void boot_banner(void) {
     clear_screen(BLACK);
     draw_string(4, 2, "ASMOS Boot", WHITE, 2);
@@ -67,7 +61,7 @@ void kmain(void) {
     idt_init();
     ps2_init();
 
-    detect_vesa_fb();
+    gpu_init();
 
     sleep_s(1);
     boot_banner();
