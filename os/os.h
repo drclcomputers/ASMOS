@@ -42,6 +42,7 @@ bool window_is_focused(window *win);
 bool os_close_own_instance(window *win);
 
 void os_tick_apps(void);
+void os_tick_apps_direct(void);
 void os_reap_dead_apps(void);
 
 extern app_descriptor *installed_apps[MAX_INSTALLED_APPS];

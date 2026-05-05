@@ -7,7 +7,7 @@
 void draw_dot(int x, int y, unsigned char color) {
     if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT)
         return;
-    ((unsigned char *)BACKBUF)[y * SCREEN_WIDTH + x] = color;
+    BACKBUF[y * SCREEN_WIDTH + x] = color;
 }
 
 void draw_line(int x0, int y0, int x1, int y1, unsigned char color) {
@@ -49,7 +49,7 @@ void fill_rect(int x, int y, int w, int h, unsigned char color) {
     int y1 = y + h > SCREEN_HEIGHT ? SCREEN_HEIGHT : y + h;
     if (x0 >= x1 || y0 >= y1)
         return;
-    unsigned char *buf = (unsigned char *)BACKBUF;
+    unsigned char *buf = BACKBUF;
     for (int row = y0; row < y1; row++)
         memset(buf + row * SCREEN_WIDTH + x0, color, x1 - x0);
 }
@@ -75,10 +75,9 @@ void draw_char(int x, int y, char c, unsigned char color, int size) {
             continue;
         unsigned char row_data =
             (size == 1) ? font1_data[offset + row] : font2_data[offset + row];
-        for (int col = 0; col < maxcol; col++) {
+        for (int col = 0; col < maxcol; col++)
             if (row_data & (startbit >> col))
                 draw_dot(x + col, y + row, color);
-        }
     }
 }
 
@@ -93,17 +92,44 @@ void draw_string(int x, int y, char *str, unsigned char color, int size) {
     }
 }
 
+extern uint32_t g_vesa_fb;
+
 void blit(void) {
+    while (inb(0x3DA) & 0x08) {
+        __asm__ volatile("pause");
+    }
+
+    uint32_t pixels = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT);
+    uint32_t dwords = pixels / 4;
+    uint32_t remain = pixels % 4;
+
     uint32_t *src = (uint32_t *)BACKBUF;
-    uint32_t *dst = (uint32_t *)0xA0000;
-    for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT / 4; i++)
-        dst[i] = src[i];
+    uint32_t *dst = (uint32_t *)g_vesa_fb;
+
+    __asm__ volatile("cld\n\t"
+                     "rep movsd"
+                     : "+S"(src), "+D"(dst), "+c"(dwords)
+                     :
+                     : "memory");
+
+    if (remain) {
+        unsigned char *s8 = (unsigned char *)src;
+        unsigned char *d8 = (unsigned char *)dst;
+        for (uint32_t i = 0; i < remain; i++)
+            d8[i] = s8[i];
+    }
+
+    while (!(inb(0x3DA) & 0x08)) {
+        __asm__ volatile("pause");
+    }
 }
 
 void clear_screen(unsigned char color) {
     uint32_t *buf = (uint32_t *)BACKBUF;
-    uint32_t val = color | (color << 8) | (color << 16) | (color << 24);
-    for (uint32_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT / 4; i++)
+    uint32_t val = (uint32_t)color | ((uint32_t)color << 8) |
+                   ((uint32_t)color << 16) | ((uint32_t)color << 24);
+    uint32_t cnt = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) / 4;
+    for (uint32_t i = 0; i < cnt; i++)
         buf[i] = val;
 }
 

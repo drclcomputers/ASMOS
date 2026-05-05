@@ -66,5 +66,5 @@ SECTIONS {
        This puts the heap limit at _heap_start + 0x50000, which must be < 0xA0000 (VGA start).
        If _heap_start ≈ 0x36000, then 0x36000 + 0x50000 = 0x86000 < 0xA0000 ✓
     */
-    ASSERT(_bss_end < 0xA0000, "ERROR: Kernel BSS extends into VGA memory region")
+    ASSERT(_bss_end < 0x90000, "ERROR: Kernel BSS too large")
 }

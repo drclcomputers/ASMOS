@@ -206,7 +206,7 @@ void scheduler_kernel_task(void) {
 
         if (!modal_active()) {
             menubar_update(&g_menubar);
-            os_tick_apps();
+            os_tick_apps_direct();
             wm_update_all();
         }
 

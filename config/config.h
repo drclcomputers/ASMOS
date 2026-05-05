@@ -1,16 +1,20 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "0.9.6"
+#define VER "0.9.7"
 
 // Memory
 #define BACKBUF ((uint8_t *)0x100000)
-#define HEAP_START 0x164000
+#define HEAP_START 0x200000
 #define HEAP_END 0x464000
 
 // Screen/Display
-#define SCREEN_WIDTH 320
-#define SCREEN_HEIGHT 200
+#define SCREEN_WIDTH 640
+#define SCREEN_HEIGHT 400
+// #define SCREEN_HEIGHT 480
+#define VESA_MODE 0x0100 // 640x400x8
+// #define VESA_MODE 0x0101 // 640x480x8
+#define VESA_FB 0xE0000000
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
 #define WIN_ANIM_DEFAULT_FRAMES 20

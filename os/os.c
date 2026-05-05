@@ -182,6 +182,17 @@ void os_tick_apps(void) {
     }
 }
 
+void os_tick_apps_direct(void) {
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *app = &running_apps[i];
+        if (app->running && !app->wants_quit) {
+            if (app->desc && app->desc->on_frame) {
+                app->desc->on_frame(app->state);
+            }
+        }
+    }
+}
+
 void os_reap_dead_apps(void) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *app = &running_apps[i];

@@ -137,6 +137,8 @@ qemu-fdd: all
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
+        -vga std \
+        -display cocoa,zoom-to-fit=on
 
 qemu: all
 	qemu-system-i386 \
@@ -144,6 +146,8 @@ qemu: all
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
+	    -vga std \
+        -display cocoa,zoom-to-fit=on
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q
