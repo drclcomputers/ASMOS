@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "0.9.8"
+#define VER "0.9.9"
 
 // Memory
 #define BACKBUF ((uint8_t *)0x100000)
@@ -15,7 +15,7 @@
 #define VESA_MODE 0x0100 // 640x400x8
 //#define VESA_MODE 0x0101 // 640x480x8
 #define VESA_FB 0xE0000000
-#define TARGET_FPS 120
+#define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
 #define WIN_ANIM_DEFAULT_FRAMES TARGET_FPS / 3
 

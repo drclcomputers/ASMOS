@@ -591,9 +591,13 @@ static void menu_delete(void) {
 }
 
 static void menu_sort_name(void) { desktop_fs_set_dirty(); }
-static void menu_about_desktop(void) {
-    modal_show(MODAL_INFO, "About Desktop", "Desktop v1.1\nASMOS Shell", NULL,
-               NULL);
+static void menu_about_os(void) {
+    char x[200];
+    sprintf(x,
+            "ASMOS ver %s\nDeveloped by drclcomputers.\n\nCheck out more of my "
+            "work here: https://github.com/drclcomputers/ASMOS",
+            VER);
+    modal_show(MODAL_INFO, "About ASMOS", x, NULL, NULL);
 }
 
 static void do_shutdown(void) {
@@ -715,7 +719,7 @@ void desktop_init(void) {
     menu_add_item(file_menu, "Rename", menu_rename);
     menu_add_item(file_menu, "Reload", menu_reload);
     menu_add_separator(file_menu);
-    menu_add_item(file_menu, "About Desktop", menu_about_desktop);
+    menu_add_item(file_menu, "About OS", menu_about_os);
 
     menu *edit_menu = window_add_menu(win, "Edit");
     menu_add_item(edit_menu, "Copy", menu_copy);
