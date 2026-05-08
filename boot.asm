@@ -5,7 +5,7 @@
 KERNEL_OFFSET   equ 0x8000
 KERNEL_SEGMENT  equ 0x0800
 SECTORS_TO_LOAD equ 1000
-VESA_MODE       equ 0x0100
+VESA_MODE       equ 0x0100 ; 0x0146 - 320x200 - mode 13h
 
 jmp short start
 nop

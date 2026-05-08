@@ -1,11 +1,11 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "0.9.9"
+#define VER "1.0.0"
 
 // Memory
 #define BACKBUF ((uint8_t *)0x100000)
-#define HEAP_START 0x200000
+#define HEAP_START 0x150000
 #define HEAP_END 0x464000
 
 // Screen/Display

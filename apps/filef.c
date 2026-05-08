@@ -1434,6 +1434,38 @@ static void ff_handle_rename(ff_inst_t *s) {
     ff_reload(s);
 }
 
+static void menu_eject_fdd(void) {
+    ff_inst_t *s = active_finder();
+    if (!s) return;
+    int sel = -1;
+    for (int i = 0; i < s->item_count; i++)
+        if (s->items[i].selected && s->items[i].is_vdrive && !s->items[i].vdrive_hdd) {
+            sel = i;
+            break;
+        }
+    if (sel < 0) {
+        strcpy(s->status, "Select a floppy first.");
+        return;
+    }
+    if (fdd_eject(s->items[sel].vdrive_id)) {
+        ff_refresh_all();
+        strcpy(s->status, "Floppy ejected.");
+    } else {
+        strcpy(s->status, "Eject failed.");
+    }
+}
+
+static void menu_insert_fdd(void) {
+    ff_inst_t *s = active_finder();
+    if (!s) return;
+    if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
+        ff_refresh_all();
+        strcpy(s->status, "Floppy mounted.");
+    } else {
+        modal_show(MODAL_WARNING, "Insert Floppy", "No floppy found or already mounted.", NULL, NULL);
+    }
+}
+
 /* ── Drag-and-drop ──────────────────────────────────────────────── */
 static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
     for (int i = win_count - 1; i >= 0; i--) {
@@ -1993,6 +2025,10 @@ static void ff_init(void *state) {
     menu_add_item(view_menu, "By Size", menu_sort_size);
     menu_add_separator(view_menu);
     menu_add_item(view_menu, "Show Hidden", menu_show_hidden_toggle);
+
+    menu *drive_menu = window_add_menu(s->win, "Drive");
+    menu_add_item(drive_menu, "Insert Floppy", menu_insert_fdd);
+    menu_add_item(drive_menu, "Eject Floppy", menu_eject_fdd);
 
     s->dir_cluster = 0;
     s->drive_id = DRIVE_HDA;

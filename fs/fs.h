@@ -122,6 +122,7 @@ extern fat_dir_ctx_t dir_context;
 bool path_is_protected(const char *name_or_path);
 
 bool fs_mount(void);
+void fs_unmount(uint8_t drive_id);
 bool fs_mount_drive(uint8_t drive_id);
 bool fs_select_drive(uint8_t drive_id);
 uint8_t fs_current_drive(void);

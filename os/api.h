@@ -29,6 +29,7 @@
 
 // Storage & Filesystem
 #include "fs/fs.h"
+#include "fs/fdd_ctrl.h"
 
 // OS Services
 #include "os/clipboard.h"

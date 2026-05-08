@@ -12,6 +12,7 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 
+#include "fs/fdd_ctrl.h"
 #include "lib/core.h"
 #include "lib/device.h"
 #include "lib/graphics.h"
@@ -619,6 +620,28 @@ static void menu_restart(void) {
                NULL);
 }
 
+static void menu_eject_fdd(void) {
+    int sel = selected_idx();
+    if (sel >= 0) {
+        desktop_item_t *it = &desktop_fs_items()[sel];
+        if (it->kind == DESKTOP_ITEM_FDD) {
+            if (fdd_eject(it->drive_id)) {
+                desktop_fs_set_dirty();
+                return;
+            }
+        }
+    }
+    modal_show(MODAL_WARNING, "Eject", "No floppy selected or mounted.", NULL, NULL);
+}
+
+static void menu_insert_fdd(void) {
+    if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
+        desktop_fs_set_dirty();
+    } else {
+        modal_show(MODAL_WARNING, "Insert Floppy", "No floppy found or already mounted.", NULL, NULL);
+    }
+}
+
 /* ── new name / rename dialog * ─────────────────────────────────────────── */
 static void handle_newname(void) {
     const char *err = NULL;
@@ -729,6 +752,9 @@ void desktop_init(void) {
     menu_add_item(edit_menu, "Delete", menu_delete);
 
     menu *action_menu = window_add_menu(win, "Action");
+    menu_add_item(action_menu, "Insert Floppy", menu_insert_fdd);
+    menu_add_item(action_menu, "Eject Floppy", menu_eject_fdd);
+    menu_add_separator(action_menu);
     menu_add_item(action_menu, "Restart", menu_restart);
     menu_add_item(action_menu, "Shut Down", menu_shutdown);
 

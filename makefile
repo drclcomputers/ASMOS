@@ -45,12 +45,14 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/config/runtime_config.o      \
 	  \
 	  $(BUILD_DIR)/drivers/gpu.o                \
+	  $(BUILD_DIR)/drivers/sb16.o               \
       \
       $(BUILD_DIR)/fonts/fonts.o                \
       \
       $(BUILD_DIR)/fs/ata.o                     \
       $(BUILD_DIR)/fs/fat_io.o                  \
       $(BUILD_DIR)/fs/fdd.o                     \
+      $(BUILD_DIR)/fs/fdd_ctrl.o                \
       $(BUILD_DIR)/fs/fs.o                      \
       \
       $(BUILD_DIR)/io/ps2.o                     \

@@ -423,6 +423,12 @@ bool fs_mount(void) {
     return true;
 }
 
+void fs_unmount(uint8_t drive_id) {
+    if (drive_id >= DRIVE_COUNT)
+        return;
+    g_drives[drive_id].mounted = false;
+}
+
 bool fs_resolve_dir(const char *path, uint8_t *out_drive,
                     uint16_t *out_cluster) {
     uint8_t drive;

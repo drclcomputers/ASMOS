@@ -1,3 +1,4 @@
+#include "config/runtime_config.h"
 #include "os/api.h"
 
 #define teditor_DEFAULT_X 30
@@ -364,25 +365,24 @@ static bool teditor_close_cb(window *w);
 
 static void menu_new(void) { os_launch_app(&teditor_app); }
 
+static void menu_open_file_dialog(void) {
+    teditor_state_t *s = active_teditor();
+    s->fname_buf[0] = '\0';
+    s->fname_len = 0;
+    s->fname_mode = FNAME_MODE_OPEN;
+}
+
 static void menu_open(void) {
     teditor_state_t *s = active_teditor();
     if (!s)
         return;
     if (s->dirty || s->text_len > 0) {
-        app_instance_t *inst = os_launch_app(&teditor_app);
-        if (!inst)
-            return;
-        teditor_state_t *ns = (teditor_state_t *)inst->state;
-        if (!ns || !ns->win)
-            return;
-        ns->fname_buf[0] = '\0';
-        ns->fname_len = 0;
-        ns->fname_mode = FNAME_MODE_OPEN;
+        modal_show(MODAL_CONFIRM, "Unsaved Changes",
+                   "Open another file without saving?", menu_open_file_dialog,
+                   NULL);
         return;
     }
-    s->fname_buf[0] = '\0';
-    s->fname_len = 0;
-    s->fname_mode = FNAME_MODE_OPEN;
+    menu_open_file_dialog();
 }
 
 static void menu_save(void) {
@@ -415,8 +415,7 @@ static void menu_close_np(void) {
 }
 
 static void on_about_np(void) {
-    modal_show(MODAL_INFO, "About TEditor", "TEditor v1.2\nDynamic Tiny Editor",
-               NULL, NULL);
+    modal_show(MODAL_INFO, "About TEditor", "TEditor v1.2", NULL, NULL);
 }
 
 /* ── Layout & drawing ───────────────────────────────────────────────────── */
@@ -690,8 +689,16 @@ static app_instance_t *s_pending_close = NULL;
 
 static void teditor_confirm_close(void) {
     if (s_pending_close) {
-        os_quit_app(s_pending_close);
-        s_pending_close = NULL;
+        teditor_state_t *s = (teditor_state_t *)s_pending_close->state;
+        if (s) s->dirty = false;
+        if (s && s->win && s->win->animate_open_close && !g_cfg.reduce_motion) {
+            s->win->anim_state = WIN_ANIM_CLOSE;
+            s->win->anim_frame = 0;
+            s_pending_close = NULL;
+        } else {
+            os_quit_app(s_pending_close);
+            s_pending_close = NULL;
+        }
     }
 }
 
