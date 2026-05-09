@@ -20,6 +20,9 @@
 #include "lib/device.h"
 #include "lib/cpu.h"
 
+// Drivers support
+#include "drivers/sb16.h"
+
 // Input & Interaction
 #include "io/keyboard.h"
 #include "io/mouse.h"

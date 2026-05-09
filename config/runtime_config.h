@@ -16,6 +16,7 @@ typedef struct __attribute__((packed)) {
     uint8_t start_in_gui;
     uint8_t play_bootchime;
     uint8_t sound_enabled;
+    uint8_t sb16_volume;
     uint8_t wallpaper_main_color;
     uint8_t wallpaper_secondary_color;
     uint8_t filef_single_window;

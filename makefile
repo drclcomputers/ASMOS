@@ -32,6 +32,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/apps/asmdraw.o               \
 	  $(BUILD_DIR)/apps/asmterm.o               \
 	  $(BUILD_DIR)/apps/asmusic.o               \
+	  $(BUILD_DIR)/apps/aswav.o                 \
 	  $(BUILD_DIR)/apps/calculator.o            \
 	  $(BUILD_DIR)/apps/clipview.o              \
 	  $(BUILD_DIR)/apps/clock.o                 \
@@ -141,6 +142,7 @@ qemu-fdd: all
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
+	    -device sb16,audiodev=snd0 \
         -vga std \
         -display cocoa,zoom-to-fit=on
 
@@ -150,8 +152,9 @@ qemu: all
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
+	    -device sb16,audiodev=snd0 \
 	    -vga std \
-        -display cocoa,zoom-to-fit=on
+	    -display cocoa,zoom-to-fit=on
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q

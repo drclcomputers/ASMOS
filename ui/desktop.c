@@ -46,6 +46,11 @@ void draw_wallpaper_pattern(void) {
             draw_line(0, y, SCREEN_WIDTH - 1, y,
                       (y / 5) % 2 == 0 ? main_col : sec_col);
         break;
+    case WALLPAPER_VERTICAL_STRIPES:
+        for (int x = 0; x < SCREEN_WIDTH; x++)
+            draw_line(x, 0, x, SCREEN_HEIGHT - 1,
+                      (x / 5) % 2 == 0 ? main_col : sec_col);
+        break;
     case WALLPAPER_DOTS:
         clear_screen(main_col);
         for (int y = 5; y < SCREEN_HEIGHT; y += 10)
@@ -631,14 +636,16 @@ static void menu_eject_fdd(void) {
             }
         }
     }
-    modal_show(MODAL_WARNING, "Eject", "No floppy selected or mounted.", NULL, NULL);
+    modal_show(MODAL_WARNING, "Eject", "No floppy selected or mounted.", NULL,
+               NULL);
 }
 
 static void menu_insert_fdd(void) {
     if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
         desktop_fs_set_dirty();
     } else {
-        modal_show(MODAL_WARNING, "Insert Floppy", "No floppy found or already mounted.", NULL, NULL);
+        modal_show(MODAL_WARNING, "Insert Floppy",
+                   "No floppy found or already mounted.", NULL, NULL);
     }
 }
 

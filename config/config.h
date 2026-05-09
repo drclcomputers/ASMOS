@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "1.0.0"
+#define VER "1.0.1"
 
 // Memory
 #define BACKBUF ((uint8_t *)0x100000)
@@ -39,7 +39,8 @@
 #define WALLPAPER_SOLID 0
 #define WALLPAPER_CHECKERBOARD 1
 #define WALLPAPER_STRIPES 2
-#define WALLPAPER_DOTS 3
+#define WALLPAPER_VERTICAL_STRIPES 3
+#define WALLPAPER_DOTS 4
 
 #define MENUBAR_H 10
 #define MENUBAR_H_SIZE MENUBAR_H

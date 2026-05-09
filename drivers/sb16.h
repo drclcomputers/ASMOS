@@ -7,6 +7,9 @@
 #define SB16_DMA_CHANNEL 1
 #define SB16_IRQ 5
 
+#define DMA_BUF_SIZE 0x4000
+#define DMA_BUF_ADDR 0x70000
+
 bool sb16_init(void);
 bool sb16_detected(void);
 

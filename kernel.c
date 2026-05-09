@@ -2,6 +2,7 @@
 #include "io/ps2.h"
 
 #include "drivers/gpu.h"
+#include "drivers/sb16.h"
 
 #include "os/app_registry.h"
 #include "os/error.h"
@@ -102,6 +103,8 @@ void kmain(void) {
 
     if (g_cfg.sound_enabled)
         speaker_init();
+    sb16_init();
+
     error_set_gui_mode(true);
 
     for (int i = 0; i < app_registry_count; i++)
