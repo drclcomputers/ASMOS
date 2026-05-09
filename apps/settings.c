@@ -170,10 +170,6 @@ static void draw_sound_tab(int px, int py) {
         row++;
         draw_string(px + LBL_X, RY(row), "found at 0x220-0x280.", DARK_GRAY, 2);
         row++;
-        draw_string(px + LBL_X, RY(row), "Check QEMU -soundhw sb16", DARK_GRAY,
-                    2);
-        row++;
-        draw_string(px + LBL_X, RY(row), "or -device sb16.", DARK_GRAY, 2);
     } else {
         // Green status dot + label
         fill_rect(px + LBL_X, RY(row) + 1, 6, 6, LIGHT_GREEN);
@@ -396,7 +392,7 @@ static void handle_sound_input(settings_state_t *s, int px, int py) {
     }
 
     row += 3; // skip separator + SB16 header + status
-    row += 3; // skip port / IRQ / DMA rows
+    row += 5; // skip port / IRQ / DMA rows
     // Volume row
     if (small_btn(px + VAL_X + 10, RY(row) - 1, 10, 9, "-", DARK_GRAY)) {
         if (g_cfg.sb16_volume > 0) {
