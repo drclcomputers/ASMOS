@@ -8,16 +8,23 @@ extern app_descriptor clipview_app;
 extern app_descriptor clock_app;
 extern app_descriptor filef_app;
 extern app_descriptor hexview_app;
+extern app_descriptor midiplayer_app;
 extern app_descriptor monitor_app;
 extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 
 registered_app_t app_registry[] = {
-    {&asmdraw_app, "ASMDraw"}, {&asmterm_app, "ASMTerm"},
-    {&asmusic_app, "ASMusic"}, {&calculator_app, "Calculator"},
-    {&clock_app, "Clock"},     {&clipview_app, "ClipView"},
-    {&filef_app, "FileF"},     {&hexview_app, "HexView"},
-    {&monitor_app, "Monitor"}, {&settings_app, "Settings"},
+    {&asmdraw_app, "ASMDraw"},
+    {&asmterm_app, "ASMTerm"},
+    {&asmusic_app, "ASMusic"},
+    {&calculator_app, "Calculator"},
+    {&clock_app, "Clock"},
+    {&clipview_app, "ClipView"},
+    {&filef_app, "FileF"},
+    {&hexview_app, "HexView"},
+    {&midiplayer_app, "MIDI Player"},
+    {&monitor_app, "Monitor"},
+    {&settings_app, "Settings"},
     {&teditor_app, "TEditor"},
 };
 

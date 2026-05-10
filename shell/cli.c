@@ -148,7 +148,7 @@ static void draw_input(void) {
     draw_string(tax, iy + 2, iv, WHITE, 2);
 
     extern volatile uint32_t pit_ticks;
-    if ((pit_ticks / 50) % 2 == 0) {
+    if ((pit_ticks / 500) % 2 == 0) {
         int cx = tax + tc * CHAR_W;
         if (cx < SCREEN_WIDTH - SCROLL_W - 2)
             draw_string(cx, iy + 2, "|", CYAN, 2);
@@ -201,7 +201,9 @@ static void execute(void) {
         redraw();
         sleep_s(1);
         s_exec_status = CMD_STATUS_EXIT;
-        goto done;
+        s.input[0] = '\0';
+        s.input_len = 0;
+        s.input_scroll = 0;
     }
     if (strcmp(s.input, "gui") == 0) {
         term_buf_push("Starting GUI...");
@@ -209,7 +211,9 @@ static void execute(void) {
         redraw();
         sleep_s(1);
         s_exec_status = CMD_STATUS_GUI;
-        goto done;
+        s.input[0] = '\0';
+        s.input_len = 0;
+        s.input_scroll = 0;
     }
 
     {
@@ -225,11 +229,6 @@ static void execute(void) {
         }
         s_exec_status = st;
     }
-
-done:
-    s.input[0] = '\0';
-    s.input_len = 0;
-    s.input_scroll = 0;
 }
 
 void cli_run(void) {

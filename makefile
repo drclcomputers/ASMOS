@@ -37,6 +37,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/apps/clock.o                 \
       $(BUILD_DIR)/apps/filef.o                 \
       $(BUILD_DIR)/apps/hexview.o               \
+      $(BUILD_DIR)/apps/midiplayer.o            \
 	  $(BUILD_DIR)/apps/monitor.o               \
 	  $(BUILD_DIR)/apps/settings.o              \
 	  $(BUILD_DIR)/apps/teditor.o 				\
@@ -45,6 +46,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/config/runtime_config.o      \
 	  \
 	  $(BUILD_DIR)/drivers/gpu.o                \
+	  $(BUILD_DIR)/drivers/opl2.o               \
 	  $(BUILD_DIR)/drivers/sb16.o               \
       \
       $(BUILD_DIR)/fonts/fonts.o                \
@@ -142,8 +144,9 @@ qemu-fdd: all
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
 	    -device sb16,audiodev=snd0 \
-        -vga std \
-        -display cocoa,zoom-to-fit=on
+	    -device adlib,audiodev=snd0 \
+	    -vga std \
+	    -display cocoa,zoom-to-fit=on
 
 qemu: all
 	qemu-system-i386 \
@@ -152,6 +155,7 @@ qemu: all
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
 	    -device sb16,audiodev=snd0 \
+	    -device adlib,audiodev=snd0 \
 	    -vga std \
 	    -display cocoa,zoom-to-fit=on
 

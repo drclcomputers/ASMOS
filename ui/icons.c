@@ -396,7 +396,7 @@ void icon_view_update(icon_view_t *v, bool blocked) {
 
             uint32_t now = pit_ticks;
             if (v->_last_click_idx == i &&
-                (now - v->_last_click_tick) <= TARGET_FPS) {
+                (now - v->_last_click_tick) <= DOUBLE_CLICK_SPEED) {
                 if (ic->on_launch)
                     ic->on_launch();
                 v->_last_click_idx = -1;

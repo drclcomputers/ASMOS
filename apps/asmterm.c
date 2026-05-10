@@ -376,7 +376,7 @@ void asmterm_window_draw(window *win, void *userdata) {
     draw_string(tax, iy + 2, iv, WHITE, 2);
 
     extern volatile uint32_t pit_ticks;
-    if (s->input_focused && (pit_ticks / 50) % 2 == 0) {
+    if (s->input_focused && (pit_ticks / 500) % 2 == 0) {
         int cx = tax + tc * CHAR_W;
         if (cx < ix + iw - 2)
             draw_string(cx, iy + 2, "|", CYAN, 2);

@@ -13,7 +13,7 @@
 #define PIT_CHANNEL0 0x40
 #define PIT_CMD 0x43
 
-#define PIT_DIVISOR 11931
+#define PIT_DIVISOR 1193
 
 extern volatile uint32_t pit_ticks;
 extern volatile uint32_t pit_seconds;

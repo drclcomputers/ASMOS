@@ -4,8 +4,11 @@
 #include "lib/core.h"
 #include "lib/string.h"
 
+#define MAX_WIN_WIDGETS 128
 #define MAX_MENU_ITEMS 12
 #define MAX_DROP_ITEMS 8
+
+#define TEXTBOX_BUF_CAP 256
 
 typedef struct widget widget;
 typedef bool (*WidgetCallback)(widget *wg);
@@ -29,7 +32,7 @@ typedef struct {
 typedef struct {
     char *text;
     unsigned char color;
-    int font_size; // 1 = large (8x8), 2 = small (4x6)
+    int font_size;
 } widget_label;
 
 typedef struct {
@@ -39,7 +42,7 @@ typedef struct {
 } widget_checkbox;
 
 typedef struct {
-    char buf[1024];
+    char *buf;
     int len;
     bool focused;
     int scroll;
@@ -61,9 +64,9 @@ typedef struct {
 } widget_menu;
 
 typedef struct {
-    int value;    // Current scroll position (0 to max)
-    int max;      // Maximum scroll value
-    int viewport; // Visible area size
+    int value;
+    int max;
+    int viewport;
     bool dragging;
     int drag_offset;
     WidgetCallback on_change;
@@ -86,6 +89,9 @@ struct widget {
         widget_scrollbar scrollbar;
     } as;
 };
+
+bool widget_textbox_ensure_buf(widget_textbox *tb);
+void widget_textbox_free(widget_textbox *tb);
 
 static inline widget make_button(int x, int y, int w, int h, char *label,
                                  unsigned char bg, unsigned char fg,
@@ -185,10 +191,8 @@ static inline widget make_vscrollbar(int x, int y, int h, unsigned char bg,
     wg.bg_color = bg;
     wg.fg_color = fg;
     wg.border_color = border;
-    wg.as.scrollbar.value = 0;
     wg.as.scrollbar.max = max;
     wg.as.scrollbar.viewport = viewport;
-    wg.as.scrollbar.dragging = false;
     wg.as.scrollbar.on_change = on_change;
     return wg;
 }
@@ -206,10 +210,8 @@ static inline widget make_hscrollbar(int x, int y, int w, unsigned char bg,
     wg.bg_color = bg;
     wg.fg_color = fg;
     wg.border_color = border;
-    wg.as.scrollbar.value = 0;
     wg.as.scrollbar.max = max;
     wg.as.scrollbar.viewport = viewport;
-    wg.as.scrollbar.dragging = false;
     wg.as.scrollbar.on_change = on_change;
     return wg;
 }

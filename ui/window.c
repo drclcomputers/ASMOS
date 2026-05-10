@@ -225,6 +225,12 @@ void wm_unregister(window *win) {
         if (win_stack[i] != win)
             continue;
 
+        for (int j = 0; j < win->widget_count; j++) {
+            if (win->widgets[j].type == WIDGET_TEXTBOX) {
+                widget_textbox_free(&win->widgets[j].as.textbox);
+            }
+        }
+
         if (focused_window == win)
             focused_window = NULL;
 

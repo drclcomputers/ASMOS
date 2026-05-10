@@ -5,13 +5,12 @@
 
 uint32_t time_seconds(void) { return pit_seconds; }
 
-uint32_t time_millis(void) { return pit_ticks * 10; }
+uint32_t time_millis(void) { return pit_ticks; }
 
-uint32_t pit_ticks_func(void) { return time_millis() / 10; }
+uint32_t pit_ticks_func(void) { return time_millis(); }
 
 void sleep_ms(uint32_t ms) {
-    uint32_t ticks_needed = (ms + 9) / 10;
-    uint32_t target = pit_ticks + ticks_needed;
+    uint32_t target = pit_ticks + ms;
     while (pit_ticks < target) {
         __asm__ volatile("hlt");
     }

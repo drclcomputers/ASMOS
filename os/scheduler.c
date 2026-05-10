@@ -12,6 +12,8 @@
 #include "io/ps2.h"
 #include "ui/ui.h"
 
+#include "drivers/opl2.h"
+
 task_t tasks[MAX_TASKS];
 int current_task = 0;
 int task_count = 0;
@@ -27,8 +29,7 @@ void scheduler_init(void) {
 
     tasks[0].alive = true;
     tasks[0].stack_base = NULL;
-    /* tasks[0].esp is written by the first task_switch out of the kernel task
-     */
+    /* tasks[0] is written by the first task_switch out of the kernel task */
     current_task = 0;
     task_count = 1;
 }
@@ -198,6 +199,7 @@ void scheduler_kernel_task(void) {
         g_menubar_click_consumed = false;
         ps2_update();
         speaker_update();
+        midi_player_update();
 
         handle_global_shortcuts();
 

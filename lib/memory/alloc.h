@@ -5,7 +5,10 @@
 #include "lib/core.h"
 
 #define HEAP_MAGIC 0xDEADBEEF
+#define BLOCK_MAGIC_FREE 0xF4EEB10C
+#define BLOCK_MAGIC_USED 0xA110CA7E
 
+void alloc_set_range(uint32_t start, uint32_t end);
 void alloc_init(void);
 void alloc_set_end(uint32_t end);
 
@@ -29,7 +32,8 @@ typedef struct {
     uint32_t free_count;
 } pool_t;
 
-bool pool_init(pool_t *pool, void *slab, uint32_t capacity, uint32_t block_size);
+bool pool_init(pool_t *pool, void *slab, uint32_t capacity,
+               uint32_t block_size);
 
 void pool_destroy(pool_t *pool);
 

@@ -2,10 +2,32 @@
 
 #include "lib/graphics.h"
 #include "lib/math.h"
+#include "lib/memory.h"
 #include "lib/string.h"
 
 #include "io/keyboard.h"
 #include "io/mouse.h"
+
+bool widget_textbox_ensure_buf(widget_textbox *tb) {
+    if (tb->buf)
+        return true;
+    tb->buf = (char *)kmalloc(TEXTBOX_BUF_CAP + 1);
+    if (!tb->buf)
+        return false;
+    tb->buf[0] = '\0';
+    tb->len = 0;
+    tb->scroll = 0;
+    return true;
+}
+
+void widget_textbox_free(widget_textbox *tb) {
+    if (tb->buf) {
+        kfree(tb->buf);
+        tb->buf = NULL;
+    }
+    tb->len = 0;
+    tb->scroll = 0;
+}
 
 static inline int abs_x(int win_x, int wx) { return win_x + 1 + wx; }
 static inline int abs_y(int win_y, int wy) { return win_y + 17 + wy; }
@@ -43,32 +65,30 @@ static void draw_textbox(widget *wg, int ax, int ay) {
     fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
     draw_rect(ax, ay, wg->w, wg->h, border);
 
-    int char_w = 5;
-    int max_vis_chars = (wg->w - 4) / char_w;
-    if (max_vis_chars < 1)
-        max_vis_chars = 1;
+    if (!tb->buf)
+        return;
 
-    tb->scroll = tb->len - max_vis_chars;
+    int char_w = 5;
+    int max_vis = (wg->w - 4) / char_w;
+    if (max_vis < 1)
+        max_vis = 1;
+
+    tb->scroll = tb->len - max_vis;
     if (tb->scroll < 0)
         tb->scroll = 0;
 
-    char vis_buf[256];
     int to_copy = tb->len - tb->scroll;
-    if (to_copy > max_vis_chars)
-        to_copy = max_vis_chars;
-    if (to_copy >= (int)sizeof(vis_buf))
-        to_copy = sizeof(vis_buf) - 1;
+    if (to_copy > max_vis)
+        to_copy = max_vis;
 
     for (int i = 0; i < to_copy; i++) {
-        vis_buf[i] = tb->buf[tb->scroll + i];
+        char ch[2] = {tb->buf[tb->scroll + i], '\0'};
+        draw_string(ax + 2 + i * char_w, ay + 2, ch, wg->fg_color, 2);
     }
-    vis_buf[to_copy] = '\0';
-
-    draw_string(ax + 2, ay + 2, vis_buf, wg->fg_color, 2);
 
     if (tb->focused) {
-        int visible_pos = tb->len - tb->scroll;
-        int cx = ax + 2 + visible_pos * char_w;
+        int vis_pos = tb->len - tb->scroll;
+        int cx = ax + 2 + vis_pos * char_w;
         if (cx < ax + wg->w - 4)
             draw_string(cx, ay + 2, "|", wg->fg_color, 2);
     }
@@ -109,49 +129,29 @@ static void draw_menu(widget *wg, int ax, int ay) {
 
 static void draw_vscrollbar(widget *wg, int ax, int ay) {
     widget_scrollbar *sb = &wg->as.scrollbar;
-
     fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
     draw_rect(ax, ay, wg->w, wg->h, wg->border_color);
-
     if (sb->max > 0 && sb->viewport > 0) {
-        int track_height = wg->h - 4;
-        int thumb_height =
-            max(12, (sb->viewport * track_height) / (sb->max + sb->viewport));
-        int thumb_range = track_height - thumb_height;
-        int thumb_pos = 0;
-
-        if (sb->max > 0) {
-            thumb_pos = (sb->value * thumb_range) / sb->max;
-        }
-
-        fill_rect(ax + 2, ay + 2 + thumb_pos, wg->w - 4, thumb_height,
-                  wg->fg_color);
-        draw_rect(ax + 2, ay + 2 + thumb_pos, wg->w - 4, thumb_height,
-                  wg->border_color);
+        int track = wg->h - 4;
+        int thumb = max(12, (sb->viewport * track) / (sb->max + sb->viewport));
+        int range = track - thumb;
+        int pos = (sb->max > 0) ? (sb->value * range / sb->max) : 0;
+        fill_rect(ax + 2, ay + 2 + pos, wg->w - 4, thumb, wg->fg_color);
+        draw_rect(ax + 2, ay + 2 + pos, wg->w - 4, thumb, wg->border_color);
     }
 }
 
 static void draw_hscrollbar(widget *wg, int ax, int ay) {
     widget_scrollbar *sb = &wg->as.scrollbar;
-
     fill_rect(ax, ay, wg->w, wg->h, wg->bg_color);
     draw_rect(ax, ay, wg->w, wg->h, wg->border_color);
-
     if (sb->max > 0 && sb->viewport > 0) {
-        int track_width = wg->w - 4;
-        int thumb_width =
-            max(12, (sb->viewport * track_width) / (sb->max + sb->viewport));
-        int thumb_range = track_width - thumb_width;
-        int thumb_pos = 0;
-
-        if (sb->max > 0) {
-            thumb_pos = (sb->value * thumb_range) / sb->max;
-        }
-
-        fill_rect(ax + 2 + thumb_pos, ay + 2, thumb_width, wg->h - 4,
-                  wg->fg_color);
-        draw_rect(ax + 2 + thumb_pos, ay + 2, thumb_width, wg->h - 4,
-                  wg->border_color);
+        int track = wg->w - 4;
+        int thumb = max(12, (sb->viewport * track) / (sb->max + sb->viewport));
+        int range = track - thumb;
+        int pos = (sb->max > 0) ? (sb->value * range / sb->max) : 0;
+        fill_rect(ax + 2 + pos, ay + 2, thumb, wg->h - 4, wg->fg_color);
+        draw_rect(ax + 2 + pos, ay + 2, thumb, wg->h - 4, wg->border_color);
     }
 }
 
@@ -203,6 +203,7 @@ static void update_checkbox(widget *wg, int ax, int ay) {
 
 static void update_textbox(widget *wg, int ax, int ay) {
     widget_textbox *tb = &wg->as.textbox;
+
     if (mouse.left_clicked) {
         if (mouse_over(ax, ay, wg->w, wg->h))
             tb->focused = true;
@@ -211,13 +212,17 @@ static void update_textbox(widget *wg, int ax, int ay) {
     }
     if (!tb->focused)
         return;
+
     if (kb.key_pressed && kb.last_char && kb.last_char != '\b') {
-        if (tb->len < (int)sizeof(tb->buf) - 1) {
+        if (!widget_textbox_ensure_buf(tb))
+            return;
+        if (tb->len < TEXTBOX_BUF_CAP) {
             tb->buf[tb->len++] = kb.last_char;
             tb->buf[tb->len] = '\0';
         }
     }
-    if (kb.key_pressed && kb.last_scancode == BACKSPACE && tb->len > 0)
+    if (kb.key_pressed && kb.last_scancode == BACKSPACE && tb->buf &&
+        tb->len > 0)
         tb->buf[--tb->len] = '\0';
 }
 
@@ -268,46 +273,28 @@ static void update_menu(widget *wg, int ax, int ay) {
 
 static void update_vscrollbar(widget *wg, int ax, int ay) {
     widget_scrollbar *sb = &wg->as.scrollbar;
-
     if (sb->max <= 0)
         return;
+    int track = wg->h - 4;
+    int thumb = max(12, (sb->viewport * track) / (sb->max + sb->viewport));
+    int range = track - thumb;
+    int pos = (sb->max > 0) ? (sb->value * range / sb->max) : 0;
+    int tx = ax + 2, ty = ay + 2 + pos;
 
-    int track_height = wg->h - 4;
-    int thumb_height =
-        max(12, (sb->viewport * track_height) / (sb->max + sb->viewport));
-    int thumb_range = track_height - thumb_height;
-    int thumb_pos = 0;
-
-    if (sb->max > 0) {
-        thumb_pos = (sb->value * thumb_range) / sb->max;
-    }
-
-    int thumb_ax = ax + 2;
-    int thumb_ay = ay + 2 + thumb_pos;
-    int thumb_w = wg->w - 4;
-    int thumb_h = thumb_height;
-
-    if (mouse.left_clicked &&
-        mouse_over(thumb_ax, thumb_ay, thumb_w, thumb_h)) {
+    if (mouse.left_clicked && mouse_over(tx, ty, wg->w - 4, thumb)) {
         sb->dragging = true;
-        sb->drag_offset = mouse.y - thumb_ay;
+        sb->drag_offset = mouse.y - ty;
     }
-
     if (sb->dragging) {
         if (mouse.left) {
-            int new_thumb_pos = mouse.y - (ay + 2) - sb->drag_offset;
-            if (new_thumb_pos < 0)
-                new_thumb_pos = 0;
-            if (new_thumb_pos > thumb_range)
-                new_thumb_pos = thumb_range;
-
-            int new_value = 0;
-            if (thumb_range > 0) {
-                new_value = (new_thumb_pos * sb->max) / thumb_range;
-            }
-
-            if (new_value != sb->value) {
-                sb->value = new_value;
+            int np = mouse.y - (ay + 2) - sb->drag_offset;
+            if (np < 0)
+                np = 0;
+            if (np > range)
+                np = range;
+            int nv = range > 0 ? (np * sb->max / range) : 0;
+            if (nv != sb->value) {
+                sb->value = nv;
                 if (sb->on_change)
                     sb->on_change(wg);
             }
@@ -319,46 +306,28 @@ static void update_vscrollbar(widget *wg, int ax, int ay) {
 
 static void update_hscrollbar(widget *wg, int ax, int ay) {
     widget_scrollbar *sb = &wg->as.scrollbar;
-
     if (sb->max <= 0)
         return;
+    int track = wg->w - 4;
+    int thumb = max(12, (sb->viewport * track) / (sb->max + sb->viewport));
+    int range = track - thumb;
+    int pos = (sb->max > 0) ? (sb->value * range / sb->max) : 0;
+    int tx = ax + 2 + pos, ty = ay + 2;
 
-    int track_width = wg->w - 4;
-    int thumb_width =
-        max(12, (sb->viewport * track_width) / (sb->max + sb->viewport));
-    int thumb_range = track_width - thumb_width;
-    int thumb_pos = 0;
-
-    if (sb->max > 0) {
-        thumb_pos = (sb->value * thumb_range) / sb->max;
-    }
-
-    int thumb_ax = ax + 2 + thumb_pos;
-    int thumb_ay = ay + 2;
-    int thumb_w = thumb_width;
-    int thumb_h = wg->h - 4;
-
-    if (mouse.left_clicked &&
-        mouse_over(thumb_ax, thumb_ay, thumb_w, thumb_h)) {
+    if (mouse.left_clicked && mouse_over(tx, ty, thumb, wg->h - 4)) {
         sb->dragging = true;
-        sb->drag_offset = mouse.x - thumb_ax;
+        sb->drag_offset = mouse.x - tx;
     }
-
     if (sb->dragging) {
         if (mouse.left) {
-            int new_thumb_pos = mouse.x - (ax + 2) - sb->drag_offset;
-            if (new_thumb_pos < 0)
-                new_thumb_pos = 0;
-            if (new_thumb_pos > thumb_range)
-                new_thumb_pos = thumb_range;
-
-            int new_value = 0;
-            if (thumb_range > 0) {
-                new_value = (new_thumb_pos * sb->max) / thumb_range;
-            }
-
-            if (new_value != sb->value) {
-                sb->value = new_value;
+            int np = mouse.x - (ax + 2) - sb->drag_offset;
+            if (np < 0)
+                np = 0;
+            if (np > range)
+                np = range;
+            int nv = range > 0 ? (np * sb->max / range) : 0;
+            if (nv != sb->value) {
+                sb->value = nv;
                 if (sb->on_change)
                     sb->on_change(wg);
             }

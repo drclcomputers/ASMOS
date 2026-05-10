@@ -539,7 +539,7 @@ static void np_draw(window *win, void *ud) {
             if (vis_col >= 0 && vis_col <= max_vis_chars) {
                 int cx = text_x + vis_col * CHAR_W;
                 extern volatile uint32_t pit_ticks;
-                if ((pit_ticks / 50) % 2 == 0)
+                if ((pit_ticks / 500) % 2 == 0)
                     fill_rect(cx, py, 1, LINE_H, BLACK);
             }
         }
@@ -623,7 +623,7 @@ static void np_draw(window *win, void *ud) {
         draw_string(field_x + 2, by + 15, (char *)show, BLACK, 2);
 
         extern volatile uint32_t pit_ticks;
-        if ((pit_ticks / 50) % 2 == 0) {
+        if ((pit_ticks / 500) % 2 == 0) {
             int vis_len = slen < field_chars ? slen : field_chars;
             int cx = field_x + 2 + vis_len * CHAR_W;
             int max_cx = field_x + field_w - 2;

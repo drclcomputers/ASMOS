@@ -1,5 +1,7 @@
 #include "os/error.h"
 #include "config/config.h"
+#include "drivers/opl2.h"
+#include "drivers/sb16.h"
 #include "fs/ata.h"
 #include "fs/fs.h"
 #include "lib/core.h"
@@ -91,6 +93,8 @@ static void boot_check_line(const char *label, bool ok, const char *detail) {
     boot_puts("\n", WHITE);
 }
 
+static char gui_msg[128];
+
 void error_report(err_severity_t sev, err_code_t code, const char *context) {
     const char *code_s =
         (code >= 0 && code < ERR_COUNT) ? err_code_str[code] : "unknown error";
@@ -117,18 +121,17 @@ void error_report(err_severity_t sev, err_code_t code, const char *context) {
                 __asm__ volatile("hlt");
         }
     } else {
-        char msg[128];
         int mi = 0;
         for (int i = 0; code_s[i] && mi < 100; i++)
-            msg[mi++] = code_s[i];
+            gui_msg[mi++] = code_s[i];
         if (ctx[0]) {
-            msg[mi++] = ' ';
-            msg[mi++] = '(';
+            gui_msg[mi++] = ' ';
+            gui_msg[mi++] = '(';
             for (int i = 0; ctx[i] && mi < 120; i++)
-                msg[mi++] = ctx[i];
-            msg[mi++] = ')';
+                gui_msg[mi++] = ctx[i];
+            gui_msg[mi++] = ')';
         }
-        msg[mi] = '\0';
+        gui_msg[mi] = '\0';
 
         int modal_t =
             (sev == ERR_FATAL || sev == ERR_WARNING) ? 2 : 0; // ERROR or INFO
@@ -136,7 +139,7 @@ void error_report(err_severity_t sev, err_code_t code, const char *context) {
         const char *title = (sev == ERR_FATAL)     ? "Fatal Error"
                             : (sev == ERR_WARNING) ? "Warning"
                                                    : "Info";
-        modal_show(modal_t, title, msg, NULL, NULL);
+        modal_show(modal_t, title, gui_msg, NULL, NULL);
 
         if (sev == ERR_FATAL) {
             blit();
@@ -247,4 +250,19 @@ void boot_check_heap(void) {
                     space_ok ? detail : "critically low");
     if (!space_ok)
         error_report(ERR_FATAL, ERR_OOM, "heap_remaining < 1024");
+}
+
+void boot_check_sound(void) {
+    boot_puts("Sound\n", LIGHT_GRAY);
+
+    // PC Speaker
+    boot_check_line("PC Speaker", true, "PIT channel 2");
+
+    // Sound Blaster 16
+    bool sb_ok = sb16_detected();
+    boot_check_line("Sound Blaster 16", sb_ok, sb_ok ? NULL : "not found");
+
+    // OPL2 FM Synthesizer
+    bool opl_ok = opl2_detected();
+    boot_check_line("OPL2 FM synth", opl_ok, opl_ok ? NULL : "not detected");
 }

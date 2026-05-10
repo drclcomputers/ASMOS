@@ -22,6 +22,7 @@ static idt_ptr_t idt_ptr;
 
 extern void isr_timer(void);
 extern void isr_spurious(void);
+extern void isr_sb16(void);
 
 static void idt_set_gate(uint8_t n, uint32_t handler) {
     idt[n].offset_lo = (uint16_t)(handler & 0xFFFF);
@@ -56,14 +57,16 @@ volatile uint32_t pit_seconds = 0;
 
 void pit_tick_handler(void) {
     pit_ticks++;
-    if (pit_ticks % 100 == 0)
+    if (pit_ticks % 1000 == 0) {
         pit_seconds++;
+    }
 }
 
 static void pit_init(void) {
-    outb(PIT_CMD, 0x36);
-    outb(PIT_CHANNEL0, PIT_DIVISOR & 0xFF);
-    outb(PIT_CHANNEL0, (PIT_DIVISOR >> 8) & 0xFF);
+    outb(PIT_CMD, 0x36);             // Counter 0, LSB/MSB, Mode 3
+    outb(PIT_CHANNEL0, PIT_DIVISOR & 0xFF); // LSB
+    outb(PIT_CHANNEL0, PIT_DIVISOR >> 8);
+    idt_set_gate(32 + 5, (uint32_t)isr_sb16);
 }
 
 void idt_init(void) {

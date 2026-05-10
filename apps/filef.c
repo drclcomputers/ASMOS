@@ -910,7 +910,7 @@ static void ff_draw_window(window *win, void *ud) {
         draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
         draw_string(bx + 6, by + 15, s->newname_buf, BLACK, 2);
         extern volatile uint32_t pit_ticks;
-        if ((pit_ticks / 50) % 2 == 0) {
+        if ((pit_ticks / 500) % 2 == 0) {
             int cx = bx + 6 + s->newname_len * CHAR_W;
             draw_string(cx, by + 15, "|", BLACK, 2);
         }
@@ -931,7 +931,7 @@ static void ff_draw_window(window *win, void *ud) {
         draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
         draw_string(bx + 6, by + 15, s->rename_buf, BLACK, 2);
         extern volatile uint32_t pit_ticks;
-        if ((pit_ticks / 50) % 2 == 0) {
+        if ((pit_ticks / 500) % 2 == 0) {
             int cx = bx + 6 + s->rename_len * CHAR_W;
             draw_string(cx, by + 15, "|", BLACK, 2);
         }
@@ -1861,7 +1861,7 @@ static void ff_on_frame(void *state) {
                 s->items[i].selected = false;
             s->items[hit].selected = true;
             uint32_t now = pit_ticks_func();
-            if (hit == s->last_click_idx && (now - s->last_click_tick) <= 60) {
+            if (hit == s->last_click_idx && (now - s->last_click_tick) <= DOUBLE_CLICK_SPEED) {
                 ff_item_t *it = &s->items[hit];
 
                 if (it->is_vdrive) {

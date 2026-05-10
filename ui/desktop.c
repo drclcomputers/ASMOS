@@ -689,7 +689,7 @@ static void draw_newname_dialog(void) {
     draw_rect(bx + 4, by + 14, bw - 8, 12, BLACK);
     draw_string(bx + 6, by + 16, s_newname_buf, BLACK, 2);
     extern volatile uint32_t pit_ticks;
-    if ((pit_ticks / 50) % 2 == 0) {
+    if ((pit_ticks / 500) % 2 == 0) {
         int cx = bx + 6 + s_newname_len * CHAR_W;
         if (cx < bx + bw - 10)
             draw_string(cx, by + 16, "|", BLACK, 2);
@@ -709,7 +709,7 @@ static void draw_rename_dialog(void) {
 
     draw_string(bx + 6, by + 16, s_rename_buf, BLACK, 2);
     extern volatile uint32_t pit_ticks;
-    if ((pit_ticks / 50) % 2 == 0) {
+    if ((pit_ticks / 500) % 2 == 0) {
         int cx = bx + 6 + s_rename_len * CHAR_W;
         if (cx < bx + bw - 10)
             draw_string(cx, by + 16, "|", BLACK, 2);
@@ -896,7 +896,7 @@ void desktop_on_frame(void) {
 
             uint32_t now = pit_ticks;
             if (hit == s_last_click_idx &&
-                (now - s_last_click_tick) <= TARGET_FPS) {
+                (now - s_last_click_tick) <= DOUBLE_CLICK_SPEED) {
                 open_item(&items[hit]);
                 s_last_click_idx = -1;
                 s_last_click_tick = 0;

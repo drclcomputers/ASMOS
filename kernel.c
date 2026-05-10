@@ -2,6 +2,7 @@
 #include "io/ps2.h"
 
 #include "drivers/gpu.h"
+#include "drivers/opl2.h"
 #include "drivers/sb16.h"
 
 #include "os/app_registry.h"
@@ -21,6 +22,8 @@
 
 #include "ui/ui.h"
 
+extern uint8_t _heap_start;
+
 extern void wm_init(void);
 extern void scheduler_init(void);
 extern void desktop_on_frame(void);
@@ -31,21 +34,39 @@ typedef struct __attribute__((packed)) {
     uint32_t type;
 } e820_entry_t;
 
-static void detect_heap_end(void) {
+static void detect_heap_range(void) {
     uint16_t count = *(volatile uint16_t *)0x500;
     uint8_t *ptr = (uint8_t *)0x504;
-    uint32_t best = HEAP_END;
+    uint32_t best = HEAP_END_MAX;
+
+    uint32_t kernel_end = (uint32_t)&_heap_start;
+    if (kernel_end < HEAP_MIN_START)
+        kernel_end = HEAP_MIN_START;
 
     for (uint16_t i = 0; i < count; i++, ptr += 20) {
         e820_entry_t *e = (e820_entry_t *)ptr;
         if (e->type != 1)
             continue;
-        if (e->base <= HEAP_START && e->base + e->length > HEAP_START) {
-            uint64_t end64 = e->base + e->length;
-            best = (end64 > 0xFFFFFFFFULL) ? 0xFFFFFFFFU : (uint32_t)end64;
+        uint64_t base = e->base;
+        uint64_t end64 = base + e->length;
+        if (base <= kernel_end && end64 > kernel_end) {
+            uint32_t end32 =
+                (end64 > 0xFFFFFFFFULL) ? 0xFFFFFFFFU : (uint32_t)end64;
+            if (end32 > best)
+                best = end32;
         }
     }
-    alloc_set_end(best);
+
+    // Never exceed the bottom of the kernel stack
+    if (best > HEAP_END_MAX)
+        best = HEAP_END_MAX;
+
+    if (best <= kernel_end) {
+        while (1) {
+        } // no usable memory – halt
+    }
+
+    alloc_set_range(kernel_end, best);
 }
 
 uint32_t g_vesa_fb = 0;
@@ -57,8 +78,7 @@ static void boot_banner(void) {
 }
 
 void kmain(void) {
-    alloc_init();
-    detect_heap_end();
+    detect_heap_range();
     idt_init();
     ps2_init();
 
@@ -77,6 +97,15 @@ void kmain(void) {
     if (!cfg_load()) {
         cfg_save();
     }
+
+    if (g_cfg.sound_enabled) {
+        speaker_init();
+        sb16_init();
+        opl2_init();
+        sb16_unmute_fm();
+    }
+
+    boot_check_sound();
 
     if (g_cfg.play_bootchime && g_cfg.sound_enabled) {
         speaker_beep(523, 120);
@@ -100,10 +129,6 @@ void kmain(void) {
     wm_init();
     desktop_init();
     menubar_init();
-
-    if (g_cfg.sound_enabled)
-        speaker_init();
-    sb16_init();
 
     error_set_gui_mode(true);
 

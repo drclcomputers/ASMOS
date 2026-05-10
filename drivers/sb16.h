@@ -10,6 +10,8 @@
 #define DMA_BUF_SIZE 0x4000
 #define DMA_BUF_ADDR 0x70000
 
+void mixer_write(uint8_t reg, uint8_t val);
+
 bool sb16_init(void);
 bool sb16_detected(void);
 
@@ -19,6 +21,6 @@ void sb16_play_pcm(const uint8_t *data, uint32_t len, uint32_t sample_rate,
                    bool stereo);
 void sb16_stop(void);
 bool sb16_is_playing(void);
-void sb16_update(void);
+void sb16_unmute_fm(void);
 
 #endif
