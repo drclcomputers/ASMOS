@@ -5,12 +5,12 @@
 
 // Screen/Display
 #define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 400
-// #define SCREEN_HEIGHT 480
-#define VESA_MODE 0x0100 // 640x400x8
-// #define VESA_MODE 0x0101 // 640x480x8
+//#define SCREEN_HEIGHT 400
+#define SCREEN_HEIGHT 480
+//#define VESA_MODE 0x0100 // 640x400x8
+#define VESA_MODE 0x0101 // 640x480x8
 #define VESA_FB 0xE0000000
-#define COLOR_BITS 8 / 8
+#define COLOR_BITS 8
 
 
 #define TARGET_FPS 60

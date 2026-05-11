@@ -128,16 +128,21 @@ $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 boot.bin: boot.asm
 	$(AS) -f bin $< -o $@
 
-os_image.bin: boot.bin kernel.bin
+boot_stage2.bin: boot_stage2.asm
+	$(AS) -f bin $< -o $@
+
+os_image.bin: boot.bin boot_stage2.bin kernel.bin
 	dd if=/dev/zero    of=os_image.bin bs=512 count=65536  2>/dev/null
-	dd if=boot.bin     of=os_image.bin bs=512 seek=0  conv=notrunc 2>/dev/null
-	dd if=kernel.bin   of=os_image.bin bs=512 seek=1  conv=notrunc 2>/dev/null
+	dd if=boot.bin     of=os_image.bin bs=512 seek=0 conv=notrunc 2>/dev/null
+	dd if=boot_stage2.bin   of=os_image.bin bs=512 seek=1 conv=notrunc 2>/dev/null
+	dd if=kernel.bin   of=os_image.bin bs=512 seek=9 conv=notrunc 2>/dev/null
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 qemu-fdd: all
 	qemu-system-i386 \
+	    -serial file:serial.log \
 	    -drive format=raw,file=os_image.bin \
 	    -drive format=raw,file=floppy.img,if=floppy \
 	    -m 4M -machine pc \
@@ -150,6 +155,7 @@ qemu-fdd: all
 
 qemu: all
 	qemu-system-i386 \
+	    -serial file:serial.log \
 	    -drive format=raw,file=os_image.bin \
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
@@ -164,6 +170,6 @@ bochs: all
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f *.bin os_image.bin
+	rm -f *.bin boot_stage2.bin os_image.bin serial.log
 	rm -f qemulog.txt
 	rm -f floppy.img

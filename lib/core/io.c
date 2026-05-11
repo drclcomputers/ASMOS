@@ -12,12 +12,22 @@ unsigned short inw(unsigned short port) {
     return ret;
 }
 
+uint32_t inl(unsigned short port) {
+    uint32_t ret;
+    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
 void outb(unsigned short port, unsigned char val) {
     asm volatile("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
 void outw(unsigned short port, unsigned short val) {
     asm volatile("outw %0, %1" : : "a"(val), "Nd"(port));
+}
+
+void outl(unsigned short port, uint32_t val) {
+    asm volatile("outl %0, %1" : : "a"(val), "Nd"(port));
 }
 
 void cpu_halt(void) { asm volatile("hlt"); }
