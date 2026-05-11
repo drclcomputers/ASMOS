@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "1.1.0"
+#define VER "1.1.3"
 
 // Screen/Display
 #define SCREEN_WIDTH 640
