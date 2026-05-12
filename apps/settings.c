@@ -3,7 +3,7 @@
 #include "os/api.h"
 
 #define SET_W 260
-#define SET_H 200
+#define SET_H 180
 #define SET_X 30
 #define SET_Y 20
 

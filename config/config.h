@@ -3,11 +3,13 @@
 
 #define VER "1.1.3"
 
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 480
-#define VESA_MODE 0x0101 /* 640×480×8bpp */
-#define VESA_FB 0xE0000000
+extern int g_screen_width;
+extern int g_screen_height;
+extern int g_backbuf_size;
+#define SCREEN_WIDTH  g_screen_width
+#define SCREEN_HEIGHT g_screen_height
 #define COLOR_BITS 8
+#define RESMODE 0
 
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
@@ -15,7 +17,7 @@
 #define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 3)
 
 #define BACKBUF ((uint8_t *)0x100000)
-#define BACKBUF_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT)
+#define BACKBUF_SIZE g_backbuf_size
 #define HEAP_MIN_START (0x100000 + BACKBUF_SIZE)
 #define HEAP_END_MAX 0x3F0000
 

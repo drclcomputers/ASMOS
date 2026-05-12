@@ -5,8 +5,7 @@
 
 typedef enum {
     GPU_BACKEND_NONE,
-    GPU_BACKEND_BGA,
-    GPU_BACKEND_VESA,
+    GPU_BACKEND_MODEX,
 } gpu_backend_t;
 
 void gpu_init(void);

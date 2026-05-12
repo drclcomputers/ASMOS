@@ -720,15 +720,15 @@ static void draw_rename_dialog(void) {
 static menu *s_apps_menu;
 
 void desktop_init(void) {
-    static const window_spec_t spec = {
+    static window_spec_t spec = {
         .x = 0,
         .y = 0,
-        .w = SCREEN_WIDTH,
-        .h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H,
         .title = "",
         .visible = true,
         .pinned_bottom = true,
     };
+    spec.w = SCREEN_WIDTH;
+    spec.h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H;
     window *win = wm_register(&spec);
     if (!win)
         return;

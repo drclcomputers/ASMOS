@@ -20,7 +20,7 @@
 
 STAGE2_SEG      equ 0x07E0      ; 0x07E0 × 16 = 0x7E00
 STAGE2_SECS     equ 8
-KERNEL_SEG      equ 0x0800      ; 0x0800 × 16 = 0x8000
+KERNEL_SEG      equ 0x1000      ; 0x0800 × 16 = 0x8000
 SECTORS_TO_LOAD equ 1000
 CHS_SPT         equ 63
 CHS_HEADS       equ 16
@@ -102,6 +102,14 @@ start:
     mov  word [remaining], SECTORS_TO_LOAD
     call read_sectors
 
+    ; ── Initialize video mode flag (0x0602) for stage 2 ──────────────────────
+    ; Default to Mode X (0x01). Stage 2 will check this value to determine
+    ; which video mode to set up. Can be overridden by bootloader config.
+    xor  ax, ax
+    mov  ds, ax
+    mov  byte [0x0602], 0x00    ; 0x01 = Mode X (640x480 planar)
+                                 ; 0x00 = Mode 13h (320x200 linear)
+
     jmp  STAGE2_SEG:0x0000
 
 ; ─────────────────────────────────────────────────────────────────────────────
@@ -130,7 +138,7 @@ read_sectors:
     mov  [chunk], ax
 
     ; ── LBA → CHS conversion ─────────────────────────────────────────────────
-    ; cylinder = LBA / (SPT × heads),  temp = LBA / SPT
+    ; cylinder = LBA / (SPT × heads),  tempx = LBA / SPT
     ; head     = temp mod heads
     ; sector   = (LBA mod SPT) + 1
     xor  dx, dx

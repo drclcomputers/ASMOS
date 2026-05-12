@@ -4,6 +4,8 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 
+extern int g_video_mode;
+
 os_config_t g_cfg;
 
 void cfg_init_defaults(void) {
@@ -56,5 +58,8 @@ bool cfg_save(void) {
 
     int written = fs_write(&f, &g_cfg, sizeof(os_config_t));
     fs_close(&f);
+    
+    *(volatile uint8_t *)0x0602 = (uint8_t)g_video_mode;
+    
     return written == sizeof(os_config_t);
 }

@@ -1,51 +1,12 @@
 [bits 16]
 [org 0x7E00]
 
-; ─────────────────────────────────────────────────────────────────────────────
-; Stage 2 – real-hardware hardened (v3)
-;
-; Bug fixes vs v2:
-;
-;  1. GRAPHICS MODE TELETYPE BUG (the actual hang):
-;     INT 10h/0Eh (teletype write) is undefined in VESA graphics modes on
-;     real BIOSes. Calling screen_char *after* INT 10h/4F02h (mode-set) hangs
-;     or corrupts state. Fix: print the status letter ('L','B','G') AND 'V'
-;     BEFORE the mode-set call, never after. After .vesa_done we call no more
-;     INT 10h functions at all.
-;
-;  2. E820 COUNT CORRUPTION:
-;     A20 verify was writing a canary to 0x0500 which holds our E820 count.
-;     Fix: use 0x0600 as the canary location (FB address word, which we
-;     control). Its wrap-around alias is 0xFFFF:0x0610 = phys 0x100600,
-;     wraps to 0x000600 with A20 off. Save/restore 0x0600 around the test.
-;
-;  3. io_delay INSIDE 'loop' CORRUPTS CX:
-;     The old macro did push ax / out / pop ax inline. When expanded inside
-;     a 'loop' body, the push/pop is fine — but it was NOT fine when called
-;     from kbc_flush which used CX as a loop counter and called io_delay
-;     (which never touched CX itself). The real corruption was that kbc_flush
-;     did NOT save/restore CX. Fix: kbc_flush now push/pops CX explicitly,
-;     and io_delay is a near-call (_io_delay_impl) to avoid macro bloat.
-;
-;  4. kbc_wait_write DID NOT SAVE AX:
-;     On return, AL contained the last status byte read from port 0x64.
-;     Callers that stored a value in AL/AX before calling kbc_wait_write
-;     would have it silently clobbered. Fix: kbc_wait_write now saves/
-;     restores AX.
-; ─────────────────────────────────────────────────────────────────────────────
-
-VESA_MODE       equ 0x0101
 KERNEL_ENTRY    equ 0x10000
-VBE_SCRATCH_SEG equ 0x2000          ; ModeInfoBlock scratch at linear 0x20000
 
-; io_delay: one ISA bus cycle. Implemented as a subroutine call so it never
-; expands inline and cannot interfere with loop counters or saved registers.
 %macro io_delay 0
     call _io_delay_impl
 %endmacro
 
-; screen_char: BIOS teletype. ONLY safe in text/compatible mode.
-; DO NOT call after any INT 10h graphics mode-set.
 %macro screen_char 1
     pusha
     mov  ah, 0x0E
@@ -56,7 +17,6 @@ VBE_SCRATCH_SEG equ 0x2000          ; ModeInfoBlock scratch at linear 0x20000
     popa
 %endmacro
 
-; ─────────────────────────────────────────────────────────────────────────────
 entry:
     cli
     xor  ax, ax
@@ -104,111 +64,252 @@ entry:
 
     screen_char 'E'
 
-; ── VBE mode select ───────────────────────────────────────────────────────────
-; KEY RULE: Print the result character AND 'V' BEFORE the INT 10h mode-set.
-; After entering graphics mode, INT 10h/0Eh is unreliable on real hardware.
-
-    ; Zero scratch buffer at 0x20000
-    mov  ax, VBE_SCRATCH_SEG
-    mov  es, ax
-    xor  di, di
-    mov  cx, 128
+; ── Video Mode Setup ─────────────────────────────────────────────────────────
+; Check flag at 0x0602 to determine which mode to use
+; 0x00 = Mode 13h (320x200 chained linear)
+; 0x01 = Mode X (640x480 unchained planar)
     xor  ax, ax
-    rep  stosw
+    mov  ds, ax
+    mov  al, [0x0602]
+    cmp  al, 0x01
+    je   .setup_mode_x
 
-    ; Query mode info
-    mov  ax, VBE_SCRATCH_SEG
-    mov  es, ax
-    xor  di, di
-    mov  ax, 0x4F01
-    mov  cx, VESA_MODE
+; ── Mode 13h: 320×200×8bpp (chained linear) ──────────────────────────────────
+.setup_mode_13h:
+    mov  ax, 0x0013
     int  0x10
 
-    ; Snapshot fields before segment restore
-    mov  si, ax                         ; return code
-    mov  bx, word  [es:di + 0]          ; ModeAttributes
-    mov  edx, dword [es:di + 40]        ; PhysBasePtr
-
+    ; Store mode info
     xor  ax, ax
     mov  ds, ax
-    mov  es, ax
-    mov  ss, ax
-    mov  sp, 0x6000
+    mov  byte [0x0602], 0x00        ; mode = Mode 13h
+    mov  word [0x0604], 320         ; width
+    mov  word [0x0606], 200         ; height
 
-    mov  dword [0x0600], 0
-
-    cmp  si, 0x004F
-    jne  .path_vga
-
-    test bx, 0x0001
-    jz   .path_vga
-
-    test bx, 0x0080
-    jz   .path_banked
-
-    cmp  edx, 0x00100000
-    jb   .path_banked
-    cmp  edx, 0xFFFFFFFF
-    je   .path_banked
-
-    ; ── LFB path: print status, then set mode ─────────────────────────────────
-    mov  dword [0x0600], edx
-    screen_char 'L'
-    screen_char 'V'             ; <-- printed while still in text mode
-    mov  ax, 0x4F02
-    mov  bx, 0x4000 | VESA_MODE
-    int  0x10                   ; enter graphics mode HERE
+    ; Clear framebuffer (320x200 = 64000 bytes = 32000 words)
     xor  ax, ax
-    mov  ds, ax
     mov  es, ax
-    mov  ss, ax
-    mov  sp, 0x6000
-    cmp  ax, 0x004F
-    je   .vesa_done
-    mov  dword [0x0600], 0      ; mode-set failed, clear FB
-    jmp  .vesa_done
-
-    ; ── Banked path ───────────────────────────────────────────────────────────
-.path_banked:
-    mov  dword [0x0600], 0
-    screen_char 'B'
-    screen_char 'V'             ; <-- printed while still in text mode
-    mov  ax, 0x4F02
-    mov  bx, VESA_MODE
-    int  0x10                   ; enter graphics mode HERE
+    mov  di, 0xA000
+    mov  es, di
+    xor  di, di
     xor  ax, ax
-    mov  ds, ax
-    mov  es, ax
-    mov  ss, ax
-    mov  sp, 0x6000
-    jmp  .vesa_done
+    mov  cx, 0x7D00                 ; 32000 words (64000 bytes)
+    rep  stosw
 
-    ; ── VGA mode 13h fallback ─────────────────────────────────────────────────
-.path_vga:
-    mov  dword [0x0600], 0
-    screen_char 'G'
-    screen_char 'V'             ; <-- printed while still in text mode
+    screen_char 'M'                 ; Mode 13h active
+    jmp  .video_setup_done
+
+; ── Mode X: 640×480×8bpp (unchained planar) ──────────────────────────────────
+.setup_mode_x:
+; Step 1: set mode 13h baseline
     mov  ax, 0x0013
-    int  0x10                   ; enter graphics mode HERE
+    int  0x10
+
+; Step 2: unlock CRTC registers 0-7
+    mov  dx, 0x03D4
+    mov  al, 0x11
+    out  dx, al
+    inc  dx
+    in   al, dx
+    and  al, 0x7F
+    out  dx, al
+    dec  dx
+
+; Step 3: write sequencer – unchain planes, disable chain-4
+    mov  dx, 0x03C4
+
+    mov  al, 0x04        ; Sequencer Memory Mode
+    out  dx, al
+    inc  dx
+    in   al, dx
+    and  al, 0xF7        ; clear chain-4 bit
+    or   al, 0x06        ; extended memory, odd/even disable
+    out  dx, al
+    dec  dx
+
+    mov  al, 0x02        ; Map Mask – enable all 4 planes
+    out  dx, al
+    inc  dx
+    mov  al, 0x0F
+    out  dx, al
+    dec  dx
+
+; Step 4: CRTC – reprogram for 640×400
+; Note: 640×400 = 160 bytes/line × 400 lines = 64000 bytes (fits in 64KB VGA window)
+    mov  dx, 0x03D4
+
+    ; Horizontal Total
+    mov  al, 0x00 & 0xFF
+    out  dx, al
+    inc  dx
+    mov  al, 0x5F
+    out  dx, al
+    dec  dx
+
+    ; Horizontal Display End
+    mov  al, 0x01
+    out  dx, al
+    inc  dx
+    mov  al, 0x4F
+    out  dx, al
+    dec  dx
+
+    ; Horizontal Blank Start
+    mov  al, 0x02
+    out  dx, al
+    inc  dx
+    mov  al, 0x50
+    out  dx, al
+    dec  dx
+
+    ; Horizontal Blank End
+    mov  al, 0x03
+    out  dx, al
+    inc  dx
+    mov  al, 0x82
+    out  dx, al
+    dec  dx
+
+    ; Horizontal Retrace Start
+    mov  al, 0x04
+    out  dx, al
+    inc  dx
+    mov  al, 0x54
+    out  dx, al
+    dec  dx
+
+    ; Horizontal Retrace End
+    mov  al, 0x05
+    out  dx, al
+    inc  dx
+    mov  al, 0x80
+    out  dx, al
+    dec  dx
+
+    ; Vertical Total (419 lines - 1 = 0x1A2, use 0xA2 for low byte)
+    mov  al, 0x06
+    out  dx, al
+    inc  dx
+    mov  al, 0xA2
+    out  dx, al
+    dec  dx
+
+    ; Overflow (VTotal bit 9 = 1, VDisplay bit 9 = 1, VRetrace bit 8 = 1)
+    mov  al, 0x07
+    out  dx, al
+    inc  dx
+    mov  al, 0x3D
+    out  dx, al
+    dec  dx
+
+    ; Maximum Scan Line – disable double-scan (no double scan, line compare = 0)
+    mov  al, 0x09
+    out  dx, al
+    inc  dx
+    mov  al, 0x00
+    out  dx, al
+    dec  dx
+
+    ; Vertical Retrace Start
+    mov  al, 0x10
+    out  dx, al
+    inc  dx
+    mov  al, 0xEA
+    out  dx, al
+    dec  dx
+
+    ; Vertical Retrace End (write protect off, value = 0xEC)
+    mov  al, 0x11
+    out  dx, al
+    inc  dx
+    mov  al, 0xEC
+    out  dx, al
+    dec  dx
+
+    ; Vertical Display End (400 - 1 = 399 = 0x18F)
+    mov  al, 0x12
+    out  dx, al
+    inc  dx
+    mov  al, 0x8F
+    out  dx, al
+    dec  dx
+
+    ; Logical Width: 640/4 = 160 = 0xA0 (each plane holds 1/4 of pixels)
+    mov  al, 0x13
+    out  dx, al
+    inc  dx
+    mov  al, 0xA0
+    out  dx, al
+    dec  dx
+
+    ; Vertical Blank Start
+    mov  al, 0x15
+    out  dx, al
+    inc  dx
+    mov  al, 0xE7
+    out  dx, al
+    dec  dx
+
+    ; Vertical Blank End
+    mov  al, 0x16
+    out  dx, al
+    inc  dx
+    mov  al, 0x06
+    out  dx, al
+    dec  dx
+
+; Step 5: Misc Output – select 25.175 MHz clock, enable colour
+    mov  dx, 0x03C2
+    mov  al, 0xE3
+    out  dx, al
+
+; Step 6: GC – disable chain, odd/even
+    mov  dx, 0x03CE
+
+    mov  al, 0x05        ; Graphics Mode
+    out  dx, al
+    inc  dx
+    in   al, dx
+    and  al, 0xEF        ; clear shift-256 bit
+    out  dx, al
+    dec  dx
+
+    mov  al, 0x06        ; Miscellaneous
+    out  dx, al
+    inc  dx
+    in   al, dx
+    and  al, 0xFD        ; clear odd/even enable
+    out  dx, al
+    dec  dx
+
+; Step 7: clear all 4 planes (0xA0000, 640x400 = 64000 bytes = 32000 words)
+    xor  ax, ax
+    mov  es, ax
+    mov  di, 0xA000
+    mov  es, di
+    xor  di, di
+    xor  ax, ax
+    mov  cx, 0x7D00    ; 32000 words (64000 bytes)
+    rep  stosw
+
+; Store mode info
     xor  ax, ax
     mov  ds, ax
-    mov  es, ax
-    mov  ss, ax
-    mov  sp, 0x6000
+    mov  byte [0x0602], 0x01        ; mode = Mode X
+    mov  word [0x0604], 640         ; width
+    mov  word [0x0606], 400         ; height
 
-.vesa_done:
-    ; *** DO NOT call screen_char here or anywhere below ***
-    ; We are now in a graphics mode. INT 10h/0Eh is dead on real hardware.
+    screen_char 'X'                 ; Mode X active
+
+.video_setup_done:
 
 ; ── A20 ──────────────────────────────────────────────────────────────────────
     cli
 
-    ; Method 1: BIOS
     mov  ax, 0x2401
     int  0x15
     jnc  .a20_verify
 
-    ; Method 2: KBC
 .a20_kbc:
     call kbc_flush
 
@@ -261,30 +362,27 @@ entry:
     io_delay
     loop .settle
 
+    call kbc_flush
+
 ; ── A20 verify ───────────────────────────────────────────────────────────────
-; Use 0x0000:0x0600 as canary (we own this word – it holds the FB address).
-; Alias: 0xFFFF:0x0610 = 0xFFFF0 + 0x0610 = 0x100600.
-; With A20 off, 0x100600 wraps to 0x000600 → reads our canary.
-; With A20 on,  0x100600 is real extended RAM → different value.
 .a20_verify:
     xor  ax, ax
     mov  ds, ax
     mov  es, ax
 
-    mov  eax, dword [ds:0x0600]         ; save current FB address
-    push eax                            ; save on stack
+    mov  eax, dword [ds:0x0600]
+    push eax
 
-    mov  dword [ds:0x0600], 0xCAFEBABE ; write canary
+    mov  dword [ds:0x0600], 0xCAFEBABE
     io_delay
     io_delay
 
     mov  ax, 0xFFFF
     mov  es, ax
-    mov  eax, dword [es:0x0610]         ; read alias
+    mov  eax, dword [es:0x0610]
 
-    ; Restore saved FB address
     xor  bx, bx
-    mov  ds, bx                         ; DS = 0
+    mov  ds, bx
     pop  ebx
     mov  dword [ds:0x0600], ebx
 
@@ -293,9 +391,8 @@ entry:
     mov  es, ax
 
     cmp  eax, 0xCAFEBABE
-    jne  .a20_on                        ; A20 is on
+    jne  .a20_on
 
-    ; Still off – try port 0x92
     in   al, 0x92
     test al, 0x02
     jnz  .a20_on
@@ -310,6 +407,7 @@ entry:
 
 ; ── Protected mode ───────────────────────────────────────────────────────────
     cli
+    call kbc_flush
     lgdt [gdt_descriptor]
     mov  eax, cr0
     or   eax, 1
