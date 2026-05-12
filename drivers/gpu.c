@@ -124,33 +124,50 @@ static uint32_t pci_scan_display_bar0(void) {
 
 /* CGA-compatible 6-bit DAC palette (values 0-63, VGA DAC is 6-bit) */
 static const uint8_t s_cga_pal[16][3] = {
-    {  0,  0,  0 }, /* 0  BLACK        */
-    {  0,  0, 42 }, /* 1  BLUE         */
-    {  0, 42,  0 }, /* 2  GREEN        */
-    {  0, 42, 42 }, /* 3  CYAN         */
-    { 42,  0,  0 }, /* 4  RED          */
-    { 42,  0, 42 }, /* 5  MAGENTA      */
-    { 42, 21,  0 }, /* 6  BROWN        */
-    { 42, 42, 42 }, /* 7  LIGHT_GRAY   */
-    { 21, 21, 21 }, /* 8  DARK_GRAY    */
-    { 21, 21, 63 }, /* 9  LIGHT_BLUE   */
-    { 21, 63, 21 }, /* 10 LIGHT_GREEN  */
-    { 21, 63, 63 }, /* 11 LIGHT_CYAN   */
-    { 63, 21, 21 }, /* 12 LIGHT_RED    */
-    { 63, 21, 63 }, /* 13 LIGHT_MAGENTA*/
-    { 63, 63, 21 }, /* 14 YELLOW       */
-    { 63, 63, 63 }, /* 15 WHITE        */
+    {0, 0, 0},    /* 0  BLACK        */
+    {0, 0, 42},   /* 1  BLUE         */
+    {0, 42, 0},   /* 2  GREEN        */
+    {0, 42, 42},  /* 3  CYAN         */
+    {42, 0, 0},   /* 4  RED          */
+    {42, 0, 42},  /* 5  MAGENTA      */
+    {42, 21, 0},  /* 6  BROWN        */
+    {42, 42, 42}, /* 7  LIGHT_GRAY   */
+    {21, 21, 21}, /* 8  DARK_GRAY    */
+    {21, 21, 63}, /* 9  LIGHT_BLUE   */
+    {21, 63, 21}, /* 10 LIGHT_GREEN  */
+    {21, 63, 63}, /* 11 LIGHT_CYAN   */
+    {63, 21, 21}, /* 12 LIGHT_RED    */
+    {63, 21, 63}, /* 13 LIGHT_MAGENTA*/
+    {63, 63, 21}, /* 14 YELLOW       */
+    {63, 63, 63}, /* 15 WHITE        */
 };
 
 static void dac_set_palette(void) {
-    while (inb(0x3DA) & 0x08);
-    while (!(inb(0x3DA) & 0x08));
-
+    /*
+     * Do NOT gate on the vsync bit (port 0x3DA bit 3) here.
+     * In VESA LFB modes on real SVGA hardware (S3, Cirrus, ET4000, etc.)
+     * and on 86Box's SVGA emulation the input-status register is not
+     * reliably connected to the VESA display engine, so the spinloop
+     * either blocks for an entire frame period or never exits at all.
+     * The VGA DAC write sequence — index via 0x3C8, then three 0x3C9
+     * writes — is self-timed and safe to issue at any point.
+     *
+     * We program all 256 entries: indices 0-15 get the CGA palette,
+     * indices 16-255 are zeroed.  In 8bpp mode leaving the upper 240
+     * entries as BIOS garbage means any stale pixel values from the
+     * BIOS splash screen render as random colours until the first blit.
+     */
     outb(0x3C8, 0);
-    for (int i = 0; i < 16; i++) {
-        outb(0x3C9, s_cga_pal[i][0]);   /* R */
-        outb(0x3C9, s_cga_pal[i][1]);   /* G */
-        outb(0x3C9, s_cga_pal[i][2]);   /* B */
+    for (int i = 0; i < 256; i++) {
+        if (i < 16) {
+            outb(0x3C9, s_cga_pal[i][0]);
+            outb(0x3C9, s_cga_pal[i][1]);
+            outb(0x3C9, s_cga_pal[i][2]);
+        } else {
+            outb(0x3C9, 0);
+            outb(0x3C9, 0);
+            outb(0x3C9, 0);
+        }
     }
 }
 
@@ -180,7 +197,8 @@ void gpu_init(void) {
         g_vesa_fb = s_fb;
 
         /* Clear both pages */
-        memset((void *)s_fb, 0, FB_TOTAL_BYTES);
+        if (fb_addr_valid(s_fb))
+            memset((void *)s_fb, 0, FB_TOTAL_BYTES);
 
     } else {
         /*
