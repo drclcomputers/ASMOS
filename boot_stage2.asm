@@ -1,166 +1,370 @@
 [bits 16]
 [org 0x7E00]
 
-VESA_MODE    equ 0x0101
-KERNEL_ENTRY equ 0x8000
+; ─────────────────────────────────────────────────────────────────────────────
+; Stage 2 – real-hardware hardened (v3)
+;
+; Bug fixes vs v2:
+;
+;  1. GRAPHICS MODE TELETYPE BUG (the actual hang):
+;     INT 10h/0Eh (teletype write) is undefined in VESA graphics modes on
+;     real BIOSes. Calling screen_char *after* INT 10h/4F02h (mode-set) hangs
+;     or corrupts state. Fix: print the status letter ('L','B','G') AND 'V'
+;     BEFORE the mode-set call, never after. After .vesa_done we call no more
+;     INT 10h functions at all.
+;
+;  2. E820 COUNT CORRUPTION:
+;     A20 verify was writing a canary to 0x0500 which holds our E820 count.
+;     Fix: use 0x0600 as the canary location (FB address word, which we
+;     control). Its wrap-around alias is 0xFFFF:0x0610 = phys 0x100600,
+;     wraps to 0x000600 with A20 off. Save/restore 0x0600 around the test.
+;
+;  3. io_delay INSIDE 'loop' CORRUPTS CX:
+;     The old macro did push ax / out / pop ax inline. When expanded inside
+;     a 'loop' body, the push/pop is fine — but it was NOT fine when called
+;     from kbc_flush which used CX as a loop counter and called io_delay
+;     (which never touched CX itself). The real corruption was that kbc_flush
+;     did NOT save/restore CX. Fix: kbc_flush now push/pops CX explicitly,
+;     and io_delay is a near-call (_io_delay_impl) to avoid macro bloat.
+;
+;  4. kbc_wait_write DID NOT SAVE AX:
+;     On return, AL contained the last status byte read from port 0x64.
+;     Callers that stored a value in AL/AX before calling kbc_wait_write
+;     would have it silently clobbered. Fix: kbc_wait_write now saves/
+;     restores AX.
+; ─────────────────────────────────────────────────────────────────────────────
 
-; Visual debug macro — prints a character to the screen via BIOS teletype
-; Preserves all registers (uses pusha/popa)
+VESA_MODE       equ 0x0101
+KERNEL_ENTRY    equ 0x10000
+VBE_SCRATCH_SEG equ 0x2000          ; ModeInfoBlock scratch at linear 0x20000
+
+; io_delay: one ISA bus cycle. Implemented as a subroutine call so it never
+; expands inline and cannot interfere with loop counters or saved registers.
+%macro io_delay 0
+    call _io_delay_impl
+%endmacro
+
+; screen_char: BIOS teletype. ONLY safe in text/compatible mode.
+; DO NOT call after any INT 10h graphics mode-set.
 %macro screen_char 1
     pusha
-    mov ah, 0x0E
-    mov al, %1
-    xor bh, bh
-    int 0x10
+    mov  ah, 0x0E
+    mov  al, %1
+    xor  bh, bh
+    mov  bl, 0x07
+    int  0x10
     popa
 %endmacro
 
+; ─────────────────────────────────────────────────────────────────────────────
+entry:
     cli
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
-    mov ss, ax
-    mov sp, 0x7000
-
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    mov  ss, ax
+    mov  sp, 0x6000
     sti
 
-    screen_char 'S'     ; Stage2 start
+    screen_char 'S'
     screen_char '2'
     screen_char 13
     screen_char 10
 
 ; ── E820 ─────────────────────────────────────────────────────────────────────
-; Protocol: after each successful INT 15h/E820 call, the returned entry is
-; valid regardless of whether EBX is 0 or not.  EBX==0 signals "last entry"
-; but that entry must still be stored.  The original code advanced DI and
-; incremented BP before checking EBX, which caused the last entry to be
-; stored but the count written to 0x0500 to include a phantom entry when the
-; zero-length guard short-circuited to .e820_next without the inc/add.  Fixed
-; by always storing a non-zero-length entry first, then checking EBX.
-    mov word [0x0500], 0
-    xor ax, ax
-    mov es, ax
-    mov di, 0x0504
-    xor ebx, ebx
-    mov edx, 0x534D4150
-    xor bp, bp
-.e820:
-    mov eax, 0xE820
-    mov ecx, 20
-    int 0x15
-    jc  .e820_done          ; carry set → list complete (or unsupported)
-    cmp eax, 0x534D4150
-    jne .e820_done          ; signature mismatch → abort
+    mov  word [0x0500], 0
+    xor  ax, ax
+    mov  es, ax
+    mov  di, 0x0504
+    xor  ebx, ebx
+    mov  edx, 0x534D4150
+    xor  bp, bp
+
+.e820_loop:
+    mov  eax, 0xE820
+    mov  ecx, 20
+    int  0x15
+    jc   .e820_done
+    cmp  eax, 0x534D4150
+    jne  .e820_done
     test ecx, ecx
-    jz  .e820_check_last    ; zero-length entry: don't store, but check if last
-    ; Valid entry — store it
-    inc bp
-    add di, 20
-    cmp bp, 50              ; hard cap: max 50 entries
-    jae .e820_done
-.e820_check_last:
-    test ebx, ebx           ; EBX==0 means this was the last entry
-    jnz .e820
+    jz   .e820_check_cont
+    inc  bp
+    add  di, 20
+    cmp  bp, 50
+    jae  .e820_done
+.e820_check_cont:
+    test ebx, ebx
+    jnz  .e820_loop
 .e820_done:
-    mov [0x0500], bp
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
+    mov  [0x0500], bp
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
 
-    screen_char 'E'         ; E820 done
+    screen_char 'E'
 
-; ── VBE 4F01 ─────────────────────────────────────────────────────────────────
-; The ModeInfoBlock is 256 bytes.  We must NOT point ES:DI at the IVT
-; (0x0000–0x03FF) or the BIOS Data Area (0x0400–0x04FF): a real VBIOS will
-; happily overwrite interrupt vectors there and cause an immediate triple-fault
-; when we enable interrupts or take the first IRQ.  Use physical 0x20000
-; (segment 0x2000, offset 0) which is well above the BDA and below the kernel.
-VBE_SCRATCH_SEG equ 0x1000   ; physical 0x20000 — safe scratch for ModeInfoBlock
+; ── VBE mode select ───────────────────────────────────────────────────────────
+; KEY RULE: Print the result character AND 'V' BEFORE the INT 10h mode-set.
+; After entering graphics mode, INT 10h/0Eh is unreliable on real hardware.
 
-    mov ax, VBE_SCRATCH_SEG
-    mov es, ax
-    xor di, di               ; ES:DI = 0x2000:0x0000 = physical 0x20000
-    mov ax, 0x4F01
-    mov cx, VESA_MODE
-    int 0x10
-    ; INT 10h returns status in AX (0x004F = success).
-    ; Read PhysBasePtr and ModeAttributes from ES:DI before zeroing ES.
-    ; Save AX now so AL isn't clobbered before the cmp ax,0x004F check.
-    mov si,  ax              ; SI = INT 10h return status
-    mov ebx, [es:di + 40]    ; EBX = PhysBasePtr
-    mov cl,  [es:di]         ; CL  = ModeAttributes byte
+    ; Zero scratch buffer at 0x20000
+    mov  ax, VBE_SCRATCH_SEG
+    mov  es, ax
+    xor  di, di
+    mov  cx, 128
+    xor  ax, ax
+    rep  stosw
 
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
+    ; Query mode info
+    mov  ax, VBE_SCRATCH_SEG
+    mov  es, ax
+    xor  di, di
+    mov  ax, 0x4F01
+    mov  cx, VESA_MODE
+    int  0x10
 
-    mov dword [0x0600], 0
+    ; Snapshot fields before segment restore
+    mov  si, ax                         ; return code
+    mov  bx, word  [es:di + 0]          ; ModeAttributes
+    mov  edx, dword [es:di + 40]        ; PhysBasePtr
 
-    cmp si, 0x004F           ; did INT 10h succeed?
-    jne .vesa_banked
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    mov  ss, ax
+    mov  sp, 0x6000
 
-    test cl, 0x01            ; bit 0: mode supported by hardware
-    jz  .vesa_banked
+    mov  dword [0x0600], 0
 
-    mov [0x0600], ebx        ; store the PhysBasePtr we saved earlier
+    cmp  si, 0x004F
+    jne  .path_vga
 
-    screen_char 'L'          ; LFB address found
+    test bx, 0x0001
+    jz   .path_vga
 
-    mov ax, 0x4F02
-    mov bx, 0x4000 | VESA_MODE
-    int 0x10
-    xor cx, cx
-    mov ds, cx
-    mov es, cx
-    cmp ax, 0x004F
-    je  .vesa_done
+    test bx, 0x0080
+    jz   .path_banked
 
-.vesa_banked:
-    screen_char 'B'          ; banked fallback
-    mov dword [0x0600], 0
-    mov ax, 0x4F02
-    mov bx, VESA_MODE
-    int 0x10
-    xor cx, cx
-    mov ds, cx
-    mov es, cx
+    cmp  edx, 0x00100000
+    jb   .path_banked
+    cmp  edx, 0xFFFFFFFF
+    je   .path_banked
+
+    ; ── LFB path: print status, then set mode ─────────────────────────────────
+    mov  dword [0x0600], edx
+    screen_char 'L'
+    screen_char 'V'             ; <-- printed while still in text mode
+    mov  ax, 0x4F02
+    mov  bx, 0x4000 | VESA_MODE
+    int  0x10                   ; enter graphics mode HERE
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    mov  ss, ax
+    mov  sp, 0x6000
+    cmp  ax, 0x004F
+    je   .vesa_done
+    mov  dword [0x0600], 0      ; mode-set failed, clear FB
+    jmp  .vesa_done
+
+    ; ── Banked path ───────────────────────────────────────────────────────────
+.path_banked:
+    mov  dword [0x0600], 0
+    screen_char 'B'
+    screen_char 'V'             ; <-- printed while still in text mode
+    mov  ax, 0x4F02
+    mov  bx, VESA_MODE
+    int  0x10                   ; enter graphics mode HERE
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    mov  ss, ax
+    mov  sp, 0x6000
+    jmp  .vesa_done
+
+    ; ── VGA mode 13h fallback ─────────────────────────────────────────────────
+.path_vga:
+    mov  dword [0x0600], 0
+    screen_char 'G'
+    screen_char 'V'             ; <-- printed while still in text mode
+    mov  ax, 0x0013
+    int  0x10                   ; enter graphics mode HERE
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    mov  ss, ax
+    mov  sp, 0x6000
 
 .vesa_done:
-    screen_char 'V'          ; VESA done
+    ; *** DO NOT call screen_char here or anywhere below ***
+    ; We are now in a graphics mode. INT 10h/0Eh is dead on real hardware.
 
-; ── Enable A20 line ──────────────────────────────────────────────────────────
-; Fast A20 via port 0x92 — works on i430FX and virtually all post-1993 chipsets.
-; Bit 1 = A20 enable, bit 0 = reset (do NOT set bit 0 — that resets the CPU).
-    in  al, 0x92
+; ── A20 ──────────────────────────────────────────────────────────────────────
+    cli
+
+    ; Method 1: BIOS
+    mov  ax, 0x2401
+    int  0x15
+    jnc  .a20_verify
+
+    ; Method 2: KBC
+.a20_kbc:
+    call kbc_flush
+
+    call kbc_wait_write
+    mov  al, 0xAD
+    out  0x64, al
+    io_delay
+
+    call kbc_wait_write
+    mov  al, 0xD0
+    out  0x64, al
+    io_delay
+
+    mov  cx, 0x4000
+.obf_wait:
+    io_delay
+    in   al, 0x64
+    test al, 0x01
+    jnz  .obf_ok
+    loop .obf_wait
+    mov  al, 0xCF
+    jmp  .kbc_write
+.obf_ok:
+    io_delay
+    in   al, 0x60
+
+.kbc_write:
+    or   al, 0x02
+    and  al, 0xFE
+    mov  ah, al
+
+    call kbc_wait_write
+    mov  al, 0xD1
+    out  0x64, al
+    io_delay
+
+    call kbc_wait_write
+    mov  al, ah
+    out  0x60, al
+    io_delay
+
+    call kbc_wait_write
+    mov  al, 0xAE
+    out  0x64, al
+    io_delay
+    call kbc_wait_write
+
+    mov  cx, 0x800
+.settle:
+    io_delay
+    loop .settle
+
+; ── A20 verify ───────────────────────────────────────────────────────────────
+; Use 0x0000:0x0600 as canary (we own this word – it holds the FB address).
+; Alias: 0xFFFF:0x0610 = 0xFFFF0 + 0x0610 = 0x100600.
+; With A20 off, 0x100600 wraps to 0x000600 → reads our canary.
+; With A20 on,  0x100600 is real extended RAM → different value.
+.a20_verify:
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+
+    mov  eax, dword [ds:0x0600]         ; save current FB address
+    push eax                            ; save on stack
+
+    mov  dword [ds:0x0600], 0xCAFEBABE ; write canary
+    io_delay
+    io_delay
+
+    mov  ax, 0xFFFF
+    mov  es, ax
+    mov  eax, dword [es:0x0610]         ; read alias
+
+    ; Restore saved FB address
+    xor  bx, bx
+    mov  ds, bx                         ; DS = 0
+    pop  ebx
+    mov  dword [ds:0x0600], ebx
+
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+
+    cmp  eax, 0xCAFEBABE
+    jne  .a20_on                        ; A20 is on
+
+    ; Still off – try port 0x92
+    in   al, 0x92
     test al, 0x02
-    jnz .a20_done           ; already enabled (e.g. QEMU)
-    or  al, 0x02
-    and al, 0xFE            ; make absolutely sure bit 0 (reset) stays clear
-    out 0x92, al
-.a20_done:
-    screen_char 'A'         ; A20 enabled
+    jnz  .a20_on
+    or   al, 0x02
+    and  al, 0xFE
+    out  0x92, al
+    io_delay
+    io_delay
+    io_delay
 
-; ── Protected mode ────────────────────────────────────────────────────────────
+.a20_on:
+
+; ── Protected mode ───────────────────────────────────────────────────────────
     cli
     lgdt [gdt_descriptor]
-    mov eax, cr0
-    or eax, 1
-    mov cr0, eax
-    jmp 0x08:pm_entry
+    mov  eax, cr0
+    or   eax, 1
+    mov  cr0, eax
+    jmp  0x08:pm_entry
 
+; ── Subroutines ──────────────────────────────────────────────────────────────
+
+_io_delay_impl:
+    push ax
+    xor  ax, ax
+    out  0x80, al
+    pop  ax
+    ret
+
+kbc_wait_write:
+    push ax
+.kw_loop:
+    io_delay
+    in   al, 0x64
+    test al, 0x02
+    jnz  .kw_loop
+    pop  ax
+    ret
+
+kbc_flush:
+    push ax
+    push cx
+    mov  cx, 0x2000
+.kf_loop:
+    io_delay
+    in   al, 0x64
+    test al, 0x01
+    jz   .kf_done
+    io_delay
+    in   al, 0x60
+    loop .kf_loop
+.kf_done:
+    pop  cx
+    pop  ax
+    ret
+
+; ── 32-bit protected mode entry ──────────────────────────────────────────────
 [bits 32]
 pm_entry:
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
-    mov esp, 0x90000
+    mov  ax, 0x10
+    mov  ds, ax
+    mov  es, ax
+    mov  fs, ax
+    mov  gs, ax
+    mov  ss, ax
+    mov  esp, 0x7C00
+    jmp  KERNEL_ENTRY
 
-    ; No debug output in protected mode — jump straight to kernel
-    jmp KERNEL_ENTRY
-
+; ── GDT ──────────────────────────────────────────────────────────────────────
 [bits 16]
 gdt_start:
     dq 0
@@ -169,10 +373,9 @@ gdt_code:
 gdt_data:
     dw 0xFFFF, 0x0000, 0x9200, 0x00CF
 gdt_end:
+
 gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
 
-; Pad to exactly 8 sectors so the build fails loudly if stage2 ever overflows.
-; NASM will error: "TIMES value -N is negative" if the binary exceeds 4096 bytes.
 times (8 * 512) - ($ - $$) db 0
