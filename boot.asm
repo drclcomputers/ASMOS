@@ -107,7 +107,7 @@ start:
     ; which video mode to set up. Can be overridden by bootloader config.
     xor  ax, ax
     mov  ds, ax
-    mov  byte [0x0602], 0x00    ; 0x01 = Mode X (640x480 planar)
+    mov  byte [0x0602], 0x01    ; 0x01 = Mode X (640x480 planar)
                                  ; 0x00 = Mode 13h (320x200 linear)
 
     jmp  STAGE2_SEG:0x0000

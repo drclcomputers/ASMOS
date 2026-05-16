@@ -6,10 +6,11 @@
 extern int g_screen_width;
 extern int g_screen_height;
 extern int g_backbuf_size;
+extern int g_video_mode;
 #define SCREEN_WIDTH  g_screen_width
 #define SCREEN_HEIGHT g_screen_height
 #define COLOR_BITS 8
-#define RESMODE 0
+#define RESMODE g_video_mode
 
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
