@@ -31,6 +31,12 @@ void alloc_set_range(uint32_t start, uint32_t end) {
     if (start < (uint32_t)&_heap_start)
         start = (uint32_t)&_heap_start;
 
+    // Re-check after clamping: need room for at least one header plus one
+    // usable word; without this the size field would wrap to ~4 GB.
+    if (end <= start || (end - start) <= HEADER_SIZE + 4)
+        return;
+
+    heap_start_addr = start;
     heap_end_addr = end;
     heap_start_ptr = (block_header_t *)start;
     heap_start_ptr->magic = BLOCK_MAGIC_FREE;
@@ -39,7 +45,6 @@ void alloc_set_range(uint32_t start, uint32_t end) {
     heap_start_ptr->next = NULL;
 }
 
-// Legacy – only sets the top, start defaults to whatever _heap_start is.
 void alloc_set_end(uint32_t end) {
     alloc_set_range((uint32_t)&_heap_start, end);
 }
@@ -48,20 +53,23 @@ void alloc_init(void) { alloc_set_range((uint32_t)&_heap_start, HEAP_END_MAX); }
 
 // ── Coalescing and trimming ────────────────────────────────────────────
 static void coalesce_from(block_header_t *cur) {
-    while (cur && cur->next) {
+    // Merge consecutive free blocks starting at cur.
+    // Only merges FREE+FREE pairs; a USED next block stops the walk.
+    // Corrupt magic on either side stops immediately to avoid heap corruption.
+    while (cur) {
         if (cur->magic != BLOCK_MAGIC_FREE)
-            return;
+            return; // cur is corrupt or still USED — stop
         block_header_t *nx = cur->next;
         if (!nx)
             break;
         if (nx->magic != BLOCK_MAGIC_FREE && nx->magic != BLOCK_MAGIC_USED)
-            return;
-        if (cur->free && nx->free) {
-            cur->size += HEADER_SIZE + nx->size;
-            cur->next = nx->next;
-        } else {
-            break;
-        }
+            return; // nx has corrupt magic — stop
+        if (!nx->free)
+            break; // next block is in use — nothing to merge here
+        // Absorb nx into cur
+        cur->size += HEADER_SIZE + nx->size;
+        cur->next = nx->next;
+        // Loop again from cur: the block now at cur->next may also be free
     }
 }
 
@@ -141,16 +149,26 @@ void *krealloc(void *ptr, uint32_t new_size) {
 }
 
 void *kmalloc_aligned(uint32_t size, uint32_t align) {
-    // (simplified as before – identical to your original)
     if (align == 0 || (align & (align - 1)) != 0)
         return NULL;
     if (align <= 4)
         return kmalloc(size);
-    uint32_t over = size + align + HEADER_SIZE;
+
+    // Allocate enough extra space so that, regardless of where kmalloc places
+    // the payload, we can find an aligned address inside it.
+    // We need: size + (align - 1) extra bytes of payload room.
+    // The returned pointer is the aligned address within that payload; the
+    // original kmalloc block is intentionally leaked (no way to kfree it via
+    // the aligned pointer without a separate header).  Callers that need
+    // freeable aligned memory should manage their own aligned slabs.
+    uint32_t over = size + (align - 1);
     uint8_t *raw = (uint8_t *)kmalloc(over);
     if (!raw)
         return NULL;
-    return raw;
+
+    uintptr_t addr = (uintptr_t)raw;
+    uintptr_t aligned = (addr + align - 1) & ~((uintptr_t)align - 1);
+    return (void *)aligned;
 }
 
 // ── Free / coalesce / trim ─────────────────────────────────────────────
@@ -165,6 +183,8 @@ void kfree(void *ptr) {
     hdr->free = true;
     hdr->magic = BLOCK_MAGIC_FREE;
 
+    // Walk the list to find the block that precedes hdr so we can attempt a
+    // backward merge (prev + hdr) after the forward merge (hdr + hdr->next).
     block_header_t *prev = NULL;
     block_header_t *cur = heap_start_ptr;
     while (cur && cur != hdr) {
@@ -172,11 +192,15 @@ void kfree(void *ptr) {
         cur = cur->next;
     }
 
+    // Forward merge: absorb any free blocks that follow hdr.
     coalesce_from(hdr);
-    if (prev && prev->free)
-        coalesce_from(prev);
 
-    //heap_trim(); // give back completely free top space
+    // Backward merge: if the predecessor is also free, absorb hdr into it.
+    // We must re-read prev->free here because coalesce_from(prev) from a
+    // previous kfree call may have already changed things; the magic check
+    // inside coalesce_from protects against stale state.
+    if (prev && prev->magic == BLOCK_MAGIC_FREE && prev->free)
+        coalesce_from(prev);
 }
 
 // ── Statistics ─────────────────────────────────────────────────────────

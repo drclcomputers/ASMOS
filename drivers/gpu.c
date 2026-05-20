@@ -52,50 +52,61 @@ static void gpu_blit_mode_13h(void) {
 
 static void gpu_blit_modex(void) {
     const uint8_t *src = (const uint8_t *)BACKBUF;
-    uint8_t *fb = (uint8_t *)MODEX_FB;
+    uint32_t *fb = (uint32_t *)MODEX_FB;
 
-    int w = SCREEN_WIDTH;        /* 640 */
-    int h = SCREEN_HEIGHT;       /* 400 */
-    int bytes_per_line = w >> 3; /* 640/8 = 80 bytes per plane per scanline */
+    int w = SCREEN_WIDTH;
+    int h = SCREEN_HEIGHT;
+    int bytes_per_line = w >> 3; /* 80 */
+    int dwords_per_line = bytes_per_line >> 2; /* 20 */
 
     for (int plane = 0; plane < 4; plane++) {
-        /* Select only this plane for writing */
         outb(VGA_SEQ_ADDR, SEQ_MAP_MASK);
         outb(VGA_SEQ_DATA, (uint8_t)(1u << plane));
 
         for (int y = 0; y < h; y++) {
             const uint8_t *row = src + y * w;
-            uint8_t *dst = fb + y * bytes_per_line;
+            uint32_t *dst = fb + y * dwords_per_line;
 
-            for (int bx = 0; bx < bytes_per_line; bx++) {
-                /* Pack 8 consecutive pixels into one plane byte.
-                 * MSB = leftmost pixel (x = bx*8), LSB = rightmost (x =
-                 * bx*8+7). */
-                const uint8_t *px = row + (bx << 3);
-                uint8_t out = 0;
-                out |= (uint8_t)(((px[0] >> plane) & 1u) << 7);
-                out |= (uint8_t)(((px[1] >> plane) & 1u) << 6);
-                out |= (uint8_t)(((px[2] >> plane) & 1u) << 5);
-                out |= (uint8_t)(((px[3] >> plane) & 1u) << 4);
-                out |= (uint8_t)(((px[4] >> plane) & 1u) << 3);
-                out |= (uint8_t)(((px[5] >> plane) & 1u) << 2);
-                out |= (uint8_t)(((px[6] >> plane) & 1u) << 1);
-                out |= (uint8_t)(((px[7] >> plane) & 1u) << 0);
-                dst[bx] = out;
+            for (int bx = 0; bx < dwords_per_line; bx++) {
+                const uint8_t *px = row + (bx << 5);
+                uint32_t out0 = 0, out1 = 0, out2 = 0, out3 = 0;
+
+                #define PACK(o, base) \
+                    o  = ((uint32_t)(((px[base+0]>>plane)&1u)<<7)); \
+                    o |= ((uint32_t)(((px[base+1]>>plane)&1u)<<6)); \
+                    o |= ((uint32_t)(((px[base+2]>>plane)&1u)<<5)); \
+                    o |= ((uint32_t)(((px[base+3]>>plane)&1u)<<4)); \
+                    o |= ((uint32_t)(((px[base+4]>>plane)&1u)<<3)); \
+                    o |= ((uint32_t)(((px[base+5]>>plane)&1u)<<2)); \
+                    o |= ((uint32_t)(((px[base+6]>>plane)&1u)<<1)); \
+                    o |= ((uint32_t)(((px[base+7]>>plane)&1u)<<0));
+
+                PACK(out0,  0)
+                PACK(out1,  8)
+                PACK(out2, 16)
+                PACK(out3, 24)
+                #undef PACK
+
+                dst[bx] = (out3 << 24) | (out2 << 16) | (out1 << 8) | out0;
             }
         }
     }
 
-    /* Restore Map Mask to all planes (safe default) */
     outb(VGA_SEQ_ADDR, SEQ_MAP_MASK);
     outb(VGA_SEQ_DATA, 0x0F);
+}
+
+static inline void wait_vblank(void) {
+    while ( (inb(0x3DA) & 0x08) == 0);
 }
 
 void gpu_blit(void) {
     if (g_video_mode == 0)
         gpu_blit_mode_13h();
-    else
+    else {
+        wait_vblank();
         gpu_blit_modex();
+    }
 }
 
 gpu_backend_t gpu_backend(void) { return GPU_BACKEND_MODEX; }

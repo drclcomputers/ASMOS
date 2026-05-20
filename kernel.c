@@ -32,14 +32,35 @@ extern void wm_init(void);
 extern void scheduler_init(void);
 extern void desktop_on_frame(void);
 
-typedef struct __attribute__((packed)) {
-    uint64_t base;
-    uint64_t length;
-    uint32_t type;
-} e820_entry_t;
+static void dbg_bar(int col, uint8_t color) {
+    __asm__ volatile("movw $0x03C4, %%dx\n\t"
+                     "movb $0x02,   %%al\n\t"
+                     "outb %%al,    %%dx\n\t"
+                     "incw %%dx\n\t"
+                     "movb $0x0F,   %%al\n\t"
+                     "outb %%al,    %%dx\n\t" ::
+                         : "eax", "edx");
+
+    if (g_video_mode == 0) {
+        volatile uint8_t *fb = (volatile uint8_t *)0xA0000;
+        int x = col * 8;
+        if (x + 8 > g_screen_width)
+            return;
+        for (int y = 0; y < g_screen_height; y++)
+            for (int i = 0; i < 8; i++)
+                fb[y * g_screen_width + x + i] = color;
+    } else {
+        volatile uint8_t *fb = (volatile uint8_t *)0xA0000;
+        int bx = col;
+        if (bx >= 80)
+            return;
+        for (int y = 0; y < g_screen_height; y++)
+            fb[y * 80 + bx] = color;
+    }
+}
 
 static void detect_heap_range(void) {
-    uint16_t count = *(volatile uint16_t *)0x0500;
+    dbg_bar(0, 4);
 
     uint32_t kernel_end = (uint32_t)&_heap_start;
     if (kernel_end < HEAP_MIN_START)
@@ -47,46 +68,35 @@ static void detect_heap_range(void) {
 
     kernel_end = (kernel_end + 15U) & ~15U;
 
-    uint32_t heap_top = 0;
+    dbg_bar(1, 2);
 
-    if (count > 0 && count <= 50) {
-        uint8_t *ptr = (uint8_t *)0x0504;
+    dbg_bar(2, 1);
+    uint32_t total_ram = *(volatile uint32_t *)0x0500;
 
-        for (uint16_t i = 0; i < count; i++, ptr += 20) {
-            e820_entry_t *e = (e820_entry_t *)ptr;
+    dbg_bar(3, 6);
 
-            if (e->type != 1)
-                continue;
-
-            uint64_t base = e->base;
-            uint64_t end64 = base + e->length;
-
-            if (base > (uint64_t)kernel_end)
-                continue;
-            if (end64 <= (uint64_t)kernel_end)
-                continue;
-
-            uint32_t end32 =
-                (end64 > 0xFFFFFFFFULL) ? 0xFFFFFFFFU : (uint32_t)end64;
-
-            if (end32 > heap_top)
-                heap_top = end32;
-        }
+    uint32_t heap_top;
+    if (total_ram == 0) {
+        heap_top = HEAP_END_MAX;
+    } else {
+        heap_top = total_ram;
+        if (heap_top > HEAP_END_MAX)
+            heap_top = HEAP_END_MAX;
     }
 
-    if (heap_top == 0) {
-        heap_top = HEAP_END_MAX;
-    }
-
-    if (heap_top > HEAP_END_MAX)
-        heap_top = HEAP_END_MAX;
+    dbg_bar(4, 5);
 
     if (heap_top <= kernel_end + 0x10000U) {
+        dbg_bar(5, 12);
         for (;;)
             __asm__ volatile("hlt");
     }
 
+    dbg_bar(5, 3);
+
     alloc_set_range(kernel_end, heap_top);
+
+    dbg_bar(6, 7);
 }
 
 static void boot_banner(void) {
@@ -99,7 +109,7 @@ static void resolution_set(void) {
     g_video_mode = *(volatile uint8_t *)0x0602;
     g_screen_width = *(volatile uint16_t *)0x0604;
     g_screen_height = *(volatile uint16_t *)0x0606;
-    
+
     if (g_screen_width == 0 || g_screen_height == 0) {
         if (RESMODE) {
             g_video_mode = 1;
@@ -111,8 +121,13 @@ static void resolution_set(void) {
             g_screen_height = 200;
         }
     }
-    
+
+    if (g_screen_width  > 640) g_screen_width  = 640;
+    if (g_screen_height > 400) g_screen_height = 400;
+
     g_backbuf_size = g_screen_width * g_screen_height;
+    if (g_backbuf_size == 0 || g_backbuf_size > 640 * 400)
+        g_backbuf_size = 640 * 400;
 }
 
 void kmain(void) {

@@ -15,12 +15,12 @@ extern int g_video_mode;
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
 #define DOUBLE_CLICK_SPEED 500
-#define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 3)
+#define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 4)
 
 #define BACKBUF ((uint8_t *)0x100000)
 #define BACKBUF_SIZE g_backbuf_size
 #define HEAP_MIN_START (0x100000 + BACKBUF_SIZE)
-#define HEAP_END_MAX 0x3F0000
+#define HEAP_END_MAX 0x7F0000
 
 #define BLACK 0
 #define BLUE 1

@@ -173,3 +173,6 @@ clean:
 	rm -f *.bin boot_stage2.bin os_image.bin serial.log
 	rm -f qemulog.txt
 	rm -f floppy.img
+
+kernel.elf: $(OBJ)
+	$(LD) -m elf_i386 -T linker.ld -o $@ $^

@@ -7,16 +7,6 @@ KERNEL_ENTRY    equ 0x10000
     call _io_delay_impl
 %endmacro
 
-%macro screen_char 1
-    pusha
-    mov  ah, 0x0E
-    mov  al, %1
-    xor  bh, bh
-    mov  bl, 0x07
-    int  0x10
-    popa
-%endmacro
-
 entry:
     cli
     xor  ax, ax
@@ -26,43 +16,35 @@ entry:
     mov  sp, 0x6000
     sti
 
-    screen_char 'S'
-    screen_char '2'
-    screen_char 13
-    screen_char 10
+; ── Memory Detection (INT 15h, AH=88h) ──────────────────────────────────────
+; AX = KB of extended memory above 1MB.  Result stored at 0x0500 as a
+; uint32_t total-RAM byte count.  0 means the call failed or returned 0 KB;
+; the kernel will use HEAP_END_MAX as a safe fallback in that case.
 
-; ── E820 ─────────────────────────────────────────────────────────────────────
-    mov  word [0x0500], 0
-    xor  ax, ax
-    mov  es, ax
-    mov  di, 0x0504
-    xor  ebx, ebx
-    mov  edx, 0x534D4150
-    xor  bp, bp
-
-.e820_loop:
-    mov  eax, 0xE820
-    mov  ecx, 20
-    int  0x15
-    jc   .e820_done
-    cmp  eax, 0x534D4150
-    jne  .e820_done
-    test ecx, ecx
-    jz   .e820_check_cont
-    inc  bp
-    add  di, 20
-    cmp  bp, 50
-    jae  .e820_done
-.e820_check_cont:
-    test ebx, ebx
-    jnz  .e820_loop
-.e820_done:
-    mov  [0x0500], bp
     xor  ax, ax
     mov  ds, ax
     mov  es, ax
+    mov  dword [0x0500], 0      ; default: unknown
 
-    screen_char 'E'
+    mov  ah, 0x88
+    int  0x15
+    jc   .mem_store             ; CF set — call not supported; leave 0x0500 = 0
+
+    test ax, ax
+    jz   .mem_store             ; AX=0 — no extended memory reported
+
+    ; AX = KB above 1MB (16-bit, up to 65535 KB ~ 64 MB)
+    movzx eax, ax
+    shl  eax, 10                ; eax = AX * 1024 (bytes above 1MB)
+    add  eax, 0x100000          ; + 1MB base = total RAM in bytes
+
+.mem_store:
+    xor  bx, bx
+    mov  ds, bx
+    mov  dword [0x0500], eax    ; store result (0 if call failed)
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
 
 ; ── Video Mode Setup ─────────────────────────────────────────────────────────
 ; Check flag at 0x0602 to determine which mode to use
@@ -96,7 +78,6 @@ entry:
     mov  cx, 0x7D00                 ; 32000 words (64000 bytes)
     rep  stosw
 
-    screen_char 'M'                 ; Mode 13h active
     jmp  .video_setup_done
 
 ; ── Mode X: 640×400×16 colour (EGA planar) ───────────────────────────────────
@@ -139,7 +120,7 @@ entry:
 ;   IMPORTANT: write Misc Output BEFORE touching CRTC timing regs so the
 ;   dot clock change takes effect before we reprogram the counters.
     mov  dx, 0x03C2
-    mov  al, 0x63
+    mov  al, 0xA3
     out  dx, al
 
 ; Step 4: reprogram only the CRTC vertical registers for 400 lines.
@@ -266,8 +247,6 @@ entry:
     mov  word [0x0604], 640         ; width
     mov  word [0x0606], 400         ; height
 
-    screen_char 'X'                 ; Mode X active
-
 .video_setup_done:
 
 ; ── A20 ──────────────────────────────────────────────────────────────────────
@@ -371,18 +350,17 @@ entry:
     io_delay
 
 .a20_on:
-
-; ── Protected mode ───────────────────────────────────────────────────────────
     cli
-    call kbc_flush
     lgdt [gdt_descriptor]
     mov  eax, cr0
     or   eax, 1
     mov  cr0, eax
-    jmp  0x08:pm_entry
+    db  0x66, 0xEA          ; far jump 32-bit, encoding manual complet
+    dd  0x00010000          ; sare direct la loader
+    dw  0x0008
+
 
 ; ── Subroutines ──────────────────────────────────────────────────────────────
-
 _io_delay_impl:
     push ax
     xor  ax, ax
@@ -392,11 +370,16 @@ _io_delay_impl:
 
 kbc_wait_write:
     push ax
+    push cx
+    mov  cx, 0x8000
 .kw_loop:
     io_delay
     in   al, 0x64
     test al, 0x02
-    jnz  .kw_loop
+    jz   .kw_done
+    loop .kw_loop
+.kw_done:
+    pop  cx
     pop  ax
     ret
 
@@ -417,20 +400,8 @@ kbc_flush:
     pop  ax
     ret
 
-; ── 32-bit protected mode entry ──────────────────────────────────────────────
-[bits 32]
-pm_entry:
-    mov  ax, 0x10
-    mov  ds, ax
-    mov  es, ax
-    mov  fs, ax
-    mov  gs, ax
-    mov  ss, ax
-    mov  esp, 0x7C00
-    jmp  KERNEL_ENTRY
-
 ; ── GDT ──────────────────────────────────────────────────────────────────────
-[bits 16]
+align 4
 gdt_start:
     dq 0
 gdt_code:
