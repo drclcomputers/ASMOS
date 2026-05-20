@@ -497,7 +497,8 @@ bool window_update(window *win) {
 
     int wy = win->y + MENUBAR_H_SIZE;
 
-    if (!is_desktop_focused() && clicked_titlebar_btn(win->x + 3, wy + 3, 10, 10)) {
+    if (!is_desktop_focused() &&
+        clicked_titlebar_btn(win->x + 3, wy + 3, 10, 10)) {
         if (win->animate_open_close && !g_cfg.reduce_motion) {
             win->anim_state = WIN_ANIM_CLOSE;
             win->anim_frame = 0;
@@ -510,7 +511,8 @@ bool window_update(window *win) {
         return true;
     }
 
-    if (!is_desktop_focused() && clicked_titlebar_btn(win->x + 16, wy + 3, 10, 10)) {
+    if (!is_desktop_focused() &&
+        clicked_titlebar_btn(win->x + 16, wy + 3, 10, 10)) {
         if (win->on_minimize) {
             win->on_minimize(win);
         } else if (win->animate_open_close && !g_cfg.reduce_motion) {
@@ -582,6 +584,28 @@ void window_dragged(window *win) {
             win->y += mouse.dy;
             wm_clamp(win);
         } else {
+            if (!win->resizable) {
+                win->dragging = false;
+                return;
+            }
+            int snap_threshold = TASKBAR_H;
+            int usable_height = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H;
+
+            // left edge
+            if (win->x < snap_threshold) {
+                win->x = 0;
+                win->y = 0;
+                win->w = SCREEN_WIDTH / 2;
+                win->h = usable_height;
+            }
+            // right edge
+            else if (win->x + win->w > SCREEN_WIDTH - snap_threshold) {
+                win->x = SCREEN_WIDTH / 2;
+                win->y = 0;
+                win->w = SCREEN_WIDTH / 2;
+                win->h = usable_height;
+            }
+
             win->dragging = false;
         }
     }

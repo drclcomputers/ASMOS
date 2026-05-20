@@ -1,5 +1,8 @@
 #include "ui/desktop_fs.h"
+#include "ui/icons.h"
 #include "fs/fs.h"
+#include "config/config.h"
+#include "config/runtime_config.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 
@@ -29,13 +32,13 @@ static bool entry_is_app(const dir_entry_t *e) {
 }
 
 static void grid_slot(int n, int *out_x, int *out_y) {
-    int rows_avail = (200 - 10 - 14) / 34;
-    if (rows_avail < 1)
-        rows_avail = 1;
+    int available_height = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H;
+    int rows_avail = (available_height - ICON_START_Y) / ICON_SPACING_Y;
+    if (rows_avail < 1) rows_avail = 1;
     int col = n / rows_avail;
     int row = n % rows_avail;
-    *out_x = 8 + col * 36;
-    *out_y = 14 + row * 34;
+    *out_x = ICON_START_X + col * ICON_SPACING_X;
+    *out_y = ICON_START_Y + row * ICON_SPACING_Y;
 }
 
 static void create_default_shortcuts(void) {
