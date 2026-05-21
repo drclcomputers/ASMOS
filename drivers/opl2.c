@@ -145,7 +145,7 @@ void opl2_set_instrument(uint8_t ch, const opl2_instrument_t *inst) {
     if (feedback > 2) {
         feedback = 2;
     }
-    //fb_conn = (feedback << 1) | conn | 0x30;
+    fb_conn = (feedback << 1) | conn | 0x30;
 
     opl_write(0xC0 + ch, fb_conn);
 }
