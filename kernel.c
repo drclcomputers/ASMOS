@@ -32,6 +32,38 @@ extern void wm_init(void);
 extern void scheduler_init(void);
 extern void desktop_on_frame(void);
 
+static void play_bootchime(void) {
+    if (g_cfg.play_bootchime && g_cfg.sound_enabled) {
+        if (opl2_detected()) {
+            const uint8_t ch = 0;
+
+            opl2_set_instrument(ch, &opl2_gm_patches[0]);
+
+            opl2_note_on(ch, 60, 80);
+            sleep_ms(150);
+            opl2_note_off(ch);
+            sleep_ms(50);
+
+            opl2_note_on(ch, 64, 80);
+            sleep_ms(150);
+            opl2_note_off(ch);
+            sleep_ms(50);
+
+            opl2_note_on(ch, 67, 90);
+            sleep_ms(200);
+            opl2_note_off(ch);
+        } else if (sb16_detected()) {
+            speaker_beep(523, 120);
+            speaker_beep(659, 120);
+            speaker_beep(784, 180);
+        } else {
+            speaker_beep(523, 120);
+            speaker_beep(659, 120);
+            speaker_beep(784, 180);
+        }
+    }
+}
+
 static void dbg_bar(int col, uint8_t color) {
     __asm__ volatile("movw $0x03C4, %%dx\n\t"
                      "movb $0x02,   %%al\n\t"
@@ -122,8 +154,10 @@ static void resolution_set(void) {
         }
     }
 
-    if (g_screen_width  > 640) g_screen_width  = 640;
-    if (g_screen_height > 400) g_screen_height = 400;
+    if (g_screen_width > 640)
+        g_screen_width = 640;
+    if (g_screen_height > 400)
+        g_screen_height = 400;
 
     g_backbuf_size = g_screen_width * g_screen_height;
     if (g_backbuf_size == 0 || g_backbuf_size > 640 * 400)
@@ -160,13 +194,10 @@ void kmain(void) {
         sb16_unmute_fm();
     }
 
-    boot_check_sound();
+    boot_check_graphics();
 
-    if (g_cfg.play_bootchime && g_cfg.sound_enabled) {
-        speaker_beep(523, 120);
-        speaker_beep(659, 120);
-        speaker_beep(784, 180);
-    }
+    boot_check_sound();
+    play_bootchime();
 
     sleep_s(2);
 

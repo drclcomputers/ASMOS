@@ -4,58 +4,43 @@
 #include "lib/string.h"
 #include "os/api.h"
 
-// ─── Window geometry
 #define MIDI_DEFAULT_X 20
 #define MIDI_DEFAULT_Y 20
 #define MIDI_DEFAULT_W 260
-#define MIDI_DEFAULT_H 190
-
-// ─── Layout constants
+#define MIDI_DEFAULT_H 150
 #define PAD 6
 
-// Path input bar
-#define PATH_Y 14
+#define PATH_Y 6
 #define PATH_H 12
 #define PATH_X PAD
 #define PATH_W (MIDI_DEFAULT_W - PAD * 2 - 28)
 #define LOAD_BTN_X (PATH_X + PATH_W + 4)
 #define LOAD_BTN_W 24
 
-// Visualizer / now-playing panel
 #define VIZ_Y (PATH_Y + PATH_H + 6)
 #define VIZ_H 52
 #define VIZ_W (MIDI_DEFAULT_W - PAD * 2)
 
-// Transport bar
 #define TRANS_Y (VIZ_Y + VIZ_H + 6)
 #define TRANS_H 14
-#define BTN_SZ 20 // square buttons
+#define BTN_SZ 20
 #define LOOP_BTN_W 30
 
-// Progress bar
-#define PROG_Y (TRANS_Y + TRANS_H + 6)
-#define PROG_H 6
-#define PROG_W (MIDI_DEFAULT_W - PAD * 2)
-
-// Volume
-#define VOL_Y (PROG_Y + PROG_H + 8)
+#define VOL_Y (TRANS_Y + TRANS_H + 10)
 #define VOL_H 10
 #define VOL_LABEL_W 24
 #define VOL_TRACK_X (PAD + VOL_LABEL_W + 4)
 #define VOL_TRACK_W (MIDI_DEFAULT_W - PAD * 2 - VOL_LABEL_W - 24)
 #define VOL_VAL_X (VOL_TRACK_X + VOL_TRACK_W + 4)
 
-// Status
-#define STATUS_Y (VOL_Y + VOL_H + 8)
+#define STATUS_Y (VOL_Y + VOL_H + 4)
 
-// ─── VU meter bars
 #define VU_BARS 24
 #define VU_BAR_W ((VIZ_W - 2) / VU_BARS)
 #define VU_BAR_MAXH (VIZ_H - 2)
 
-// ─── Misc
 #define MAX_PATH_LEN 63
-#define MAX_MIDI_SIZE (64 * 1024) // 64 KB — plenty for standard MIDIs
+#define MAX_MIDI_SIZE (64 * 1024)
 
 typedef enum {
     MIDI_STATE_IDLE,
@@ -67,42 +52,34 @@ typedef enum {
 typedef struct {
     window *win;
 
-    // File path input
     char path_buf[MAX_PATH_LEN + 1];
     int path_len;
     bool path_focused;
 
-    // Loaded MIDI
     uint8_t *midi_buf;
     uint32_t midi_size;
-    char filename[32]; // basename for display
+    char filename[32];
 
-    // Playback state
     midi_ui_state_t state;
     bool looping;
-    uint8_t volume; // 0-100
+    uint8_t volume;
 
-    // Visualizer: per-bar peak heights (smoothly decaying)
     uint8_t vu_peaks[VU_BARS];
     uint8_t vu_decay[VU_BARS];
     uint32_t vu_frame;
 
-    // Progress tracking
-    uint32_t play_start_pit; // pit_ticks when play began
-    uint32_t total_pit_est;  // estimated total length in pit_ticks
+    uint32_t play_start_pit;
+    uint32_t total_pit_est;
 
-    // Status message
     char status[64];
     uint32_t status_timer;
 
-    // Volume drag
     bool vol_dragging;
 } midiplayer_state_t;
 
 app_descriptor midiplayer_app;
 
-// ─── Helpers
-
+// Helpers
 static void mp_set_status(midiplayer_state_t *s, const char *msg) {
     strncpy(s->status, msg, 63);
     s->status[63] = '\0';
@@ -118,13 +95,10 @@ static bool btn_hit(int mx, int my, int bx, int by, int bw, int bh) {
     return mx >= bx && mx < bx + bw && my >= by && my < by + bh;
 }
 
-// ─── VU meter update ─────────────────────────────────────────────────────────
-// Driven by a simple pseudo-random pattern that reacts to OPL2 activity.
-// In a real implementation you'd sample OPL2 register state; here we fake it
-// nicely so it looks musically alive.
+// meter update
+// fake btw
 static void mp_update_vu(midiplayer_state_t *s) {
     if (s->state != MIDI_STATE_PLAYING) {
-        // Decay all bars to zero
         for (int i = 0; i < VU_BARS; i++) {
             if (s->vu_peaks[i] > 0)
                 s->vu_peaks[i] = s->vu_peaks[i] > 3 ? s->vu_peaks[i] - 3 : 0;
@@ -134,14 +108,10 @@ static void mp_update_vu(midiplayer_state_t *s) {
 
     s->vu_frame++;
 
-    // Simple pseudo-random noise that looks like a spectrum
-    // In practice, hook OPL2 channel note_on events to feed real data here.
     uint32_t t = s->vu_frame;
     for (int i = 0; i < VU_BARS; i++) {
-        // Each bar has its own oscillation frequency based on index
         uint32_t phase = t * (uint32_t)(i + 3);
         uint8_t wave = (uint8_t)((phase ^ (phase >> 4) ^ (phase >> 7)) & 0xFF);
-        // Shape into a rough spectrum curve (higher bars in low-mid range)
         uint8_t shape;
         if (i < 4)
             shape = 60 + (uint8_t)(i * 8);
@@ -153,15 +123,14 @@ static void mp_update_vu(midiplayer_state_t *s) {
             shape = 30 - (uint8_t)((i - 18) * 4);
 
         uint8_t target = (uint8_t)((wave * shape) >> 8);
-        // Scale to bar height
+
         target = (uint8_t)((target * VU_BAR_MAXH) >> 8);
-        // Apply volume scaling
+
         target = (uint8_t)((target * (uint32_t)s->volume) / 100);
 
         if (target > s->vu_peaks[i]) {
             s->vu_peaks[i] = target;
         } else {
-            // Smooth decay
             uint8_t decay =
                 (uint8_t)(s->vu_decay[i] > 0 ? s->vu_decay[i]-- : 0);
             (void)decay;
@@ -173,8 +142,7 @@ static void mp_update_vu(midiplayer_state_t *s) {
     }
 }
 
-// ─── Draw ────────────────────────────────────────────────────────────────────
-
+// Draw
 static void midiplayer_draw(window *win, void *ud) {
     midiplayer_state_t *s = (midiplayer_state_t *)ud;
     if (!s)
@@ -187,14 +155,12 @@ static void midiplayer_draw(window *win, void *ud) {
 
     fill_rect(cx, cy, ww, wh, BLACK);
 
-    // ── Path input ────────────────────────────────────────────────────────
     int py = cy + PATH_Y;
     uint8_t path_border = s->path_focused ? CYAN : DARK_GRAY;
     fill_rect(cx + PATH_X, py, PATH_W, PATH_H, 1);
     draw_rect(cx + PATH_X, py, PATH_W, PATH_H, path_border);
 
     char display_path[MAX_PATH_LEN + 1];
-    // Show last N chars that fit (each char ~5px wide in font mode 2)
     int max_vis = (PATH_W - 4) / 5;
     int start = s->path_len > max_vis ? s->path_len - max_vis : 0;
     strncpy(display_path, s->path_buf + start, max_vis);
@@ -209,13 +175,13 @@ static void midiplayer_draw(window *win, void *ud) {
             draw_string(cursor_x, py + 3, "|", CYAN, 2);
     }
 
-    // LOAD button
+    // Load button
     int lbx = cx + LOAD_BTN_X;
     fill_rect(lbx, py, LOAD_BTN_W, PATH_H, DARK_GRAY);
     draw_rect(lbx, py, LOAD_BTN_W, PATH_H, LIGHT_GRAY);
     draw_string(lbx + 3, py + 3, "GO", WHITE, 2);
 
-    // ── VU Meter / now-playing panel ─────────────────────────────────────
+    // VU Meter / now-playing panel
     int vx = cx + PAD;
     int vy = cy + VIZ_Y;
     fill_rect(vx, vy, VIZ_W, VIZ_H, 1);
@@ -224,7 +190,6 @@ static void midiplayer_draw(window *win, void *ud) {
     if (s->state == MIDI_STATE_IDLE) {
         draw_string(vx + 8, vy + VIZ_H / 2 - 3, "No file loaded", DARK_GRAY, 2);
     } else {
-        // Filename
         draw_string(vx + 3, vy + 3, s->filename, CYAN, 2);
 
         // VU bars
@@ -234,7 +199,6 @@ static void midiplayer_draw(window *win, void *ud) {
             int bh = s->vu_peaks[i];
             if (bh < 1)
                 bh = 1;
-            // Color: green → yellow → red based on height
             uint8_t col;
             if (bh < VU_BAR_MAXH * 5 / 10)
                 col = LIGHT_GREEN;
@@ -246,101 +210,72 @@ static void midiplayer_draw(window *win, void *ud) {
         }
     }
 
-    // ── Transport buttons ─────────────────────────────────────────────────
+    // Transport buttons
     int tx = cx + PAD;
     int ty = cy + TRANS_Y;
 
-    // |<< (rewind/restart)
-    {
-        bool active = (s->state != MIDI_STATE_IDLE);
-        fill_rect(tx, ty, BTN_SZ, BTN_SZ, active ? DARK_GRAY : 1);
-        draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? LIGHT_GRAY : DARK_GRAY);
-        draw_string(tx + 3, ty + 4, "|<", active ? WHITE : DARK_GRAY, 2);
-        tx += BTN_SZ + 3;
-    }
+    // rewind/restart
+    bool active = (s->state != MIDI_STATE_IDLE);
+    fill_rect(tx, ty, BTN_SZ, BTN_SZ, active ? DARK_GRAY : 1);
+    draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? LIGHT_GRAY : DARK_GRAY);
+    draw_string(tx + 3, ty + 4, "|<", active ? WHITE : DARK_GRAY, 2);
+    tx += BTN_SZ + 3;
 
     // PLAY / PAUSE
-    {
-        bool is_playing = (s->state == MIDI_STATE_PLAYING);
-        bool active = (s->state != MIDI_STATE_IDLE);
-        uint8_t pbg = is_playing ? RED : (active ? LIGHT_GREEN : 1);
-        fill_rect(tx, ty, BTN_SZ, BTN_SZ, pbg);
-        draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? WHITE : DARK_GRAY);
-        const char *plbl =
-            is_playing ? "||" : (s->state == MIDI_STATE_PAUSED ? ">>" : " >");
-        draw_string(tx + 3, ty + 4, (char *)plbl, WHITE, 2);
-        tx += BTN_SZ + 3;
-    }
+    bool is_playing = (s->state == MIDI_STATE_PLAYING);
+    active = (s->state != MIDI_STATE_IDLE);
+    uint8_t pbg = is_playing ? RED : (active ? LIGHT_GREEN : 1);
+    fill_rect(tx, ty, BTN_SZ, BTN_SZ, pbg);
+    draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? WHITE : DARK_GRAY);
+    const char *plbl =
+        is_playing ? "||" : (s->state == MIDI_STATE_PAUSED ? ">>" : " >");
+    draw_string(tx + 3, ty + 4, (char *)plbl, WHITE, 2);
+    tx += BTN_SZ + 3;
 
     // STOP
-    {
-        bool active =
-            (s->state == MIDI_STATE_PLAYING || s->state == MIDI_STATE_PAUSED);
-        fill_rect(tx, ty, BTN_SZ, BTN_SZ, active ? DARK_GRAY : 1);
-        draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? LIGHT_GRAY : DARK_GRAY);
-        draw_string(tx + 5, ty + 4, "[]", active ? WHITE : DARK_GRAY, 2);
-        tx += BTN_SZ + 3;
-    }
+    active = (s->state == MIDI_STATE_PLAYING || s->state == MIDI_STATE_PAUSED);
+    fill_rect(tx, ty, BTN_SZ, BTN_SZ, active ? DARK_GRAY : 1);
+    draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? LIGHT_GRAY : DARK_GRAY);
+    draw_string(tx + 5, ty + 4, "[]", active ? WHITE : DARK_GRAY, 2);
+    tx += BTN_SZ + 3;
 
     // LOOP toggle
-    {
-        uint8_t lbg = s->looping ? LIGHT_BLUE : DARK_GRAY;
-        fill_rect(tx, ty, LOOP_BTN_W, BTN_SZ, lbg);
-        draw_rect(tx, ty, LOOP_BTN_W, BTN_SZ, s->looping ? WHITE : LIGHT_GRAY);
-        draw_string(tx + 4, ty + 4, "LOOP", s->looping ? WHITE : LIGHT_GRAY, 2);
-        tx += LOOP_BTN_W + 6;
-    }
+    uint8_t lbg = s->looping ? LIGHT_BLUE : DARK_GRAY;
+    fill_rect(tx, ty, LOOP_BTN_W, BTN_SZ, lbg);
+    draw_rect(tx, ty, LOOP_BTN_W, BTN_SZ, s->looping ? WHITE : LIGHT_GRAY);
+    draw_string(tx + 4, ty + 4, "LOOP", s->looping ? WHITE : LIGHT_GRAY, 2);
+    tx += LOOP_BTN_W + 6;
 
     // State label on the right
-    {
-        const char *state_lbl;
-        uint8_t state_col;
-        switch (s->state) {
-        case MIDI_STATE_IDLE:
-            state_lbl = "IDLE";
-            state_col = DARK_GRAY;
-            break;
-        case MIDI_STATE_LOADED:
-            state_lbl = "READY";
-            state_col = LIGHT_GRAY;
-            break;
-        case MIDI_STATE_PLAYING:
-            state_lbl = "PLAYING";
-            state_col = LIGHT_GREEN;
-            break;
-        case MIDI_STATE_PAUSED:
-            state_lbl = "PAUSED";
-            state_col = YELLOW;
-            break;
-        default:
-            state_lbl = "";
-            state_col = DARK_GRAY;
-            break;
-        }
-        int sw = (int)strlen(state_lbl) * 5;
-        draw_string(cx + PAD + VIZ_W - sw, cy + TRANS_Y + 5, (char *)state_lbl,
-                    state_col, 2);
+    const char *state_lbl;
+    uint8_t state_col;
+    switch (s->state) {
+    case MIDI_STATE_IDLE:
+        state_lbl = "IDLE";
+        state_col = DARK_GRAY;
+        break;
+    case MIDI_STATE_LOADED:
+        state_lbl = "READY";
+        state_col = LIGHT_GRAY;
+        break;
+    case MIDI_STATE_PLAYING:
+        state_lbl = "PLAYING";
+        state_col = LIGHT_GREEN;
+        break;
+    case MIDI_STATE_PAUSED:
+        state_lbl = "PAUSED";
+        state_col = YELLOW;
+        break;
+    default:
+        state_lbl = "";
+        state_col = DARK_GRAY;
+        break;
     }
+    int sw = (int)strlen(state_lbl) * 5;
+    draw_string(cx + PAD + VIZ_W - sw, cy + TRANS_Y + 5, (char *)state_lbl,
+                state_col, 2);
 
-    // ── Progress bar ──────────────────────────────────────────────────────
-    int prog_x = cx + PAD;
-    int prog_y = cy + PROG_Y;
-
-    fill_rect(prog_x, prog_y, PROG_W, PROG_H, 1);
-    draw_rect(prog_x, prog_y, PROG_W, PROG_H, DARK_GRAY);
-
-    if (s->state == MIDI_STATE_PLAYING || s->state == MIDI_STATE_PAUSED) {
-        extern volatile uint32_t pit_ticks;
-        uint32_t elapsed = pit_ticks - s->play_start_pit;
-        uint32_t total = s->total_pit_est > 0 ? s->total_pit_est : 1;
-        if (elapsed > total)
-            elapsed = total;
-        int fill_w = (int)((uint32_t)(PROG_W - 2) * elapsed / total);
-        if (fill_w > 0)
-            fill_rect(prog_x + 1, prog_y + 1, fill_w, PROG_H - 2, CYAN);
-    }
-
-    // ── Volume ────────────────────────────────────────────────────────────
+    // Volume
     int vol_y = cy + VOL_Y;
     draw_string(cx + PAD, vol_y + 1, "VOL", LIGHT_GRAY, 2);
 
@@ -355,7 +290,7 @@ static void midiplayer_draw(window *win, void *ud) {
     sprintf(vol_str, "%d%%", (int)s->volume);
     draw_string(cx + VOL_VAL_X, vol_y + 1, vol_str, CYAN, 2);
 
-    // ── Status ────────────────────────────────────────────────────────────
+    // Status
     if (s->status_timer > 0)
         draw_string(cx + PAD, cy + STATUS_Y, s->status, YELLOW, 2);
     else
@@ -365,22 +300,19 @@ static void midiplayer_draw(window *win, void *ud) {
                     DARK_GRAY, 2);
 }
 
-// ─── File loading
-// ─────────────────────────────────────────────────────────────
-
+// File loading
 static void mp_load_file(midiplayer_state_t *s) {
     if (s->path_len == 0) {
         mp_set_status(s, "No path entered.");
         return;
     }
 
-    // Stop current playback
+    // stop current playback
     if (s->state == MIDI_STATE_PLAYING || s->state == MIDI_STATE_PAUSED) {
         midi_player_stop();
         s->state = MIDI_STATE_IDLE;
     }
 
-    // Free old buffer
     if (s->midi_buf) {
         kfree(s->midi_buf);
         s->midi_buf = NULL;
@@ -428,7 +360,6 @@ static void mp_load_file(midiplayer_state_t *s) {
     s->midi_size = (uint32_t)got;
     s->state = MIDI_STATE_LOADED;
 
-    // Extract basename for display
     const char *slash = NULL;
     for (int i = 0; i < s->path_len; i++)
         if (s->path_buf[i] == '/' || s->path_buf[i] == '\\')
@@ -436,16 +367,6 @@ static void mp_load_file(midiplayer_state_t *s) {
     const char *base = slash ? slash + 1 : s->path_buf;
     strncpy(s->filename, base, 31);
     s->filename[31] = '\0';
-
-    // Rough duration estimate: MIDI duration is hard to know without parsing
-    // the entire event stream.  We estimate from file size as a heuristic.
-    // A typical 30-second MIDI ≈ 5KB, so bytes/170 ≈ seconds.
-    // pit_ticks runs at ~100 Hz.
-    s->total_pit_est = (fsize / 170) * 100;
-    if (s->total_pit_est < 600)
-        s->total_pit_est = 600;
-    if (s->total_pit_est > 60000)
-        s->total_pit_est = 60000;
 
     // Reset VU
     for (int i = 0; i < VU_BARS; i++) {
@@ -457,9 +378,6 @@ static void mp_load_file(midiplayer_state_t *s) {
     sprintf(msg, "Loaded: %s (%lu bytes)", s->filename, (unsigned long)fsize);
     mp_set_status(s, msg);
 }
-
-// ─── Transport actions
-// ────────────────────────────────────────────────────────
 
 static void mp_action_play_pause(midiplayer_state_t *s) {
     switch (s->state) {
@@ -481,7 +399,7 @@ static void mp_action_play_pause(midiplayer_state_t *s) {
         mp_set_status(s, "Paused.");
         break;
     case MIDI_STATE_PAUSED:
-        midi_player_pause(); // toggle resumes
+        midi_player_pause();
         s->state = MIDI_STATE_PLAYING;
         mp_set_status(s, "Resumed.");
         break;
@@ -522,13 +440,10 @@ static void mp_apply_volume(midiplayer_state_t *s) {
     uint8_t v = (uint8_t)(s->volume * 255 / 100);
     sb16_set_volume(v, v);
     opl2_set_master_volume(s->volume);
-    // set FM synthesis volume on the SB16 mixer
     mixer_write(0x26, (v & 0xF0) | (v >> 4));
 }
 
-// ─── Active-instance helper
-// ───────────────────────────────────────────────────
-
+// Active-instance helper
 static midiplayer_state_t *active_mp(void) {
     window *fw = wm_focused_window();
     if (!fw)
@@ -544,9 +459,7 @@ static midiplayer_state_t *active_mp(void) {
     return NULL;
 }
 
-// ─── Menu callbacks
-// ───────────────────────────────────────────────────────────
-
+// Menu callbacks
 static void menu_play_pause(void) {
     midiplayer_state_t *s = active_mp();
     if (!s)
@@ -609,9 +522,6 @@ static void on_about_mp(void) {
                "and Type-1 MIDI",
                NULL, NULL);
 }
-
-// ─── App lifecycle
-// ────────────────────────────────────────────────────────────
 
 static bool midiplayer_close(window *w) {
     midiplayer_state_t *s = NULL;
@@ -697,10 +607,8 @@ static void midiplayer_on_frame(void *state) {
 
     bool focused = window_is_focused(s->win);
 
-    // Advance MIDI sequencer (no-op if not playing)
     midi_player_update();
 
-    // Detect natural end of playback
     if (s->state == MIDI_STATE_PLAYING && !midi_player_is_playing()) {
         s->state = MIDI_STATE_LOADED;
         for (int i = 0; i < VU_BARS; i++)
@@ -721,7 +629,6 @@ static void midiplayer_on_frame(void *state) {
         int cx = win_cx(s);
         int cy = win_cy(s);
 
-        // ── Path input click ─────────────────────────────────────────────
         int py = cy + PATH_Y;
         if (btn_hit(mouse.x, mouse.y, cx + PATH_X, py, PATH_W, PATH_H)) {
             s->path_focused = true;
@@ -733,7 +640,6 @@ static void midiplayer_on_frame(void *state) {
             s->path_focused = false;
         }
 
-        // ── Transport buttons ─────────────────────────────────────────────
         int tx = cx + PAD;
         int ty = cy + TRANS_Y;
 
@@ -764,7 +670,7 @@ static void midiplayer_on_frame(void *state) {
             midiplayer_draw(s->win, s);
         }
 
-        // ── Volume track click/drag ───────────────────────────────────────
+        // Volume track click/drag
         int vol_y = cy + VOL_Y;
         int track_x = cx + VOL_TRACK_X;
         if (btn_hit(mouse.x, mouse.y, track_x, vol_y - 2, VOL_TRACK_W,
@@ -790,7 +696,7 @@ static void midiplayer_on_frame(void *state) {
         }
     }
 
-    // ── Keyboard shortcuts ────────────────────────────────────────────────
+    // shortcuts
     if (focused && kb.key_pressed) {
         if (s->path_focused) {
             if (kb.last_char && kb.last_char != '\b' && kb.last_char != '\r') {

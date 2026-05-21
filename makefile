@@ -142,7 +142,6 @@ $(BUILD_DIR):
 
 qemu-fdd: all
 	qemu-system-i386 \
-	    -serial file:serial.log \
 	    -drive format=raw,file=os_image.bin \
 	    -drive format=raw,file=floppy.img,if=floppy \
 	    -m 4M -machine pc \
@@ -155,7 +154,6 @@ qemu-fdd: all
 
 qemu: all
 	qemu-system-i386 \
-	    -serial file:serial.log \
 	    -drive format=raw,file=os_image.bin \
 	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \

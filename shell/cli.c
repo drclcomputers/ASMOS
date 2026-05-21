@@ -49,6 +49,8 @@ typedef struct {
 
 static cli_state_t s;
 
+bool shouldexit = 0;
+
 /* ── helpers ───────────────────────────────────────── */
 static void scroll_to_bottom(void) {
     int ms = term_buf_count() - VISIBLE_ROWS;
@@ -204,6 +206,7 @@ static void execute(void) {
         s.input[0] = '\0';
         s.input_len = 0;
         s.input_scroll = 0;
+        shouldexit = 1;
     }
     if (strcmp(s.input, "gui") == 0) {
         term_buf_push("Starting GUI...");
@@ -214,21 +217,20 @@ static void execute(void) {
         s.input[0] = '\0';
         s.input_len = 0;
         s.input_scroll = 0;
+        shouldexit = 1;
     }
 
-    {
-        static char out_buf[CMD_OUTPUT_MAX];
-        out_buf[0] = '\0';
-        cmd_status_t st = cli_execute_command(s.input, out_buf, CMD_OUTPUT_MAX);
+    static char out_buf[CMD_OUTPUT_MAX];
+    out_buf[0] = '\0';
+    cmd_status_t st = cli_execute_command(s.input, out_buf, CMD_OUTPUT_MAX);
 
-        if (st == CMD_STATUS_CLEAR) {
-            term_buf_clear();
-            s.scroll_top = 0;
-        } else {
-            scroll_to_bottom();
-        }
-        s_exec_status = st;
+    if (st == CMD_STATUS_CLEAR) {
+        term_buf_clear();
+        s.scroll_top = 0;
+    } else {
+        scroll_to_bottom();
     }
+    s_exec_status = st;
 }
 
 void cli_run(void) {
@@ -245,6 +247,8 @@ void cli_run(void) {
     redraw();
 
     while (1) {
+        if (shouldexit)
+            return;
         ps2_update();
 
         if (!kb.key_pressed) {
@@ -311,6 +315,8 @@ void cli_run(void) {
             if (s_exec_status == CMD_STATUS_EXIT ||
                 s_exec_status == CMD_STATUS_GUI)
                 return;
+            s.input[0] = '\0';
+            s.input_len = 0;
             continue;
         }
 

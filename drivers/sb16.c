@@ -2,8 +2,7 @@
 #include "lib/core.h"
 #include "lib/memory.h"
 
-// ── Port offsets
-// ──────────────────────────────────────────────────────────────
+// Port offsets
 #define DSP_RESET (s_port + 0x6)
 #define DSP_READ (s_port + 0xA)
 #define DSP_WRITE (s_port + 0xC)
@@ -13,17 +12,15 @@
 #define MIXER_ADDR (s_port + 0x4)
 #define MIXER_DATA (s_port + 0x5)
 
-// ── DSP commands
-// ──────────────────────────────────────────────────────────────
+// DSP commands
 #define DSP_CMD_SET_RATE 0x41
-#define DSP_CMD_PLAY_8BIT 0xC0 // single-cycle
+#define DSP_CMD_PLAY_8BIT 0xC0
 #define DSP_CMD_HALT_8 0xD0
 #define DSP_CMD_SPEAKER_ON 0xD1
 #define DSP_CMD_SPEAKER_OFF 0xD3
 #define DSP_CMD_GET_VERSION 0xE1
 
-// ── 8-bit DMA channel 1
-// ───────────────────────────────────────────────────────
+// 8-bit DMA channel 1
 #define DMA8_MASK 0x0A
 #define DMA8_MODE 0x0B
 #define DMA8_CLEAR_FF 0x0C
@@ -31,8 +28,7 @@
 #define DMA8_COUNT_CH1 0x03
 #define DMA8_PAGE_CH1 0x83
 
-// ── Mixer registers
-// ───────────────────────────────────────────────────────────
+// Mixer registers
 #define MIXER_IRQ_REG 0x80
 #define MIXER_MASTER_VOL 0x22
 #define MIXER_DAC_VOL 0x04
@@ -41,29 +37,20 @@
 #define MIXER_FM_VOL_LEFT 0x34
 #define MIXER_FM_VOL_RIGHT 0x35
 
-// ── PIC / IRQ5
-// ────────────────────────────────────────────────────────────────
+// PIC / IRQ5
 #define PIC1_CMD 0x20
 #define PIC1_DATA 0x21
 #define PIC1_EOI 0x20
 
-// ── DMA buffer
-// ────────────────────────────────────────────────────────────────
-// 0x70000–0x74000: 7th 64K page, does not cross a 64K boundary.
+// DMA buffer
 #define DMA_BUF_PHYS 0x70000
 #define DMA_BUF_SIZE 0x4000
 
-// ── Spin-loop timeouts
-// ──────────────────────────────────────────────────────── dsp_write: SB16 spec
-// says write buffer clears within a few µs. 0x10000 iterations at ~10ns each ≈
-// 655µs — plenty, never hangs the CPU.
+// Spin-loop timeouts
 #define DSP_WRITE_TIMEOUT 0x10000u
-// dsp_read: DSP should reply within 1ms after a command.
-// 0x40000 iterations ≈ 2.6ms.
 #define DSP_READ_TIMEOUT 0x40000u
 
-// ── Module state
-// ──────────────────────────────────────────────────────────────
+// Module state
 static uint16_t s_port = SB16_DEFAULT_PORT;
 static bool s_detected = false;
 static volatile bool s_playing = false;
@@ -74,9 +61,7 @@ static uint32_t s_src_offset = 0;
 static uint32_t s_sample_rate = 22050;
 static bool s_looping = false;
 
-// ── Low-level DSP helpers — ALL have bounded timeouts
-// ─────────────────────────
-
+// Low-level DSP helpers
 static bool dsp_reset(void) {
     outb(DSP_RESET, 1);
     for (volatile int i = 0; i < 300; i++)
@@ -86,10 +71,9 @@ static bool dsp_reset(void) {
         if ((inb(DSP_READ_STATUS) & 0x80) && inb(DSP_READ) == 0xAA)
             return true;
     }
-    return false; // card not present / not responding
+    return false;
 }
 
-// Returns false if the DSP write buffer never cleared (card stuck or absent).
 static bool dsp_write(uint8_t val) {
     for (uint32_t i = 0; i < DSP_WRITE_TIMEOUT; i++) {
         if (!(inb(DSP_WRITE) & 0x80)) {
@@ -97,16 +81,15 @@ static bool dsp_write(uint8_t val) {
             return true;
         }
     }
-    return false; // timeout — treat as card error
+    return false;
 }
 
-// Returns -1 on timeout.
 static int dsp_read_byte(void) {
     for (uint32_t i = 0; i < DSP_READ_TIMEOUT; i++) {
         if (inb(DSP_READ_STATUS) & 0x80)
             return (int)(uint8_t)inb(DSP_READ);
     }
-    return -1; // timeout
+    return -1;
 }
 
 void mixer_write(uint8_t reg, uint8_t val) {
@@ -119,12 +102,11 @@ static uint8_t mixer_read(uint8_t reg) {
     return inb(MIXER_DATA);
 }
 
-// ── DMA setup
-// ─────────────────────────────────────────────────────────────────
+// DMA setup
 static void dma8_setup(uint32_t phys_addr, uint32_t byte_count) {
     outb(DMA8_MASK, 0x05); // mask channel 1
     outb(DMA8_CLEAR_FF, 0x00);
-    outb(DMA8_MODE, 0x49); // single, read (mem→device), ch1
+    outb(DMA8_MODE, 0x49);
     outb(DMA8_ADDR_CH1, (uint8_t)(phys_addr & 0xFF));
     outb(DMA8_ADDR_CH1, (uint8_t)((phys_addr >> 8) & 0xFF));
     outb(DMA8_PAGE_CH1, (uint8_t)((phys_addr >> 16) & 0xFF));
@@ -134,15 +116,12 @@ static void dma8_setup(uint32_t phys_addr, uint32_t byte_count) {
     outb(DMA8_MASK, 0x01); // unmask channel 1
 }
 
-// ── PIC IRQ5
-// ──────────────────────────────────────────────────────────────────
+// PIC IRQ5
 static void pic_unmask_irq5(void) {
     outb(PIC1_DATA, inb(PIC1_DATA) & ~(1 << 5));
 }
 static void pic_mask_irq5(void) { outb(PIC1_DATA, inb(PIC1_DATA) | (1 << 5)); }
 
-// ── Helper: program DSP for next chunk ───────────────────────────────────────
-// Returns false if any DSP write timed out (card died mid-stream).
 static bool dsp_program_chunk(uint32_t count_minus_1) {
     if (!dsp_write(DSP_CMD_SET_RATE))
         return false;
@@ -153,7 +132,7 @@ static bool dsp_program_chunk(uint32_t count_minus_1) {
     if (!dsp_write(DSP_CMD_PLAY_8BIT))
         return false;
     if (!dsp_write(0x00))
-        return false; // unsigned mono
+        return false;
     if (!dsp_write((uint8_t)(count_minus_1 & 0xFF)))
         return false;
     if (!dsp_write((uint8_t)((count_minus_1 >> 8) & 0xFF)))
@@ -161,7 +140,7 @@ static bool dsp_program_chunk(uint32_t count_minus_1) {
     return true;
 }
 
-// ── IRQ5 handler — called from isr_sb16 trampoline ───────────────────────────
+// IRQ5 handler
 void sb16_irq_handler(void) {
     if (!s_detected) {
         outb(PIC1_CMD, PIC1_EOI);
@@ -187,7 +166,6 @@ void sb16_irq_handler(void) {
 
         dma8_setup(DMA_BUF_PHYS, DMA_BUF_SIZE);
         if (!dsp_program_chunk(DMA_BUF_SIZE - 1)) {
-            // DSP hung mid-stream; abort cleanly
             s_playing = false;
             s_src_data = NULL;
         }
@@ -202,15 +180,12 @@ void sb16_irq_handler(void) {
     } else {
         s_playing = false;
         s_src_data = NULL;
-        // dsp_write may time out here if card died, but we're stopping anyway
         dsp_write(DSP_CMD_HALT_8);
     }
     outb(PIC1_CMD, PIC1_EOI);
 }
 
 // ── Public API
-// ────────────────────────────────────────────────────────────────
-
 bool sb16_init(void) {
     uint16_t ports[] = {0x220, 0x240, 0x260, 0x280};
     for (int i = 0; i < 4; i++) {
@@ -218,15 +193,14 @@ bool sb16_init(void) {
         if (!dsp_reset())
             continue;
 
-        // Version command — uses bounded helpers now
         if (!dsp_write(DSP_CMD_GET_VERSION))
             continue;
         int major = dsp_read_byte();
         int minor = dsp_read_byte();
         if (major < 0 || minor < 0)
-            continue; // timeout → try next port
+            continue;
         if ((uint8_t)major < 4)
-            continue; // not SB16
+            continue;
 
         s_detected = true;
         dsp_write(DSP_CMD_SPEAKER_ON);
@@ -239,7 +213,6 @@ bool sb16_init(void) {
         (void)mixer_read(MIXER_IRQ_REG);
         return true;
     }
-    // No card found — s_detected stays false, all play calls become no-ops
     return false;
 }
 
@@ -279,7 +252,6 @@ void sb16_play_pcm(const uint8_t *data, uint32_t len, uint32_t sample_rate,
     pic_unmask_irq5();
 
     if (!dsp_program_chunk(DMA_BUF_SIZE - 1)) {
-        // DSP didn't accept the command — abort
         s_playing = false;
         s_src_data = NULL;
         pic_mask_irq5();
@@ -289,7 +261,7 @@ void sb16_play_pcm(const uint8_t *data, uint32_t len, uint32_t sample_rate,
 void sb16_stop(void) {
     if (!s_detected)
         return;
-    dsp_write(DSP_CMD_HALT_8); // best-effort; may time out if card is gone
+    dsp_write(DSP_CMD_HALT_8);
     pic_mask_irq5();
     s_playing = false;
     s_src_data = NULL;

@@ -266,3 +266,13 @@ void boot_check_sound(void) {
     bool opl_ok = opl2_detected();
     boot_check_line("OPL2 FM synth", opl_ok, opl_ok ? NULL : "not detected");
 }
+
+void boot_check_graphics(void) {
+    boot_puts("Graphics\n", LIGHT_GRAY);
+
+    // Mode 13h or X
+    if (g_video_mode == 0)
+        boot_check_line("RESMODE = 320 x 200", true, "GPU is fried :(");
+    else
+        boot_check_line("RESMODE = 640 x 400", true, "GPU is fried :(");
+}

@@ -14,8 +14,6 @@ uint8_t s_master_vol = 100;
 // Register I/O
 // OPL2 requires >=3.3 µs between address write and data write,
 // and >=23 µs after the data write before the next address write.
-// We approximate both with port-read busy-loops (each ~1 µs on ISA).
-
 static inline void opl_delay_short(void) {
     inb(0x80);
     inb(0x80);
@@ -35,10 +33,7 @@ static inline void opl_write(uint8_t reg, uint8_t val) {
     opl_delay_long();
 }
 
-// Detection — standard OPL2 timer test (from Adlib FAQ)
-
 static bool detect_port(uint16_t port) {
-    // Reset both timers
     outb(port, 0x04);
     for (int i = 0; i < 6; i++)
         inb(0x80);
@@ -53,9 +48,7 @@ static bool detect_port(uint16_t port) {
     for (int i = 0; i < 35; i++)
         inb(0x80);
     uint8_t s1 = inb(port);
-    ;
 
-    // Start timer 1 at 0xFF → overflows in ~80 µs
     outb(port, 0x02);
     for (int i = 0; i < 6; i++)
         inb(0x80);
@@ -77,7 +70,7 @@ static bool detect_port(uint16_t port) {
             break;
     }
 
-    // Reset again
+    // reset
     outb(port, 0x04);
     for (int i = 0; i < 6; i++)
         inb(0x80);
@@ -121,13 +114,10 @@ void opl2_reset(void) {
     opl_write(0x01, 0x20);
     opl_write(0xBD, 0x00);
     for (int i = 0; i < 9; i++)
-        opl_write(0xC0 + i, 0x30);
+        opl_write(0xC0 + i, 0x00);
     for (volatile int i = 0; i < 1000; i++)
         inb(0x80);
 }
-
-// Operator offsets for each of the 9 channels.
-// Index [ch][0] = modulator slot offset, [ch][1] = carrier slot offset.
 
 static const uint8_t s_op[9][2] = {
     {0x00, 0x03}, {0x01, 0x04}, {0x02, 0x05}, {0x08, 0x0B}, {0x09, 0x0C},
@@ -135,9 +125,6 @@ static const uint8_t s_op[9][2] = {
 };
 
 // Instrument load
-// We preserve the KSL bits from the patch's mod_ksl_tl when loading,
-// but the TL field is overridden per-note in opl2_note_on().
-
 void opl2_set_instrument(uint8_t ch, const opl2_instrument_t *inst) {
     if (ch >= OPL2_CHANNELS || !inst)
         return;
@@ -152,53 +139,32 @@ void opl2_set_instrument(uint8_t ch, const opl2_instrument_t *inst) {
     opl_write(0x60 + c, inst->car_ar_dr);
     opl_write(0x80 + c, inst->car_sl_rr);
     opl_write(0xE0 + c, inst->car_wave & 0x07);
-    opl_write(0xC0 + ch, inst->fb_conn | 0x30);
+    uint8_t fb_conn = inst->fb_conn;
+    uint8_t feedback = (fb_conn >> 1) & 0x07;
+    uint8_t conn = fb_conn & 0x01;
+    if (feedback > 2) {
+        feedback = 2;
+    }
+    //fb_conn = (feedback << 1) | conn | 0x30;
+
+    opl_write(0xC0 + ch, fb_conn);
 }
 
-// Pitch — exact OPL2 F-number formula:
-//   F = freq * 2^(20 - block) / 49716
-// Base frequencies (mHz) for MIDI notes 0-11 in block 0, then shift up by
-// block. We work in units of 0.001 Hz to stay in integer arithmetic.
-
-static const uint32_t s_note_mhz[12] = {
-    // C      C#     D      D#     E      F
-    16352,
-    17324,
-    18354,
-    19445,
-    20602,
-    21827,
-    // F#     G      G#     A      A#     B
-    23125,
-    24500,
-    25957,
-    27500,
-    29135,
-    30868,
+static const uint16_t s_fnum_table[12] = {
+    0x156, 0x16B, 0x181, 0x198, 0x1B0, 0x1CA,
+    0x1E5, 0x202, 0x220, 0x241, 0x263, 0x287
 };
 
 static void note_to_fnum(uint8_t note, uint16_t *fnum, uint8_t *block) {
     int b = (int)(note / 12);
-    if (b < 0)
-        b = 0;
-    if (b > 7)
-        b = 7;
-
-    uint32_t freq_mhz = s_note_mhz[note % 12];
-    uint32_t f = (freq_mhz * (1u << 20)) / 49716000u;
-
-    // Clamp to 10 bits
-    if (f > 0x3FF)
-        f = 0x3FF;
-    *fnum = (uint16_t)f;
+    if (b < 0) b = 0;
+    if (b > 7) b = 7;
+    *fnum = s_fnum_table[note % 12];
     *block = (uint8_t)b;
 }
 
 // Volume — OPL2 carrier Total Level is attenuation in 0.75 dB steps.
 // TL=0 → full volume, TL=63 → ~47 dB down (silent for practical purposes).
-// MIDI velocity is perceptually logarithmic; we apply a square-law curve
-// to approximate that on the linear-dB TL scale.
-
 void opl2_set_master_volume(uint8_t v) {
     if (v > 100)
         v = 100;
@@ -228,15 +194,9 @@ static uint8_t s_b0[OPL2_CHANNELS];
 void opl2_note_on(uint8_t ch, uint8_t note, uint8_t vel) {
     if (ch >= OPL2_CHANNELS)
         return;
-    // Writing B0 with key-on=0 first ensures a clean re-trigger
     opl_write(0xB0 + ch, 0x00);
 
     uint8_t c = s_op[ch][1];
-    // We need the patch's carrier KSL/TL to compute volume correctly.
-    // The sequencer always calls opl2_set_instrument before opl2_note_on,
-    // so we read it back from the shadow in the voice table (set by sequencer).
-    // Here we just apply velocity directly — the sequencer passes the patch
-    // ptr. Volume is applied to carrier TL only (standard OPL2 FM practice).
     uint32_t eff = (uint32_t)vel * s_master_vol / 100u;
     if (eff > 127)
         eff = 127;
@@ -261,20 +221,12 @@ void opl2_note_off(uint8_t ch) {
 
 void opl2_all_notes_off(void) {
     for (uint8_t c = 0; c < OPL2_CHANNELS; c++) {
-        // Fastest possible release before clearing key-on
         opl_write(0x80 + s_op[c][0], 0xFF);
         opl_write(0x80 + s_op[c][1], 0xFF);
         opl_write(0xB0 + c, 0x00);
         s_b0[c] = 0x00;
     }
 }
-
-// We need to fix note_on to use the shadow too:
-// (patch up note_on_ex to write through shadow)
-
-// GM patch table — all 128 programs
-// Format: mod_avekm, mod_ksl_tl, mod_ar_dr, mod_sl_rr, mod_wave,
-//         car_avekm, car_ksl_tl, car_ar_dr, car_sl_rr, car_wave, fb_conn
 
 const opl2_instrument_t opl2_gm_patches[128] = {
     {0x01, 0x8F, 0xF2, 0x44, 0x00, 0x01, 0x06, 0xF2, 0x54, 0x00,
@@ -535,14 +487,10 @@ const opl2_instrument_t opl2_gm_patches[128] = {
      0x08} // 127 Gunshot
 };
 
-// ===========================================================================
 // MIDI sequencer
-// ===========================================================================
-
 #define MAX_TRACKS 16
 #define MAX_CHANNELS 16
 
-// Per-voice slot: one active note on one OPL channel
 typedef struct {
     int8_t opl_ch;
     uint8_t midi_ch;
@@ -555,16 +503,15 @@ static voice_t s_voices[OPL2_CHANNELS];
 static uint8_t s_age_ctr;
 
 // Per MIDI channel state
-static uint8_t s_prog[MAX_CHANNELS]; // current program (patch)
-static int16_t s_bend[MAX_CHANNELS]; // pitch bend, -8192..+8191 (unused in
-                                     // pitch calc but tracked)
-static uint8_t s_expr[MAX_CHANNELS]; // expression CC11, 0-127
+static uint8_t s_prog[MAX_CHANNELS];
+static int16_t s_bend[MAX_CHANNELS];
+static uint8_t s_expr[MAX_CHANNELS];
 
 typedef struct {
     const uint8_t *pos, *end;
     uint32_t wait;
     bool done;
-    uint8_t rs; // running status
+    uint8_t rs;
 } track_t;
 
 static const uint8_t *s_midi_data;
@@ -615,7 +562,6 @@ static void seq_reset(void) {
     voices_init();
 }
 
-// Find a voice already playing (midi_ch, note) — for note-off matching
 static int voice_find(uint8_t midi_ch, uint8_t note) {
     for (int i = 0; i < OPL2_CHANNELS; i++)
         if (s_voices[i].midi_ch == midi_ch && s_voices[i].note == note)
@@ -623,14 +569,12 @@ static int voice_find(uint8_t midi_ch, uint8_t note) {
     return -1;
 }
 
-// Allocate an OPL channel. Prefers free slots; steals oldest active note.
+// Allocate an OPL channel
 static int voice_alloc(void) {
-    // Prefer a slot with no active note
     for (int i = 0; i < OPL2_CHANNELS; i++)
         if (s_voices[i].midi_ch == 0xFF)
             return i;
 
-    // Steal the oldest voice
     int oldest = 0;
     for (int i = 1; i < OPL2_CHANNELS; i++)
         if ((uint8_t)(s_age_ctr - s_voices[i].age) >
@@ -645,7 +589,6 @@ static int voice_alloc(void) {
 
 static void note_on_voice(uint8_t midi_ch, uint8_t note, uint8_t vel) {
     if (vel == 0) {
-        // velocity-0 note-on acts as note-off
         int v = voice_find(midi_ch, note);
         if (v >= 0) {
             opl2_note_off((uint8_t)v);
@@ -655,7 +598,6 @@ static void note_on_voice(uint8_t midi_ch, uint8_t note, uint8_t vel) {
         return;
     }
 
-    // Re-trigger if already sounding (same ch+note)
     int v = voice_find(midi_ch, note);
     if (v < 0)
         v = voice_alloc();
@@ -667,12 +609,10 @@ static void note_on_voice(uint8_t midi_ch, uint8_t note, uint8_t vel) {
         s_voices[v].prog = prog;
     }
 
-    // Apply expression (CC11) on top of velocity
     uint32_t eff_vel = (uint32_t)vel * s_expr[midi_ch] / 127u;
     if (eff_vel > 127)
         eff_vel = 127;
 
-    // Write B0 key-off first for clean retrigger, then set pitch and key-on
     opl_write(0xB0 + v, 0x00);
 
     uint8_t c = s_op[v][1];
@@ -708,7 +648,7 @@ static void note_on_voice(uint8_t midi_ch, uint8_t note, uint8_t vel) {
         block_bent = 7;
     if (block_bent < 0)
         block_bent = 0;
-    // Clamp fnum to 0..0x3FF
+
     if (fnum_bent > 0x3FF)
         fnum_bent = 0x3FF;
     if (fnum_bent < 0x00)
@@ -736,7 +676,7 @@ static void note_off_voice(uint8_t midi_ch, uint8_t note) {
 
 static void dispatch(uint8_t ch, uint8_t type, uint8_t b1, uint8_t b2) {
     if (ch == 9 && type != 0xC && type != 0xB)
-        return; // skip GM percussion — no melodic OPL2 mapping
+        return;
 
     switch (type) {
     case 0x8:
@@ -745,14 +685,14 @@ static void dispatch(uint8_t ch, uint8_t type, uint8_t b1, uint8_t b2) {
     case 0x9:
         note_on_voice(ch, b1, b2);
         break;
-    case 0xA: // aftertouch — ignore
+    case 0xA:
         break;
-    case 0xB:        // control change
-        if (b1 == 7) // channel volume
+    case 0xB:
+        if (b1 == 7)
             s_expr[ch] = b2;
-        else if (b1 == 11) // expression
+        else if (b1 == 11)
             s_expr[ch] = b2;
-        else if (b1 == 120 || b1 == 123) { // all sound/notes off
+        else if (b1 == 120 || b1 == 123) {
             for (int i = 0; i < OPL2_CHANNELS; i++) {
                 if (s_voices[i].midi_ch == ch) {
                     opl2_note_off((uint8_t)i);
@@ -762,10 +702,10 @@ static void dispatch(uint8_t ch, uint8_t type, uint8_t b1, uint8_t b2) {
             }
         }
         break;
-    case 0xC: // program change
+    case 0xC:
         s_prog[ch] = b1 & 0x7F;
         break;
-    case 0xE: // pitch bend — store for reference, not applied to running notes
+    case 0xE:
         s_bend[ch] = (int16_t)(((uint16_t)b2 << 7 | b1) - 8192);
         break;
     }
@@ -852,7 +792,7 @@ bool midi_player_load(const uint8_t *data, uint32_t len) {
 
     uint16_t div = rd16(data + 12);
     if (div & 0x8000)
-        return false; // SMPTE timecode not supported
+        return false;
     s_ppq = div ? div : 480;
 
     uint16_t ntracks = rd16(data + 10);
@@ -931,7 +871,6 @@ void midi_player_update(void) {
     if (!s_tempo)
         s_tempo = 500000;
 
-    // Accumulate time in µs (PIT at ~1000 Hz → 1 tick ≈ 1000 µs)
     s_tacc += el * 1000u * s_ppq;
     uint32_t pulses = s_tacc / s_tempo;
     if (pulses > (uint32_t)s_ppq * 2)
@@ -941,7 +880,6 @@ void midi_player_update(void) {
     if (!pulses)
         return;
 
-    // Check if all tracks are done
     bool all_done = true;
     for (int i = 0; i < s_track_count; i++)
         if (!s_tracks[i].done) {
