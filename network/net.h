@@ -22,7 +22,7 @@
 #define NET_TCP_BUFSIZE 4096
 
 #define RX_QUEUE_SIZE 8
-#define RX_PKT_MAX    1518
+#define RX_PKT_MAX 1518
 
 typedef struct {
     uint8_t data[RX_PKT_MAX];
@@ -111,14 +111,14 @@ typedef struct {
     uint8_t remote_ip[4];
     uint8_t remote_mac[6];
 
-    uint8_t rx_buf[NET_UDP_BUFSIZE];
+    uint8_t *rx_buf; /* allocated on udp_open/tcp_connect */
     uint16_t rx_len;
     bool rx_ready;
 
     tcp_state_t tcp_state;
     uint32_t tx_seq;
     uint32_t rx_seq;
-    uint8_t tcp_rx[NET_TCP_BUFSIZE];
+    uint8_t *tcp_rx; /* allocated on tcp_connect */
     uint16_t tcp_rx_head;
     uint16_t tcp_rx_tail;
 } net_socket_t;
@@ -162,6 +162,5 @@ uint16_t net_htons(uint16_t v);
 uint32_t net_htonl(uint32_t v);
 #define net_ntohs(v) net_htons(v)
 #define net_ntohl(v) net_htonl(v)
-
 
 #endif

@@ -7,7 +7,7 @@ extern int g_screen_width;
 extern int g_screen_height;
 extern int g_backbuf_size;
 extern int g_video_mode;
-#define SCREEN_WIDTH  g_screen_width
+#define SCREEN_WIDTH g_screen_width
 #define SCREEN_HEIGHT g_screen_height
 #define COLOR_BITS 8
 #define RESMODE g_video_mode
@@ -19,8 +19,8 @@ extern int g_video_mode;
 
 #define BACKBUF ((uint8_t *)0x100000)
 #define BACKBUF_SIZE g_backbuf_size
-#define HEAP_MIN_START (0x100000 + BACKBUF_SIZE)
-#define HEAP_END_MAX 0x7F0000
+#define HEAP_MIN_START (0x100000)
+#define HEAP_END_MAX 0x4000000
 
 #define BLACK 0
 #define BLUE 1

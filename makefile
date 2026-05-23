@@ -162,7 +162,7 @@ qemu-fdd: all
 qemu: all
 	qemu-system-i386 \
 	    -drive format=raw,file=os_image.bin \
-	    -m 4M -machine pc \
+	    -m 2M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
 	    -device sb16,audiodev=snd0 \
@@ -177,6 +177,12 @@ bochs: all
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f *.bin boot_stage2.bin os_image.bin serial.log
+	rm -f *.bin boot_stage2.bin os_image.bin *.log *.map
 	rm -f qemulog.txt
 	rm -f floppy.img
+
+kernelmap: $(OBJ)
+	$(LD) $(LDFLAGS) -Map=kernel.map -o $@ $^
+
+bloat: $(OBJ)
+	i686-elf-nm --print-size --size-sort --radix=d $(OBJ) | awk '$$3 ~ /[bBcC]/' | sort -k2 -n -r | head -30

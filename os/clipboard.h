@@ -30,28 +30,35 @@ typedef struct {
 
 typedef clipboard_t clip_entry_t;
 
-extern clipboard_t g_clipboard;
-extern clip_entry_t g_clip_history[CLIP_HISTORY_MAX];
+/* Both heap-allocated by clipboard_init() at boot. */
+extern clipboard_t *g_clipboard_ptr;
+extern clip_entry_t *g_clip_history;
 extern int g_clip_history_count;
 extern int g_clip_history_current;
 
+/* Convenience macro so existing code using g_clipboard.field still compiles. */
+#define g_clipboard (*g_clipboard_ptr)
+
+void clipboard_init(void);
 void clipboard_clear(void);
 void clipboard_set_text(const char *text, int len);
 void clipboard_set_file(const char *src_path, const char *name, bool is_dir,
                         bool is_cut, uint8_t src_drive);
 
 void clipboard_push_text(const char *text, int len);
-int  clipboard_history_count(void);
+int clipboard_history_count(void);
 const char *clipboard_history_get_text(int index);
 
 static inline bool clipboard_has_text(void) {
-    return g_clipboard.type == CLIP_TEXT && g_clipboard.text_len > 0;
+    return g_clipboard_ptr && g_clipboard_ptr->type == CLIP_TEXT &&
+           g_clipboard_ptr->text_len > 0;
 }
 static inline bool clipboard_has_file(void) {
-    return g_clipboard.type == CLIP_FILE && g_clipboard.name[0] != '\0';
+    return g_clipboard_ptr && g_clipboard_ptr->type == CLIP_FILE &&
+           g_clipboard_ptr->name[0] != '\0';
 }
 static inline bool clipboard_empty(void) {
-    return g_clipboard.type == CLIP_EMPTY;
+    return !g_clipboard_ptr || g_clipboard_ptr->type == CLIP_EMPTY;
 }
 
 #endif

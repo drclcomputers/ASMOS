@@ -78,6 +78,20 @@ static void cv_on_frame(void *state) {
     cv_draw(s->win, s);
 }
 
+static bool cv_close(window *w) {
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *a = &running_apps[i];
+        if (!a->running || a->desc != &clipview_app)
+            continue;
+        cv_state_t *s = (cv_state_t *)a->state;
+        if (s->win != w)
+            continue;
+        os_quit_app(a);
+        return true;
+    }
+    return true;
+}
+
 static void cv_init(void *state) {
     cv_state_t *s = (cv_state_t *)state;
     const window_spec_t spec = {
@@ -88,12 +102,12 @@ static void cv_init(void *state) {
         .min_w = 80,
         .min_h = 60,
         .resizable = true,
-        .title = "Clipboard",
+        .title = "ClipView",
         .title_color = WHITE,
         .bar_color = DARK_GRAY,
         .content_color = WHITE,
         .visible = true,
-        .on_close = NULL,
+        .on_close = cv_close,
     };
     s->win = wm_register(&spec);
     if (!s->win)

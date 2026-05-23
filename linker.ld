@@ -1,4 +1,3 @@
-/* linker.ld */
 ENTRY(_start)
 SECTIONS {
     . = 0x10000;
@@ -9,13 +8,8 @@ SECTIONS {
         *(.text)
     }
 
-    .data : {
-        *(.data)
-    }
-
-    .rodata : {
-        *(.rodata)
-    }
+    .data   : { *(.data)   }
+    .rodata : { *(.rodata) }
 
     .bss : {
         _bss_start = .;
@@ -24,15 +18,18 @@ SECTIONS {
         _bss_end = .;
     }
 
-    _heap_start = ALIGN(4);
+    _heap_start = ALIGN(16);
 
-    /* ── Kernel stack now lives at the top of low memory ── */
-    .kstack 0x3F0000 (NOLOAD) : {
+    /*
+     * Stack placed just below VGA. Kernel BSS can now grow to 0x88000
+     * (~480KB from load address) before hitting the stack.
+     * _kstack_top = 0x98000, leaving 32KB gap before VGA at 0xA0000.
+     */
+    .kstack 0x88000 (NOLOAD) : {
         _kstack_bottom = .;
-        . += 0x8000;
-        _kstack_top = .;
+        . += 0x10000;       /* 64KB */
+        _kstack_top = .;    /* = 0x98000 */
     }
 
-    /* Only a safety check, but we have plenty of room now */
-    ASSERT(_bss_end < 0x3F0000, "ERROR: Kernel BSS too large – reduce code")
+    ASSERT(_kstack_top <= 0xA0000, "Stack overflows into VGA!")
 }

@@ -11,6 +11,7 @@ void term_buf_push_text(const char *text);
 int term_buf_count(void);
 const char *term_buf_get(int i);
 void term_buf_clear(void);
+void term_buf_free(void); /* release heap buffer (e.g. if shell exits) */
 int term_buf_read_all(char *dst, int max);
 int term_buf_read_new(char *dst, int max, int *cursor);
 bool term_buf_save(const char *path);

@@ -10,22 +10,11 @@
 #define ASM_MAX_LINE 256
 #define ASM_MAX_TOKENS 32
 
-static uint8_t a_out[ASM_OUT_MAX];
-static int a_out_len;
-static uint32_t a_org;
-static int a_bits;
-static int a_pass;
-static int a_line_no;
-static char a_err[128];
-static bool a_had_error;
-
 typedef struct {
     char name[64];
     uint32_t addr;
     bool defined;
 } a_label_t;
-static a_label_t a_labels[ASM_MAX_LABELS];
-static int a_label_count;
 
 typedef enum { FIX_REL8, FIX_REL32, FIX_ABS32 } fix_t;
 typedef struct {
@@ -34,11 +23,45 @@ typedef struct {
     uint32_t base;
     char label[64];
 } a_fixup_t;
-static a_fixup_t a_fixups[ASM_MAX_FIXUPS];
-static int a_fixup_count;
 
-static char a_tokens[ASM_MAX_TOKENS][ASM_MAX_LINE];
-static int a_tok_count;
+/* All mutable assembler state lives here; allocated on the heap per
+   assembly run so nothing lands in BSS. */
+typedef struct {
+    uint8_t *out;      /* [ASM_OUT_MAX]                     */
+    a_label_t *labels; /* [ASM_MAX_LABELS]                  */
+    a_fixup_t *fixups; /* [ASM_MAX_FIXUPS]                  */
+    char *tokens_flat; /* [ASM_MAX_TOKENS * ASM_MAX_LINE]   */
+    int out_len;
+    uint32_t org;
+    int bits;
+    int pass;
+    int line_no;
+    char err[128];
+    bool had_error;
+    int label_count;
+    int fixup_count;
+    int tok_count;
+} asm_ctx_t;
+
+/* Single active context pointer; set at the top of do_assemble_src. */
+static asm_ctx_t *A;
+
+/* Convenience accessors that keep the rest of the code readable. */
+#define a_out (A->out)
+#define a_out_len (A->out_len)
+#define a_org (A->org)
+#define a_bits (A->bits)
+#define a_pass (A->pass)
+#define a_line_no (A->line_no)
+#define a_err (A->err)
+#define a_had_error (A->had_error)
+#define a_labels (A->labels)
+#define a_label_count (A->label_count)
+#define a_fixups (A->fixups)
+#define a_fixup_count (A->fixup_count)
+#define a_tok_count (A->tok_count)
+/* a_tokens_ptr(i) is a char* into the flat token buffer */
+#define a_tokens_ptr(i) (A->tokens_flat + (i) * ASM_MAX_LINE)
 
 static void a_emit_b(uint8_t b) {
     if (a_out_len < ASM_OUT_MAX)
@@ -159,7 +182,7 @@ static void a_tokenise(char *line) {
             return;
         }
 
-        char *dst = a_tokens[a_tok_count];
+        char *dst = a_tokens_ptr(a_tok_count);
         int di = 0;
 
         if (*p == '"' || *p == '\'') {
@@ -205,7 +228,7 @@ static void a_tokenise(char *line) {
                         p++;
                     if (!*p || *p == ']')
                         break;
-                    char *idst = a_tokens[a_tok_count];
+                    char *idst = a_tokens_ptr(a_tok_count);
                     int idi = 0;
                     while (*p && *p != ' ' && *p != '\t' && *p != ']' &&
                            idi < ASM_MAX_LINE - 1)
@@ -941,7 +964,7 @@ static void a_line(void) {
     if (a_tok_count == 0)
         return;
     char mn[ASM_MAX_LINE];
-    strncpy(mn, a_tokens[0], ASM_MAX_LINE - 1);
+    strncpy(mn, a_tokens_ptr(0), ASM_MAX_LINE - 1);
     mn[ASM_MAX_LINE - 1] = '\0';
 
     int mlen = (int)strlen(mn);
@@ -949,28 +972,28 @@ static void a_line(void) {
         mn[mlen - 1] = '\0';
         a_label_def(mn, a_cur());
         for (int i = 0; i < a_tok_count - 1; i++)
-            strcpy(a_tokens[i], a_tokens[i + 1]);
+            strcpy(a_tokens_ptr(i), a_tokens_ptr(i + 1));
         a_tok_count--;
         if (!a_tok_count)
             return;
-        strncpy(mn, a_tokens[0], ASM_MAX_LINE - 1);
+        strncpy(mn, a_tokens_ptr(0), ASM_MAX_LINE - 1);
         mlen = (int)strlen(mn);
     }
 
     for (int i = 0; mn[i]; i++)
         mn[i] = tolower(mn[i]);
 
-    if (a_tok_count >= 3 && strcasecmp(a_tokens[1], "equ") == 0) {
+    if (a_tok_count >= 3 && strcasecmp(a_tokens_ptr(1), "equ") == 0) {
         uint32_t v;
         bool fwd;
         char fl[64];
-        a_eval(a_tokens[2], &v, &fwd, fl);
+        a_eval(a_tokens_ptr(2), &v, &fwd, fl);
         a_label_def(mn, v);
         return;
     }
     if (strcmp(mn, "bits") == 0) {
         if (a_tok_count >= 2)
-            a_bits = str_to_int(a_tokens[1]);
+            a_bits = str_to_int(a_tokens_ptr(1));
         return;
     }
     if (strcmp(mn, "org") == 0) {
@@ -978,7 +1001,7 @@ static void a_line(void) {
             uint32_t v;
             bool fwd;
             char fl[64];
-            a_eval(a_tokens[1], &v, &fwd, fl);
+            a_eval(a_tokens_ptr(1), &v, &fwd, fl);
             a_org = v;
         }
         return;
@@ -986,7 +1009,7 @@ static void a_line(void) {
 
     if (strcmp(mn, "db") == 0) {
         for (int i = 1; i < a_tok_count; i++) {
-            char *t = a_tokens[i];
+            char *t = a_tokens_ptr(i);
             if (t[0] == '"' || t[0] == '\'') {
                 int len = (int)strlen(t);
                 for (int j = 1; j < len - 1; j++) {
@@ -1008,7 +1031,7 @@ static void a_line(void) {
             uint32_t v;
             bool fwd;
             char fl[64];
-            a_eval(a_tokens[i], &v, &fwd, fl);
+            a_eval(a_tokens_ptr(i), &v, &fwd, fl);
             if (fwd && fl[0]) {
                 a_fixup_add(FIX_ABS32, a_out_len, a_cur() + 2, fl);
                 a_emit_w(0);
@@ -1022,7 +1045,7 @@ static void a_line(void) {
             uint32_t v;
             bool fwd;
             char fl[64];
-            a_eval(a_tokens[i], &v, &fwd, fl);
+            a_eval(a_tokens_ptr(i), &v, &fwd, fl);
             if (fwd && fl[0]) {
                 a_fixup_add(FIX_ABS32, a_out_len, a_cur() + 4, fl);
                 a_emit_d(0);
@@ -1036,21 +1059,21 @@ static void a_line(void) {
         uint32_t cnt;
         bool fwd;
         char fl[64];
-        a_eval(a_tokens[1], &cnt, &fwd, fl);
+        a_eval(a_tokens_ptr(1), &cnt, &fwd, fl);
         char sub[ASM_MAX_LINE] = "";
         for (int i = 2; i < a_tok_count; i++) {
             if (i > 2)
                 strcat(sub, " ");
-            strcat(sub, a_tokens[i]);
+            strcat(sub, a_tokens_ptr(i));
         }
-        char save[ASM_MAX_TOKENS][ASM_MAX_LINE];
+        char save[ASM_MAX_TOKENS * ASM_MAX_LINE];
         int sc2 = a_tok_count;
-        memcpy(save, a_tokens, sizeof(a_tokens));
+        memcpy(save, A->tokens_flat, ASM_MAX_TOKENS * ASM_MAX_LINE);
         for (uint32_t k = 0; k < cnt; k++) {
             a_tokenise(sub);
             a_line();
         }
-        memcpy(a_tokens, save, sizeof(a_tokens));
+        memcpy(A->tokens_flat, save, ASM_MAX_TOKENS * ASM_MAX_LINE);
         a_tok_count = sc2;
         return;
     }
@@ -1090,9 +1113,9 @@ static void a_line(void) {
     if (strcmp(mn, "rep") == 0 && a_tok_count >= 2) {
         a_emit_b(0xF3);
         for (int i = 0; i < a_tok_count - 1; i++)
-            strcpy(a_tokens[i], a_tokens[i + 1]);
+            strcpy(a_tokens_ptr(i), a_tokens_ptr(i + 1));
         a_tok_count--;
-        strncpy(mn, a_tokens[0], ASM_MAX_LINE - 1);
+        strncpy(mn, a_tokens_ptr(0), ASM_MAX_LINE - 1);
         for (int i = 0; mn[i]; i++)
             mn[i] = tolower(mn[i]);
         a_line();
@@ -1111,7 +1134,7 @@ static void a_line(void) {
         uint32_t v;
         bool fwd;
         char fl[64];
-        a_eval(a_tokens[1], &v, &fwd, fl);
+        a_eval(a_tokens_ptr(1), &v, &fwd, fl);
         if (v == 3)
             a_emit_b(0xCC);
         else {
@@ -1124,7 +1147,7 @@ static void a_line(void) {
         uint32_t v;
         bool fwd;
         char fl[64];
-        a_eval(a_tokens[1], &v, &fwd, fl);
+        a_eval(a_tokens_ptr(1), &v, &fwd, fl);
         a_emit_b(0xC2);
         a_emit_w((uint16_t)v);
         return;
@@ -1133,8 +1156,8 @@ static void a_line(void) {
         uint32_t sz, lv;
         bool f1, f2;
         char l1[64], l2[64];
-        a_eval(a_tokens[1], &sz, &f1, l1);
-        a_eval(a_tokens[2], &lv, &f2, l2);
+        a_eval(a_tokens_ptr(1), &sz, &f1, l1);
+        a_eval(a_tokens_ptr(2), &lv, &f2, l2);
         a_emit_b(0xC8);
         a_emit_w((uint16_t)sz);
         a_emit_b((uint8_t)lv);
@@ -1145,7 +1168,7 @@ static void a_line(void) {
         uint32_t addr;
         bool fwd;
         char fl[64];
-        a_eval(a_tokens[1], &addr, &fwd, fl);
+        a_eval(a_tokens_ptr(1), &addr, &fwd, fl);
         if (fwd || a_pass == 0) {
             a_emit_b(0xE9);
             int fo = a_out_len;
@@ -1176,7 +1199,7 @@ static void a_line(void) {
 
     if (strcmp(mn, "call") == 0 && a_tok_count >= 2) {
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         if (op.type == OP_IMM) {
             a_emit_b(0xE8);
             int fo = a_out_len;
@@ -1200,7 +1223,7 @@ static void a_line(void) {
         return;
     }
 
-    if (a_tok_count >= 2 && a_do_jcc(mn, a_tokens[1]))
+    if (a_tok_count >= 2 && a_do_jcc(mn, a_tokens_ptr(1)))
         return;
 
     if ((strcmp(mn, "loop") == 0 || strcmp(mn, "loopz") == 0 ||
@@ -1212,7 +1235,7 @@ static void a_line(void) {
         uint32_t addr;
         bool fwd;
         char fl[64];
-        a_eval(a_tokens[1], &addr, &fwd, fl);
+        a_eval(a_tokens_ptr(1), &addr, &fwd, fl);
         a_emit_b(opc);
         int fo = a_out_len;
         a_emit_b(0);
@@ -1229,15 +1252,15 @@ static void a_line(void) {
 
     if (strcmp(mn, "mov") == 0 && a_tok_count >= 3) {
         op_t d, s2;
-        a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s2);
+        a_parse_op(a_tokens_ptr(1), &d);
+        a_parse_op(a_tokens_ptr(2), &s2);
         a_mov(&d, &s2);
         return;
     }
     if (strcmp(mn, "lea") == 0 && a_tok_count >= 3) {
         op_t d, s2;
-        a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s2);
+        a_parse_op(a_tokens_ptr(1), &d);
+        a_parse_op(a_tokens_ptr(2), &s2);
         if (d.type == OP_REG && s2.type == OP_MEM) {
             if (d.size == 16)
                 a_emit_b(0x66);
@@ -1248,8 +1271,8 @@ static void a_line(void) {
     }
     if (strcmp(mn, "xchg") == 0 && a_tok_count >= 3) {
         op_t a2, b2;
-        a_parse_op(a_tokens[1], &a2);
-        a_parse_op(a_tokens[2], &b2);
+        a_parse_op(a_tokens_ptr(1), &a2);
+        a_parse_op(a_tokens_ptr(2), &b2);
         if (a2.type == OP_REG && b2.type == OP_REG) {
             if (a2.reg == R_EAX) {
                 a_emit_b(0x90 | re(b2.reg));
@@ -1275,8 +1298,8 @@ static void a_line(void) {
     for (int i = 0; alu[i].mn; i++) {
         if (strcmp(mn, alu[i].mn) == 0 && a_tok_count >= 3) {
             op_t d, s2;
-            a_parse_op(a_tokens[1], &d);
-            a_parse_op(a_tokens[2], &s2);
+            a_parse_op(a_tokens_ptr(1), &d);
+            a_parse_op(a_tokens_ptr(2), &s2);
             a_alu(alu[i].grp, &d, &s2);
             return;
         }
@@ -1284,8 +1307,8 @@ static void a_line(void) {
 
     if (strcmp(mn, "test") == 0 && a_tok_count >= 3) {
         op_t d, s2;
-        a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s2);
+        a_parse_op(a_tokens_ptr(1), &d);
+        a_parse_op(a_tokens_ptr(2), &s2);
         if (d.type == OP_REG && s2.type == OP_IMM) {
             if (d.reg == R_AL) {
                 a_emit_b(0xA8);
@@ -1314,7 +1337,7 @@ static void a_line(void) {
         a_tok_count >= 2) {
         int grp = strcmp(mn, "dec") == 0 ? 1 : 0;
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         if (op.type == OP_REG && r32(op.reg))
             a_emit_b(0x40 | (grp << 3) | re(op.reg));
         else
@@ -1325,30 +1348,30 @@ static void a_line(void) {
         a_tok_count >= 2) {
         int grp = strcmp(mn, "not") == 0 ? 2 : 3;
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         a_rm(op.size == 8 ? 0xF6 : 0xF7, &op, grp);
         return;
     }
     if (strcmp(mn, "mul") == 0 && a_tok_count >= 2) {
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         a_rm(op.size == 8 ? 0xF6 : 0xF7, &op, 4);
         return;
     }
     if (strcmp(mn, "div") == 0 && a_tok_count >= 2) {
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         a_rm(op.size == 8 ? 0xF6 : 0xF7, &op, 6);
         return;
     }
     if (strcmp(mn, "imul") == 0 && a_tok_count >= 2) {
         op_t op1;
-        a_parse_op(a_tokens[1], &op1);
+        a_parse_op(a_tokens_ptr(1), &op1);
         if (a_tok_count == 2) {
             a_rm(op1.size == 8 ? 0xF6 : 0xF7, &op1, 5);
         } else {
             op_t op2;
-            a_parse_op(a_tokens[2], &op2);
+            a_parse_op(a_tokens_ptr(2), &op2);
             a_emit_b(0x0F);
             a_rm(0xAF, &op2, re(op1.reg));
         }
@@ -1356,14 +1379,14 @@ static void a_line(void) {
     }
     if (strcmp(mn, "idiv") == 0 && a_tok_count >= 2) {
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         a_rm(op.size == 8 ? 0xF6 : 0xF7, &op, 7);
         return;
     }
 
     if (strcmp(mn, "push") == 0 && a_tok_count >= 2) {
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         if (op.type == OP_REG) {
             if (op.size == 16)
                 a_emit_b(0x66);
@@ -1388,7 +1411,7 @@ static void a_line(void) {
     }
     if (strcmp(mn, "pop") == 0 && a_tok_count >= 2) {
         op_t op;
-        a_parse_op(a_tokens[1], &op);
+        a_parse_op(a_tokens_ptr(1), &op);
         if (op.type == OP_REG) {
             if (op.size == 16)
                 a_emit_b(0x66);
@@ -1407,8 +1430,8 @@ static void a_line(void) {
     for (int i = 0; shifts[i].mn; i++) {
         if (strcmp(mn, shifts[i].mn) == 0 && a_tok_count >= 3) {
             op_t d, c;
-            a_parse_op(a_tokens[1], &d);
-            a_parse_op(a_tokens[2], &c);
+            a_parse_op(a_tokens_ptr(1), &d);
+            a_parse_op(a_tokens_ptr(2), &c);
             a_shift(shifts[i].grp, &d, &c);
             return;
         }
@@ -1416,8 +1439,8 @@ static void a_line(void) {
 
     if (strcmp(mn, "in") == 0 && a_tok_count >= 3) {
         op_t d, s2;
-        a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s2);
+        a_parse_op(a_tokens_ptr(1), &d);
+        a_parse_op(a_tokens_ptr(2), &s2);
         if (s2.type == OP_REG && s2.reg == R_DX)
             a_emit_b(d.size == 8 ? 0xEC : 0xED);
         else {
@@ -1428,8 +1451,8 @@ static void a_line(void) {
     }
     if (strcmp(mn, "out") == 0 && a_tok_count >= 3) {
         op_t d, s2;
-        a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s2);
+        a_parse_op(a_tokens_ptr(1), &d);
+        a_parse_op(a_tokens_ptr(2), &s2);
         if (d.type == OP_REG && d.reg == R_DX)
             a_emit_b(s2.size == 8 ? 0xEE : 0xEF);
         else {
@@ -1441,8 +1464,8 @@ static void a_line(void) {
     if ((strcmp(mn, "movzx") == 0 || strcmp(mn, "movsx") == 0) &&
         a_tok_count >= 3) {
         op_t d, s2;
-        a_parse_op(a_tokens[1], &d);
-        a_parse_op(a_tokens[2], &s2);
+        a_parse_op(a_tokens_ptr(1), &d);
+        a_parse_op(a_tokens_ptr(2), &s2);
         uint8_t ext = strcmp(mn, "movsx") == 0 ? 0xBE : 0xB6;
         a_emit_b(0x0F);
         a_rm(ext | (s2.size == 16 ? 1 : 0), &s2, re(d.reg));
@@ -1461,7 +1484,7 @@ static void a_line(void) {
     for (int i = 0; setcc[i].mn; i++) {
         if (strcmp(mn, setcc[i].mn) == 0 && a_tok_count >= 2) {
             op_t op;
-            a_parse_op(a_tokens[1], &op);
+            a_parse_op(a_tokens_ptr(1), &op);
             a_emit_b(0x0F);
             a_rm(setcc[i].opc, &op, 0);
             return;
@@ -1476,6 +1499,30 @@ static void a_line(void) {
 static bool do_assemble_src(const char *src_text, uint8_t *out_buf,
                             int *out_len, int buf_max, char *err_msg,
                             int err_max) {
+    /* Allocate assembler context on the heap so nothing lands in BSS. */
+    asm_ctx_t *ctx = (asm_ctx_t *)kzalloc(sizeof(asm_ctx_t));
+    if (!ctx) {
+        strncpy(err_msg, "out of memory (ctx)", err_max - 1);
+        err_msg[err_max - 1] = '\0';
+        return false;
+    }
+    ctx->out = (uint8_t *)kzalloc(ASM_OUT_MAX);
+    ctx->labels = (a_label_t *)kzalloc(ASM_MAX_LABELS * sizeof(a_label_t));
+    ctx->fixups = (a_fixup_t *)kzalloc(ASM_MAX_FIXUPS * sizeof(a_fixup_t));
+    ctx->tokens_flat = (char *)kzalloc(ASM_MAX_TOKENS * ASM_MAX_LINE);
+    if (!ctx->out || !ctx->labels || !ctx->fixups || !ctx->tokens_flat) {
+        kfree(ctx->out);
+        kfree(ctx->labels);
+        kfree(ctx->fixups);
+        kfree(ctx->tokens_flat);
+        kfree(ctx);
+        strncpy(err_msg, "out of memory (bufs)", err_max - 1);
+        err_msg[err_max - 1] = '\0';
+        return false;
+    }
+
+    A = ctx;
+
     a_out_len = 0;
     a_org = 0;
     a_bits = 32;
@@ -1483,9 +1530,6 @@ static bool do_assemble_src(const char *src_text, uint8_t *out_buf,
     a_err[0] = '\0';
     a_label_count = 0;
     a_fixup_count = 0;
-    memset(a_labels, 0, sizeof(a_labels));
-    memset(a_fixups, 0, sizeof(a_fixups));
-    memset(a_out, 0, sizeof(a_out));
 
     for (a_pass = 0; a_pass < 2 && !a_had_error; a_pass++) {
         a_out_len = 0;
@@ -1510,18 +1554,27 @@ static bool do_assemble_src(const char *src_text, uint8_t *out_buf,
             a_fixup_apply();
     }
 
+    bool ok = true;
     if (a_had_error) {
         strncpy(err_msg, a_err, err_max - 1);
         err_msg[err_max - 1] = '\0';
-        return false;
-    }
-    if (a_out_len > buf_max) {
+        ok = false;
+    } else if (a_out_len > buf_max) {
         strncpy(err_msg, "output too large", err_max - 1);
-        return false;
+        err_msg[err_max - 1] = '\0';
+        ok = false;
+    } else {
+        memcpy(out_buf, a_out, a_out_len);
+        *out_len = a_out_len;
     }
-    memcpy(out_buf, a_out, a_out_len);
-    *out_len = a_out_len;
-    return true;
+
+    kfree(ctx->out);
+    kfree(ctx->labels);
+    kfree(ctx->fixups);
+    kfree(ctx->tokens_flat);
+    kfree(ctx);
+    A = NULL;
+    return ok;
 }
 
 bool asm_assemble_file(const char *src_path, uint8_t *out_buf, int *out_len,

@@ -766,6 +766,8 @@ void desktop_init(void) {
     menu_add_item(action_menu, "Shut Down", menu_shutdown);
 
     desktop_fs_init();
+
+    clipboard_init();
 }
 
 /* ── per-frame ──────────────────────────────────────────────────────────── */

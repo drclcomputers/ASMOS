@@ -15,8 +15,9 @@
 #define PALETTE_H 10
 #define PALETTE_COLS 16
 
-#define CANVAS_MAX_W 320
-#define CANVAS_MAX_H 200
+/* Canvas dimensions are determined at runtime from the screen resolution. */
+extern int g_screen_width;
+extern int g_screen_height;
 
 #define TOOL_PENCIL 0
 #define TOOL_ERASER 1
@@ -36,7 +37,7 @@ static const uint8_t PALETTE_COLORS[PALETTE_COLS] = {
 typedef struct {
     window *win;
 
-    uint8_t canvas[CANVAS_MAX_H][CANVAS_MAX_W];
+    uint8_t *canvas; /* heap-allocated: canvas_w * canvas_h bytes */
     int canvas_w;
     int canvas_h;
 
@@ -102,7 +103,7 @@ static void canvas_paint(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
         hi_y = s->canvas_h - 1;
     for (int y = lo_y; y <= hi_y; y++)
         for (int x = lo_x; x <= hi_x; x++)
-            s->canvas[y][x] = color;
+            s->canvas[(y)*s->canvas_w + (x)] = color;
 }
 
 static void canvas_line(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
@@ -133,44 +134,49 @@ static void canvas_line(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
 }
 
 static void canvas_fill(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
-    uint8_t target = s->canvas[cy][cx];
+    uint8_t target = s->canvas[(cy)*s->canvas_w + (cx)];
     if (target == color)
         return;
 
     typedef struct {
         int16_t x, y;
     } pt_t;
-    static pt_t stack[CANVAS_MAX_W * CANVAS_MAX_H / 2];
+    int max_pts = s->canvas_w * s->canvas_h / 2;
+    pt_t *stk = (pt_t *)kmalloc(max_pts * sizeof(pt_t));
+    if (!stk)
+        return;
     int top = 0;
 
-    stack[top].x = (int16_t)cx;
-    stack[top].y = (int16_t)cy;
+    stk[top].x = (int16_t)cx;
+    stk[top].y = (int16_t)cy;
     top++;
 
     while (top > 0) {
         top--;
-        int x = stack[top].x;
-        int y = stack[top].y;
+        int x = stk[top].x;
+        int y = stk[top].y;
         if (x < 0 || y < 0 || x >= s->canvas_w || y >= s->canvas_h)
             continue;
-        if (s->canvas[y][x] != target)
+        if (s->canvas[(y)*s->canvas_w + (x)] != target)
             continue;
-        s->canvas[y][x] = color;
-        if (top + 4 <= (int)(sizeof(stack) / sizeof(stack[0])) - 1) {
-            stack[top].x = (int16_t)(x + 1);
-            stack[top].y = (int16_t)y;
+        s->canvas[(y)*s->canvas_w + (x)] = color;
+        if (top + 4 <= max_pts - 1) {
+            stk[top].x = (int16_t)(x + 1);
+            stk[top].y = (int16_t)y;
             top++;
-            stack[top].x = (int16_t)(x - 1);
-            stack[top].y = (int16_t)y;
+            stk[top].x = (int16_t)(x - 1);
+            stk[top].y = (int16_t)y;
             top++;
-            stack[top].x = (int16_t)x;
-            stack[top].y = (int16_t)(y + 1);
+            stk[top].x = (int16_t)x;
+            stk[top].y = (int16_t)(y + 1);
             top++;
-            stack[top].x = (int16_t)x;
-            stack[top].y = (int16_t)(y - 1);
+            stk[top].x = (int16_t)x;
+            stk[top].y = (int16_t)(y - 1);
             top++;
         }
     }
+
+    kfree(stk);
 }
 
 static void canvas_rect(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
@@ -200,14 +206,35 @@ static void update_canvas_size(asmdraw_state_t *s) {
     int wh = s->win->h - 16;
     int cw = ww - CANVAS_X_OFF - 1;
     int ch = wh - PALETTE_H - 1;
-    if (cw > CANVAS_MAX_W)
-        cw = CANVAS_MAX_W;
-    if (ch > CANVAS_MAX_H)
-        ch = CANVAS_MAX_H;
+    if (cw > g_screen_width)
+        cw = g_screen_width;
+    if (ch > g_screen_height)
+        ch = g_screen_height;
     if (cw < 1)
         cw = 1;
     if (ch < 1)
         ch = 1;
+
+    if (cw == s->canvas_w && ch == s->canvas_h)
+        return; /* nothing changed */
+
+    uint8_t *newbuf = (uint8_t *)kmalloc(cw * ch);
+    if (!newbuf)
+        return; /* keep old size rather than corrupt */
+
+    /* Fill new buffer white, then copy existing pixels into the
+       overlap region with correct per-row stride translation. */
+    memset(newbuf, WHITE, (uint32_t)(cw * ch));
+    if (s->canvas) {
+        int copy_w = cw < s->canvas_w ? cw : s->canvas_w;
+        int copy_h = ch < s->canvas_h ? ch : s->canvas_h;
+        for (int y = 0; y < copy_h; y++)
+            memcpy(newbuf + y * cw, s->canvas + y * s->canvas_w,
+                   (uint32_t)copy_w);
+    }
+
+    kfree(s->canvas);
+    s->canvas = newbuf;
     s->canvas_w = cw;
     s->canvas_h = ch;
 }
@@ -256,7 +283,7 @@ static void asmdraw_draw(window *win, void *ud) {
 
     for (int y = 0; y < ch; y++)
         for (int x = 0; x < cw; x++)
-            draw_dot(cax + x, cay + y, s->canvas[y][x]);
+            draw_dot(cax + x, cay + y, s->canvas[(y)*s->canvas_w + (x)]);
 
     draw_rect(cax - 1, cay - 1, cw + 2, ch + 2, DARK_GRAY);
 
@@ -356,7 +383,7 @@ static void asmdraw_save(asmdraw_state_t *s, const char *path) {
     fs_write(&f, hdr, 4);
 
     for (int y = 0; y < s->canvas_h; y++)
-        fs_write(&f, s->canvas[y], s->canvas_w);
+        fs_write(&f, s->canvas + y * s->canvas_w, s->canvas_w);
 
     fs_close(&f);
     draw_set_status(s, "Saved.");
@@ -377,23 +404,21 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
     }
     int fw = hdr[0] | (hdr[1] << 8);
     int fh = hdr[2] | (hdr[3] << 8);
-    if (fw < 1 || fw > CANVAS_MAX_W || fh < 1 || fh > CANVAS_MAX_H) {
+    if (fw < 1 || fw > g_screen_width || fh < 1 || fh > g_screen_height) {
         fs_close(&f);
         draw_set_status(s, "Unsupported size.");
         return;
     }
 
-    for (int y = 0; y < CANVAS_MAX_H; y++)
-        for (int x = 0; x < CANVAS_MAX_W; x++)
-            s->canvas[y][x] = WHITE;
+    memset(s->canvas, WHITE, (uint32_t)(s->canvas_w * s->canvas_h));
 
     for (int y = 0; y < fh; y++) {
-        uint8_t row[CANVAS_MAX_W];
+        uint8_t row[640]; /* max screen width */
         int got = fs_read(&f, row, fw);
         if (got < fw)
             break;
         for (int x = 0; x < fw; x++)
-            s->canvas[y][x] = row[x];
+            s->canvas[(y)*s->canvas_w + (x)] = row[x];
     }
     fs_close(&f);
     draw_set_status(s, "Opened.");
@@ -442,9 +467,7 @@ static void menu_new(void) {
     asmdraw_state_t *s = active_asmdraw();
     if (!s)
         return;
-    for (int y = 0; y < CANVAS_MAX_H; y++)
-        for (int x = 0; x < CANVAS_MAX_W; x++)
-            s->canvas[y][x] = WHITE;
+    memset(s->canvas, WHITE, (uint32_t)(s->canvas_w * s->canvas_h));
     draw_set_status(s, "New canvas.");
 }
 
@@ -479,8 +502,16 @@ static void on_about_draw(void) {
 }
 
 static bool asmdraw_close(window *w) {
-    (void)w;
-    os_close_own_instance(w);
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *a = &running_apps[i];
+        if (!a->running || a->desc != &asmdraw_app)
+            continue;
+        asmdraw_state_t *s = (asmdraw_state_t *)a->state;
+        if (s->win != w)
+            continue;
+        os_quit_app(a);
+        return true;
+    }
     return true;
 }
 
@@ -533,6 +564,12 @@ static int palette_hit(const asmdraw_state_t *s, int mx, int my) {
 static void asmdraw_init(void *state) {
     asmdraw_state_t *s = (asmdraw_state_t *)state;
 
+    /* If re-opening, free the previous canvas so we don't leak it. */
+    kfree(s->canvas);
+    s->canvas = NULL;
+    s->canvas_w = 0;
+    s->canvas_h = 0;
+
     const window_spec_t spec = {
         .x = ASMDRAW_DEFAULT_X,
         .y = ASMDRAW_DEFAULT_Y,
@@ -574,9 +611,8 @@ static void asmdraw_init(void *state) {
 
     update_canvas_size(s);
 
-    for (int y = 0; y < CANVAS_MAX_H; y++)
-        for (int x = 0; x < CANVAS_MAX_W; x++)
-            s->canvas[y][x] = WHITE;
+    if (!s->canvas)
+        return; /* update_canvas_size failed to allocate */
 }
 
 static void asmdraw_on_frame(void *state) {
@@ -727,6 +763,8 @@ static void asmdraw_destroy(void *state) {
         wm_unregister(s->win);
         s->win = NULL;
     }
+    kfree(s->canvas);
+    s->canvas = NULL;
 }
 
 app_descriptor asmdraw_app = {

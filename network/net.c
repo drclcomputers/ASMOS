@@ -12,13 +12,13 @@ static uint8_t s_mac[6] = {0};
 static const uint8_t MAC_BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static const uint8_t IP_BCAST[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 
-static net_socket_t s_socks[NET_MAX_SOCKETS];
-
 static volatile bool s_ping_reply = false;
 static uint16_t s_ping_id = 0;
 static uint16_t s_ping_seq = 0;
 
-static rx_pkt_t  s_rx_queue[RX_QUEUE_SIZE];
+static net_socket_t *s_socks = NULL;
+static rx_pkt_t *s_rx_queue = NULL;
+
 static volatile uint8_t s_rx_head = 0;
 static volatile uint8_t s_rx_tail = 0;
 
@@ -188,9 +188,12 @@ bool arp_lookup(const uint8_t ip[4], uint8_t mac_out[6]) {
 
 static void arp_reply(const uint8_t dst_ip[4], const uint8_t dst_mac[6]) {
     arp_pkt_t pkt;
-    pkt.htype_hi = 0; pkt.htype_lo = 1;
-    pkt.ptype_hi = 0x08; pkt.ptype_lo = 0x00;
-    pkt.hlen = 6; pkt.plen = 4;
+    pkt.htype_hi = 0;
+    pkt.htype_lo = 1;
+    pkt.ptype_hi = 0x08;
+    pkt.ptype_lo = 0x00;
+    pkt.hlen = 6;
+    pkt.plen = 4;
     pkt.op = net_htons(ARP_OP_REPLY);
     memcpy(pkt.sha, s_mac, 6);
     memcpy(pkt.spa, s_ip, 4);
@@ -401,16 +404,19 @@ static void handle_ip(const uint8_t *data, uint16_t len) {
 
 void net_rx_enqueue(const uint8_t *frame, uint16_t len) {
     uint8_t next = (s_rx_head + 1) % RX_QUEUE_SIZE;
-    if (next == s_rx_tail) return;
-    if (len > RX_PKT_MAX) len = RX_PKT_MAX;
+    if (next == s_rx_tail)
+        return;
+    if (len > RX_PKT_MAX)
+        len = RX_PKT_MAX;
     memcpy(s_rx_queue[s_rx_head].data, frame, len);
     s_rx_queue[s_rx_head].len = len;
     s_rx_head = next;
 }
 
 static void net_rx_process(const uint8_t *frame, uint16_t len) {
-    if (len < sizeof(eth_hdr_t)) return;
-    const eth_hdr_t *eth = (const eth_hdr_t*)frame;
+    if (len < sizeof(eth_hdr_t))
+        return;
+    const eth_hdr_t *eth = (const eth_hdr_t *)frame;
     uint16_t type = net_ntohs(eth->type);
     const uint8_t *payload = frame + sizeof(eth_hdr_t);
     uint16_t plen = len - sizeof(eth_hdr_t);
@@ -421,7 +427,8 @@ static void net_rx_process(const uint8_t *frame, uint16_t len) {
 }
 
 void net_init(void) {
-    memset(s_socks, 0, sizeof(s_socks));
+    s_socks = (net_socket_t *)kzalloc(NET_MAX_SOCKETS * sizeof(net_socket_t));
+    s_rx_queue = (rx_pkt_t *)kzalloc(RX_QUEUE_SIZE * sizeof(rx_pkt_t));
     memset(s_arp_cache, 0, sizeof(s_arp_cache));
     ne2000_get_mac(s_mac);
     ne2000_set_rx_callback(net_rx_enqueue);
@@ -466,9 +473,14 @@ bool icmp_ping(const uint8_t dst_ip[4], uint16_t id, uint16_t seq,
 }
 
 int udp_open(uint16_t local_port) {
+    if (!s_socks)
+        return -1;
     for (int i = 0; i < NET_MAX_SOCKETS; i++) {
         if (!s_socks[i].used) {
             memset(&s_socks[i], 0, sizeof(net_socket_t));
+            s_socks[i].rx_buf = (uint8_t *)kmalloc(NET_UDP_BUFSIZE);
+            if (!s_socks[i].rx_buf)
+                return -1;
             s_socks[i].used = true;
             s_socks[i].proto = IP_PROTO_UDP;
             s_socks[i].local_port = local_port;
@@ -479,8 +491,10 @@ int udp_open(uint16_t local_port) {
 }
 
 void udp_close(int sock) {
-    if (sock < 0 || sock >= NET_MAX_SOCKETS)
+    if (sock < 0 || sock >= NET_MAX_SOCKETS || !s_socks)
         return;
+    kfree(s_socks[sock].rx_buf);
+    s_socks[sock].rx_buf = NULL;
     s_socks[sock].used = false;
 }
 
@@ -561,6 +575,8 @@ static void tcp_send_flags(net_socket_t *s, uint8_t flags, const uint8_t *data,
 
 int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
                 uint16_t local_port) {
+    if (!s_socks)
+        return -1;
     int i;
     for (i = 0; i < NET_MAX_SOCKETS; i++)
         if (!s_socks[i].used)
@@ -570,6 +586,13 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
 
     net_socket_t *s = &s_socks[i];
     memset(s, 0, sizeof(net_socket_t));
+    s->rx_buf = (uint8_t *)kmalloc(NET_UDP_BUFSIZE);
+    s->tcp_rx = (uint8_t *)kmalloc(NET_TCP_BUFSIZE);
+    if (!s->rx_buf || !s->tcp_rx) {
+        kfree(s->rx_buf);
+        kfree(s->tcp_rx);
+        return -1;
+    }
     s->used = true;
     s->proto = IP_PROTO_TCP;
     s->local_port = local_port;
@@ -580,6 +603,8 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
 
     uint8_t mac[6];
     if (!resolve_mac(dst_ip, mac)) {
+        kfree(s->rx_buf);
+        kfree(s->tcp_rx);
         s->used = false;
         return -1;
     }
@@ -594,12 +619,14 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
         if (s->tcp_state == TCP_CLOSED)
             break;
     }
+    kfree(s->rx_buf);
+    kfree(s->tcp_rx);
     s->used = false;
     return -1;
 }
 
 void tcp_close(int sock) {
-    if (sock < 0 || sock >= NET_MAX_SOCKETS)
+    if (sock < 0 || sock >= NET_MAX_SOCKETS || !s_socks)
         return;
     net_socket_t *s = &s_socks[sock];
     if (!s->used)
@@ -616,6 +643,10 @@ void tcp_close(int sock) {
                 break;
         }
     }
+    kfree(s->rx_buf);
+    s->rx_buf = NULL;
+    kfree(s->tcp_rx);
+    s->tcp_rx = NULL;
     s->used = false;
 }
 
