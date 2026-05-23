@@ -619,6 +619,9 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
         if (s->tcp_state == TCP_CLOSED)
             break;
     }
+    if (s->tcp_state != TCP_CLOSED) {
+        tcp_send_flags(s, TCP_RST | TCP_ACK, NULL, 0);
+    }
     kfree(s->rx_buf);
     kfree(s->tcp_rx);
     s->used = false;

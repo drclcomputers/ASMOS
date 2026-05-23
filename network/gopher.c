@@ -1,6 +1,7 @@
 #include "network/gopher.h"
 #include "drivers/ne2000.h"
 #include "io/keyboard.h"
+#include "io/ps2.h"
 #include "lib/core.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
@@ -27,6 +28,7 @@ typedef struct {
     uint8_t host[4];
     uint16_t port;
     bool is_link;
+    char hostname[64];
 } gopher_line_t;
 
 typedef struct {
@@ -94,7 +96,7 @@ static void parse_response(const char *buf, int len) {
         memset(gl->display, 0, LINE_MAX);
         memset(gl->selector, 0, LINE_MAX);
         memset(gl->host, 0, 4);
-        gl->port = 70;
+        gl->port = 0;
 
         int field = 0, fi = 0;
         char hostbuf[64];
@@ -126,8 +128,9 @@ static void parse_response(const char *buf, int len) {
                     hostbuf[fi] = 0;
                 }
                 if (buf[i] == '\t' || buf[i] == '\n' || buf[i] == '\r') {
+                    gopher_strncpy(gl->hostname, hostbuf, 64);
                     if (!parse_ip_str(hostbuf, gl->host))
-                        dns_resolve(hostbuf, gl->host);
+                        memset(gl->host, 0, 4);
                 }
                 break;
             case 3:
@@ -142,6 +145,9 @@ static void parse_response(const char *buf, int len) {
         if (type == '0' || type == '1')
             gl->is_link = true;
         s_line_count++;
+
+        if (gl->port == 0)
+            gl->port = 70;
     }
 }
 
@@ -333,14 +339,11 @@ void gopher_run(const uint8_t start_ip[4], uint16_t port,
     render_gopher();
 
     while (1) {
-        kb_update();
+        ps2_update();
         net_poll();
         task_yield();
-        if (inb(0x64) & 0x01)
-            kb_process_byte(inb(0x60));
         if (!kb.key_pressed)
             continue;
-
         uint8_t key = kb.last_scancode;
 
         if (key == UP_ARROW && s_cursor > 0) {
@@ -359,6 +362,17 @@ void gopher_run(const uint8_t start_ip[4], uint16_t port,
             gopher_line_t *gl = &s_lines[s_cursor];
             if (!gl->is_link)
                 continue;
+
+            uint8_t zero[4] = {0, 0, 0, 0};
+            if (memcmp(gl->host, zero, 4) == 0 && gl->hostname[0]) {
+                if (!dns_resolve(gl->hostname, gl->host)) {
+                    term_buf_push("Gopher: DNS failed");
+                    blit();
+                    sleep_ms(1500);
+                    render_gopher();
+                    continue;
+                }
+            }
 
             char nav_msg[TERM_BUF_LINE_W];
             int nm = 0;

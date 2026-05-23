@@ -162,7 +162,7 @@ qemu-fdd: all
 qemu: all
 	qemu-system-i386 \
 	    -drive format=raw,file=os_image.bin \
-	    -m 2M -machine pc \
+	    -m 4M -machine pc \
 	    -audiodev coreaudio,id=snd0 \
 	    -machine pcspk-audiodev=snd0 \
 	    -device sb16,audiodev=snd0 \

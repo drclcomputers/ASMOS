@@ -21,7 +21,7 @@
 #define NET_UDP_BUFSIZE 1460
 #define NET_TCP_BUFSIZE 4096
 
-#define RX_QUEUE_SIZE 8
+#define RX_QUEUE_SIZE 32
 #define RX_PKT_MAX 1518
 
 typedef struct {
