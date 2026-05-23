@@ -25,14 +25,11 @@ void alloc_set_range(uint32_t start, uint32_t end) {
     if (end <= start)
         return;
 
-    if (start < HEAP_MIN_START)
-        start = HEAP_MIN_START;
-
     if (start < (uint32_t)&_heap_start)
         start = (uint32_t)&_heap_start;
 
-    // Re-check after clamping: need room for at least one header plus one
-    // usable word; without this the size field would wrap to ~4 GB.
+    /* Re-check after clamping: need room for at least one header plus one
+       usable word; without this the size field would wrap to ~4 GB. */
     if (end <= start || (end - start) <= HEADER_SIZE + 4)
         return;
 
@@ -49,7 +46,7 @@ void alloc_set_end(uint32_t end) {
     alloc_set_range((uint32_t)&_heap_start, end);
 }
 
-void alloc_init(void) { alloc_set_range((uint32_t)&_heap_start, HEAP_END_MAX); }
+void alloc_init(void) { alloc_set_range((uint32_t)&_heap_start, (uint32_t)&_heap_start + 0x100000); }
 
 // ── Coalescing and trimming ────────────────────────────────────────────
 static void coalesce_from(block_header_t *cur) {

@@ -2,8 +2,11 @@
 #include "io/ps2.h"
 
 #include "drivers/gpu.h"
+#include "drivers/ne2000.h"
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
+
+#include "network/net.h"
 
 #include "os/app_registry.h"
 #include "os/error.h"
@@ -198,6 +201,15 @@ void kmain(void) {
 
     boot_check_sound();
     play_bootchime();
+
+    if (ne2000_init()) {
+        net_init();
+        static const uint8_t my_ip[4] = {10, 0, 2, 15};
+        static const uint8_t my_gw[4] = {10, 0, 2, 2};
+        static const uint8_t my_nm[4] = {255, 255, 255, 0};
+        net_set_ip(my_ip, my_gw, my_nm);
+        arp_announce();
+    }
 
     sleep_s(2);
 

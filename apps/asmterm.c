@@ -343,7 +343,7 @@ void asmterm_window_draw(window *win, void *userdata) {
     int div_y = wy + wh - INPUT_H - 4;
     draw_line(wx + 2, div_y, wx + ww - 2, div_y, DARK_GRAY);
 
-    int iy = wy + wh - INPUT_H - 1, ix = wx + 2, iw = ww - 4;
+    int iy = wy + wh - INPUT_H - 1, ix = wx + 2, iw = ww - 12;
     uint8_t iborder = s->input_focused ? CYAN : DARK_GRAY;
     fill_rect(ix, iy, iw, INPUT_H, BLACK);
     draw_rect(ix, iy, iw, INPUT_H, iborder);

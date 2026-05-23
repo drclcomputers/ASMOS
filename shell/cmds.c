@@ -2,10 +2,14 @@
 
 #include "fs/fs.h"
 
+#include "drivers/ne2000.h"
 #include "lib/cpu.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
+#include "network/dns.h"
+#include "network/gopher.h"
+#include "network/net.h"
 
 static void append(char *buf, size_t max, const char *text) {
     size_t cl = strlen(buf), tl = strlen(text);
@@ -14,33 +18,43 @@ static void append(char *buf, size_t max, const char *text) {
 }
 
 void cmd_help(char *out, size_t max) {
-    append(out, max, "Available commands:\n");
-    append(out, max, "help          - This message\n");
-    append(out, max, "clear         - Clear screen\n");
-    append(out, max, "pwd           - Working directory\n");
-    append(out, max, "cd <d>        - Change directory\n");
-    append(out, max, "ls            - List directory\n");
-    append(out, max, "cat <f>       - Print file\n");
-    append(out, max, "touch <f>     - Create empty file\n");
-    append(out, max, "rm [-r] <f>   - Delete file/dir\n");
-    append(out, max, "write <f> <t> - Write text to file\n");
-    append(out, max, "echo <t>      - Print text\n");
-    append(out, max, "cp <s> <d>    - Copy file/dir\n");
-    append(out, max, "mv <s> <d>    - Move/rename\n");
-    append(out, max, "mkdir <d>     - Create directory\n");
-    append(out, max, "rmdir <d>     - Remove empty dir\n");
-    append(out, max, "df            - Disk usage\n");
-    append(out, max, "mem           - Memory usage\n");
-    append(out, max, "sysinfo       - CPU model and uptime\n");
-    append(out, max, "clock         - System time\n");
-    append(out, max, "shutdown [s]  - Shut down (optional delay)\n");
-    append(out, max, "restart [s]   - Restart (optional delay)\n");
-    append(out, max, "tee <f>       - Save terminal buffer to file\n");
-    append(out, max, "history       - Recent terminal output\n");
-    append(out, max, "asm <f> [out] - Assemble .ASM -> .BIN\n");
-    append(out, max, "run <f>       - Execute flat .BIN binary\n");
-    append(out, max, "gui           - Start GUI\n");
-    append(out, max, "exit          - Exit CLI\n\n");
+    append(out, max, "Available commands:\n\n");
+
+    append(out, max, "  help          - This message\n");
+    append(out, max, "  clear         - Clear screen\n");
+    append(out, max, "  exit          - Exit CLI\n\n");
+
+    append(out, max, "  pwd           - Working directory\n");
+    append(out, max, "  cd <d>        - Change directory\n");
+    append(out, max, "  ls            - List directory\n");
+    append(out, max, "  mkdir <d>     - Create directory\n");
+    append(out, max, "  rmdir <d>     - Remove empty dir\n\n");
+
+    append(out, max, "  cat <f>       - Print file\n");
+    append(out, max, "  touch <f>     - Create empty file\n");
+    append(out, max, "  write <f> <t> - Write text to file\n");
+    append(out, max, "  cp <s> <d>    - Copy file/dir\n");
+    append(out, max, "  mv <s> <d>    - Move/rename\n");
+    append(out, max, "  rm [-r] <f>   - Delete file/dir\n\n");
+
+    append(out, max, "  echo <t>      - Print text\n");
+    append(out, max, "  tee <f>       - Save terminal buffer to file\n");
+    append(out, max, "  history       - Recent terminal output\n\n");
+
+    append(out, max, "  clock         - System time\n");
+    append(out, max, "  df            - Disk usage\n");
+    append(out, max, "  mem           - Memory usage\n");
+    append(out, max, "  sysinfo       - CPU model and uptime\n\n");
+
+    append(out, max, "  shutdown [s]  - Shut down (optional delay)\n");
+    append(out, max, "  restart [s]   - Restart (optional delay)\n\n");
+
+    append(out, max, "  asm <f> [out] - Assemble .ASM -> .BIN\n");
+    append(out, max, "  run <f>       - Execute flat .BIN binary\n\n");
+
+    append(out, max, "  gopher <ip> [port] [sel] - Browse Gopher\n");
+    append(out, max, "  ping <host>   - ICMP echo request\n");
+    append(out, max, "  gui           - Start GUI\n\n");
 }
 
 void cmd_pwd(char *out, size_t max) {
@@ -489,4 +503,118 @@ void cmd_history(char *out, size_t max) {
         }
     }
     append(out, max, "\n");
+}
+
+void cmd_gopher(const char *args, char *out, size_t max) {
+    if (!args || args[0] == '\0') {
+        append(out, max, "Usage: gopher <host|ip> [port] [selector]\n\n");
+        return;
+    }
+    if (!ne2000_detected()) {
+        append(out, max, "Error: no network card detected\n\n");
+        return;
+    }
+
+    char host_str[64];
+    uint16_t port = 70;
+    char selector[128] = "";
+
+    int i = 0;
+    while (args[i] == ' ')
+        i++;
+    int s = i;
+    while (args[i] != ' ' && args[i] != '\0')
+        i++;
+    int len = i - s;
+    if (len >= 64)
+        len = 63;
+    memcpy(host_str, args + s, len);
+    host_str[len] = '\0';
+
+    while (args[i] == ' ')
+        i++;
+    if (args[i] != '\0') {
+        port = 0;
+        while (args[i] >= '0' && args[i] <= '9')
+            port = port * 10 + (args[i++] - '0');
+        while (args[i] == ' ')
+            i++;
+        if (args[i] != '\0') {
+            int si = 0;
+            while (args[i] != '\0' && si < 127)
+                selector[si++] = args[i++];
+            selector[si] = '\0';
+        }
+    }
+
+    append(out, max, "Launching Gopher...\n");
+    term_buf_push_text(out);
+    out[0] = '\0';
+
+    gopher_run_host(host_str, port, selector);
+}
+
+void cmd_ping(const char *args, char *out, size_t max) {
+    if (!args || args[0] == '\0') {
+        append(out, max, "Usage: ping <host|ip>\n\n");
+        return;
+    }
+
+    char host[64];
+    int i = 0;
+    while (args[i] == ' ')
+        i++;
+    int s = i;
+    while (args[i] != ' ' && args[i] != '\0')
+        i++;
+    int len = i - s;
+    if (len >= 64)
+        len = 63;
+    memcpy(host, args + s, len);
+    host[len] = '\0';
+
+    uint8_t ip[4];
+    if (!dns_resolve(host, ip)) {
+        append(out, max, "Cannot resolve: ");
+        append(out, max, host);
+        append(out, max, "\n\n");
+        return;
+    }
+
+    char ip_str[20];
+    sprintf(ip_str, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+    append(out, max, "Pinging ");
+    append(out, max, ip_str);
+    append(out, max, " ...\n");
+
+    uint32_t start = time_millis();
+    bool ok = icmp_ping(ip, 0x1234, 0, 2000);
+    uint32_t elapsed = time_millis() - start;
+
+    if (ok) {
+        char result[64];
+        sprintf(result, "Reply from %s: time=%u ms\n\n", ip_str, elapsed);
+        append(out, max, result);
+    } else {
+        append(out, max, "Request timed out.\n\n");
+    }
+}
+
+void cmd_netconf(const char *args, char *out, size_t max) {
+    uint8_t mac[6];
+    ne2000_get_mac(mac);
+    append(out, max, "NE2000 detected\n\n");
+    char mac_str[32];
+    sprintf(mac_str, "MAC: %02X:%02X:%02X:%02X:%02X:%02X\n\n", mac[0], mac[1],
+            mac[2], mac[3], mac[4], mac[5]);
+    append(out, max, mac_str);
+
+    outb(P0_CMD, CMD_RD2 | CMD_PS0 | CMD_START);
+    uint8_t isr = inb(P0_ISR);
+    uint8_t bnry = inb(P0_BNRY);
+    outb(P0_CMD, CMD_RD2 | CMD_PS1 | CMD_START);
+    uint8_t curr = inb(P1_CURR);
+    char buf[64];
+    sprintf(buf, "ISR=0x%02X BNRY=0x%02X CURR=0x%02X\n\n", isr, bnry, curr);
+    append(out, max, buf);
 }

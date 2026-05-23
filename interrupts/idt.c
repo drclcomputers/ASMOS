@@ -23,6 +23,7 @@ static idt_ptr_t idt_ptr;
 extern void isr_timer(void);
 extern void isr_spurious(void);
 extern void isr_sb16(void);
+extern void isr_ne2000(void);
 
 static void idt_set_gate(uint8_t n, uint32_t handler) {
     idt[n].offset_lo = (uint16_t)(handler & 0xFFFF);
@@ -67,6 +68,7 @@ static void pit_init(void) {
     outb(PIT_CHANNEL0, PIT_DIVISOR & 0xFF); // LSB
     outb(PIT_CHANNEL0, PIT_DIVISOR >> 8);
     idt_set_gate(32 + 5, (uint32_t)isr_sb16);
+    idt_set_gate(32 + 3, (uint32_t)isr_ne2000);
 }
 
 void idt_init(void) {
@@ -84,7 +86,7 @@ void idt_init(void) {
 
     pic_remap();
 
-    outb(PIC1_DATA, 0xFE);
+    outb(PIC1_DATA, 0xF0);
     outb(PIC2_DATA, 0xFF);
 
     pit_init();

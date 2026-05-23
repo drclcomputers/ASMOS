@@ -10,6 +10,7 @@
 
 #include "config/config.h"
 #include "io/ps2.h"
+#include "network/net.h"
 #include "ui/ui.h"
 
 #include "drivers/opl2.h"
@@ -198,6 +199,7 @@ void scheduler_kernel_task(void) {
 
         g_menubar_click_consumed = false;
         ps2_update();
+        //net_poll();
         speaker_update();
         midi_player_update();
 

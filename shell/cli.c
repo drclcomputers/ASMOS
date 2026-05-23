@@ -14,6 +14,7 @@
 
 #include "config/config.h"
 #include "fs/fs.h"
+#include "network/net.h"
 #include "os/os.h"
 #include "os/scheduler.h"
 
@@ -250,6 +251,7 @@ void cli_run(void) {
         if (shouldexit)
             return;
         ps2_update();
+        net_poll();
 
         if (!kb.key_pressed) {
             draw_input();
@@ -424,7 +426,13 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
     else if (!strcmp(command, "run")) {
         static term_context_t dummy_ctx = {0};
         cmd_run(&dummy_ctx, argument, out_buffer, max_len);
-    } else if (command[0] != '\0')
+    } else if (!strcmp(command, "gopher"))
+        cmd_gopher(argument, out_buffer, max_len);
+    else if (!strcmp(command, "ping"))
+        cmd_ping(argument, out_buffer, max_len);
+    else if (!strcmp(command, "netconf"))
+        cmd_netconf(argument, out_buffer, max_len);
+    else if (command[0] != '\0')
         snprintf(out_buffer, max_len, "Unknown command: %s\n", command);
 
     if (out_buffer[0])

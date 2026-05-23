@@ -2,6 +2,7 @@
 
 extern pit_tick_handler
 extern sb16_irq_handler
+extern ne2000_irq_handler
 
 global isr_timer
 isr_timer:
@@ -26,6 +27,13 @@ isr_spurious:
 global isr_sb16
 isr_sb16:
     pusha
-    call sb16_irq_handler   ; handler sends its own EOI to the PIC
+    call sb16_irq_handler
+    popa
+    iret
+
+global isr_ne2000
+isr_ne2000:
+    pusha
+    call ne2000_irq_handler
     popa
     iret

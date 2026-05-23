@@ -20,7 +20,7 @@
 
 STAGE2_SEG      equ 0x07E0      ; 0x07E0 × 16 = 0x7E00
 STAGE2_SECS     equ 8
-KERNEL_SEG      equ 0x1000      ; 0x0800 × 16 = 0x8000
+KERNEL_SEG      equ 0x1000      ; 0x1000 × 16 = 0x10000
 SECTORS_TO_LOAD equ 1000
 CHS_SPT         equ 63
 CHS_HEADS       equ 16

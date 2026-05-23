@@ -46,6 +46,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/config/runtime_config.o      \
 	  \
 	  $(BUILD_DIR)/drivers/gpu.o                \
+	  $(BUILD_DIR)/drivers/ne2000.o             \
 	  $(BUILD_DIR)/drivers/opl2.o               \
 	  $(BUILD_DIR)/drivers/sb16.o               \
       \
@@ -89,7 +90,11 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/ui/menubar.o                 \
 	  $(BUILD_DIR)/ui/modal.o                   \
       $(BUILD_DIR)/ui/widgets.o                 \
-      $(BUILD_DIR)/ui/window.o
+      $(BUILD_DIR)/ui/window.o                  \
+      \
+      $(BUILD_DIR)/network/dns.o                \
+      $(BUILD_DIR)/network/gopher.o             \
+      $(BUILD_DIR)/network/net.o
 
 KERNEL_SECTORS_LOADED = 1000
 
@@ -150,7 +155,9 @@ qemu-fdd: all
 	    -device sb16,audiodev=snd0 \
 	    -device adlib,audiodev=snd0 \
 	    -vga std \
-	    -display cocoa,zoom-to-fit=on
+	    -display cocoa,zoom-to-fit=on \
+	    -device ne2k_isa,irq=3,iobase=0x300,netdev=net0 \
+	    -netdev user,id=net0
 
 qemu: all
 	qemu-system-i386 \
@@ -161,7 +168,9 @@ qemu: all
 	    -device sb16,audiodev=snd0 \
 	    -device adlib,audiodev=snd0 \
 	    -vga std \
-	    -display cocoa,zoom-to-fit=on
+	    -display cocoa,zoom-to-fit=on \
+	    -device ne2k_isa,irq=3,iobase=0x300,netdev=net0 \
+	    -netdev user,id=net0
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q
