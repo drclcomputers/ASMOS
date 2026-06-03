@@ -144,8 +144,6 @@ bool ne2000_send(const uint8_t *data, uint16_t len) {
         return false;
     }
     uint8_t tsr = inb(P0_TSR);
-    if (tsr & 0x01)
-        term_buf_push("NE2000: TX collision");
     if (tsr & 0x02)
         term_buf_push("NE2000: TX abort");
     return true;

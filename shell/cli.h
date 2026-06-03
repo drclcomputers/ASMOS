@@ -18,6 +18,7 @@ cmd_status_t cli_execute_command(const char *cmd, char *out_buffer,
 #include "shell/term_buf.h"
 
 void asmterm_input_push(char c);
+extern bool g_asmterm_active;
 void asmterm_input_push_enter(void);
 int asmterm_output_read(char *dst, int max);
 term_context_t *cli_asmterm_context(void);

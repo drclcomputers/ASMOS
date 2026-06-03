@@ -106,12 +106,13 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
     bool found = false;
 
     for (int attempt = 0; attempt < DNS_RETRIES && !found; attempt++) {
-        memset(pkt, 0, DNS_PKT_SIZE);
-        pkt[0] = (uint8_t)(s_dns_txn_id >> 8);
-        pkt[1] = (uint8_t)(s_dns_txn_id & 0xFF);
-        pkt[2] = 0x01; /* RD */
-        pkt[4] = 0x00;
-        pkt[5] = 0x01; /* QDCOUNT = 1 */
+            memset(pkt, 0, DNS_PKT_SIZE);
+            pkt[0] = (uint8_t)(s_dns_txn_id >> 8);
+            pkt[1] = (uint8_t)(s_dns_txn_id & 0xFF);
+            pkt[2] = 0x00; /* Flags high byte */
+            pkt[3] = 0x01; /* Flags low byte - RD bit set */
+            pkt[4] = 0x00;
+            pkt[5] = 0x01; /* QDCOUNT = 1 */
 
         uint16_t pos = 12;
         uint16_t name_len =

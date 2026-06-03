@@ -2,6 +2,7 @@
 #include "os/scheduler.h"
 #include "shell/asm/asm.h"
 #include "shell/binrun.h"
+#include "shell/cmds.h"
 #include "shell/term_buf.h"
 
 #define TERM_X 4
@@ -81,6 +82,7 @@ typedef struct {
     char hist_draft[INPUT_CAP];
 
     bool binary_waiting;
+    bool gopher_mode;
     input_queue_t iq;
     term_context_t term_ctx;
 } asmterm_state_t;
@@ -151,6 +153,7 @@ static void tctx_print(term_context_t *ctx, const char *str) {
         return;
     term_push_output(s, str);
     term_buf_push_text(str);
+    term_scroll_to_bottom(s);
 }
 
 static void tctx_putchar(term_context_t *ctx, char c) {
@@ -200,6 +203,13 @@ static int tctx_getchar(term_context_t *ctx) {
     char c = iq_pop(&s->iq);
     s->binary_waiting = false;
     return (int)(unsigned char)c;
+}
+
+void asmterm_set_gopher_mode(term_context_t *ctx, bool on) {
+    if (!ctx || !ctx->userdata)
+        return;
+    asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
+    s->gopher_mode = on;
 }
 
 static void term_execute(asmterm_state_t *s) {
@@ -262,6 +272,8 @@ static void term_execute(asmterm_state_t *s) {
     cmd_status_t status = CMD_STATUS_OK;
     if (strcmp(command, "run") == 0) {
         cmd_run(&s->term_ctx, arg, outbuf, sizeof(outbuf));
+    } else if (strcmp(command, "gopher") == 0) {
+        cmd_gopher(&s->term_ctx, arg, outbuf, sizeof(outbuf));
     } else {
         status = cli_execute_command(s->input, outbuf, sizeof(outbuf));
     }
@@ -349,13 +361,18 @@ void asmterm_window_draw(window *win, void *userdata) {
     draw_rect(ix, iy, iw, INPUT_H, iborder);
 
     if (s->binary_waiting) {
-        draw_string(ix + 2, iy + 2, "BIN>", LIGHT_GREEN, 2);
+        const char *label = s->gopher_mode ? "GOPHER>" : "BIN>";
+        draw_string(ix + 2, iy + 2, label, LIGHT_GREEN, 2);
     } else {
         draw_string(ix + 2, iy + 2, ">", CYAN, 2);
     }
 
-    int tax = ix + 10 + (s->binary_waiting ? 15 : 0);
-    int taw = iw - 12 - CHAR_W - (s->binary_waiting ? 15 : 0);
+    int label_w =
+        s->binary_waiting
+            ? (int)strlen(s->gopher_mode ? "GOPHER>" : "BIN>") * CHAR_W + 2
+            : CHAR_W + 2;
+    int tax = ix + 2 + label_w + 2;
+    int taw = iw - 12 - CHAR_W - label_w - 2;
     int mvc = taw / CHAR_W;
     if (mvc < 1)
         mvc = 1;

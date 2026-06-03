@@ -199,7 +199,7 @@ void scheduler_kernel_task(void) {
 
         g_menubar_click_consumed = false;
         ps2_update();
-        //net_poll();
+        net_poll();
         speaker_update();
         midi_player_update();
 

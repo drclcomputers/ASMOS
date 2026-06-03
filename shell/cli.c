@@ -51,6 +51,7 @@ typedef struct {
 static cli_state_t s;
 
 bool shouldexit = 0;
+bool g_asmterm_active = false;
 
 /* ── helpers ───────────────────────────────────────── */
 static void scroll_to_bottom(void) {
@@ -117,6 +118,13 @@ static void draw_input(void) {
     fill_rect(0, iy, SCREEN_WIDTH, INPUT_H, BLACK);
     draw_rect(0, iy, SCREEN_WIDTH, INPUT_H, DARK_GRAY);
     draw_line(0, OUTPUT_H, SCREEN_WIDTH - 1, OUTPUT_H, DARK_GRAY);
+
+    if (g_asmterm_active) {
+        draw_string(MARGIN_X, iy + 2,
+                    "[task]> j/k=scroll  Enter=open  b=back  q=quit", YELLOW,
+                    2);
+        return;
+    }
 
     char prompt[40];
     const char *drv = g_drive_paths[dir_context.drive_id];
@@ -247,6 +255,8 @@ void cli_run(void) {
     scroll_to_bottom();
     redraw();
 
+    int last_buf_count = 0;
+
     while (1) {
         if (shouldexit)
             return;
@@ -254,13 +264,35 @@ void cli_run(void) {
         net_poll();
 
         if (!kb.key_pressed) {
-            draw_input();
-            blit();
+            int cur_count = term_buf_count();
+            if (cur_count != last_buf_count) {
+                last_buf_count = cur_count;
+                scroll_to_bottom();
+                redraw();
+            } else {
+                draw_input();
+                blit();
+            }
             continue;
         }
+        last_buf_count = term_buf_count();
 
         uint8_t sc = kb.last_scancode;
         char ch = kb.last_char;
+
+        if (g_asmterm_active) {
+            if (sc == ENTER) {
+                asmterm_input_push_enter();
+            } else if (sc == BACKSPACE) {
+                asmterm_input_push('\b');
+            } else if (ch >= 32 && ch < 127) {
+                asmterm_input_push(ch);
+            }
+
+            scroll_to_bottom();
+            redraw();
+            continue;
+        }
 
         /* scroll */
         if (sc == F5) {
@@ -332,7 +364,6 @@ void cli_run(void) {
             continue;
         }
 
-        /* printable */
         if (ch >= 32 && ch < 127) {
             if (s.input_len < CLI_INPUT_CAP - 1) {
                 s.input[s.input_len++] = ch;
@@ -427,7 +458,7 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         static term_context_t dummy_ctx = {0};
         cmd_run(&dummy_ctx, argument, out_buffer, max_len);
     } else if (!strcmp(command, "gopher"))
-        cmd_gopher(argument, out_buffer, max_len);
+        cmd_gopher(cli_asmterm_context(), argument, out_buffer, max_len);
     else if (!strcmp(command, "ping"))
         cmd_ping(argument, out_buffer, max_len);
     else if (!strcmp(command, "netconf"))
@@ -556,4 +587,5 @@ static term_context_t s_aterm_ctx = {
     .getchar = aterm_ctx_getchar,
     .userdata = NULL,
 };
+
 term_context_t *cli_asmterm_context(void) { return &s_aterm_ctx; }

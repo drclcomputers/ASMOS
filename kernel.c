@@ -97,15 +97,12 @@ static void dbg_bar(int col, uint8_t color) {
 static void detect_heap_range(void) {
     dbg_bar(0, 4);
 
-    /* Heap starts above the backbuffer in extended RAM */
     uint32_t heap_bot = (uint32_t)BACKBUF + (uint32_t)g_backbuf_size;
 
-    /* Also must be above kernel BSS end */
     uint32_t kernel_end = (uint32_t)&_heap_start;
     if (kernel_end > heap_bot)
         heap_bot = kernel_end;
 
-    /* Always at least at the 1MB mark */
     if (heap_bot < HEAP_MIN_START)
         heap_bot = HEAP_MIN_START;
 
@@ -114,17 +111,15 @@ static void detect_heap_range(void) {
     dbg_bar(1, 2);
     dbg_bar(2, 1);
 
-    /* Total RAM reported by stage 2 via INT 15h AH=88h */
     uint32_t total_ram = *(volatile uint32_t *)0x0500;
 
     dbg_bar(3, 6);
 
     uint32_t heap_top;
     if (total_ram == 0 || total_ram <= heap_bot) {
-        /* AH=88h failed or RAM too small — 512KB fallback heap */
         heap_top = heap_bot + 0x80000;
     } else {
-        heap_top = total_ram - 0x10000; /* 64KB guard at top */
+        heap_top = total_ram - 0x10000;
     }
 
     if (heap_top > HEAP_END_MAX)
@@ -133,7 +128,6 @@ static void detect_heap_range(void) {
     dbg_bar(4, 5);
 
     if (heap_top <= heap_bot + 0x10000U) {
-        /* Less than 64KB heap — halt */
         dbg_bar(5, 12);
         for (;;)
             __asm__ volatile("hlt");

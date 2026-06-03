@@ -25,7 +25,7 @@ void cmd_restart(const char *args, char *out, size_t max);
 void cmd_tee(const char *filename, char *out, size_t max);
 void cmd_history(char *out, size_t max);
 void cmd_cd(const char *path, char *out, size_t max);
-void cmd_gopher(const char *args, char *out, size_t max);
+void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max);
 void cmd_ping(const char *args, char *out, size_t max);
 void cmd_netconf(const char *args, char *out, size_t max);
 

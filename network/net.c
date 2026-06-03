@@ -3,6 +3,7 @@
 #include "lib/core.h"
 #include "lib/memory.h"
 #include "lib/time.h"
+#include "os/scheduler.h"
 
 static uint8_t s_ip[4] = {0};
 static uint8_t s_gw[4] = {0};
@@ -117,6 +118,7 @@ static bool resolve_mac(const uint8_t ip[4], uint8_t mac_out[6]) {
     uint32_t t = time_millis() + 500;
     while (time_millis() < t) {
         net_poll();
+        task_yield();
         if (arp_lookup(target, mac_out))
             return true;
     }
@@ -308,17 +310,22 @@ static void handle_tcp(const ip_hdr_t *iph, const uint8_t *data, uint16_t len) {
             continue;
 
         if (th->flags & TCP_RST) {
-            s->tcp_state = TCP_CLOSED;
+            if (s->tcp_state == TCP_SYN_SENT) {
+                if ((th->flags & TCP_ACK) && seg_ack == s->tx_seq)
+                    s->tcp_state = TCP_CLOSED;
+            } else {
+                s->tcp_state = TCP_CLOSED;
+            }
             return;
         }
 
         switch (s->tcp_state) {
         case TCP_SYN_SENT:
             if ((th->flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
+                if (seg_ack != s->tx_seq)
+                    break;
                 s->rx_seq = seg_seq + 1;
                 s->tx_seq = seg_ack;
-                s->remote_port = sport;
-                arp_lookup(iph->src, s->remote_mac);
                 s->tcp_state = TCP_ESTABLISHED;
                 tcp_send_flags(s, TCP_ACK, NULL, 0);
             }
@@ -465,6 +472,7 @@ bool icmp_ping(const uint8_t dst_ip[4], uint16_t id, uint16_t seq,
 
     uint32_t deadline = time_millis() + timeout_ms;
     while (time_millis() < deadline) {
+        task_yield();
         net_poll();
         if (s_ping_reply)
             return true;
@@ -584,6 +592,11 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
     if (i == NET_MAX_SOCKETS)
         return -1;
 
+    static uint16_t s_next_port = 49200;
+    uint16_t actual_port = s_next_port++;
+    if (s_next_port >= 49900)
+        s_next_port = 49200;
+
     net_socket_t *s = &s_socks[i];
     memset(s, 0, sizeof(net_socket_t));
     s->rx_buf = (uint8_t *)kmalloc(NET_UDP_BUFSIZE);
@@ -595,7 +608,7 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
     }
     s->used = true;
     s->proto = IP_PROTO_TCP;
-    s->local_port = local_port;
+    s->local_port = actual_port;
     s->remote_port = dst_port;
     memcpy(s->remote_ip, dst_ip, 4);
     s->tx_seq = 0x12345678;
@@ -613,15 +626,14 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
 
     uint32_t deadline = time_millis() + 3000;
     while (time_millis() < deadline) {
-        net_poll();
+        task_yield();
         if (s->tcp_state == TCP_ESTABLISHED)
             return i;
         if (s->tcp_state == TCP_CLOSED)
             break;
     }
-    if (s->tcp_state != TCP_CLOSED) {
+    if (s->tcp_state != TCP_CLOSED)
         tcp_send_flags(s, TCP_RST | TCP_ACK, NULL, 0);
-    }
     kfree(s->rx_buf);
     kfree(s->tcp_rx);
     s->used = false;
@@ -641,7 +653,7 @@ void tcp_close(int sock) {
         s->tcp_state = next;
         uint32_t deadline = time_millis() + 2000;
         while (time_millis() < deadline) {
-            net_poll();
+            task_yield();
             if (s->tcp_state == TCP_CLOSED || s->tcp_state == TCP_TIME_WAIT)
                 break;
         }
@@ -691,11 +703,17 @@ tcp_state_t tcp_state(int sock) {
     return s_socks[sock].tcp_state;
 }
 
+static bool s_polling = false;
+
 void net_poll(void) {
+    if (s_polling)
+        return;
+    s_polling = true;
     ne2000_poll();
     while (s_rx_tail != s_rx_head) {
         rx_pkt_t *p = &s_rx_queue[s_rx_tail];
         net_rx_process(p->data, p->len);
         s_rx_tail = (s_rx_tail + 1) % RX_QUEUE_SIZE;
     }
+    s_polling = false;
 }

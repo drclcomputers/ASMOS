@@ -10,6 +10,7 @@
 #include "network/dns.h"
 #include "network/gopher.h"
 #include "network/net.h"
+#include "os/scheduler.h"
 
 static void append(char *buf, size_t max, const char *text) {
     size_t cl = strlen(buf), tl = strlen(text);
@@ -505,7 +506,23 @@ void cmd_history(char *out, size_t max) {
     append(out, max, "\n");
 }
 
-void cmd_gopher(const char *args, char *out, size_t max) {
+typedef struct {
+    char host[64];
+    uint16_t port;
+    char selector[128];
+    term_context_t *ctx;
+} gopher_task_args_t;
+
+static void gopher_task_entry(void *arg) {
+    gopher_task_args_t *a = (gopher_task_args_t *)arg;
+    g_asmterm_active = true;
+    gopher_run_host(a->ctx, a->host, a->port, a->selector);
+    g_asmterm_active = false;
+    kfree(a);
+    scheduler_exit_current();
+}
+
+void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max) {
     if (!args || args[0] == '\0') {
         append(out, max, "Usage: gopher <host|ip> [port] [selector]\n\n");
         return;
@@ -515,43 +532,52 @@ void cmd_gopher(const char *args, char *out, size_t max) {
         return;
     }
 
-    char host_str[64];
-    uint16_t port = 70;
-    char selector[128] = "";
+    gopher_task_args_t *a =
+        (gopher_task_args_t *)kmalloc(sizeof(gopher_task_args_t));
+    if (!a) {
+        append(out, max, "gopher: out of memory\n\n");
+        return;
+    }
 
     int i = 0;
     while (args[i] == ' ')
         i++;
-    int s = i;
+    int hs = i;
     while (args[i] != ' ' && args[i] != '\0')
         i++;
-    int len = i - s;
-    if (len >= 64)
-        len = 63;
-    memcpy(host_str, args + s, len);
-    host_str[len] = '\0';
+    int hlen = i - hs;
+    if (hlen >= 64)
+        hlen = 63;
+    memcpy(a->host, args + hs, hlen);
+    a->host[hlen] = '\0';
+
+    a->port = 70;
+    a->selector[0] = '\0';
+    a->ctx = ctx;
 
     while (args[i] == ' ')
         i++;
     if (args[i] != '\0') {
-        port = 0;
+        a->port = 0;
         while (args[i] >= '0' && args[i] <= '9')
-            port = port * 10 + (args[i++] - '0');
+            a->port = a->port * 10 + (args[i++] - '0');
         while (args[i] == ' ')
             i++;
-        if (args[i] != '\0') {
-            int si = 0;
-            while (args[i] != '\0' && si < 127)
-                selector[si++] = args[i++];
-            selector[si] = '\0';
-        }
+        int si = 0;
+        while (args[i] != '\0' && si < 127)
+            a->selector[si++] = args[i++];
+        a->selector[si] = '\0';
     }
 
-    append(out, max, "Launching Gopher...\n");
-    term_buf_push_text(out);
-    out[0] = '\0';
-
-    gopher_run_host(host_str, port, selector);
+    int slot = scheduler_add_task(gopher_task_entry, a);
+    if (slot < 0) {
+        kfree(a);
+        append(out, max, "gopher: no free task slots\n\n");
+        return;
+    }
+    char tmp[48];
+    sprintf(tmp, "gopher: started (task %d)\n\n", slot);
+    append(out, max, tmp);
 }
 
 void cmd_ping(const char *args, char *out, size_t max) {
