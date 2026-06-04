@@ -676,7 +676,13 @@ void gopher_run_host(term_context_t *ctx, const char *hostname, uint16_t port,
     uint8_t ip[4];
     if (!dns_resolve(hostname, ip)) {
         gopher_print(ctx, "Gopher: could not resolve hostname");
+        sprintf(msg, "Gopher: resolved to %d.%d.%d.%d", ip[0], ip[1], ip[2],
+                ip[3]);
+        gopher_print(ctx, msg);
         return;
     }
+    sprintf(msg, "Gopher: resolved to %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+    gopher_print(ctx, msg);
+
     gopher_run(ctx, ip, port, selector);
 }

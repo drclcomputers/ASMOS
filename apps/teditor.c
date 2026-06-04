@@ -415,7 +415,7 @@ static void menu_close_np(void) {
 }
 
 static void on_about_np(void) {
-    modal_show(MODAL_INFO, "About TEditor", "TEditor v1.2", NULL, NULL);
+    modal_show(MODAL_INFO, "About TEditor (c)2026 @drclcomputers", "TEditor v1.2", NULL, NULL);
 }
 
 /* ── Layout & drawing ───────────────────────────────────────────────────── */

@@ -517,7 +517,7 @@ static void menu_close_mp(void) {
     os_close_own_instance(s->win);
 }
 static void on_about_mp(void) {
-    modal_show(MODAL_INFO, "About MIDI Player",
+    modal_show(MODAL_INFO, "About MIDI Player (c)2026 @drclcomputers",
                "MIDI Player v1.0\nASMOS OPL2/FM Synthesizer\nSupports Type-0 "
                "and Type-1 MIDI",
                NULL, NULL);

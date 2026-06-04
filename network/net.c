@@ -114,13 +114,16 @@ static bool resolve_mac(const uint8_t ip[4], uint8_t mac_out[6]) {
     if (arp_lookup(ip, mac_out))
         return true;
     const uint8_t *target = ip_is_local(ip) ? ip : s_gw;
-    arp_request(target);
-    uint32_t t = time_millis() + 500;
-    while (time_millis() < t) {
-        net_poll();
-        task_yield();
-        if (arp_lookup(target, mac_out))
-            return true;
+    for (int retry = 0; retry < 3; retry++) {
+        arp_request(target);
+        uint32_t t = time_millis() + 500;
+        while (time_millis() < t) {
+            net_poll();
+            net_poll();
+            task_yield();
+            if (arp_lookup(target, mac_out))
+                return true;
+        }
     }
     return false;
 }
@@ -716,10 +719,10 @@ void net_poll(void) {
         return;
     s_polling = true;
     ne2000_poll();
+    s_polling = false;
     while (s_rx_tail != s_rx_head) {
         rx_pkt_t *p = &s_rx_queue[s_rx_tail];
         net_rx_process(p->data, p->len);
         s_rx_tail = (s_rx_tail + 1) % RX_QUEUE_SIZE;
     }
-    s_polling = false;
 }

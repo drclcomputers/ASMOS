@@ -19,7 +19,7 @@ typedef struct {
 app_descriptor clipview_app;
 
 static void cv_about(void) {
-    modal_show(MODAL_INFO, "Clipboard Viewer",
+    modal_show(MODAL_INFO, "Clipboard Viewer (c)2026 @drclcomputers",
                "Clipboard Viewer v1.0\nShows text clipboard history.\nClick a "
                "line to copy it.",
                NULL, NULL);

@@ -497,7 +497,7 @@ static void menu_close_draw(void) {
 }
 
 static void on_about_draw(void) {
-    modal_show(MODAL_INFO, "About ASMDraw", "ASMDraw v1.0\nASMOS Paint App",
+    modal_show(MODAL_INFO, "About ASMDraw (c)2026 @drclcomputers", "ASMDraw v1.0\nASMOS Paint App",
                NULL, NULL);
 }
 

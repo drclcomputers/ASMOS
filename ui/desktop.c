@@ -603,7 +603,7 @@ static void menu_about_os(void) {
             "ASMOS ver %s\nDeveloped by drclcomputers.\n\nCheck out more of my "
             "work here: https://github.com/drclcomputers/ASMOS",
             VER);
-    modal_show(MODAL_INFO, "About ASMOS", x, NULL, NULL);
+    modal_show(MODAL_INFO, "About ASMOS (c)2026 @drclcomputers", x, NULL, NULL);
 }
 
 static void do_shutdown(void) {

@@ -69,7 +69,6 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
     if (!hostname)
         return false;
 
-    /* Fast path: dotted decimal */
     bool all_digits = true;
     int dots = 0;
     for (int i = 0; hostname[i]; i++) {
@@ -108,11 +107,13 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
     }
 
     bool found = false;
+    uint16_t txn_id = s_dns_txn_id;
 
     for (int attempt = 0; attempt < DNS_RETRIES && !found; attempt++) {
+        uint16_t sent_id = txn_id;
         memset(pkt, 0, DNS_PKT_SIZE);
-        pkt[0] = (uint8_t)(s_dns_txn_id >> 8);
-        pkt[1] = (uint8_t)(s_dns_txn_id & 0xFF);
+        pkt[0] = (uint8_t)(txn_id >> 8);
+        pkt[1] = (uint8_t)(txn_id & 0xFF);
         pkt[2] = 0x00;
         pkt[3] = 0x01; /* RD */
         pkt[4] = 0x00;
@@ -122,7 +123,7 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
         uint16_t name_len =
             encode_name(pkt + pos, DNS_PKT_SIZE - pos - 4, hostname);
         if (name_len == 0) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
         pos += name_len;
@@ -131,27 +132,23 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
         pkt[pos++] = 0x00;
         pkt[pos++] = 0x01; /* QCLASS IN */
 
-        /* Rotate local port to avoid TIME_WAIT collisions */
         uint16_t local =
             DNS_LOCAL_BASE + (s_dns_local_port++ % DNS_LOCAL_COUNT);
         int sock = udp_open(local);
         if (sock < 0) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
 
         if (!udp_send(sock, s_dns_server, DNS_PORT, pkt, pos)) {
             udp_close(sock);
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
 
-        /* Drain the NIC ring aggressively — QEMU usermode reply may be
-           queued behind ARP or other frames already in the rx buffer. */
         uint32_t deadline = time_millis() + DNS_TIMEOUT_MS;
         int rlen = 0;
         while (time_millis() < deadline) {
-            /* Drain as many frames as the NIC has waiting */
             net_poll();
             net_poll();
             net_poll();
@@ -163,37 +160,37 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
         udp_close(sock);
 
         if (rlen <= 12) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
 
         uint16_t resp_id = (resp[0] << 8) | resp[1];
-        if (resp_id != s_dns_txn_id) {
-            s_dns_txn_id++;
+        if (resp_id != sent_id) {
+            txn_id++;
             continue;
         }
         if (!(resp[2] & 0x80)) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
         if ((resp[3] & 0x0F) != 0) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
 
         uint16_t ancount = (resp[6] << 8) | resp[7];
         if (ancount == 0) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
 
         pos = 12;
         pos = skip_name(resp, (uint16_t)rlen, pos);
         if (pos == 0 || pos + 4 > rlen) {
-            s_dns_txn_id++;
+            txn_id++;
             continue;
         }
-        pos += 4; /* skip QTYPE + QCLASS */
+        pos += 4;
 
         for (uint16_t a = 0; a < ancount; a++) {
             pos = skip_name(resp, (uint16_t)rlen, pos);
@@ -211,8 +208,9 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
             }
             pos += rdlen;
         }
-        s_dns_txn_id++;
+        txn_id++;
     }
+    s_dns_txn_id = txn_id;
 
     kfree(pkt);
     kfree(resp);

@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "1.2.9"
+#define VER "1.2.9.1"
 
 extern int g_screen_width;
 extern int g_screen_height;

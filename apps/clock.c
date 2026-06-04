@@ -48,7 +48,7 @@ static bool clock_close(window *w) {
 static void on_file_close(void) { clock_close(NULL); }
 
 static void on_about(void) {
-    modal_show(MODAL_INFO, "About Clock", "Clock v2.0\nASMOS System App", NULL,
+    modal_show(MODAL_INFO, "About Clock (c)2026 @drclcomputers", "Clock v2.0\nASMOS System App", NULL,
                NULL);
 }
 

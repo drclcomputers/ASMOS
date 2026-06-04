@@ -634,7 +634,7 @@ static void menu_open(void) {
 }
 static void menu_close_hv(void) { os_quit_app_by_desc(&hexview_app); }
 static void on_about_hv(void) {
-    modal_show(MODAL_INFO, "About HexView",
+    modal_show(MODAL_INFO, "About HexView (c)2026 @drclcomputers",
                "HexView v1.2\nASMOS Hex Viewer\n"
                "Left: address + hex  Right: ASCII\n"
                "Scroll bar or arrow keys to navigate.\n"

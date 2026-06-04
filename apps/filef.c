@@ -1348,7 +1348,7 @@ static void menu_sort_size(void) {
     }
 }
 static void menu_about_filef(void) {
-    modal_show(MODAL_INFO, "About FileF", "FileF v2.0\nASMOS File Manager",
+    modal_show(MODAL_INFO, "About FileF (c)2026 @drclcomputers", "FileF v2.0\nASMOS File Manager",
                NULL, NULL);
 }
 static bool ff_close_cb(window *w) {

@@ -334,7 +334,7 @@ static bool calc_close(window *w) {
 
 static void on_file_close(void) { calc_close(NULL); }
 static void on_about(void) {
-    modal_show(MODAL_INFO, "About Calculator",
+    modal_show(MODAL_INFO, "About Calculator (c)2026 @drclcomputers",
                "Calculator v1.0\nASMOS System App", NULL, NULL);
 }
 

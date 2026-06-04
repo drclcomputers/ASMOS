@@ -226,7 +226,7 @@ static bool monitor_close(window *w) {
 static void on_file_close(void) { monitor_close(NULL); }
 
 static void on_about(void) {
-    modal_show(MODAL_INFO, "About Monitor",
+    modal_show(MODAL_INFO, "About Monitor (c)2026 @drclcomputers",
                "Monitor v2.0\nTask List & System Stats", NULL, NULL);
 }
 

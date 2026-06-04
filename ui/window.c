@@ -588,18 +588,18 @@ void window_dragged(window *win) {
                 win->dragging = false;
                 return;
             }
-            int snap_threshold = TASKBAR_H;
+            int snap_threshold = 3 * TASKBAR_H;
             int usable_height = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H;
 
             // left edge
-            if (win->x < snap_threshold) {
+            if (mouse.x < snap_threshold) {
                 win->x = 0;
                 win->y = 0;
                 win->w = SCREEN_WIDTH / 2;
                 win->h = usable_height;
             }
             // right edge
-            else if (win->x + win->w > SCREEN_WIDTH - snap_threshold) {
+            else if (mouse.x > SCREEN_WIDTH - snap_threshold) {
                 win->x = SCREEN_WIDTH / 2;
                 win->y = 0;
                 win->w = SCREEN_WIDTH / 2;

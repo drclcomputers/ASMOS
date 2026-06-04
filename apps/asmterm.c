@@ -408,7 +408,7 @@ static bool asmterm_close(window *w) {
 static void on_file_close(void) { asmterm_close(NULL); }
 static void on_about(void) {
     modal_show(
-        MODAL_INFO, "About ASMTerm",
+        MODAL_INFO, "About ASMTerm (c)2026 @drclcomputers",
         "ASMTerm v1.1", NULL,
         NULL);
 }
