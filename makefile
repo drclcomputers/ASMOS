@@ -31,7 +31,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
 	  $(BUILD_DIR)/apps/asmdraw.o               \
 	  $(BUILD_DIR)/apps/asmterm.o               \
-	  $(BUILD_DIR)/apps/asmusic.o               \
 	  $(BUILD_DIR)/apps/calculator.o            \
 	  $(BUILD_DIR)/apps/clipview.o              \
 	  $(BUILD_DIR)/apps/clock.o                 \

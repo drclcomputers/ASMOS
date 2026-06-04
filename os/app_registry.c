@@ -2,7 +2,6 @@
 
 extern app_descriptor asmdraw_app;
 extern app_descriptor asmterm_app;
-extern app_descriptor asmusic_app;
 extern app_descriptor calculator_app;
 extern app_descriptor clipview_app;
 extern app_descriptor clock_app;
@@ -16,7 +15,6 @@ extern app_descriptor teditor_app;
 registered_app_t app_registry[] = {
     {&asmdraw_app, "ASMDraw"},
     {&asmterm_app, "ASMTerm"},
-    {&asmusic_app, "ASMusic"},
     {&calculator_app, "Calculator"},
     {&clock_app, "Clock"},
     {&clipview_app, "ClipView"},
