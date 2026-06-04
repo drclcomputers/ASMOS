@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "1.2.9.1"
+#define VER "1.3.0"
 
 extern int g_screen_width;
 extern int g_screen_height;
@@ -15,7 +15,7 @@ extern int g_video_mode;
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
 #define DOUBLE_CLICK_SPEED 500
-#define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 4)
+#define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 3)
 
 #define BACKBUF ((uint8_t *)0x100000)
 #define BACKBUF_SIZE g_backbuf_size

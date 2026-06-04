@@ -606,6 +606,7 @@ static void settings_init(void *state) {
         .on_close = settings_close,
     };
     s->win = wm_register(&spec);
+    s->win->anim_no_of_frames = 10;
     if (!s->win)
         return;
     s->win->on_draw = settings_draw;

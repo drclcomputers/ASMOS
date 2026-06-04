@@ -110,6 +110,7 @@ static void cv_init(void *state) {
         .on_close = cv_close,
     };
     s->win = wm_register(&spec);
+    s->win->anim_no_of_frames = 10;
     if (!s->win)
         return;
     s->win->on_draw = cv_draw;
