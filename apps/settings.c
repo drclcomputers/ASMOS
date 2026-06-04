@@ -30,6 +30,7 @@ typedef enum {
     TAB_WALLPAPER = 0,
     TAB_SOUND,
     TAB_SYSTEM,
+    TAB_NETWORK,
     TAB_COUNT
 } settings_tab_t;
 
@@ -37,6 +38,7 @@ static const char *TAB_NAMES[TAB_COUNT] = {
     "Wallpaper",
     "Sound",
     "System",
+    "Network",
 };
 
 typedef struct {
@@ -261,6 +263,54 @@ static void draw_system_tab(int px, int py) {
 #undef RY
 }
 
+static void draw_network_tab(int px, int py) {
+    int row = 0;
+#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
+
+    draw_string(px + LBL_X, RY(row), "-- Network Status --", LIGHT_CYAN, 2);
+    row++;
+
+    draw_string(px + LBL_X, RY(row), "Networking:", DARK_GRAY, 2);
+    draw_string(px + VAL_X - 30, RY(row), g_cfg.networking_enabled ? "ON" : "OFF",
+                BLACK, 2);
+    small_btn(px + VAL_X, RY(row) - 1, 24, 9,
+              g_cfg.networking_enabled ? "Off" : "On", DARK_GRAY);
+    row++;
+
+    row++;
+    draw_string(px + LBL_X, RY(row), "-- IP Configuration --", LIGHT_CYAN, 2);
+    row++;
+
+    draw_string(px + LBL_X, RY(row), "IP Address:", DARK_GRAY, 2);
+    char ip_str[20];
+    sprintf(ip_str, "%d.%d.%d.%d", g_cfg.ip[0], g_cfg.ip[1], g_cfg.ip[2], g_cfg.ip[3]);
+    draw_string(px + VAL_X - 30, RY(row), ip_str, BLACK, 2);
+    row++;
+
+    draw_string(px + LBL_X, RY(row), "Gateway:", DARK_GRAY, 2);
+    char gw_str[20];
+    sprintf(gw_str, "%d.%d.%d.%d", g_cfg.gateway[0], g_cfg.gateway[1], g_cfg.gateway[2], g_cfg.gateway[3]);
+    draw_string(px + VAL_X - 30, RY(row), gw_str, BLACK, 2);
+    row++;
+
+    draw_string(px + LBL_X, RY(row), "Netmask:", DARK_GRAY, 2);
+    char nm_str[20];
+    sprintf(nm_str, "%d.%d.%d.%d", g_cfg.netmask[0], g_cfg.netmask[1], g_cfg.netmask[2], g_cfg.netmask[3]);
+    draw_string(px + VAL_X - 30, RY(row), nm_str, BLACK, 2);
+    row++;
+
+    row++;
+    draw_string(px + LBL_X, RY(row), "-- DNS --", LIGHT_CYAN, 2);
+    row++;
+
+    draw_string(px + LBL_X, RY(row), "DNS Server:", DARK_GRAY, 2);
+    char dns_str[20];
+    sprintf(dns_str, "%d.%d.%d.%d", g_cfg.dns_server[0], g_cfg.dns_server[1], g_cfg.dns_server[2], g_cfg.dns_server[3]);
+    draw_string(px + VAL_X - 30, RY(row), dns_str, BLACK, 2);
+    row++;
+#undef RY
+}
+
 // ── Main draw ─────────────────────────────────────────────────────────────
 
 static void settings_draw(window *win, void *ud) {
@@ -307,6 +357,9 @@ static void settings_draw(window *win, void *ud) {
         break;
     case TAB_SYSTEM:
         draw_system_tab(px, py);
+        break;
+    case TAB_NETWORK:
+        draw_network_tab(px, py);
         break;
     default:
         break;
@@ -451,6 +504,17 @@ static void handle_system_input(settings_state_t *s, int px, int py) {
 #undef RY
 }
 
+static void handle_network_input(settings_state_t *s, int px, int py) {
+    int row = 1; // skip header row
+#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
+    if (small_btn(px + VAL_X, RY(row) - 1, 24, 9,
+                  g_cfg.networking_enabled ? "Off" : "On", DARK_GRAY)) {
+        g_cfg.networking_enabled ^= 1;
+        s->dirty = true;
+    }
+#undef RY
+}
+
 // ── on_frame ──────────────────────────────────────────────────────────────
 
 static void settings_on_frame(void *state) {
@@ -505,6 +569,9 @@ static void settings_on_frame(void *state) {
             break;
         case TAB_SYSTEM:
             handle_system_input(s, px, py);
+            break;
+        case TAB_NETWORK:
+            handle_network_input(s, px, py);
             break;
         default:
             break;

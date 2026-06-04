@@ -21,7 +21,12 @@ typedef struct __attribute__((packed)) {
     uint8_t wallpaper_secondary_color;
     uint8_t filef_single_window;
     uint8_t reduce_motion;
-    uint8_t _reserved[53];
+    uint8_t networking_enabled;
+    uint8_t ip[4];
+    uint8_t gateway[4];
+    uint8_t netmask[4];
+    uint8_t dns_server[4];
+    uint8_t _reserved[36];
 } os_config_t;
 
 extern os_config_t g_cfg;

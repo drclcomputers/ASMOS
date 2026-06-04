@@ -21,6 +21,11 @@ void cfg_init_defaults(void) {
     g_cfg.wallpaper_secondary_color = LIGHT_CYAN;
     g_cfg.filef_single_window = 0;
     g_cfg.reduce_motion = 0;
+    g_cfg.networking_enabled = 1;
+    g_cfg.ip[0] = 10; g_cfg.ip[1] = 0; g_cfg.ip[2] = 2; g_cfg.ip[3] = 15;
+    g_cfg.gateway[0] = 10; g_cfg.gateway[1] = 0; g_cfg.gateway[2] = 2; g_cfg.gateway[3] = 2;
+    g_cfg.netmask[0] = 255; g_cfg.netmask[1] = 255; g_cfg.netmask[2] = 255; g_cfg.netmask[3] = 0;
+    g_cfg.dns_server[0] = 8; g_cfg.dns_server[1] = 8; g_cfg.dns_server[2] = 8; g_cfg.dns_server[3] = 8;
 }
 
 bool cfg_load(void) {

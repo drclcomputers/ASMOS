@@ -1,5 +1,8 @@
 #include "os/error.h"
 #include "config/config.h"
+#include "config/runtime_config.h"
+#include "drivers/gpu.h"
+#include "drivers/ne2000.h"
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
 #include "fs/ata.h"
@@ -86,9 +89,10 @@ static void boot_check_line(const char *label, bool ok, const char *detail) {
     boot_puts("  ", WHITE);
     boot_puts(ok ? "[ OK ] " : "[FAIL] ", ok ? LIGHT_GREEN : LIGHT_RED);
     boot_puts(label, WHITE);
-    if (!ok && detail) {
+    if (detail) {
         boot_puts(": ", WHITE);
-        boot_puts(detail, LIGHT_RED);
+        uint8_t detail_color = ok ? LIGHT_GREEN : LIGHT_RED;
+        boot_puts(detail, detail_color);
     }
     boot_puts("\n", WHITE);
 }
@@ -272,7 +276,35 @@ void boot_check_graphics(void) {
 
     // Mode 13h or X
     if (g_video_mode == 0)
-        boot_check_line("RESMODE = 320 x 200", true, "GPU is fried :(");
+        boot_check_line("Resolution = 320 x 200", true, NULL);
     else
-        boot_check_line("RESMODE = 640 x 400", true, "GPU is fried :(");
+        boot_check_line("Resolution = 640 x 400", true, NULL);
+}
+
+void boot_check_network(void) {
+    boot_puts("Network\n", LIGHT_GRAY);
+
+    // Check if networking is enabled in config
+    bool enabled = g_cfg.networking_enabled;
+    boot_check_line("Networking enabled", enabled,
+                    enabled ? NULL : "disabled in config");
+
+    if (!enabled) {
+        boot_check_line("NE2000 card", false, "skipped - networking disabled");
+        return;
+    }
+
+    // Check if NE2000 card is detected
+    bool ne2k_ok = ne2000_detected();
+
+    if (ne2k_ok) {
+        uint8_t mac[6];
+        ne2000_get_mac(mac);
+        char mac_str[32];
+        sprintf(mac_str, "detected - MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1],
+                mac[2], mac[3], mac[4], mac[5]);
+        boot_check_line("NE2000 card", true, mac_str);
+    } else {
+        boot_check_line("NE2000 card", false, "not found");
+    }
 }

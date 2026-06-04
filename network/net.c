@@ -434,6 +434,12 @@ static void net_rx_process(const uint8_t *frame, uint16_t len) {
 }
 
 void net_init(void) {
+    static const uint8_t def_ip[4] = {10, 0, 2, 15};
+    static const uint8_t def_gw[4] = {10, 0, 2, 2};
+    static const uint8_t def_nm[4] = {255, 255, 255, 0};
+    memcpy(s_ip, def_ip, 4);
+    memcpy(s_gw, def_gw, 4);
+    memcpy(s_nm, def_nm, 4);
     s_socks = (net_socket_t *)kzalloc(NET_MAX_SOCKETS * sizeof(net_socket_t));
     s_rx_queue = (rx_pkt_t *)kzalloc(RX_QUEUE_SIZE * sizeof(rx_pkt_t));
     memset(s_arp_cache, 0, sizeof(s_arp_cache));

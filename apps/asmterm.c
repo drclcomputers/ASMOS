@@ -409,7 +409,7 @@ static void on_file_close(void) { asmterm_close(NULL); }
 static void on_about(void) {
     modal_show(
         MODAL_INFO, "About ASMTerm",
-        "ASMTerm v1.1\nASMOS Terminal\nBinary I/O via context callbacks.", NULL,
+        "ASMTerm v1.1", NULL,
         NULL);
 }
 

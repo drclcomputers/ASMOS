@@ -432,8 +432,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_clock(out_buffer, max_len);
     else if (!strcmp(command, "shutdown"))
         cmd_shutdown(argument, out_buffer, max_len);
-    else if (!strcmp(command, "restart"))
-        cmd_restart(argument, out_buffer, max_len);
+    else if (!strcmp(command, "reboot"))
+        cmd_reboot(argument, out_buffer, max_len);
     else if (!strcmp(command, "df"))
         cmd_df(out_buffer, max_len);
     else if (!strcmp(command, "mem"))

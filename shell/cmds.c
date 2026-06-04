@@ -2,6 +2,7 @@
 
 #include "fs/fs.h"
 
+#include "config/runtime_config.h"
 #include "drivers/ne2000.h"
 #include "lib/cpu.h"
 #include "lib/memory.h"
@@ -23,7 +24,7 @@ void cmd_help(char *out, size_t max) {
 
     append(out, max, "  help          - This message\n");
     append(out, max, "  clear         - Clear screen\n");
-    append(out, max, "  exit          - Exit CLI\n\n");
+    append(out, max, "  exit          - Exit CLI/ASMTerm\n\n");
 
     append(out, max, "  pwd           - Working directory\n");
     append(out, max, "  cd <d>        - Change directory\n");
@@ -48,7 +49,7 @@ void cmd_help(char *out, size_t max) {
     append(out, max, "  sysinfo       - CPU model and uptime\n\n");
 
     append(out, max, "  shutdown [s]  - Shut down (optional delay)\n");
-    append(out, max, "  restart [s]   - Restart (optional delay)\n\n");
+    append(out, max, "  reboot [s]    - Reboot (optional delay)\n\n");
 
     append(out, max, "  asm <f> [out] - Assemble .ASM -> .BIN\n");
     append(out, max, "  run <f>       - Execute flat .BIN binary\n\n");
@@ -453,19 +454,19 @@ void cmd_shutdown(const char *args, char *out, size_t max) {
     cpu_shutdown();
 }
 
-void cmd_restart(const char *args, char *out, size_t max) {
+void cmd_reboot(const char *args, char *out, size_t max) {
     uint32_t delay_s = 0;
     if (args && args[0] != '\0')
         delay_s = (uint32_t)str_to_int(args);
     if (delay_s > 0) {
         char tmp[48];
-        sprintf(tmp, "Restarting in %u seconds...\n", delay_s);
+        sprintf(tmp, "Rebooting in %u seconds...\n", delay_s);
         append(out, max, tmp);
         term_buf_push_text(out);
         out[0] = '\0';
         sleep_s(delay_s);
     }
-    append(out, max, "Restarting...\n");
+    append(out, max, "Rebooting...\n");
     term_buf_push_text(out);
     out[0] = '\0';
     sleep_s(1);
@@ -527,6 +528,10 @@ void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max) {
         append(out, max, "Usage: gopher <host|ip> [port] [selector]\n\n");
         return;
     }
+    if (!g_cfg.networking_enabled) {
+        append(out, max, "Error: networking is disabled\n\n");
+        return;
+    }
     if (!ne2000_detected()) {
         append(out, max, "Error: no network card detected\n\n");
         return;
@@ -586,6 +591,11 @@ void cmd_ping(const char *args, char *out, size_t max) {
         return;
     }
 
+    if (!g_cfg.networking_enabled) {
+        append(out, max, "Error: networking is disabled\n\n");
+        return;
+    }
+
     char host[64];
     int i = 0;
     while (args[i] == ' ')
@@ -627,6 +637,13 @@ void cmd_ping(const char *args, char *out, size_t max) {
 }
 
 void cmd_netconf(const char *args, char *out, size_t max) {
+    (void)args;
+
+    if (!g_cfg.networking_enabled) {
+        append(out, max, "Networking is disabled\n\n");
+        return;
+    }
+
     uint8_t mac[6];
     ne2000_get_mac(mac);
     append(out, max, "NE2000 detected\n\n");

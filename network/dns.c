@@ -6,9 +6,12 @@
 #include "network/net.h"
 
 #define DNS_PKT_SIZE 512
+#define DNS_LOCAL_BASE 49160
+#define DNS_LOCAL_COUNT 8
 
-static uint8_t s_dns_server[4] = {10, 0, 2, 3};
+static uint8_t s_dns_server[4] = {8, 8, 8, 8};
 static uint16_t s_dns_txn_id = 0x1234;
+static uint16_t s_dns_local_port = DNS_LOCAL_BASE;
 
 void dns_set_server(const uint8_t ip[4]) {
     if (ip)
@@ -56,7 +59,7 @@ static uint16_t skip_name(const uint8_t *pkt, uint16_t pkt_len, uint16_t pos) {
         if (len > 63)
             return 0;
         pos += len + 1;
-        if (pos >= pkt_len)
+        if (pos > pkt_len)
             return 0;
     }
     return 0;
@@ -66,6 +69,7 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
     if (!hostname)
         return false;
 
+    /* Fast path: dotted decimal */
     bool all_digits = true;
     int dots = 0;
     for (int i = 0; hostname[i]; i++) {
@@ -106,13 +110,13 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
     bool found = false;
 
     for (int attempt = 0; attempt < DNS_RETRIES && !found; attempt++) {
-            memset(pkt, 0, DNS_PKT_SIZE);
-            pkt[0] = (uint8_t)(s_dns_txn_id >> 8);
-            pkt[1] = (uint8_t)(s_dns_txn_id & 0xFF);
-            pkt[2] = 0x00; /* Flags high byte */
-            pkt[3] = 0x01; /* Flags low byte - RD bit set */
-            pkt[4] = 0x00;
-            pkt[5] = 0x01; /* QDCOUNT = 1 */
+        memset(pkt, 0, DNS_PKT_SIZE);
+        pkt[0] = (uint8_t)(s_dns_txn_id >> 8);
+        pkt[1] = (uint8_t)(s_dns_txn_id & 0xFF);
+        pkt[2] = 0x00;
+        pkt[3] = 0x01; /* RD */
+        pkt[4] = 0x00;
+        pkt[5] = 0x01; /* QDCOUNT=1 */
 
         uint16_t pos = 12;
         uint16_t name_len =
@@ -123,11 +127,14 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
         }
         pos += name_len;
         pkt[pos++] = 0x00;
-        pkt[pos++] = 0x01; /* QTYPE A  */
+        pkt[pos++] = 0x01; /* QTYPE  A  */
         pkt[pos++] = 0x00;
         pkt[pos++] = 0x01; /* QCLASS IN */
 
-        int sock = udp_open(DNS_LOCAL);
+        /* Rotate local port to avoid TIME_WAIT collisions */
+        uint16_t local =
+            DNS_LOCAL_BASE + (s_dns_local_port++ % DNS_LOCAL_COUNT);
+        int sock = udp_open(local);
         if (sock < 0) {
             s_dns_txn_id++;
             continue;
@@ -139,9 +146,15 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
             continue;
         }
 
+        /* Drain the NIC ring aggressively — QEMU usermode reply may be
+           queued behind ARP or other frames already in the rx buffer. */
         uint32_t deadline = time_millis() + DNS_TIMEOUT_MS;
         int rlen = 0;
         while (time_millis() < deadline) {
+            /* Drain as many frames as the NIC has waiting */
+            net_poll();
+            net_poll();
+            net_poll();
             net_poll();
             rlen = udp_recv(sock, resp, DNS_PKT_SIZE, NULL, NULL);
             if (rlen > 12)
@@ -180,7 +193,7 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
             s_dns_txn_id++;
             continue;
         }
-        pos += 4;
+        pos += 4; /* skip QTYPE + QCLASS */
 
         for (uint16_t a = 0; a < ancount; a++) {
             pos = skip_name(resp, (uint16_t)rlen, pos);

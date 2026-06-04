@@ -68,5 +68,6 @@ void boot_check_fat(void);
 void boot_check_heap(void);
 void boot_check_sound(void);
 void boot_check_graphics(void);
+void boot_check_network(void);
 
 #endif
