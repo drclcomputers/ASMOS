@@ -34,8 +34,6 @@ static void idt_set_gate(uint8_t n, uint32_t handler) {
     idt[n].type_attr = 0x8E;
 }
 
-static void idt_set_gate_pub(uint8_t n, uint32_t h) { idt_set_gate(n, h); }
-
 static void pic_remap(void) {
     uint8_t m1 = inb(PIC1_DATA);
     uint8_t m2 = inb(PIC2_DATA);
@@ -70,8 +68,6 @@ static void pit_init(void) {
     outb(PIT_CMD, 0x36);             // Counter 0, LSB/MSB, Mode 3
     outb(PIT_CHANNEL0, PIT_DIVISOR & 0xFF); // LSB
     outb(PIT_CHANNEL0, PIT_DIVISOR >> 8);
-    idt_set_gate(32 + 5, (uint32_t)isr_sb16);
-    idt_set_gate(32 + 3, (uint32_t)isr_ne2000);
 }
 
 void idt_init(void) {
@@ -81,8 +77,10 @@ void idt_init(void) {
     for (int i = 0; i < IDT_SIZE; i++)
         idt_set_gate(i, spurious_addr);
 
-    appguard_install_gates(idt_set_gate_pub);
+    appguard_install_gates(idt_set_gate);
     idt_set_gate(IRQ0_VECTOR, (uint32_t)isr_timer);
+    idt_set_gate(IRQ0_VECTOR + 3, (uint32_t)isr_ne2000);
+    idt_set_gate(IRQ0_VECTOR + 5, (uint32_t)isr_sb16);
 
     idt_ptr.limit = sizeof(idt) - 1;
     idt_ptr.base = (uint32_t)idt;

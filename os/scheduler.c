@@ -2,7 +2,8 @@
 #include "os/error.h"
 #include "os/os.h"
 
-#include "lib/device.h"
+#include "drivers/serial.h"
+#include "drivers/speaker.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -10,7 +11,7 @@
 
 #include "config/config.h"
 #include "drivers/opl2.h"
-#include "io/ps2.h"
+#include "drivers/ps2.h"
 #include "network/net.h"
 #include "ui/ui.h"
 
@@ -223,7 +224,7 @@ void scheduler_kernel_task(void) {
 
         if (!modal_active()) {
             menubar_update(&g_menubar);
-            os_tick_apps_direct();
+            os_tick_apps();
             wm_update_all();
         }
 

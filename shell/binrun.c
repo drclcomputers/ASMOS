@@ -187,7 +187,3 @@ void cmd_run(term_context_t *ctx, const char *path, char *out, size_t max) {
     }
     do_run(ctx, path, out, max);
 }
-
-void cmd_run_cli(const char *path, char *out, size_t max) {
-    cmd_run(NULL, path, out, max);
-}

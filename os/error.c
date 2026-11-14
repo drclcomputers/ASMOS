@@ -5,15 +5,14 @@
 #include "drivers/ne2000.h"
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
-#include "fs/ata.h"
+#include "drivers/ata.h"
 #include "fs/fs.h"
 #include "lib/core.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "ui/modal.h"
 
-extern void modal_show(int type, const char *title, const char *message,
-                       void (*on_confirm)(void), void (*on_cancel)(void));
 
 static bool s_gui_mode = false;
 

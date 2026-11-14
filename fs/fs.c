@@ -1,7 +1,7 @@
 #include "fs/fs.h"
-#include "fs/ata.h"
+#include "drivers/ata.h"
 #include "fs/fat_io.h"
-#include "fs/fdd.h"
+#include "drivers/fdd.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -1535,4 +1535,53 @@ bool fs_is_hidden(const char *path) {
     if (!fs_find(path, &de))
         return false;
     return (de.attr & ATTR_HIDDEN) != 0;
+}
+
+/* ── 8.3 name validation (used by desktop + FileF dialogs) ───────────── */
+bool fs_name_char_ok(char c) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9'))
+        return true;
+    const char *ok = "!#$%&'()-@^_`{}~";
+    for (int i = 0; ok[i]; i++)
+        if (c == ok[i])
+            return true;
+    return false;
+}
+
+bool fs_validate_name(const char *n, bool is_dir, const char **err) {
+    if (!n || !n[0]) {
+        *err = "Name cannot be empty.";
+        return false;
+    }
+    const char *dot = strchr(n, '.');
+    int base_len = dot ? (int)(dot - n) : (int)strlen(n);
+    int ext_len = dot ? (int)strlen(dot + 1) : 0;
+    if (is_dir && ext_len > 0) {
+        *err = "Folder: no extension.";
+        return false;
+    }
+    if (ext_len > 3) {
+        *err = "Extension too long (max 3).";
+        return false;
+    }
+    if (base_len == 0) {
+        *err = "Base name empty.";
+        return false;
+    }
+    if (base_len > 8) {
+        *err = "Base name too long (8).";
+        return false;
+    }
+    for (int i = 0; i < base_len; i++)
+        if (!fs_name_char_ok(n[i])) {
+            *err = "Invalid character.";
+            return false;
+        }
+    for (int i = 0; i < ext_len; i++)
+        if (!fs_name_char_ok(dot[1 + i])) {
+            *err = "Invalid ext char.";
+            return false;
+        }
+    return true;
 }

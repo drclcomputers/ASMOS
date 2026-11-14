@@ -1,13 +1,14 @@
 #include "ui/modal.h"
 
-#include "lib/device.h"
+#include "drivers/serial.h"
+#include "drivers/speaker.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 
 #include "config/config.h"
 #include "interrupts/idt.h"
-#include "io/mouse.h"
+#include "drivers/mouse.h"
 
 #define MODAL_W 220
 #define MODAL_H 110

@@ -1,6 +1,6 @@
 #include "network/gopher.h"
 #include "fs/fs.h"
-#include "io/keyboard.h"
+#include "drivers/keyboard.h"
 #include "lib/core.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -17,7 +17,7 @@
 #define MAX_LINES 200
 #define FETCH_BUF_SIZE 32768
 #define HIST_MAX 16
-#define PAGE_SIZE 18
+#define GOPHER_PAGE_LINES 18
 
 typedef struct {
     char type;
@@ -371,7 +371,7 @@ static void print_page(gopher_ctx_t *g, term_context_t *ctx) {
 
     gopher_print(ctx, "UP/DOWN:move  ENTER:open  d:save  b:back  q:quit");
 
-    int end = g->scroll + PAGE_SIZE;
+    int end = g->scroll + GOPHER_PAGE_LINES;
     if (end > g->line_count)
         end = g->line_count;
 
@@ -458,8 +458,8 @@ static void cursor_set(gopher_ctx_t *g, int pos) {
     g->cursor = pos;
     if (g->cursor < g->scroll)
         g->scroll = g->cursor;
-    if (g->cursor >= g->scroll + PAGE_SIZE)
-        g->scroll = g->cursor - PAGE_SIZE + 1;
+    if (g->cursor >= g->scroll + GOPHER_PAGE_LINES)
+        g->scroll = g->cursor - GOPHER_PAGE_LINES + 1;
     if (g->scroll < 0)
         g->scroll = 0;
 }
@@ -544,11 +544,11 @@ static void gopher_session(term_context_t *ctx, gopher_ctx_t *g,
             print_page(g, ctx);
 
         } else if (c == PAGE_UP) {
-            cursor_set(g, g->cursor - PAGE_SIZE);
+            cursor_set(g, g->cursor - GOPHER_PAGE_LINES);
             print_page(g, ctx);
 
         } else if (c == PAGE_DOWN) {
-            cursor_set(g, g->cursor + PAGE_SIZE);
+            cursor_set(g, g->cursor + GOPHER_PAGE_LINES);
             print_page(g, ctx);
 
         } else if (c == 'q' || c == 'Q') {

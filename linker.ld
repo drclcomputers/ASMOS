@@ -3,7 +3,7 @@ SECTIONS {
     . = 0x10000;
 
     .text : {
-        build/loader.o(.text)
+        build/boot/loader.o(.text)
         build/interrupts/interrupt.o(.text)
         *(.text)
     }

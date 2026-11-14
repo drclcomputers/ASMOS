@@ -148,20 +148,6 @@ void arp_request(const uint8_t ip[4]) {
 
 void arp_announce(void) { arp_request(s_ip); }
 
-static void arp_insert(const uint8_t ip[4], const uint8_t mac[6]) {
-    for (int i = 0; i < ARP_CACHE_SIZE; i++) {
-        if (!s_arp_cache[i].valid || memcmp(s_arp_cache[i].ip, ip, 4) == 0) {
-            memcpy(s_arp_cache[i].ip, ip, 4);
-            memcpy(s_arp_cache[i].mac, mac, 6);
-            s_arp_cache[i].valid = true;
-            return;
-        }
-    }
-    memcpy(s_arp_cache[0].ip, ip, 4);
-    memcpy(s_arp_cache[0].mac, mac, 6);
-    s_arp_cache[0].valid = true;
-}
-
 void arp_cache_insert(const uint8_t ip[4], const uint8_t mac[6]) {
     for (int i = 0; i < ARP_CACHE_SIZE; i++) {
         if (s_arp_cache[i].valid && memcmp(s_arp_cache[i].ip, ip, 4) == 0) {

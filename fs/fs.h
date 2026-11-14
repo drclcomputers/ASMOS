@@ -136,6 +136,9 @@ bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf);
 bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
 
 void fs_make_83(const char *filename, char *out83);
+bool fs_name_char_ok(char c);
+/* Validate a user-typed 8.3 name; on failure *err gets a short message. */
+bool fs_validate_name(const char *name, bool is_dir, const char **err);
 bool fs_resolve(const char *path, uint8_t *out_drive,
                 uint16_t *out_parent_cluster, char out_name83[12]);
 bool fs_chdir(const char *path);

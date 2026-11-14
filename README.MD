@@ -31,7 +31,7 @@ Clean build artifacts:
 BOOT SEQUENCE
 =============================================================================
 
-Stage 1 (boot.asm, 512 bytes)
+Stage 1 (boot/boot.asm, 512 bytes)
   - Real mode, 16-bit x86
   - BIOS loads sector 0 to 0x7C00
   - Sets up stack at 0x7000
@@ -41,7 +41,7 @@ Stage 1 (boot.asm, 512 bytes)
   - Handles flaky real hardware with retry logic
   - Reads video mode flag from 0x0602 to decide between Mode 13h or Mode X
 
-Stage 2 (boot_stage2.asm, ~4KB)
+Stage 2 (boot/boot_stage2.asm, ~4KB)
   - Real mode, 16-bit x86
   - Sets up video: either 320x200 (Mode 13h, linear) or 640x400 (Mode X, planar)
   - Detects extended memory (INT 15h AH=88h), stores total RAM at 0x0500
@@ -49,7 +49,7 @@ Stage 2 (boot_stage2.asm, ~4KB)
   - Loads GDT and switches to 32-bit protected mode
   - Jumps to 32-bit kernel entry (0x10000)
 
-Loader (loader.asm, 32-bit)
+Loader (boot/loader.asm, 32-bit)
   - Sets up flat memory model (16-bit selectors map to full 4GB)
   - Clears BSS section
   - Sets up kernel stack (64KB, just below VGA at 0xA0000)
@@ -174,12 +174,12 @@ OPL2 (opl2.c):
 FILESYSTEM DRIVERS
 =============================================================================
 
-ATA (fs/ata.c):
+ATA (drivers/ata.c):
   - IDE/ATA hard drive support
   - PIO mode (no DMA)
   - INT 13h for CHS access
 
-Floppy Drive (fs/fdd.c):
+Floppy Drive (drivers/fdd.c):
   - 3.5" floppy drive support
   - 1.44MB standard format
   - INT 13h
@@ -342,22 +342,24 @@ Testing new code:
 SOURCE TREE
 =============================================================================
 
-boot.asm, boot_stage2.asm, loader.asm     Boot stages and loader
-kernel.c                                   Main kernel entry
-linker.ld                                  Linker script
+kernel.c              Main kernel entry
+linker.ld             Linker script
 
-os/                   Core OS (scheduler, tasks, error handling)
+boot/                 Boot stages (boot.asm, boot_stage2.asm) and loader.asm
+os/                   Core OS (apps, scheduler, fault guard, error handling)
 interrupts/           IDT setup and interrupt handlers
-io/                   PS/2 keyboard and mouse
-drivers/              Hardware drivers (GPU, sound, NIC)
-fs/                   Filesystem and storage drivers
+drivers/              All hardware drivers: GPU, sound, NIC, ATA, floppy,
+                      PS/2 keyboard/mouse, PC speaker, serial
+fs/                   FAT filesystem (+ floppy mount/eject)
 ui/                   Window manager, desktop, widgets
-shell/                CLI shell and commands
+shell/                CLI shell, commands, built-in assembler
 apps/                 Bundled applications
-lib/                  Utility libraries (memory, string, time, etc.)
-config/               Runtime configuration
+lib/                  Freestanding libs (memory, string, math, time, graphics)
+config/               Compile-time + persisted runtime configuration
 fonts/                Font data for text rendering
 network/              TCP/IP stack, DNS, Gopher client
+
+The makefile builds every .c in those dirs automatically.
 
 
 ![Desktop with file manager and icon shortcuts](resources/3.png)

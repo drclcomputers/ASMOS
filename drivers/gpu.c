@@ -3,7 +3,6 @@
 #include "lib/core.h"
 #include "lib/memory.h"
 
-extern int g_video_mode;
 
 #define MODEX_FB 0x000A0000U
 #define VGA_SEQ_ADDR 0x03C4

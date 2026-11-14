@@ -1,12 +1,13 @@
 #ifndef OS_APPAPI_H
 #define OS_APPAPI_H
 
-/* Stable function table handed to v2 .APP packages as arg 0 of
+/* For DYNAMIC .APP packages only (built-in apps use os/api.h).
+ * Stable function table handed to v2 .APP packages as arg 0 of
  * init/on_frame/destroy.  Apps must NOT reference kernel symbols directly
  * (the flat binary has no linker access to them) – go through this table.
  * Only ever append new members; bump `size`, not `version`. */
 
-#include "io/mouse.h"
+#include "drivers/mouse.h"
 #include "lib/core.h"
 #include "ui/window.h"
 

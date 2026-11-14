@@ -15,18 +15,20 @@
 
 #include "fs/fdd_ctrl.h"
 #include "lib/core.h"
-#include "lib/device.h"
+#include "drivers/serial.h"
+#include "drivers/speaker.h"
+
+/* Defined in apps/filef.c (apps have no public headers). */
+void ff_open_dir_pub(uint16_t cluster, const char *path);
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
 
 #include "interrupts/idt.h"
-#include "io/keyboard.h"
-#include "io/mouse.h"
+#include "drivers/keyboard.h"
+#include "drivers/mouse.h"
 
-extern menubar g_menubar;
-extern bool g_menubar_click_consumed;
 
 /* ── wallpaper ──────────────────────────────────────────────────────────── */
 void draw_wallpaper_pattern(void) {
@@ -158,66 +160,6 @@ void power_anim_run(bool is_restart) {
     sleep_s(2);
 }
 
-/* ── name validation ────────────────────────────────────────────────────── */
-static bool fat_char_ok(char c) {
-    if (c >= 'A' && c <= 'Z')
-        return true;
-    if (c >= 'a' && c <= 'z')
-        return true;
-    if (c >= '0' && c <= '9')
-        return true;
-    const char *ok = "!#$%&'()-@^_`{}~";
-    for (int i = 0; ok[i]; i++)
-        if (c == ok[i])
-            return true;
-    return false;
-}
-
-static bool validate_fat_name(const char *name_buf, bool is_dir,
-                              const char **err_msg) {
-    if (!name_buf || name_buf[0] == '\0') {
-        *err_msg = "Name cannot be empty.";
-        return false;
-    }
-    const char *dot = strchr(name_buf, '.');
-    int base_len, ext_len;
-    if (dot) {
-        base_len = (int)(dot - name_buf);
-        ext_len = (int)strlen(dot + 1);
-        if (is_dir && ext_len > 0) {
-            *err_msg = "Folder: no extension.";
-            return false;
-        }
-        if (ext_len > 3) {
-            *err_msg = "Extension too long.";
-            return false;
-        }
-        for (int i = 0; i < ext_len; i++)
-            if (!fat_char_ok(dot[1 + i])) {
-                *err_msg = "Invalid ext char.";
-                return false;
-            }
-    } else {
-        base_len = (int)strlen(name_buf);
-        ext_len = 0;
-    }
-    if (base_len == 0) {
-        *err_msg = "Base name empty.";
-        return false;
-    }
-    if (base_len > 8) {
-        *err_msg = "Base name too long (8).";
-        return false;
-    }
-    for (int i = 0; i < base_len; i++)
-        if (!fat_char_ok(name_buf[i])) {
-            *err_msg = "Invalid character.";
-            return false;
-        }
-    (void)ext_len;
-    return true;
-}
-
 /* ── dialog state ───────────────────────────────────────────────────────── */
 
 #define DESK_MODE_NORMAL 0
@@ -303,7 +245,6 @@ static void open_item(desktop_item_t *it) {
             modal_show(MODAL_INFO, "App Not Found", msg, NULL, NULL);
         }
     } else if (it->kind == DESKTOP_ITEM_DIR) {
-        extern void ff_open_dir_pub(uint16_t cluster, const char *path);
         dir_entry_t de;
         uint16_t saved = dir_context.current_cluster;
         dir_context.current_cluster = desktop_fs_cluster();
@@ -315,7 +256,6 @@ static void open_item(desktop_item_t *it) {
             ff_open_dir_pub(de.cluster_lo, path);
         }
     } else if (it->kind == DESKTOP_ITEM_FDD || it->kind == DESKTOP_ITEM_HDD) {
-        extern void ff_open_dir_pub(uint16_t cluster, const char *path);
         const char *vfs_path = NULL;
         for (int m = 0; m < VFS_MOUNT_COUNT; m++) {
             if (g_vfs_mounts[m].drive_id == it->drive_id) {
@@ -326,7 +266,6 @@ static void open_item(desktop_item_t *it) {
         if (vfs_path && fs_drive_mounted(it->drive_id))
             ff_open_dir_pub(0, vfs_path);
     } else {
-        extern void ff_open_dir_pub(uint16_t cluster, const char *path);
         ff_open_dir_pub(desktop_fs_cluster(), desktop_fs_path());
     }
 }
@@ -338,7 +277,7 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     int ay = DESK_ORIGIN_Y + it->y;
 
     if (dragged_ghost) {
-        draw_rect(ax, ay, ICO_W, ICO_H, DARK_GRAY);
+        draw_rect(ax, ay, ICON_W, ICON_H, DARK_GRAY);
         return;
     }
 
@@ -382,8 +321,8 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     disp[dlen] = '\0';
 
     int lw = dlen * ICO_LABEL_W;
-    int lx = ax + ICO_W / 2 - lw / 2;
-    int ly = ay + ICO_H + 2;
+    int lx = ax + ICON_W / 2 - lw / 2;
+    int ly = ay + ICON_H + 2;
 
     uint8_t label_col = is_cut ? DARK_GRAY : WHITE;
     draw_string(lx + 1, ly + 1, disp, BLACK, 2);
@@ -398,8 +337,8 @@ static int desktop_hit(int mx, int my) {
             continue;
         int ax = DESK_ORIGIN_X + items[i].x;
         int ay = DESK_ORIGIN_Y + items[i].y;
-        if (mx >= ax && mx < ax + ICO_W && my >= ay &&
-            my < ay + ICO_H + ICO_LABEL_H + 2)
+        if (mx >= ax && mx < ax + ICON_W && my >= ay &&
+            my < ay + ICON_H + ICO_LABEL_H + 2)
             return i;
     }
     return -1;
@@ -498,77 +437,42 @@ static void menu_rename(void) {
 }
 static void menu_reload(void) { desktop_fs_set_dirty(); }
 
-static void menu_copy(void) {
+/* Copy (is_cut=false) or cut the selected item to the file clipboard. */
+static void clip_selected(bool is_cut) {
+    const char *title = is_cut ? "Cut" : "Copy";
     int sel = selected_idx();
     if (sel < 0) {
-        modal_show(MODAL_ERROR, "Copy", "Nothing selected.", NULL, NULL);
+        modal_show(MODAL_ERROR, title, "Nothing selected.", NULL, NULL);
         return;
     }
     desktop_item_t *it = &desktop_fs_items()[sel];
     if (path_is_protected(it->name)) {
-        modal_show(MODAL_ERROR, "Copy", "Protected item.", NULL, NULL);
+        modal_show(MODAL_ERROR, title, "Protected item.", NULL, NULL);
         return;
     }
 
+    /* App icons are backed by NAME.APP on disk. */
     char disk_name[16];
     if (it->kind == DESKTOP_ITEM_APP) {
         int fi = 0;
         for (int k = 0; it->name[k] && fi < 8; k++) {
             char c = it->name[k];
-            if (c >= 'a' && c <= 'z')
-                c -= 32;
-            disk_name[fi++] = c;
+            disk_name[fi++] = (c >= 'a' && c <= 'z') ? c - 32 : c;
         }
-        disk_name[fi++] = '.';
-        disk_name[fi++] = 'A';
-        disk_name[fi++] = 'P';
-        disk_name[fi++] = 'P';
-        disk_name[fi] = '\0';
+        strcpy(disk_name + fi, ".APP");
     } else {
         strncpy(disk_name, it->name, 15);
         disk_name[15] = '\0';
     }
 
     clipboard_set_file(desktop_fs_path(), disk_name,
-                       it->kind == DESKTOP_ITEM_DIR, false, DRIVE_HDA);
-    modal_show(MODAL_INFO, "Copy", "Item copied to clipboard.", NULL, NULL);
+                       it->kind == DESKTOP_ITEM_DIR, is_cut, DRIVE_HDA);
+    modal_show(MODAL_INFO, title,
+               is_cut ? "Item cut. Paste to move." : "Item copied to clipboard.",
+               NULL, NULL);
 }
-
-static void menu_cut(void) {
-    int sel = selected_idx();
-    if (sel < 0) {
-        modal_show(MODAL_ERROR, "Cut", "Nothing selected.", NULL, NULL);
-        return;
-    }
-    desktop_item_t *it = &desktop_fs_items()[sel];
-    if (path_is_protected(it->name)) {
-        modal_show(MODAL_ERROR, "Cut", "Protected item.", NULL, NULL);
-        return;
-    }
-
-    char disk_name[16];
-    if (it->kind == DESKTOP_ITEM_APP) {
-        int fi = 0;
-        for (int k = 0; it->name[k] && fi < 8; k++) {
-            char c = it->name[k];
-            if (c >= 'a' && c <= 'z')
-                c -= 32;
-            disk_name[fi++] = c;
-        }
-        disk_name[fi++] = '.';
-        disk_name[fi++] = 'A';
-        disk_name[fi++] = 'P';
-        disk_name[fi++] = 'P';
-        disk_name[fi] = '\0';
-    } else {
-        strncpy(disk_name, it->name, 15);
-        disk_name[15] = '\0';
-    }
-
-    clipboard_set_file(desktop_fs_path(), disk_name,
-                       it->kind == DESKTOP_ITEM_DIR, true, DRIVE_HDA);
-    modal_show(MODAL_INFO, "Cut", "Item cut. Paste to move.", NULL, NULL);
-}
+static void menu_copy(void) { clip_selected(false); }
+static void menu_cut(void) { clip_selected(true); }
 
 static void menu_paste(void) {
     if (!clipboard_has_file()) {
@@ -633,7 +537,6 @@ static void menu_delete(void) {
     modal_show(MODAL_CONFIRM, "Confirm Delete", msg, do_delete, NULL);
 }
 
-static void menu_sort_name(void) { desktop_fs_set_dirty(); }
 static void menu_about_os(void) {
     char x[200];
     sprintf(x,
@@ -689,7 +592,7 @@ static void menu_insert_fdd(void) {
 /* ── new name / rename dialog * ─────────────────────────────────────────── */
 static void handle_newname(void) {
     const char *err = NULL;
-    if (!validate_fat_name(s_newname_buf, s_newname_is_dir, &err)) {
+    if (!fs_validate_name(s_newname_buf, s_newname_is_dir, &err)) {
         s_mode = DESK_MODE_NORMAL;
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
@@ -725,7 +628,6 @@ static void draw_newname_dialog(void) {
     fill_rect(bx + 4, by + 14, bw - 8, 12, WHITE);
     draw_rect(bx + 4, by + 14, bw - 8, 12, BLACK);
     draw_string(bx + 6, by + 16, s_newname_buf, BLACK, 2);
-    extern volatile uint32_t pit_ticks;
     if ((pit_ticks / 500) % 2 == 0) {
         int cx = bx + 6 + s_newname_len * CHAR_W;
         if (cx < bx + bw - 10)
@@ -745,7 +647,6 @@ static void draw_rename_dialog(void) {
     draw_rect(bx + 4, by + 14, bw - 8, 12, BLACK);
 
     draw_string(bx + 6, by + 16, s_rename_buf, BLACK, 2);
-    extern volatile uint32_t pit_ticks;
     if ((pit_ticks / 500) % 2 == 0) {
         int cx = bx + 6 + s_rename_len * CHAR_W;
         if (cx < bx + bw - 10)
@@ -843,7 +744,7 @@ void desktop_on_frame(void) {
             } else if (kb.last_char >= 32 && kb.last_char < 127 &&
                        s_newname_len < 12) {
                 char c = kb.last_char;
-                bool allow = fat_char_ok(c) || (c == '.' && !s_newname_is_dir);
+                bool allow = fs_name_char_ok(c) || (c == '.' && !s_newname_is_dir);
                 if (allow) {
                     s_newname_buf[s_newname_len++] = c;
                     s_newname_buf[s_newname_len] = '\0';
@@ -892,12 +793,12 @@ void desktop_on_frame(void) {
                 new_x = 0;
             if (new_y < 0)
                 new_y = 0;
-            if (new_x > SCREEN_WIDTH - ICO_W)
-                new_x = SCREEN_WIDTH - ICO_W;
+            if (new_x > SCREEN_WIDTH - ICON_W)
+                new_x = SCREEN_WIDTH - ICON_W;
             if (new_y >
-                SCREEN_HEIGHT - MENUBAR_H - ICO_H - ICO_LABEL_H - TASKBAR_H)
+                SCREEN_HEIGHT - MENUBAR_H - ICON_H - ICO_LABEL_H - TASKBAR_H)
                 new_y =
-                    SCREEN_HEIGHT - MENUBAR_H - ICO_H - ICO_LABEL_H - TASKBAR_H;
+                    SCREEN_HEIGHT - MENUBAR_H - ICON_H - ICO_LABEL_H - TASKBAR_H;
             it->x = new_x;
             it->y = new_y;
         } else {
@@ -912,8 +813,8 @@ void desktop_on_frame(void) {
                 continue;
             int ax = DESK_ORIGIN_X + items[i].x;
             int ay = DESK_ORIGIN_Y + items[i].y;
-            if (mouse.x >= ax && mouse.x < ax + ICO_W && mouse.y >= ay &&
-                mouse.y < ay + ICO_H) {
+            if (mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay &&
+                mouse.y < ay + ICON_H) {
                 if (mouse.dx != 0 || mouse.dy != 0) {
                     s_drag_off_x = mouse.x - ax;
                     s_drag_off_y = mouse.y - ay;

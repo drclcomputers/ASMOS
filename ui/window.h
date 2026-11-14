@@ -86,6 +86,7 @@ extern window *focused_window;
 
 bool is_desktop_focused();
 
+void wm_init(void);
 window *wm_register(const window_spec_t *spec);
 
 void wm_unregister(window *win);

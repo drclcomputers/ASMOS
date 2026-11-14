@@ -454,7 +454,6 @@ static void hv_draw_hex(window *win, void *ud) {
             show = s->fname_buf + (s->fname_len - mc);
         draw_string(fldx + 2, by + 15, (char *)show, BLACK, 2);
 
-        extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 500) % 2 == 0) {
             int vis = s->fname_len < mc ? s->fname_len : mc;
             int cx = fldx + 2 + vis * CHAR_W;

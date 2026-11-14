@@ -5,8 +5,8 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 
-#include "io/keyboard.h"
-#include "io/mouse.h"
+#include "drivers/keyboard.h"
+#include "drivers/mouse.h"
 
 bool widget_textbox_ensure_buf(widget_textbox *tb) {
     if (tb->buf)

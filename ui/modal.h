@@ -1,5 +1,5 @@
-#ifndef MODAL_H
-#define MODAL_H
+#ifndef UI_MODAL_H
+#define UI_MODAL_H
 
 #include "lib/core.h"
 

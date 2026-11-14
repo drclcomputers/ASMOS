@@ -4,7 +4,8 @@
 #include "os/error.h"
 #include "os/scheduler.h"
 
-#include "lib/device.h"
+#include "drivers/serial.h"
+#include "drivers/speaker.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -15,7 +16,7 @@
 #include "ui/window.h"
 
 #include "config/config.h"
-#include "io/ps2.h"
+#include "drivers/ps2.h"
 
 menubar g_menubar;
 bool g_menubar_click_consumed = false;
@@ -190,23 +191,8 @@ bool os_close_own_instance(window *win) {
     return false;
 }
 
+/* Run one on_frame for every live app (scheduler drives the frame rate). */
 void os_tick_apps(void) {
-    uint32_t now = time_millis();
-    static uint32_t last_run_time[MAX_RUNNING_APPS];
-
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *app = &running_apps[i];
-        if (!app->running || app->wants_quit)
-            continue;
-        if (now - last_run_time[i] >= FRAME_TIME_MS) {
-            if (app->desc && app->desc->on_frame)
-                app->desc->on_frame(app->state);
-            last_run_time[i] = now;
-        }
-    }
-}
-
-void os_tick_apps_direct(void) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *app = &running_apps[i];
         if (app->running && !app->wants_quit) {

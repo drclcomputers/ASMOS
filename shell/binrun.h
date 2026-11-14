@@ -30,6 +30,5 @@ const bin_syscall_t *binrun_make_table(term_context_t *ctx);
 
 void cmd_run(term_context_t *ctx, const char *path, char *out, size_t max);
 
-void cmd_run_cli(const char *path, char *out, size_t max);
 
 #endif

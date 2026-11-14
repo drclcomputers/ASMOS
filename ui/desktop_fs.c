@@ -32,7 +32,7 @@ static bool entry_is_app(const dir_entry_t *e) {
 }
 
 static void grid_slot(int n, int *out_x, int *out_y) {
-    int available_height = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H;
+    int available_height = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H;
     int rows_avail = (available_height - ICON_START_Y) / ICON_SPACING_Y;
     if (rows_avail < 1) rows_avail = 1;
     int col = n / rows_avail;

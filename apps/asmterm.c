@@ -1,6 +1,6 @@
 #include "os/api.h"
 #include "os/scheduler.h"
-#include "shell/asm/asm.h"
+#include "shell/asm.h"
 #include "shell/binrun.h"
 #include "shell/cmds.h"
 #include "shell/term_buf.h"
@@ -392,7 +392,6 @@ void asmterm_window_draw(window *win, void *userdata) {
     iv[tc] = '\0';
     draw_string(tax, iy + 2, iv, WHITE, 2);
 
-    extern volatile uint32_t pit_ticks;
     if (s->input_focused && (pit_ticks / 500) % 2 == 0) {
         int cx = tax + tc * CHAR_W;
         if (cx < ix + iw - 2)

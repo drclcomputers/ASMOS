@@ -1,6 +1,9 @@
 #ifndef OS_API_H
 #define OS_API_H
 
+// Header for BUILT-IN apps (linked into the kernel). Dynamic .APP packages
+// can't link against kernel symbols and use os/appapi.h instead — two headers
+// on purpose.
 // Apps include ONLY this header. It exposes everything an app legitimately needs while hiding kernel internals (ATA, PS/2 init, memory layout, etc.)
 // if it's not in this header, apps don't touch it.
 
@@ -17,15 +20,16 @@
 
 // Device Control
 #include "lib/time.h"
-#include "lib/device.h"
+#include "drivers/serial.h"
+#include "drivers/speaker.h"
 #include "lib/cpu.h"
 
 // Drivers support
 #include "drivers/sb16.h"
 
 // Input & Interaction
-#include "io/keyboard.h"
-#include "io/mouse.h"
+#include "drivers/keyboard.h"
+#include "drivers/mouse.h"
 
 // User Interface
 #include "ui/ui.h"

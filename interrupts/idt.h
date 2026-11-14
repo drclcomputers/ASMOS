@@ -15,7 +15,6 @@
 
 #define PIT_DIVISOR 1193
 
-extern volatile uint32_t pit_ticks;
 extern volatile uint32_t pit_seconds;
 
 void idt_init(void);

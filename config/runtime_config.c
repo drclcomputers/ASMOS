@@ -4,7 +4,6 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 
-extern int g_video_mode;
 
 os_config_t g_cfg;
 

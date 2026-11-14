@@ -2,7 +2,7 @@
 
 #include "drivers/sb16.h"
 #include "fs/fs.h"
-#include "io/mouse.h"
+#include "drivers/mouse.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"

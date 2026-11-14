@@ -1,5 +1,5 @@
 #include "fs/fs.h"
-#include "io/ps2.h"
+#include "drivers/ps2.h"
 
 #include "drivers/gpu.h"
 #include "drivers/ne2000.h"
@@ -20,7 +20,8 @@
 #include "config/runtime_config.h"
 
 #include "interrupts/idt.h"
-#include "lib/device.h"
+#include "drivers/serial.h"
+#include "drivers/speaker.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/time.h"
@@ -33,9 +34,6 @@ int g_screen_height = 400;
 int g_video_mode = 1;
 int g_backbuf_size = 640 * 400;
 
-extern void wm_init(void);
-extern void scheduler_init(void);
-extern void desktop_on_frame(void);
 
 static void play_bootchime(void) {
     if (g_cfg.play_bootchime && g_cfg.sound_enabled) {
@@ -57,11 +55,7 @@ static void play_bootchime(void) {
             opl2_note_on(ch, 67, 90);
             sleep_ms(200);
             opl2_note_off(ch);
-        } else if (sb16_detected()) {
-            speaker_beep(523, 120);
-            speaker_beep(659, 120);
-            speaker_beep(784, 180);
-        } else {
+        } else { /* no OPL2 (SB16 has no tone path here): PC speaker */
             speaker_beep(523, 120);
             speaker_beep(659, 120);
             speaker_beep(784, 180);

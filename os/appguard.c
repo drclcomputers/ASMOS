@@ -1,5 +1,9 @@
 #include "os/appguard.h"
+#include "lib/string.h"
+#include "lib/vmm.h"
+#include "os/os.h"
 #include "os/scheduler.h"
+#include "ui/modal.h"
 
 typedef struct {
     uint32_t ebx, esi, edi, ebp, esp, eip;
@@ -69,7 +73,52 @@ extern void isr_exc0(void);
 extern void isr_exc6(void);
 extern void isr_exc13(void);
 extern void isr_exc14(void);
-extern void pf_handler_c(uint32_t eip, uint32_t err, uint32_t addr);
+
+/* ── Unguarded #PF fallback ─────────────────────────────────────────────────
+ * Reached only for page faults outside appguard_call2 (e.g. a scheduler
+ * task).  Task 0 (kernel) faults are fatal; any other task is killed. */
+#define PF_PRESENT (1u << 0) /* 0=not-present, 1=protection violation */
+#define PF_WRITE (1u << 1)
+#define PF_RSVD (1u << 3)
+#define PF_IFETCH (1u << 4)
+
+static void pf_kill_task(uint32_t eip, uint32_t err, uint32_t fault_addr) {
+    app_instance_t *victim = NULL;
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        if (running_apps[i].running &&
+            running_apps[i].task_slot == current_task) {
+            victim = &running_apps[i];
+            break;
+        }
+    }
+    const char *app_name = (victim && victim->desc && victim->desc->name)
+                               ? victim->desc->name
+                               : "Unknown App";
+
+    const char *kind;
+    if (err & PF_RSVD)
+        kind = "reserved-bit violation";
+    else if (err & PF_IFETCH)
+        kind = "instruction fetch violation";
+    else if (err & PF_WRITE)
+        kind = (err & PF_PRESENT) ? "write protection fault"
+                                  : "write to unmapped page";
+    else
+        kind = (err & PF_PRESENT) ? "read protection fault"
+                                  : "read from unmapped page";
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "%.60s: %s\nat 0x%08X (EIP 0x%08X)", app_name,
+             kind, fault_addr, eip);
+
+    vmm_load_kernel();
+    modal_show(MODAL_ERROR, "Page Fault — App Terminated", msg, NULL, NULL);
+    if (victim)
+        os_quit_app(victim);
+    task_yield();
+    for (;;)
+        __asm__ volatile("hlt");
+}
 
 static gjmp_t *s_jmp = NULL;
 static appfault_t s_fault;
@@ -84,8 +133,8 @@ void exc_handler_c(uint32_t vec, uint32_t err, uint32_t eip, uint32_t cr2) {
         s_fault.cr2 = cr2;
         guard_longjmp(j, 1);
     }
-    if (vec == 14)
-        pf_handler_c(eip, err, cr2); /* task-level handler; halts if task 0 */
+    if (vec == 14 && current_task != 0)
+        pf_kill_task(eip, err, cr2);
     __asm__ volatile("cli");
     for (;;)
         __asm__ volatile("hlt");

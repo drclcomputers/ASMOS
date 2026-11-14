@@ -10,7 +10,7 @@
 
 #include "config/config.h"
 #include "config/runtime_config.h"
-#include "io/mouse.h"
+#include "drivers/mouse.h"
 
 window *win_stack[MAX_WINDOWS];
 int win_count = 0;
@@ -35,12 +35,12 @@ static void wm_clamp(window *win) {
         win->y = 0;
     if (win->x + win->w > SCREEN_WIDTH)
         win->x = SCREEN_WIDTH - win->w;
-    if (win->y + win->h + MENUBAR_H_SIZE + TASKBAR_H > SCREEN_HEIGHT)
-        win->y = SCREEN_HEIGHT - win->h - MENUBAR_H_SIZE - TASKBAR_H;
+    if (win->y + win->h + MENUBAR_H + TASKBAR_H > SCREEN_HEIGHT)
+        win->y = SCREEN_HEIGHT - win->h - MENUBAR_H - TASKBAR_H;
 }
 
 static bool in_titlebar(const window *win, int mx, int my) {
-    int wy = win->y + MENUBAR_H_SIZE;
+    int wy = win->y + MENUBAR_H;
     return mx >= win->x && mx < win->x + win->w && my >= wy &&
            my < wy + TITLEBAR_H;
 }
@@ -90,7 +90,7 @@ bool is_desktop_focused() {
 }
 
 static void draw_anim(window *win) {
-    int wy = win->y + MENUBAR_H_SIZE;
+    int wy = win->y + MENUBAR_H;
 
     int win_rx = win->x, win_ry = wy, win_rw = win->w, win_rh = win->h;
 
@@ -402,7 +402,7 @@ void wm_update_all(void) {
             return;
     }
 
-    if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE)
+    if (mouse.left_clicked && mouse.y < MENUBAR_H)
         return;
 
     if (!g_menubar_click_consumed) {
@@ -410,7 +410,7 @@ void wm_update_all(void) {
             window *win = win_stack[i];
             if (!win->visible || win->minimized)
                 continue;
-            int wy = win->y + MENUBAR_H_SIZE;
+            int wy = win->y + MENUBAR_H;
             bool on_win = mouse.x >= win->x && mouse.x <= win->x + win->w &&
                           mouse.y >= wy && mouse.y <= wy + win->h;
             if (!click_consumed && mouse.left_clicked && on_win) {
@@ -429,7 +429,7 @@ void window_draw(window *win) {
     if (!win || !win->visible || win->minimized)
         return;
 
-    int wy = win->y + MENUBAR_H_SIZE;
+    int wy = win->y + MENUBAR_H;
 
     if (win->dragging) {
         draw_rect(win->x + 2, wy + 2, win->w, win->h, BLACK);
@@ -467,8 +467,8 @@ void window_draw(window *win) {
 
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
         draw_rect(win->x, wy, win->w, win->h, BLACK);
-        draw_line(win->x, win->y + win->h + MENUBAR_H_SIZE - 1,
-                  win->x + win->w - 1, win->y + win->h + MENUBAR_H_SIZE - 1,
+        draw_line(win->x, win->y + win->h + MENUBAR_H - 1,
+                  win->x + win->w - 1, win->y + win->h + MENUBAR_H - 1,
                   BLACK);
     }
 
@@ -480,7 +480,7 @@ void window_draw(window *win) {
 
     if (win->resizable) {
         int gx = win->x + win->w - RESIZE_BUTTON - 1;
-        int gy = win->y + MENUBAR_H_SIZE + win->h - RESIZE_BUTTON;
+        int gy = win->y + MENUBAR_H + win->h - RESIZE_BUTTON;
         fill_rect(gx, gy, RESIZE_BUTTON, RESIZE_BUTTON, LIGHT_GRAY);
         draw_rect(gx, gy, RESIZE_BUTTON, RESIZE_BUTTON, DARK_GRAY);
         draw_line(gx + 1, gy + 6, gx + 6, gy + 1, DARK_GRAY);
@@ -495,7 +495,7 @@ bool window_update(window *win) {
     if (win->anim_state != WIN_ANIM_NONE)
         return true;
 
-    int wy = win->y + MENUBAR_H_SIZE;
+    int wy = win->y + MENUBAR_H;
 
     // close button
     if (!is_desktop_focused() &&
@@ -540,7 +540,7 @@ void window_resize(window *win) {
         return;
 
     int gx = win->x + win->w - 10;
-    int gy = win->y + MENUBAR_H_SIZE + win->h - 10;
+    int gy = win->y + MENUBAR_H + win->h - 10;
 
     if (!win->resizing && mouse.left_clicked && mouse.x >= gx &&
         mouse.x < gx + 10 && mouse.y >= gy && mouse.y < gy + 10)
@@ -557,7 +557,7 @@ void window_resize(window *win) {
             if (win->h < min_h)
                 win->h = min_h;
             int max_w = SCREEN_WIDTH - win->x;
-            int max_h = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H - win->y;
+            int max_h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H - win->y;
             if (win->w > max_w)
                 win->w = max_w;
             if (win->h > max_h)

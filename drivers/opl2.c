@@ -1,10 +1,8 @@
 #include "drivers/opl2.h"
 #include "lib/core.h"
 #include "lib/memory.h"
+#include "lib/time.h"
 
-void opl2_reset(void);
-void opl2_all_notes_off(void);
-void opl2_note_off(uint8_t ch);
 void midi_player_stop(void);
 
 static uint16_t s_opl_port = 0;
@@ -833,7 +831,6 @@ void midi_player_play(bool loop) {
     s_paused = false;
     if (!s_master_vol)
         s_master_vol = 100;
-    extern volatile uint32_t pit_ticks;
     s_lpit = pit_ticks;
     seq_reset();
     opl2_all_notes_off();
@@ -862,7 +859,6 @@ void midi_player_update(void) {
     if (!s_playing || s_paused || !s_track_count)
         return;
 
-    extern volatile uint32_t pit_ticks;
     uint32_t el = pit_ticks - s_lpit;
     s_lpit = pit_ticks;
     if (!el)

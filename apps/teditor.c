@@ -407,13 +407,6 @@ static void menu_saveas(void) {
     s->fname_mode = FNAME_MODE_SAVEAS;
 }
 
-static void menu_close_np(void) {
-    teditor_state_t *s = active_teditor();
-    if (!s)
-        return;
-    teditor_close_cb(s->win);
-}
-
 static void on_about_np(void) {
     modal_show(MODAL_INFO, "About TEditor (c)2026 @drclcomputers", "TEditor v1.2", NULL, NULL);
 }
@@ -538,7 +531,6 @@ static void np_draw(window *win, void *ud) {
             int vis_col = cursor_col - s->scroll_col;
             if (vis_col >= 0 && vis_col <= max_vis_chars) {
                 int cx = text_x + vis_col * CHAR_W;
-                extern volatile uint32_t pit_ticks;
                 if ((pit_ticks / 500) % 2 == 0)
                     fill_rect(cx, py, 1, LINE_H, BLACK);
             }
@@ -622,7 +614,6 @@ static void np_draw(window *win, void *ud) {
             show = s->fname_buf + (slen - field_chars);
         draw_string(field_x + 2, by + 15, (char *)show, BLACK, 2);
 
-        extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 500) % 2 == 0) {
             int vis_len = slen < field_chars ? slen : field_chars;
             int cx = field_x + 2 + vis_len * CHAR_W;

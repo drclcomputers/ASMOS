@@ -292,55 +292,6 @@ static void maybe_notify_desktop(ff_inst_t *s) {
         desktop_fs_set_dirty();
 }
 
-/* ── Name validation ────────────────────────────────────────────── */
-static bool fat_char_ok(char c) {
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-        (c >= '0' && c <= '9'))
-        return true;
-    const char *ok = "!#$%&'()-@^_`{}~";
-    for (int i = 0; ok[i]; i++)
-        if (c == ok[i])
-            return true;
-    return false;
-}
-
-static bool validate_fat_name(const char *n, bool is_dir, const char **err) {
-    if (!n || !n[0]) {
-        *err = "Name cannot be empty.";
-        return false;
-    }
-    const char *dot = strchr(n, '.');
-    int base_len = dot ? (int)(dot - n) : (int)strlen(n);
-    int ext_len = dot ? (int)strlen(dot + 1) : 0;
-    if (is_dir && ext_len > 0) {
-        *err = "Folder: no extension.";
-        return false;
-    }
-    if (ext_len > 3) {
-        *err = "Extension too long (max 3).";
-        return false;
-    }
-    if (base_len == 0) {
-        *err = "Base name empty.";
-        return false;
-    }
-    if (base_len > 8) {
-        *err = "Base name too long (8).";
-        return false;
-    }
-    for (int i = 0; i < base_len; i++)
-        if (!fat_char_ok(n[i])) {
-            *err = "Invalid character.";
-            return false;
-        }
-    for (int i = 0; i < ext_len; i++)
-        if (!fat_char_ok(dot[1 + i])) {
-            *err = "Invalid ext char.";
-            return false;
-        }
-    return true;
-}
-
 /* ── Sort & Layout ──────────────────────────────────────────────── */
 static int item_sort_cmp(const ff_item_t *a, const ff_item_t *b, int sort) {
     if (a->is_dotdot || a->is_vdrive)
@@ -571,13 +522,13 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
 static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
                          int clip_bottom) {
     ff_item_t *it = &s->items[i];
-    int ax = base_x + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
+    int ax = base_x + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
     int ay = base_y + it->icon_y;
     int content_top_y =
         s->win->y + MENUBAR_H + TITLEBAR_H + BUTTON_BAR_H + CONTENT_TOP;
     if (ay < content_top_y)
         return;
-    if (ay + ICON_SZ_H + CHAR_H + 2 > clip_bottom)
+    if (ay + ICON_H + CHAR_H + 2 > clip_bottom)
         return;
 
     if (it->is_vdrive)
@@ -610,7 +561,7 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
     }
 
     if (it->hidden)
-        draw_char(ax + ICON_SZ_W - 6, ay, 'H', DARK_GRAY, 2);
+        draw_char(ax + ICON_W - 6, ay, 'H', DARK_GRAY, 2);
 
     bool is_cut =
         (!it->is_vdrive && !it->is_dotdot && clipboard_has_file() &&
@@ -618,8 +569,8 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
          strcmp(g_clipboard.src_path, s->path) == 0);
 
     int lw = (int)strlen(it->label) * CHAR_W;
-    int lx = ax + ICON_SZ_W / 2 - lw / 2;
-    int ly = ay + ICON_SZ_H + 1;
+    int lx = ax + ICON_W / 2 - lw / 2;
+    int ly = ay + ICON_H + 1;
     uint8_t lc = (is_cut || it->hidden) ? DARK_GRAY : BLACK;
     if (it->selected) {
         fill_rect(lx - 1, ly - 1, lw + 2, CHAR_H + 2, BLACK);
@@ -909,7 +860,6 @@ static void ff_draw_window(window *win, void *ud) {
         fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
         draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
         draw_string(bx + 6, by + 15, s->newname_buf, BLACK, 2);
-        extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 500) % 2 == 0) {
             int cx = bx + 6 + s->newname_len * CHAR_W;
             draw_string(cx, by + 15, "|", BLACK, 2);
@@ -930,7 +880,6 @@ static void ff_draw_window(window *win, void *ud) {
         fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
         draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
         draw_string(bx + 6, by + 15, s->rename_buf, BLACK, 2);
-        extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 500) % 2 == 0) {
             int cx = bx + 6 + s->rename_len * CHAR_W;
             draw_string(cx, by + 15, "|", BLACK, 2);
@@ -954,10 +903,10 @@ static int ff_hit(ff_inst_t *s, int mx, int my) {
     int wy = s->win->y + MENUBAR_H + TITLEBAR_H + BUTTON_BAR_H;
     for (int i = 0; i < s->item_count; i++) {
         ff_item_t *it = &s->items[i];
-        int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
+        int ax = wx + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
         int ay = wy + it->icon_y - s->scroll_y;
-        if (mx >= ax && mx < ax + ICON_SZ_W && my >= ay &&
-            my < ay + ICON_SZ_H + CHAR_H + 4)
+        if (mx >= ax && mx < ax + ICON_W && my >= ay &&
+            my < ay + ICON_H + CHAR_H + 4)
             return i;
     }
     return -1;
@@ -1008,16 +957,19 @@ static void item_fspath(ff_inst_t *s, const char *name, char *out, int sz) {
     }
 }
 
+/* Index of the first selected real entry (not "..", not a drive), or -1. */
+static int ff_selected_file(const ff_inst_t *s) {
+    for (int i = 0; i < s->item_count; i++)
+        if (s->items[i].selected && !s->items[i].is_dotdot &&
+            !s->items[i].is_vdrive)
+            return i;
+    return -1;
+}
+
 /* ── Delete / paste ──────────────────────────────────────────────── */
 static void do_delete(void *ud) {
     ff_inst_t *s = (ff_inst_t *)ud;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && !s->items[i].is_dotdot &&
-            !s->items[i].is_vdrive) {
-            sel = i;
-            break;
-        }
+    int sel = ff_selected_file(s);
     if (sel < 0) {
         s->mode = MODE_NORMAL;
         return;
@@ -1069,13 +1021,7 @@ static void menu_rename(void) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
         return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && !s->items[i].is_dotdot &&
-            !s->items[i].is_vdrive) {
-            sel = i;
-            break;
-        }
+    int sel = ff_selected_file(s);
     if (sel < 0) {
         strcpy(s->status, "Nothing selected.");
         return;
@@ -1116,13 +1062,7 @@ static void menu_toggle_hidden(void) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
         return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && !s->items[i].is_dotdot &&
-            !s->items[i].is_vdrive) {
-            sel = i;
-            break;
-        }
+    int sel = ff_selected_file(s);
     if (sel < 0) {
         strcpy(s->status, "Nothing selected.");
         return;
@@ -1157,17 +1097,11 @@ static void menu_copy_path(void) {
     strcpy(s->status, "Path copied.");
 }
 
-static void menu_copy(void) {
+static void ff_clip_selected(bool is_cut) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
         return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && !s->items[i].is_dotdot &&
-            !s->items[i].is_vdrive) {
-            sel = i;
-            break;
-        }
+    int sel = ff_selected_file(s);
     if (sel < 0) {
         strcpy(s->status, "Nothing selected.");
         return;
@@ -1177,34 +1111,12 @@ static void menu_copy(void) {
         return;
     }
     clipboard_set_file(s->path, s->items[sel].name,
-                       (s->items[sel].entry.attr & ATTR_DIRECTORY) != 0, false,
+                       (s->items[sel].entry.attr & ATTR_DIRECTORY) != 0, is_cut,
                        s->drive_id);
-    strcpy(s->status, "Copied.");
+    strcpy(s->status, is_cut ? "Cut." : "Copied.");
 }
-static void menu_cut(void) {
-    ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
-        return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && !s->items[i].is_dotdot &&
-            !s->items[i].is_vdrive) {
-            sel = i;
-            break;
-        }
-    if (sel < 0) {
-        strcpy(s->status, "Nothing selected.");
-        return;
-    }
-    if (path_is_protected(s->items[sel].name)) {
-        strcpy(s->status, "Protected.");
-        return;
-    }
-    clipboard_set_file(s->path, s->items[sel].name,
-                       (s->items[sel].entry.attr & ATTR_DIRECTORY) != 0, true,
-                       s->drive_id);
-    strcpy(s->status, "Cut.");
-}
+static void menu_copy(void) { ff_clip_selected(false); }
+static void menu_cut(void) { ff_clip_selected(true); }
 
 static void menu_paste(void) {
     ff_inst_t *s = active_finder();
@@ -1303,13 +1215,7 @@ static void menu_delete(void) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
         return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && !s->items[i].is_dotdot &&
-            !s->items[i].is_vdrive) {
-            sel = i;
-            break;
-        }
+    int sel = ff_selected_file(s);
     if (sel < 0) {
         strcpy(s->status, "Nothing selected.");
         return;
@@ -1374,7 +1280,7 @@ static void menu_close(void) {
 /* ── New name / rename ──────────────────────────────────────────── */
 static void ff_handle_newname(ff_inst_t *s) {
     const char *err = NULL;
-    if (!validate_fat_name(s->newname_buf, s->newname_is_dir, &err)) {
+    if (!fs_validate_name(s->newname_buf, s->newname_is_dir, &err)) {
         s->mode = MODE_NORMAL;
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
@@ -1410,7 +1316,7 @@ static void ff_handle_rename(ff_inst_t *s) {
     const char *err = NULL;
     bool is_dir = s->rename_idx >= 0 &&
                   (s->items[s->rename_idx].entry.attr & ATTR_DIRECTORY);
-    if (!validate_fat_name(s->rename_buf, is_dir, &err)) {
+    if (!fs_validate_name(s->rename_buf, is_dir, &err)) {
         s->mode = MODE_NORMAL;
         modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
         return;
@@ -1758,7 +1664,7 @@ static void ff_on_frame(void *state) {
             } else if (kb.last_char >= 32 && kb.last_char < 127 && *len < 12) {
                 char c = kb.last_char;
                 bool allow =
-                    fat_char_ok(c) ||
+                    fs_name_char_ok(c) ||
                     (c == '.' && (s->mode == MODE_NEWNAME
                                       ? !s->newname_is_dir
                                       : !(s->items[s->rename_idx].entry.attr &
@@ -1837,13 +1743,13 @@ static void ff_on_frame(void *state) {
                 continue;
             if (path_is_protected(it->name))
                 continue;
-            int ax = wx + it->icon_x + (ICON_CELL_W - ICON_SZ_W) / 2;
+            int ax = wx + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
             int ay = wy_top + it->icon_y - s->scroll_y;
-            if (mouse.x >= ax && mouse.x < ax + ICON_SZ_W && mouse.y >= ay &&
-                mouse.y < ay + ICON_SZ_H) {
+            if (mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay &&
+                mouse.y < ay + ICON_H) {
                 if (mouse.dx != 0 || mouse.dy != 0) {
                     it->dragging = true;
-                    it->drag_off_x = mouse.x - (ax - ICON_SZ_W / 2);
+                    it->drag_off_x = mouse.x - (ax - ICON_W / 2);
                     it->drag_off_y = mouse.y - ay;
                     s->drag_idx = i;
                     s->last_click_idx = -1;
@@ -1860,7 +1766,7 @@ static void ff_on_frame(void *state) {
             for (int i = 0; i < s->item_count; i++)
                 s->items[i].selected = false;
             s->items[hit].selected = true;
-            uint32_t now = pit_ticks_func();
+            uint32_t now = time_millis();
             if (hit == s->last_click_idx && (now - s->last_click_tick) <= DOUBLE_CLICK_SPEED) {
                 ff_item_t *it = &s->items[hit];
 
@@ -1944,7 +1850,7 @@ static void ff_on_frame(void *state) {
                 s->last_click_tick = 0;
             } else {
                 s->last_click_idx = hit;
-                s->last_click_tick = pit_ticks_func();
+                s->last_click_tick = time_millis();
             }
         } else if (in_content(s, mouse.x, mouse.y)) {
             for (int i = 0; i < s->item_count; i++)

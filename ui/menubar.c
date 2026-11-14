@@ -6,7 +6,7 @@
 #include "lib/time.h"
 
 #include "config/config.h"
-#include "io/mouse.h"
+#include "drivers/mouse.h"
 #include "os/os.h"
 
 #define BAR_BG LIGHT_GRAY
@@ -100,7 +100,7 @@ static void build_clock_str(char *out) {
 }
 
 void menubar_draw(menubar *mb) {
-    fill_rect(0, 0, SCREEN_WIDTH, MENUBAR_H_SIZE, BAR_BG);
+    fill_rect(0, 0, SCREEN_WIDTH, MENUBAR_H, BAR_BG);
 
     int cursor_x = 2;
 
@@ -117,7 +117,7 @@ void menubar_draw(menubar *mb) {
         m->bar_w = tw;
 
         if (m->open)
-            fill_rect(cursor_x, 0, tw, MENUBAR_H_SIZE, DROP_SEL);
+            fill_rect(cursor_x, 0, tw, MENUBAR_H, DROP_SEL);
 
         draw_string(cursor_x + PADDING, 2, m->title, BAR_FG, 2);
         cursor_x += tw + 2;
@@ -132,7 +132,7 @@ void menubar_draw(menubar *mb) {
                     dw = iw;
             }
 
-            int dy = MENUBAR_H_SIZE;
+            int dy = MENUBAR_H;
             int dh = m->item_count * MENU_ITEM_H;
 
             fill_rect(m->bar_x + 2, dy + 2, dw, dh, BLACK);
@@ -164,7 +164,7 @@ void menubar_draw(menubar *mb) {
 }
 
 void menubar_update(menubar *mb) {
-    if (mouse.left_clicked && mouse.y < MENUBAR_H_SIZE) {
+    if (mouse.left_clicked && mouse.y < MENUBAR_H) {
         g_menubar_click_consumed = true;
         mouse.left_clicked = false;
 
@@ -192,7 +192,7 @@ void menubar_update(menubar *mb) {
 
     if (mb->open_index >= 0 && mouse.left_clicked) {
         menu *m = &mb->menus[mb->open_index];
-        int dy = MENUBAR_H_SIZE;
+        int dy = MENUBAR_H;
 
         int dw = MENU_ITEM_MIN_W;
         for (int j = 0; j < m->item_count; j++) {
@@ -226,7 +226,7 @@ void menubar_update(menubar *mb) {
         return;
     }
 
-    if (mb->open_index >= 0 && mouse.y < MENUBAR_H_SIZE) {
+    if (mb->open_index >= 0 && mouse.y < MENUBAR_H) {
         for (int i = 0; i < mb->menu_count; i++) {
             menu *m = &mb->menus[i];
             if (i == mb->open_index)

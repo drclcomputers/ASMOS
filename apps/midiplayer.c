@@ -387,7 +387,6 @@ static void mp_action_play_pause(midiplayer_state_t *s) {
     case MIDI_STATE_LOADED:
         midi_player_play(s->looping);
         {
-            extern volatile uint32_t pit_ticks;
             s->play_start_pit = pit_ticks;
         }
         s->state = MIDI_STATE_PLAYING;
@@ -423,7 +422,6 @@ static void mp_action_rewind(midiplayer_state_t *s) {
         midi_player_load(s->midi_buf, s->midi_size);
     if (was_playing) {
         midi_player_play(s->looping);
-        extern volatile uint32_t pit_ticks;
         s->play_start_pit = pit_ticks;
         s->state = MIDI_STATE_PLAYING;
     } else {

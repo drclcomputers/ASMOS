@@ -16,8 +16,6 @@
 #define PALETTE_COLS 16
 
 /* Canvas dimensions are determined at runtime from the screen resolution. */
-extern int g_screen_width;
-extern int g_screen_height;
 
 #define TOOL_PENCIL 0
 #define TOOL_ERASER 1
@@ -344,7 +342,6 @@ static void asmdraw_draw(window *win, void *ud) {
         fill_rect(bx + 32, by + 14, bw - 36, 10, WHITE);
         draw_rect(bx + 32, by + 14, bw - 36, 10, BLACK);
         draw_string(bx + 34, by + 15, s->fname_buf, BLACK, 2);
-        extern volatile uint32_t pit_ticks;
         if ((pit_ticks / 500) % 2 == 0) {
             int cx3 = bx + 34 + s->fname_len * 5;
             if (cx3 < bx + bw - 6)

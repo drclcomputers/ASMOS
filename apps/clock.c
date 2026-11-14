@@ -97,7 +97,6 @@ static void clock_draw_input(clock_state_t *s) {
     draw_rect(bx + 3, by + 12, bw - 6, 10, BLACK);
     draw_string(bx + 5, by + 13, s->input_buf, BLACK, 2);
 
-    extern volatile uint32_t pit_ticks;
     if ((pit_ticks / 500) % 2 == 0) {
         int cx = bx + 5 + s->input_len * CHAR_W;
         draw_string(cx, by + 13, "|", BLACK, 2);

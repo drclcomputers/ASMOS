@@ -1,107 +1,37 @@
 CC = i686-elf-gcc
 LD = i686-elf-ld
+NM = i686-elf-nm
 AS = nasm
 
 CFLAGS  = -std=gnu11 -ffreestanding -m32 -O2 -Wall -Wextra \
           -fno-stack-protector -fno-pie -nostdlib \
           -fno-builtin-memset -fno-builtin-memcpy \
-          -I. -c
+          -MMD -MP -I. -c
 LDFLAGS = -m elf_i386 -T linker.ld --oformat binary
 
 BUILD_DIR = build
 
-OBJ = $(BUILD_DIR)/loader.o                     \
-      $(BUILD_DIR)/kernel.o                     \
-      \
-	  $(BUILD_DIR)/os/app_registry.o            \
-      $(BUILD_DIR)/os/appload.o                 \
-      $(BUILD_DIR)/os/appguard.o                \
-      $(BUILD_DIR)/lib/memory/pf_handler.o      \
-      $(BUILD_DIR)/os/clipboard.o               \
-	  $(BUILD_DIR)/os/error.o                   \
-      $(BUILD_DIR)/os/os.o                      \
-	  $(BUILD_DIR)/os/scheduler.o               \
-      $(BUILD_DIR)/os/task_switch.o             \
-	  \
-	  $(BUILD_DIR)/interrupts/interrupt.o  		\
-      $(BUILD_DIR)/interrupts/idt.o        		\
-      \
-      $(BUILD_DIR)/lib/memory/alloc.o           \
-      $(BUILD_DIR)/lib/memory/mem.o             \
-      $(BUILD_DIR)/lib/memory/pmm.o             \
-      $(BUILD_DIR)/lib/memory/vmm.o             \
-      \
-      $(BUILD_DIR)/shell/asm/asm.o              \
-      $(BUILD_DIR)/shell/binrun.o               \
-      $(BUILD_DIR)/shell/cli.o                  \
-      $(BUILD_DIR)/shell/cmds.o                 \
-      $(BUILD_DIR)/shell/term_buf.o             \
-      \
-	  $(BUILD_DIR)/apps/asmdraw.o               \
-	  $(BUILD_DIR)/apps/asmterm.o               \
-	  $(BUILD_DIR)/apps/calculator.o            \
-	  $(BUILD_DIR)/apps/clipview.o              \
-	  $(BUILD_DIR)/apps/clock.o                 \
-      $(BUILD_DIR)/apps/filef.o                 \
-      $(BUILD_DIR)/apps/hexview.o               \
-      $(BUILD_DIR)/apps/midiplayer.o            \
-	  $(BUILD_DIR)/apps/monitor.o               \
-	  $(BUILD_DIR)/apps/settings.o              \
-	  $(BUILD_DIR)/apps/teditor.o 				\
-      \
-	  $(BUILD_DIR)/config/config.o              \
-	  $(BUILD_DIR)/config/runtime_config.o      \
-	  \
-	  $(BUILD_DIR)/drivers/gpu.o                \
-	  $(BUILD_DIR)/drivers/ne2000.o             \
-	  $(BUILD_DIR)/drivers/opl2.o               \
-	  $(BUILD_DIR)/drivers/sb16.o               \
-      \
-      $(BUILD_DIR)/fonts/fonts.o                \
-      \
-      $(BUILD_DIR)/fs/ata.o                     \
-      $(BUILD_DIR)/fs/fat_io.o                  \
-      $(BUILD_DIR)/fs/fdd.o                     \
-      $(BUILD_DIR)/fs/fdd_ctrl.o                \
-      $(BUILD_DIR)/fs/fs.o                      \
-      \
-      $(BUILD_DIR)/io/ps2.o                     \
-      $(BUILD_DIR)/io/mouse.o                   \
-      $(BUILD_DIR)/io/keyboard.o                \
-      \
-      $(BUILD_DIR)/lib/core/io.o                \
-	  $(BUILD_DIR)/lib/core/types.o             \
-      \
-      $(BUILD_DIR)/lib/cpu/cpu_metrics.o        \
-      \
-      $(BUILD_DIR)/lib/string/string.o          \
-      \
-      $(BUILD_DIR)/lib/math/math.o              \
-      \
-      $(BUILD_DIR)/lib/time/time.o              \
-      \
-      $(BUILD_DIR)/lib/device/speaker.o         \
-      $(BUILD_DIR)/lib/device/serial.o          \
-      \
-      $(BUILD_DIR)/lib/graphics/primitive_graphics.o \
-      \
-      $(BUILD_DIR)/lib/compat/libcore.o         \
-      \
-      $(BUILD_DIR)/ui/cursor.o                  \
-	  $(BUILD_DIR)/ui/desktop.o                 \
-	  $(BUILD_DIR)/ui/desktop_fs.o              \
-	  $(BUILD_DIR)/ui/icons.o                   \
-      $(BUILD_DIR)/ui/menubar.o                 \
-	  $(BUILD_DIR)/ui/modal.o                   \
-      $(BUILD_DIR)/ui/widgets.o                 \
-      $(BUILD_DIR)/ui/window.o                  \
-      \
-      $(BUILD_DIR)/network/dns.o                \
-      $(BUILD_DIR)/network/gopher.o             \
-      $(BUILD_DIR)/network/net.o
-
+# Must match SECTORS_TO_LOAD in boot/boot.asm.
 KERNEL_SECTORS_LOADED = 1000
 
+# ── Sources ──────────────────────────────────────────────────────────────────
+# Every .c in these dirs is built automatically; just drop a new file in.
+SRC_DIRS = apps config drivers fonts fs interrupts lib network os shell ui
+
+# Kept in-tree but deliberately not built:
+#   apps/asmusic.c      – app retired from the registry (still gitignored WIP)
+#   lib/libc_compat.c   – libc shim for future TCC/NASM ports; pulled from the
+#                         build in 7d3b781 ("OS now boots"), not needed yet
+EXCLUDE = apps/asmusic.c lib/libc_compat.c
+
+C_SRC   = kernel.c $(filter-out $(EXCLUDE),$(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)))
+# boot/loader.asm must stay first (entry point); linker.ld also pins it.
+ASM_SRC = boot/loader.asm interrupts/interrupt.asm os/task_switch.asm
+
+OBJ = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SRC)) \
+      $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRC))
+
+# ── Build ────────────────────────────────────────────────────────────────────
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \
 	 MAX=$$(($(KERNEL_SECTORS_LOADED) * 512)); \
@@ -109,7 +39,7 @@ all: os_image.bin
 	 echo "Kernel size  : $$KSIZE bytes"; \
 	 echo "Max loadable : $$MAX bytes  ($(KERNEL_SECTORS_LOADED) sectors)"; \
 	 if [ $$KSIZE -gt $$MAX ]; then \
-	   echo "*** ERROR: kernel too large — increase sector count in boot.asm ***"; \
+	   echo "*** ERROR: kernel too large — increase sector count in boot/boot.asm ***"; \
 	   exit 1; \
 	 fi; \
 	 echo ""
@@ -117,80 +47,55 @@ all: os_image.bin
 kernel.bin: $(OBJ)
 	$(LD) $(LDFLAGS) -o $@ $^
 
-# Boot sector
-$(BUILD_DIR)/loader.o: loader.asm | $(BUILD_DIR)
-	$(AS) -f elf32 $< -o $@
-
-$(BUILD_DIR)/interrupts/interrupt.o: interrupts/interrupt.asm | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.asm
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
 
-$(BUILD_DIR)/os/task_switch.o: os/task_switch.asm | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	$(AS) -f elf32 $< -o $@
-
-$(BUILD_DIR)/lib/memory/page_fault.o: lib/memory/page_fault.asm | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	$(AS) -f elf32 $< -o $@
-
-# All C sources
-$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< -o $@
 
-boot.bin: boot.asm
-	$(AS) -f bin $< -o $@
-
-boot_stage2.bin: boot_stage2.asm
+%.bin: boot/%.asm
 	$(AS) -f bin $< -o $@
 
 os_image.bin: boot.bin boot_stage2.bin kernel.bin
-	dd if=/dev/zero    of=os_image.bin bs=512 count=65536  2>/dev/null
-	dd if=boot.bin     of=os_image.bin bs=512 seek=0 conv=notrunc 2>/dev/null
-	dd if=boot_stage2.bin   of=os_image.bin bs=512 seek=1 conv=notrunc 2>/dev/null
-	dd if=kernel.bin   of=os_image.bin bs=512 seek=9 conv=notrunc 2>/dev/null
+	dd if=/dev/zero        of=$@ bs=512 count=65536 2>/dev/null
+	dd if=boot.bin         of=$@ bs=512 seek=0 conv=notrunc 2>/dev/null
+	dd if=boot_stage2.bin  of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
+	dd if=kernel.bin       of=$@ bs=512 seek=9 conv=notrunc 2>/dev/null
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+-include $(OBJ:.o=.d)
 
-qemu-fdd: all
-	qemu-system-i386 \
-	    -drive format=raw,file=os_image.bin \
-	    -drive format=raw,file=floppy.img,if=floppy \
-	    -m 4M -machine pc \
-	    -audiodev coreaudio,id=snd0 \
-	    -machine pcspk-audiodev=snd0 \
-	    -device sb16,audiodev=snd0 \
-	    -device adlib,audiodev=snd0 \
-	    -vga std \
-	    -display cocoa,zoom-to-fit=on \
-	    -device ne2k_isa,irq=3,iobase=0x300,netdev=net0 \
-	    -netdev user,id=net0
+# ── Run ──────────────────────────────────────────────────────────────────────
+QEMU_FLAGS = -drive format=raw,file=os_image.bin \
+             -m 4M -machine pc \
+             -audiodev coreaudio,id=snd0 \
+             -machine pcspk-audiodev=snd0 \
+             -device sb16,audiodev=snd0 \
+             -device adlib,audiodev=snd0 \
+             -vga std \
+             -display cocoa,zoom-to-fit=on \
+             -device ne2k_isa,irq=3,iobase=0x300,netdev=net0 \
+             -netdev user,id=net0
 
 qemu: all
-	qemu-system-i386 \
-	    -drive format=raw,file=os_image.bin \
-	    -m 4M -machine pc \
-	    -audiodev coreaudio,id=snd0 \
-	    -machine pcspk-audiodev=snd0 \
-	    -device sb16,audiodev=snd0 \
-	    -device adlib,audiodev=snd0 \
-	    -vga std \
-	    -display cocoa,zoom-to-fit=on \
-	    -device ne2k_isa,irq=3,iobase=0x300,netdev=net0 \
-	    -netdev user,id=net0
+	qemu-system-i386 $(QEMU_FLAGS)
+
+qemu-fdd: all
+	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=floppy.img,if=floppy
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q
 
+# ── Misc ─────────────────────────────────────────────────────────────────────
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f *.bin boot_stage2.bin os_image.bin *.log *.map
-	rm -f qemulog.txt
-	rm -f floppy.img
+	rm -f *.bin *.log *.map qemulog.txt floppy.img
 
 kernelmap: $(OBJ)
-	$(LD) $(LDFLAGS) -Map=kernel.map -o $@ $^
+	$(LD) $(LDFLAGS) -Map=kernel.map -o kernel.bin $^
 
 bloat: $(OBJ)
-	i686-elf-nm --print-size --size-sort --radix=d $(OBJ) | awk '$$3 ~ /[bBcC]/' | sort -k2 -n -r | head -30
+	$(NM) --print-size --size-sort --radix=d $(OBJ) | awk '$$3 ~ /[bBcC]/' | sort -k2 -n -r | head -30
+
+.PHONY: all qemu qemu-fdd bochs clean kernelmap bloat

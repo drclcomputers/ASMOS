@@ -9,7 +9,6 @@ extern int g_backbuf_size;
 extern int g_video_mode;
 #define SCREEN_WIDTH g_screen_width
 #define SCREEN_HEIGHT g_screen_height
-#define COLOR_BITS 8
 #define RESMODE g_video_mode
 
 #define TARGET_FPS 60
@@ -46,7 +45,6 @@ extern int g_video_mode;
 #define WALLPAPER_DOTS 4
 
 #define MENUBAR_H 10
-#define MENUBAR_H_SIZE MENUBAR_H
 #define TASKBAR_H 10
 
 #endif

@@ -1,0 +1,254 @@
+#include "lib/alloc.h"
+#include "config/config.h"
+#include "lib/mem.h"
+
+#define BLOCK_MAGIC_FREE 0xF4EEB10C
+#define BLOCK_MAGIC_USED 0xA110CA7E
+
+typedef struct block_header {
+    uint32_t magic;
+    uint32_t size;
+    bool free;
+    struct block_header *next;
+} block_header_t;
+
+#define HEADER_SIZE sizeof(block_header_t)
+
+extern uint8_t _heap_start;
+
+static block_header_t *heap_start_ptr = NULL;
+static uint32_t heap_end_addr = 0;
+static uint32_t heap_start_addr = 0;
+
+// ── One‑time setup at boot ────────────────────────────────────────────
+void alloc_set_range(uint32_t start, uint32_t end) {
+    if (end <= start)
+        return;
+
+    if (start < (uint32_t)&_heap_start)
+        start = (uint32_t)&_heap_start;
+
+    /* Re-check after clamping: need room for at least one header plus one
+       usable word; without this the size field would wrap to ~4 GB. */
+    if (end <= start || (end - start) <= HEADER_SIZE + 4)
+        return;
+
+    heap_start_addr = start;
+    heap_end_addr = end;
+    heap_start_ptr = (block_header_t *)start;
+    heap_start_ptr->magic = BLOCK_MAGIC_FREE;
+    heap_start_ptr->size = end - start - HEADER_SIZE;
+    heap_start_ptr->free = true;
+    heap_start_ptr->next = NULL;
+}
+
+void alloc_set_end(uint32_t end) {
+    alloc_set_range((uint32_t)&_heap_start, end);
+}
+
+void alloc_init(void) { alloc_set_range((uint32_t)&_heap_start, (uint32_t)&_heap_start + 0x100000); }
+
+// ── Coalescing and trimming ────────────────────────────────────────────
+static void coalesce_from(block_header_t *cur) {
+    // Merge consecutive free blocks starting at cur.
+    // Only merges FREE+FREE pairs; a USED next block stops the walk.
+    // Corrupt magic on either side stops immediately to avoid heap corruption.
+    while (cur) {
+        if (cur->magic != BLOCK_MAGIC_FREE)
+            return; // cur is corrupt or still USED — stop
+        block_header_t *nx = cur->next;
+        if (!nx)
+            break;
+        if (nx->magic != BLOCK_MAGIC_FREE && nx->magic != BLOCK_MAGIC_USED)
+            return; // nx has corrupt magic — stop
+        if (!nx->free)
+            break; // next block is in use — nothing to merge here
+        // Absorb nx into cur
+        cur->size += HEADER_SIZE + nx->size;
+        cur->next = nx->next;
+        // Loop again from cur: the block now at cur->next may also be free
+    }
+}
+
+// ── Allocation ─────────────────────────────────────────────────────────
+void *kmalloc(uint32_t size) {
+    if (size == 0)
+        return NULL;
+    size = (size + 3) & ~3u;
+
+    block_header_t *cur = heap_start_ptr;
+    while (cur) {
+        if (cur->magic != BLOCK_MAGIC_FREE && cur->magic != BLOCK_MAGIC_USED)
+            return NULL;
+        if (cur->free && cur->size >= size) {
+            if (cur->size >= size + HEADER_SIZE + 4) {
+                block_header_t *nb =
+                    (block_header_t *)((uint8_t *)cur + HEADER_SIZE + size);
+                nb->magic = BLOCK_MAGIC_FREE;
+                nb->size = cur->size - size - HEADER_SIZE;
+                nb->free = true;
+                nb->next = cur->next;
+                cur->size = size;
+                cur->next = nb;
+            }
+            cur->free = false;
+            cur->magic = BLOCK_MAGIC_USED;
+            return (void *)((uint8_t *)cur + HEADER_SIZE);
+        }
+        cur = cur->next;
+    }
+    return NULL;
+}
+
+void *kzalloc(uint32_t size) {
+    void *p = kmalloc(size);
+    if (p)
+        memset(p, 0, size);
+    return p;
+}
+
+void *krealloc(void *ptr, uint32_t new_size) {
+    if (!ptr)
+        return kmalloc(new_size);
+    if (!new_size) {
+        kfree(ptr);
+        return NULL;
+    }
+
+    block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
+    if (hdr->magic != BLOCK_MAGIC_USED)
+        return NULL;
+    if (hdr->size >= new_size)
+        return ptr;
+
+    void *np = kmalloc(new_size);
+    if (!np)
+        return NULL;
+    memcpy(np, ptr, hdr->size < new_size ? hdr->size : new_size);
+    kfree(ptr);
+    return np;
+}
+
+void *kmalloc_aligned(uint32_t size, uint32_t align) {
+    if (align == 0 || (align & (align - 1)) != 0)
+        return NULL;
+    if (align <= 4)
+        return kmalloc(size);
+
+    // Allocate enough extra space so that, regardless of where kmalloc places
+    // the payload, we can find an aligned address inside it.
+    // We need: size + (align - 1) extra bytes of payload room.
+    // The returned pointer is the aligned address within that payload; the
+    // original kmalloc block is intentionally leaked (no way to kfree it via
+    // the aligned pointer without a separate header).  Callers that need
+    // freeable aligned memory should manage their own aligned slabs.
+    uint32_t over = size + (align - 1);
+    uint8_t *raw = (uint8_t *)kmalloc(over);
+    if (!raw)
+        return NULL;
+
+    uintptr_t addr = (uintptr_t)raw;
+    uintptr_t aligned = (addr + align - 1) & ~((uintptr_t)align - 1);
+    return (void *)aligned;
+}
+
+// ── Free / coalesce / trim ─────────────────────────────────────────────
+void kfree(void *ptr) {
+    if (!ptr)
+        return;
+    block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
+
+    if (hdr->magic != BLOCK_MAGIC_USED)
+        return;
+
+    hdr->free = true;
+    hdr->magic = BLOCK_MAGIC_FREE;
+
+    // Walk the list to find the block that precedes hdr so we can attempt a
+    // backward merge (prev + hdr) after the forward merge (hdr + hdr->next).
+    block_header_t *prev = NULL;
+    block_header_t *cur = heap_start_ptr;
+    while (cur && cur != hdr) {
+        prev = cur;
+        cur = cur->next;
+    }
+
+    // Forward merge: absorb any free blocks that follow hdr.
+    coalesce_from(hdr);
+
+    // Backward merge: if the predecessor is also free, absorb hdr into it.
+    // We must re-read prev->free here because coalesce_from(prev) from a
+    // previous kfree call may have already changed things; the magic check
+    // inside coalesce_from protects against stale state.
+    if (prev && prev->magic == BLOCK_MAGIC_FREE && prev->free)
+        coalesce_from(prev);
+}
+
+// ── Statistics ─────────────────────────────────────────────────────────
+uint32_t heap_used(void) {
+    uint32_t used = 0;
+    block_header_t *cur = heap_start_ptr;
+    while (cur) {
+        if (cur->magic != BLOCK_MAGIC_FREE && cur->magic != BLOCK_MAGIC_USED)
+            break;
+        if (!cur->free)
+            used += HEADER_SIZE + cur->size;
+        cur = cur->next;
+    }
+    return used;
+}
+
+uint32_t heap_remaining(void) {
+    uint32_t free_bytes = 0;
+    block_header_t *cur = heap_start_ptr;
+    while (cur) {
+        if (cur->magic != BLOCK_MAGIC_FREE && cur->magic != BLOCK_MAGIC_USED)
+            break;
+        if (cur->free)
+            free_bytes += cur->size;
+        cur = cur->next;
+    }
+    return free_bytes;
+}
+
+// ── Pool allocator ─────────────────────────────────────────
+bool pool_init(pool_t *pool, void *slab, uint32_t capacity,
+               uint32_t block_size) {
+    if (!pool || !slab || capacity == 0 || block_size == 0)
+        return false;
+
+    pool->block_size = (block_size + 3) & ~3u;
+    pool->capacity = capacity;
+    pool->slab = (uint8_t *)slab;
+
+    pool->free_stack = (uint32_t *)kmalloc(capacity * sizeof(uint32_t));
+    if (!pool->free_stack)
+        return false;
+
+    for (uint32_t i = 0; i < capacity; i++)
+        pool->free_stack[i] = i;
+    pool->free_count = capacity;
+    return true;
+}
+
+void pool_destroy(pool_t *pool) {
+    if (pool && pool->free_stack) {
+        kfree(pool->free_stack);
+        pool->free_stack = NULL;
+    }
+}
+
+void *pool_alloc(pool_t *pool) {
+    if (!pool || pool->free_count == 0)
+        return NULL;
+    uint32_t idx = pool->free_stack[--pool->free_count];
+    return pool->slab + idx * pool->block_size;
+}
+
+void pool_free(pool_t *pool, void *ptr) {
+    if (!pool || !ptr)
+        return;
+    uint32_t idx = (uint32_t)((uint8_t *)ptr - pool->slab) / pool->block_size;
+    if (idx < pool->capacity)
+        pool->free_stack[pool->free_count++] = idx;
+}

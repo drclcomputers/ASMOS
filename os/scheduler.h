@@ -2,7 +2,7 @@
 #define SCHEDULER_H
 
 #include "lib/core.h"
-#include "lib/memory/vmm.h"
+#include "lib/vmm.h"
 
 #define MAX_TASKS        128
 #define TASK_STACK_SIZE  (16 * 1024)
