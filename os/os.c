@@ -37,7 +37,29 @@ void os_install_app(app_descriptor *desc) {
         ERR_WARN_REPORT(ERR_APP_MAX_RUNNING, "os_install_app: registry full");
         return;
     }
+    for (int i = 0; i < installed_app_count; i++)
+        if (installed_apps[i] == desc)
+            return; /* already installed */
     installed_apps[installed_app_count++] = desc;
+}
+
+void os_uninstall_app(app_descriptor *desc) {
+    if (!desc)
+        return;
+    for (int i = 0; i < installed_app_count; i++) {
+        if (installed_apps[i] != desc)
+            continue;
+        for (int j = i; j < installed_app_count - 1; j++)
+            installed_apps[j] = installed_apps[j + 1];
+        installed_apps[--installed_app_count] = NULL;
+        return;
+    }
+}
+
+window *os_instance_window(const app_instance_t *a) {
+    if (!a || !a->state || !a->desc || a->desc->opaque_state)
+        return NULL;
+    return *(window **)a->state;
 }
 
 app_instance_t *os_launch_app(app_descriptor *desc) {
@@ -51,11 +73,9 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
             app_instance_t *a = &running_apps[i];
             if (!a->running || a->wants_quit || a->desc != desc)
                 continue;
-            if (a->state) {
-                window **wp = (window **)a->state;
-                if (*wp && (*wp)->visible)
-                    wm_focus(*wp);
-            }
+            window *w = os_instance_window(a);
+            if (w && w->visible)
+                wm_focus(w);
             return a;
         }
     }
@@ -140,7 +160,7 @@ app_descriptor *os_find_app(const char *name) {
     if (!name)
         return NULL;
     for (int i = 0; i < installed_app_count; i++)
-        if (strcmp(installed_apps[i]->name, name) == 0)
+        if (installed_apps[i]->name && strcmp(installed_apps[i]->name, name) == 0)
             return installed_apps[i];
     return NULL;
 }
@@ -156,9 +176,8 @@ bool os_close_own_instance(window *win) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
         if (!a->running || a->wants_quit) continue;
-        if (!a->state) continue;
-        window **wp = (window **)a->state;
-        if (*wp == win) {
+        if (os_instance_window(a) != win) continue;
+        {
             os_quit_app(a);
             return true;
         }

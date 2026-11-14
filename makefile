@@ -15,6 +15,8 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       \
 	  $(BUILD_DIR)/os/app_registry.o            \
       $(BUILD_DIR)/os/appload.o                 \
+      $(BUILD_DIR)/os/appguard.o                \
+      $(BUILD_DIR)/lib/memory/pf_handler.o      \
       $(BUILD_DIR)/os/clipboard.o               \
 	  $(BUILD_DIR)/os/error.o                   \
       $(BUILD_DIR)/os/os.o                      \
@@ -127,7 +129,7 @@ $(BUILD_DIR)/os/task_switch.o: os/task_switch.asm | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
 
-$(BUILD_DIR)/lib/memory/page_fault.o: os/page_fault.asm | $(BUILD_DIR)
+$(BUILD_DIR)/lib/memory/page_fault.o: lib/memory/page_fault.asm | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
 

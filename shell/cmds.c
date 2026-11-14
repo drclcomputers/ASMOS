@@ -11,6 +11,7 @@
 #include "network/dns.h"
 #include "network/gopher.h"
 #include "network/net.h"
+#include "os/appload.h"
 #include "os/scheduler.h"
 
 static void append(char *buf, size_t max, const char *text) {
@@ -56,6 +57,7 @@ void cmd_help(char *out, size_t max) {
 
     append(out, max, "  gopher <ip> [port] [sel] - Browse Gopher\n");
     append(out, max, "  ping <host>   - ICMP echo request\n");
+    append(out, max, "  app <cmd>     - run|scan|list|unload external .APP\n");
     append(out, max, "  gui           - Start GUI\n\n");
 }
 
@@ -660,4 +662,44 @@ void cmd_netconf(const char *args, char *out, size_t max) {
     char buf[64];
     sprintf(buf, "ISR=0x%02X BNRY=0x%02X CURR=0x%02X\n\n", isr, bnry, curr);
     append(out, max, buf);
+}
+
+void cmd_app(const char *args, char *out, size_t max) {
+    if (!args) args = "";
+    while (*args == ' ') args++;
+
+    if (!*args) {
+        append(out, max, "Usage: app run <name|path> | scan [dir] | list | unload <name>\n");
+        return;
+    }
+    const char *arg = args;
+    while (*arg && *arg != ' ') arg++;
+    size_t cl = (size_t)(arg - args);
+    while (*arg == ' ') arg++;
+
+    if (cl == 3 && !strncmp(args, "run", 3)) {
+        if (!*arg) { append(out, max, "app run: need a name or path\n"); return; }
+        if (!appload_try_open(arg))
+            snprintf(out, max, "app: '%s' not found\n", arg);
+    } else if (cl == 4 && !strncmp(args, "scan", 4)) {
+        int n = appload_scan_dir(*arg ? arg : "/apps");
+        snprintf(out, max, "Loaded %d package(s)\n", n);
+    } else if (cl == 4 && !strncmp(args, "list", 4)) {
+        int shown = 0;
+        for (int i = 0; i < installed_app_count; i++) {
+            if (!appload_find(installed_apps[i]->name)) continue;
+            append(out, max, "  ");
+            append(out, max, installed_apps[i]->name);
+            append(out, max, "\n");
+            shown++;
+        }
+        if (!shown) append(out, max, "No external apps loaded\n");
+    } else if (cl == 6 && !strncmp(args, "unload", 6)) {
+        app_descriptor *d = appload_find(arg);
+        if (!d) snprintf(out, max, "app: '%s' is not a loaded external app\n", arg);
+        else if (!appload_unload(d)) append(out, max, "app: still running; close it first\n");
+        else append(out, max, "Unloaded\n");
+    } else {
+        append(out, max, "app: unknown subcommand\n");
+    }
 }

@@ -10,6 +10,7 @@
 #include "network/net.h"
 
 #include "os/app_registry.h"
+#include "os/appload.h"
 #include "os/error.h"
 #include "os/os.h"
 #include "os/scheduler.h"
@@ -239,6 +240,8 @@ void kmain(void) {
 
     for (int i = 0; i < app_registry_count; i++)
         os_install_app(app_registry[i].desc);
+
+    appload_scan_dir("/apps"); /* external .APP packages, if any */
 
     scheduler_init();
 

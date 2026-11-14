@@ -2,96 +2,96 @@
 #define APPLOAD_H
 
 /*
- * ASMOS Dynamic Application Loader
- * --------------------------------
- * Single-file packages with the .APP extension (same extension the desktop
- * already understands).  A package is a small header followed by the raw
- * machine code of the application.
+ * ASMOS dynamic application loader (.APP packages)
  *
- * Layout of an .APP file:
+ *   Off  Size  Field
+ *   0    4     magic          'ASMA'
+ *   4    2     version        1 (legacy) or 2
+ *   6    2     flags          bit0 single_instance
+ *                             bit1 state starts with a window* (v2 only)
+ *   8    4     header_size    68 (v1) or 80 (v2)
+ *   12   4     code_offset    from file start
+ *   16   4     code_size      bytes of code+data stored in the file
+ *   20   4     state_size     4 .. ASMA_MAX_STATE
+ *   24   32    name           NUL-terminated
+ *   56   4     entry_init     offset into code (0 is valid)
+ *   60   4     entry_frame    offset into code (0 is valid)
+ *   64   4     entry_destroy  offset into code; v2: ASMA_NO_ENTRY = none,
+ *                             v1: 0 = none
+ *   --- v2 only ---
+ *   68   4     reloc_offset   from file start; table of u32 code offsets
+ *   72   4     reloc_count    each word at code+off gets += load base
+ *   76   4     bss_size       zero-filled bytes appended after the code
  *
- *   Offset  Size   Field
- *   0       4      magic          "ASMA"
- *   4       2      version        currently 1
- *   6       2      flags          bit 0 = single_instance
- *   8       4      header_size    sizeof(asma_header_t)
- *  12       4      code_offset    from start of file
- *  16       4      code_size      bytes of code+data
- *  20       4      state_size     bytes the app needs for its private state
- *  24      32      name           null-terminated display name
- *  56       4      entry_init     offset of init(void *state) relative to code
- *  60       4      entry_frame    offset of on_frame(void *state)
- *  64       4      entry_destroy  offset of destroy(void *state)  (0 = none)
- *  68       ...    reserved / future (icon, etc.)
- *  header_size ... code + data
- *
- * The binary is loaded into a private region (or kernel heap for the first
- * version) and the three entry points are called exactly like a normal
- * statically-linked app_descriptor.
- *
- * Apps are expected to live under /apps (or the desktop folder).  Installing
- * a new app is simply copying the .APP file there — no kernel rebuild, no
- * reboot required.
+ * v1: entry(state).        v2: entry(const os_api_t *api, void *state).
+ * Link v2 apps at address 0 (-Ttext 0 --emit-relocs); tools/mkapp.py
+ * builds the relocation table from the ELF.
  */
 
 #include "lib/core.h"
 #include "os/os.h"
 
-#define ASMA_MAGIC          0x414D5341u   /* 'ASMA' little-endian */
-#define ASMA_VERSION        1
-#define ASMA_FLAG_SINGLE    (1u << 0)
+#define ASMA_MAGIC 0x414D5341u
+#define ASMA_VERSION_1 1
+#define ASMA_VERSION_2 2
+#define ASMA_FLAG_SINGLE (1u << 0)
+#define ASMA_FLAG_WINDOW_FIRST (1u << 1)
+#define ASMA_FLAGS_KNOWN (ASMA_FLAG_SINGLE | ASMA_FLAG_WINDOW_FIRST)
 
-#define ASMA_NAME_MAX       32
-#define ASMA_HEADER_SIZE    68
-#define ASMA_MAX_CODE_SIZE  (256 * 1024)  /* hard safety limit */
+#define ASMA_NAME_MAX 32
+#define ASMA_HEADER_V1 68
+#define ASMA_HEADER_V2 80
+#define ASMA_NO_ENTRY 0xFFFFFFFFu
+
+#define ASMA_MAX_CODE_SIZE (256u * 1024u)
+#define ASMA_MAX_BSS (256u * 1024u)
+#define ASMA_MAX_STATE (64u * 1024u)
+#define ASMA_MAX_RELOCS 32768u
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint16_t version;
     uint16_t flags;
-    uint32_t header_size;     /* must be ASMA_HEADER_SIZE */
+    uint32_t header_size;
     uint32_t code_offset;
     uint32_t code_size;
     uint32_t state_size;
-    char     name[ASMA_NAME_MAX];
-    uint32_t entry_init;      /* offset from start of code blob */
+    char name[ASMA_NAME_MAX];
+    uint32_t entry_init;
     uint32_t entry_frame;
     uint32_t entry_destroy;
+    /* v2 */
+    uint32_t reloc_offset;
+    uint32_t reloc_count;
+    uint32_t bss_size;
 } asma_header_t;
 
-/* Runtime representation of a loaded package */
+#define MAX_LOADED_APPS 32
+
 typedef struct {
-    asma_header_t   hdr;
-    uint8_t        *code_base;     /* where the code was loaded */
-    uint32_t        code_size;
-    void           *state;         /* owned by the app_instance */
-    app_descriptor  desc;          /* synthetic descriptor we hand to os_ */
-    bool            loaded;
-    char            path[256];     /* original file path (for debugging) */
+    asma_header_t hdr;
+    uint8_t *raw;       /* kmalloc'd block (for kfree) */
+    uint8_t *code_base; /* 16-byte aligned inside raw */
+    uint32_t image_size;
+    app_descriptor desc;
+    bool loaded;
+    bool faulted;
+    uint32_t file_size;
+    uint16_t mod_date, mod_time;
+    char path[128];
 } loaded_app_t;
 
-/* Maximum number of simultaneously loaded dynamic apps */
-#define MAX_LOADED_APPS  32
-
-/* Load a .APP file from the filesystem and register it so os_launch_app works.
- * Returns the synthetic app_descriptor on success, NULL on failure.
- * The descriptor stays valid until appload_unload() is called. */
+/* Load (or reuse / hot-reload if the file changed) and register. */
 app_descriptor *appload_load(const char *path);
-
-/* Convenience: load + immediately launch. */
 app_instance_t *appload_launch(const char *path);
-
-/* Unload a previously loaded package (only safe if no instances are running). */
-void appload_unload(app_descriptor *desc);
-
-/* Scan a directory (e.g. "/apps") and load every .APP found.
- * Returns how many packages were successfully loaded. */
+/* Refuses (returns false) if any instance is running. */
+bool appload_unload(app_descriptor *desc);
+/* Load every *.APP in dir. Returns count loaded. */
 int appload_scan_dir(const char *dir_path);
-
-/* Lookup by name among dynamically loaded packages. */
 app_descriptor *appload_find(const char *name);
-
-/* Called from the desktop open_item path when a real .APP file is clicked. */
+/* Try path as-is, then common locations. */
 bool appload_try_open(const char *path_or_name);
+/* Last human-readable failure reason ("" if none). */
+const char *appload_last_error(void);
 
-#endif /* APPLOAD_H */
+#endif

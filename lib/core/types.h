@@ -13,9 +13,13 @@ typedef signed int int32_t;
 
 typedef uint32_t uintptr_t;
 
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L
+#ifndef __cplusplus
 typedef _Bool bool;
 #define true 1
 #define false 0
+#endif
+#endif
 
 #define NULL ((void *)0)
 

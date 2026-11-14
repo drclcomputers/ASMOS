@@ -162,11 +162,11 @@ static void do_switch(void) {
     app_instance_t *a = get_nth(s->selected);
     if (!a || !a->state)
         return;
-    window **wp = (window **)a->state;
-    if (*wp) {
-        (*wp)->minimized = false;
-        (*wp)->visible = true;
-        wm_focus(*wp);
+    window *w = os_instance_window(a);
+    if (w) {
+        w->minimized = false;
+        w->visible = true;
+        wm_focus(w);
         mouse.left_clicked = false;
     }
 }
@@ -178,15 +178,11 @@ static void do_end_task(void) {
     app_instance_t *a = get_nth(s->selected);
     if (!a || a->desc == &monitor_app)
         return;
-    if (a->state) {
-        window **wp = (window **)a->state;
-        if (*wp && (*wp)->on_close)
-            (*wp)->on_close(*wp);
-        else
-            os_quit_app(a);
-    } else {
+    window *w = os_instance_window(a);
+    if (w && w->on_close)
+        w->on_close(w);
+    else
         os_quit_app(a);
-    }
     s->selected = -1;
     int count = count_running();
     if (s->scroll_top > 0 && s->scroll_top >= count - LIST_VISIBLE)

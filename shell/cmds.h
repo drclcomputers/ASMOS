@@ -28,5 +28,6 @@ void cmd_cd(const char *path, char *out, size_t max);
 void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max);
 void cmd_ping(const char *args, char *out, size_t max);
 void cmd_netconf(const char *args, char *out, size_t max);
+void cmd_app(const char *args, char *out, size_t max);
 
 #endif

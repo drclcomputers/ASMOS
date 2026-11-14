@@ -463,6 +463,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_ping(argument, out_buffer, max_len);
     else if (!strcmp(command, "netconf"))
         cmd_netconf(argument, out_buffer, max_len);
+    else if (!strcmp(command, "app"))
+        cmd_app(argument, out_buffer, max_len);
     else if (command[0] != '\0')
         snprintf(out_buffer, max_len, "Unknown command: %s\n", command);
 

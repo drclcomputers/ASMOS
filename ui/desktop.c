@@ -298,8 +298,8 @@ static void open_item(desktop_item_t *it) {
             char msg[256];
             snprintf(msg, sizeof(msg),
                      "Could not find application '%s'.\n"
-                     "Put a real .APP package on /FDD0 or rebuild the kernel.",
-                     names[0]);
+                     "Put %s.APP in /apps or /FDD0, or rebuild the kernel.",
+                     names[0], names[0]);
             modal_show(MODAL_INFO, "App Not Found", msg, NULL, NULL);
         }
     } else if (it->kind == DESKTOP_ITEM_DIR) {

@@ -1,6 +1,7 @@
 #include "interrupts/idt.h"
 #include "lib/core.h"
 #include "lib/memory.h"
+#include "os/appguard.h"
 
 typedef struct __attribute__((packed)) {
     uint16_t offset_lo;
@@ -32,6 +33,8 @@ static void idt_set_gate(uint8_t n, uint32_t handler) {
     idt[n].zero = 0;
     idt[n].type_attr = 0x8E;
 }
+
+static void idt_set_gate_pub(uint8_t n, uint32_t h) { idt_set_gate(n, h); }
 
 static void pic_remap(void) {
     uint8_t m1 = inb(PIC1_DATA);
@@ -78,6 +81,7 @@ void idt_init(void) {
     for (int i = 0; i < IDT_SIZE; i++)
         idt_set_gate(i, spurious_addr);
 
+    appguard_install_gates(idt_set_gate_pub);
     idt_set_gate(IRQ0_VECTOR, (uint32_t)isr_timer);
 
     idt_ptr.limit = sizeof(idt) - 1;

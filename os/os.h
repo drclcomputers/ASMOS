@@ -20,6 +20,7 @@ typedef struct {
     app_frame_fn on_frame;
     app_destroy_fn destroy;
     bool single_instance;
+    bool opaque_state; /* true: state does NOT start with a window* */
 } app_descriptor;
 
 typedef struct {
@@ -31,6 +32,8 @@ typedef struct {
 } app_instance_t;
 
 void os_install_app(app_descriptor *desc);
+void os_uninstall_app(app_descriptor *desc);
+window *os_instance_window(const app_instance_t *a);
 app_instance_t *os_launch_app(app_descriptor *desc);
 void os_quit_app(app_instance_t *inst);
 void os_quit_app_by_desc(app_descriptor *desc);
