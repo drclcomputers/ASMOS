@@ -304,6 +304,9 @@ void wm_sync_menubar(menubar *mb) {
     }
 }
 
+static void (*s_overlay)(void *);
+static void *s_overlay_user;
+
 void wm_draw_all(void) {
     for (int i = 0; i < win_count; i++) {
         window *win = win_stack[i];
@@ -367,6 +370,21 @@ void wm_draw_all(void) {
                     2);
         taskbar_x += lw + 1;
     }
+
+    if (s_overlay) { /* e.g. an icon being dragged between windows */
+        gfx_reset_clip();
+        s_overlay(s_overlay_user);
+    }
+}
+
+void wm_set_overlay(void (*fn)(void *user), void *user) {
+    s_overlay = fn;
+    s_overlay_user = user;
+}
+
+void wm_clear_overlay(void *user) {
+    if (s_overlay_user == user)
+        s_overlay = NULL;
 }
 
 void wm_update_all(void) {
@@ -418,9 +436,36 @@ void wm_update_all(void) {
         window_update(focused_window);
 }
 
+/* Keep a window inside the desktop. Apps lay out controls for one size;
+ * on a 320x200 screen the window shrinks after the controls exist so the
+ * anchor/stretch styles adapt them. */
+static void fit_to_screen(window *win) {
+    int maxw = SCREEN_WIDTH, maxh = SCREEN_HEIGHT - MENUBAR_H;
+    if (win->w > maxw)
+        win->w = maxw;
+    if (win->h > maxh)
+        win->h = maxh;
+    if (win->min_w > win->w)
+        win->min_w = win->w;
+    if (win->min_h > win->h)
+        win->min_h = win->h;
+    if (win->x + win->w > maxw)
+        win->x = maxw - win->w;
+    if (win->y + win->h > maxh)
+        win->y = maxh - win->h;
+    if (win->x < 0)
+        win->x = 0;
+    if (win->y < 0)
+        win->y = 0;
+}
+
 void window_draw(window *win) {
     if (!win || !win->visible || win->minimized)
         return;
+    if (win->fit_pending) {
+        win->fit_pending = false;
+        fit_to_screen(win);
+    }
 
     int wy = win->y + MENUBAR_H;
 

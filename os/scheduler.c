@@ -222,21 +222,16 @@ void scheduler_kernel_task(void) {
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);
 
-        if (!modal_active()) {
-            menubar_update(&g_menubar);
-            ctl_dispatch(); /* controls get their clicks/keys first */
-            os_tick_apps();
-            wm_update_all();
-        }
+        menubar_update(&g_menubar);
+        ctl_dispatch(); /* controls get their clicks/keys first */
+        os_tick_apps();
+        wm_update_all();
 
         os_reap_dead_apps();
 
         desktop_on_frame();
         wm_draw_all();
         menubar_draw(&g_menubar);
-
-        modal_update();
-        modal_draw();
 
         draw_cursor(mouse.x, mouse.y);
 

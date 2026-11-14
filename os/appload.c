@@ -14,7 +14,6 @@
 #include "os/os.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
-#include "ui/modal.h"
 
 static loaded_app_t s_loaded[MAX_LOADED_APPS];
 static char s_err[160];
@@ -181,6 +180,34 @@ static void hook_dlg(window *owner, void (*fn)(void *, void *), void *user,
     guarded(owner->dyn_state, fn, user, arg, "a dialog callback");
 }
 
+static void call_menu(void *fn, void *user) { ((MenuActionUD)fn)(user); }
+
+static void hook_menu(void *state, MenuActionUD fn, void *user) {
+    guarded(state, call_menu, (void *)fn, user, "a menu command");
+}
+
+/* Menus may only go on the app's own windows; items remember the app so
+ * the menubar calls them through the guard with the app's state. */
+static menu *api_add_menu(window *w, const char *title) {
+    if (!w || !s_calling_state || w->dyn_state != s_calling_state)
+        return NULL;
+    return window_add_menu(w, title);
+}
+
+static void api_menu_item(menu *m, const char *label, void (*fn)(void *)) {
+    if (!m || !s_calling_state || !fn)
+        return;
+    int n = m->item_count;
+    menu_add_item_ud(m, (char *)label, fn, s_calling_state);
+    if (m->item_count > n) /* not full */
+        m->items[n].dyn_state = s_calling_state;
+}
+
+static void api_menu_separator(menu *m) {
+    if (m)
+        menu_add_separator(m);
+}
+
 static int api_file_read(const char *path, void *buf, int max) {
     fat_file_t f;
     if (!path || !buf || max <= 0 || !fs_open(path, &f))
@@ -262,6 +289,10 @@ static const ui_api_t s_ui = {
     .edit_copy = edit_copy,
     .edit_cut = edit_cut,
     .edit_paste = edit_paste,
+    .add_menu = api_add_menu,
+    .menu_item = api_menu_item,
+    .menu_separator = api_menu_separator,
+    .input_check = dlg_input_check,
 };
 
 /* ── API table given to v2 apps ─────────────────────────────────────── */
@@ -344,7 +375,7 @@ static void on_fault(loaded_app_t *la, void *state, const char *what,
             *(window **)inst->state = NULL;
         os_quit_app(inst);
     }
-    modal_show(MODAL_INFO, "App Crashed", msg, NULL, NULL);
+    dlg_post_message("App Crashed", msg);
 }
 
 static void run_entry(app_descriptor *d, uint32_t off, void *state,
@@ -489,6 +520,7 @@ static bool read_exact(fat_file_t *f, void *buf, uint32_t n) {
 app_descriptor *appload_load(const char *path) {
     g_ctl_invoke_hook = hook_ctl;
     g_dlg_call_hook = hook_dlg;
+    g_menu_call_hook = hook_menu;
     s_err[0] = 0;
     if (!path || !path[0] ||
         strlen(path) >= sizeof(((loaded_app_t *)0)->path)) {
@@ -748,7 +780,7 @@ bool appload_try_open(const char *p) {
     }
     if (first_err[0]) {
         snprintf(s_err, sizeof(s_err), "%s", first_err);
-        modal_show(MODAL_INFO, "App Load Failed", s_err, NULL, NULL);
+        dlg_message(NULL, "App Load Failed", s_err);
         s_err[0] = 0;
         return true; /* handled: don't fall through to "not found" */
     }

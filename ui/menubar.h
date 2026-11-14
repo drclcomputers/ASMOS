@@ -17,6 +17,7 @@ typedef struct {
     MenuAction action;
     MenuActionUD action_ud;
     void *userdata;
+    void *dyn_state; /* set for .APP items: called through the app guard */
     bool disabled;
 } menu_item;
 
@@ -43,6 +44,8 @@ void menu_add_item(menu *m, char *label, MenuAction action);
 void menu_add_item_ud(menu *m, char *label, MenuActionUD action,
                       void *userdata);
 void menu_add_separator(menu *m);
+/* set by the .APP loader: runs a dynamic app's menu command guarded */
+extern void (*g_menu_call_hook)(void *state, MenuActionUD fn, void *user);
 void menubar_layout(menubar *mb);
 void menubar_draw(menubar *mb);
 void menubar_update(menubar *mb);

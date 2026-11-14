@@ -11,7 +11,7 @@
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
-#include "ui/modal.h"
+#include "ui/dialogs.h"
 
 static bool s_gui_mode = false;
 
@@ -136,15 +136,14 @@ void error_report(err_severity_t sev, err_code_t code, const char *context) {
         }
         gui_msg[mi] = '\0';
 
-        int modal_t =
-            (sev == ERR_FATAL || sev == ERR_WARNING) ? 2 : 0; // ERROR or INFO
-
         const char *title = (sev == ERR_FATAL)     ? "Fatal Error"
                             : (sev == ERR_WARNING) ? "Warning"
                                                    : "Info";
-        modal_show(modal_t, title, gui_msg, NULL, NULL);
+        if (sev != ERR_FATAL)
+            dlg_post_message(title, gui_msg); /* shown next frame */
 
         if (sev == ERR_FATAL) {
+            dlg_draw_now(title, gui_msg);
             blit();
             volatile uint32_t delay = 0x8000000;
             while (delay--)

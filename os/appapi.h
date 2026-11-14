@@ -90,6 +90,15 @@ typedef struct ui_api {
     void (*edit_copy)(control *);
     void (*edit_cut)(control *);
     void (*edit_paste)(control *);
+
+    /* window menus: fn(state) runs when the item is picked */
+    menu *(*add_menu)(window *w, const char *title);
+    void (*menu_item)(menu *m, const char *label, void (*fn)(void *state));
+    void (*menu_separator)(menu *m);
+
+    /* input dialog with a check box (*checked is written before cb) */
+    void (*input_check)(window *, const char *, const char *, const char *, int,
+                        uint32_t, const char *, bool *, dlg_text_cb, void *);
 } ui_api_t;
 
 #define OS_API_VERSION 1

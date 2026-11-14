@@ -4,6 +4,7 @@
 
 #include "config/config.h"
 #include "fs/fs.h"
+#include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "ui/window.h"
@@ -20,9 +21,11 @@ typedef struct {
     dlg_text_cb tcb;
     dlg_bool_cb bcb;
     void *user;
-    control *edit, *list, *path;
+    control *edit, *list, *path, *check;
+    bool *check_out; /* dlg_input_check: receives the box on OK */
     char dir[128];
     char ext[4];
+    char title[40]; /* callers may pass a stack buffer */
 } dlg_t;
 
 #define MAX_DLG 8
@@ -55,6 +58,8 @@ static void finish(dlg_t *d, bool ok, const char *text) {
         strncpy(result, text, sizeof(result) - 1);
         result[sizeof(result) - 1] = 0;
     }
+    if (ok && d->check && d->check_out)
+        *d->check_out = ctl_value(d->check) != 0;
     window *owner = d->owner;
     dlg_text_cb tcb = d->tcb;
     dlg_bool_cb bcb = d->bcb;
@@ -107,7 +112,8 @@ static dlg_t *open_dlg(window *owner, int kind, const char *title, int w,
     spec.y = y;
     spec.w = w;
     spec.h = h;
-    spec.title = title;
+    strncpy(d->title, title ? title : "", sizeof(d->title) - 1);
+    spec.title = d->title;
     spec.title_color = WHITE;
     spec.bar_color = DARK_GRAY;
     spec.content_color = TH_FACE;
@@ -154,7 +160,7 @@ static void on_cancel(control *c, int ev) {
 }
 
 /* word-wrap msg into out (lines separated by '\n'); returns line count */
-static int wrap(const char *msg, char *out, int outsz, int cols) {
+static int wrap_text(const char *msg, char *out, int outsz, int cols) {
     int o = 0, lines = 1, col = 0;
     const char *p = msg;
     while (*p && o < outsz - 2) {
@@ -199,7 +205,7 @@ static int wrap(const char *msg, char *out, int outsz, int cols) {
 static void message_box(window *owner, int kind, const char *title,
                         const char *msg, dlg_bool_cb cb, void *user) {
     char text[512];
-    int lines = wrap(msg ? msg : "", text, sizeof(text), 38);
+    int lines = wrap_text(msg ? msg : "", text, sizeof(text), 38);
     if (lines > 12)
         lines = 12;
     int h = 16 + 8 + lines * 8 + 8 + 13 + 8;
@@ -232,10 +238,12 @@ void dlg_confirm(window *owner, const char *title, const char *msg,
     message_box(owner, K_CONFIRM, title, msg, cb, user);
 }
 
-void dlg_input(window *owner, const char *title, const char *prompt,
-               const char *initial, int max_len, uint32_t edit_style,
-               dlg_text_cb cb, void *user) {
-    dlg_t *d = open_dlg(owner, K_INPUT, title, 200, 70);
+void dlg_input_check(window *owner, const char *title, const char *prompt,
+                     const char *initial, int max_len, uint32_t edit_style,
+                     const char *check_label, bool *checked, dlg_text_cb cb,
+                     void *user) {
+    int h = check_label ? 82 : 70, by = check_label ? 48 : 36;
+    dlg_t *d = open_dlg(owner, K_INPUT, title, 200, h);
     if (!d)
         return;
     d->tcb = cb;
@@ -243,12 +251,24 @@ void dlg_input(window *owner, const char *title, const char *prompt,
     ctl_label(d->win, 8, 6, 180, 8, prompt ? prompt : "", 0);
     d->edit = ctl_edit(d->win, 8, 17, 182, 12, initial ? initial : "", max_len,
                        edit_style & ~ES_MULTILINE, NULL);
-    control *ok = ctl_button(d->win, 84, 36, 50, 13, "OK", 1, on_ok);
-    control *ca = ctl_button(d->win, 140, 36, 50, 13, "Cancel", 2, on_cancel);
+    if (check_label) {
+        d->check = ctl_check(d->win, 8, 33, 182, check_label,
+                             checked && *checked, NULL);
+        d->check_out = checked;
+    }
+    control *ok = ctl_button(d->win, 84, by, 50, 13, "OK", 1, on_ok);
+    control *ca = ctl_button(d->win, 140, by, 50, 13, "Cancel", 2, on_cancel);
     ctl_style_add(ok, CS_DEFAULT);
     ctl_style_add(ca, CS_CANCEL);
     ctl_focus(d->edit);
     edit_select_all(d->edit);
+}
+
+void dlg_input(window *owner, const char *title, const char *prompt,
+               const char *initial, int max_len, uint32_t edit_style,
+               dlg_text_cb cb, void *user) {
+    dlg_input_check(owner, title, prompt, initial, max_len, edit_style, NULL,
+                    NULL, cb, user);
 }
 
 /* ── file dialogs ──────────────────────────────────────────────────────── */
@@ -527,4 +547,55 @@ void dlg_save_file(window *owner, const char *title, const char *dir,
                    void *user) {
     file_dialog(owner, K_SAVE, title ? title : "Save As", dir, name, ext, cb,
                 user);
+}
+
+/* ── messages from places that must not build windows ──────────────────── */
+
+#define MAX_POSTED 4
+static struct {
+    char title[40];
+    char msg[200];
+} s_posted[MAX_POSTED];
+static volatile int s_posted_n;
+
+void dlg_post_message(const char *title, const char *msg) {
+    if (s_posted_n >= MAX_POSTED)
+        return; /* a flood of errors: the first few are enough */
+    int i = s_posted_n;
+    strncpy(s_posted[i].title, title ? title : "", 39);
+    s_posted[i].title[39] = 0;
+    strncpy(s_posted[i].msg, msg ? msg : "", 199);
+    s_posted[i].msg[199] = 0;
+    s_posted_n = i + 1;
+}
+
+void dlg_flush_posted(void) {
+    for (int i = 0; i < s_posted_n; i++)
+        dlg_message(NULL, s_posted[i].title, s_posted[i].msg);
+    s_posted_n = 0;
+}
+
+/* Draw a box straight into the frame (the system is about to halt). */
+void dlg_draw_now(const char *title, const char *msg) {
+    char text[512];
+    int lines = wrap_text(msg ? msg : "", text, sizeof(text), 38);
+    if (lines > 12)
+        lines = 12;
+    int w = 210, h = 16 + 8 + lines * 8 + 8;
+    int x = (SCREEN_WIDTH - w) / 2, y = (SCREEN_HEIGHT - h) / 3;
+    gfx_reset_clip();
+    fill_rect(x + 3, y + 3, w, h, BLACK);
+    fill_rect(x, y, w, h, TH_FACE);
+    draw_rect(x, y, w, h, BLACK);
+    fill_rect(x + 1, y + 1, w - 2, 14, RED);
+    draw_string(x + 4, y + 4, title ? title : "", WHITE, 2);
+    const char *p = text;
+    for (int l = 0; l < lines; l++) {
+        const char *e = strchr(p, '\n');
+        int n = e ? (int)(e - p) : (int)strlen(p);
+        draw_text_n(x + 8, y + 24 + l * 8, p, n, BLACK, 2);
+        if (!e)
+            break;
+        p = e + 1;
+    }
 }

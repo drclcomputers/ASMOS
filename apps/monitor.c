@@ -2,7 +2,7 @@
 #include "os/api.h"
 #include "os/appload.h"
 
-#define REFRESH_MS 3000
+#define REFRESH_MS 1000
 
 typedef struct {
     window *win; /* must stay first */
@@ -51,9 +51,6 @@ static void fill_tasks(monitor_state_t *s) {
 
 static void refresh_system(monitor_state_t *s) {
     char b[80];
-    cpu_model_init();
-    snprintf(b, sizeof(b), "CPU:  %s", cpu_model_str());
-    ctl_set_text(s->cpu, b);
     uint32_t used = heap_used() / 1024;
     uint32_t total = (heap_used() + heap_remaining()) / 1024;
     snprintf(b, sizeof(b), "Heap: %u KB used of %u KB", used, total);
@@ -187,6 +184,10 @@ static void monitor_init(void *state) {
     menu_add_separator(f);
     menu_add_item(f, "About Monitor", on_about);
 
+    char b[64];
+    cpu_model_init(); /* CPUID once; the name doesn't change */
+    snprintf(b, sizeof(b), "CPU:  %s", cpu_model_str());
+    ctl_set_text(s->cpu, b);
     fill_tasks(s);
     refresh_system(s);
     ctl_focus(s->list);
@@ -195,7 +196,8 @@ static void monitor_init(void *state) {
 static void monitor_on_frame(void *state) {
     monitor_state_t *s = state;
     fill_tasks(s);
-    if (time_millis() >= s->next_refresh) {
+    /* System page only while it is showing; disk usage is cached by fs */
+    if (ctl_value(s->tabs) == 1 && time_millis() >= s->next_refresh) {
         s->next_refresh = time_millis() + REFRESH_MS;
         refresh_system(s);
     }

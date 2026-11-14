@@ -12,8 +12,8 @@
 #include "lib/time.h"
 #include "os/os.h"
 #include "ui/cursor.h"
+#include "ui/dialogs.h"
 #include "ui/menubar.h"
-#include "ui/modal.h"
 #include "ui/window.h"
 
 void (*g_ctl_invoke_hook)(control *c, int ev) = NULL;
@@ -22,6 +22,7 @@ static control *s_capture;   /* control that owns the mouse while held */
 static control *s_popup;     /* combo box whose list is open           */
 static control *s_last_down; /* for double clicks                       */
 static uint32_t s_last_down_t;
+static int s_last_down_x, s_last_down_y; /* a double-click stays put */
 static int s_last_down_item = -1;
 static int s_drag_off; /* scrollbar thumb grab offset */
 static int s_drag_part;
@@ -1276,9 +1277,14 @@ static void mouse_down(control *c) {
     c->mx = mx;
     c->my = my;
     uint32_t now = time_millis();
-    bool dbl = (c == s_last_down && now - s_last_down_t < DBLCLICK_MS);
-    s_last_down = c;
+    int ddx = mouse.x - s_last_down_x, ddy = mouse.y - s_last_down_y;
+    bool dbl = (c == s_last_down && now - s_last_down_t < DBLCLICK_MS &&
+                ddx * ddx + ddy * ddy <= 16);
+    /* after a double-click the next press starts a new pair */
+    s_last_down = dbl ? NULL : c;
     s_last_down_t = now;
+    s_last_down_x = mouse.x;
+    s_last_down_y = mouse.y;
     s_drag_part = 0;
 
     switch (c->type) {
@@ -1746,8 +1752,7 @@ static void hover_cursor(void) {
 }
 
 void ctl_dispatch(void) {
-    if (modal_active())
-        return;
+    dlg_flush_posted();
     hover_cursor();
 
     /* 1) mouse held on a control */
@@ -1904,5 +1909,6 @@ window *app_window(void *state, const char *title, int x, int y, int w, int h,
     if (flags & AW_NO_ANIM)
         win->anim_state = WIN_ANIM_NONE;
     win->userdata = state;
+    win->fit_pending = true;
     return win;
 }

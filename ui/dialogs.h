@@ -26,6 +26,13 @@ void dlg_confirm(window *owner, const char *title, const char *msg,
 void dlg_input(window *owner, const char *title, const char *prompt,
                const char *initial, int max_len, uint32_t edit_style,
                dlg_text_cb cb, void *user);
+/* dlg_input plus a check box. *checked gives its start state and receives
+ * the final state just before cb runs (on OK only); it must outlive the
+ * dialog (e.g. a field of your app state). */
+void dlg_input_check(window *owner, const char *title, const char *prompt,
+                     const char *initial, int max_len, uint32_t edit_style,
+                     const char *check_label, bool *checked, dlg_text_cb cb,
+                     void *user);
 /* File pickers return a full path (e.g. "/FDD0/SONG.MID").
  * ext: show only files with this extension ("TXT"), or NULL for all. */
 void dlg_open_file(window *owner, const char *title, const char *dir,
@@ -33,6 +40,13 @@ void dlg_open_file(window *owner, const char *title, const char *dir,
 void dlg_save_file(window *owner, const char *title, const char *dir,
                    const char *name, const char *ext, dlg_text_cb cb,
                    void *user);
+
+/* From code that must not create windows (fault/error handlers): queued,
+ * shown as a dlg_message at the start of the next frame. */
+void dlg_post_message(const char *title, const char *msg);
+void dlg_flush_posted(void);
+/* Draw a message box into the frame right now (before a halt). */
+void dlg_draw_now(const char *title, const char *msg);
 
 /* system hooks */
 void dlg_owner_destroyed(window *owner);

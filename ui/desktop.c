@@ -3,7 +3,6 @@
 #include "ui/dialogs.h"
 #include "ui/icons.h"
 #include "ui/menubar.h"
-#include "ui/modal.h"
 #include "ui/window.h"
 
 #include "os/app_registry.h"
@@ -161,6 +160,7 @@ void power_anim_run(bool is_restart) {
 /* ── dialog state ───────────────────────────────────────────────────────── */
 
 static bool s_newname_is_dir = false;
+static bool s_newname_hidden = false; /* the dialog's "Hidden" box */
 
 /* ── open item ──────────────────────────────────────────────────────────── */
 
@@ -232,7 +232,7 @@ static void open_item(desktop_item_t *it) {
                      "Could not find application '%s'.\n"
                      "Put %s.APP in /apps or /FDD0, or rebuild the kernel.",
                      names[0], names[0]);
-            modal_show(MODAL_INFO, "App Not Found", msg, NULL, NULL);
+            dlg_message(NULL, "App Not Found", msg);
         }
     } else if (it->kind == DESKTOP_ITEM_DIR) {
         dir_entry_t de;
@@ -376,7 +376,7 @@ static int selected_idx(void) {
 static void do_delete(void) {
     int sel = selected_idx();
     if (sel < 0) {
-        modal_show(MODAL_ERROR, "Delete", "Selection lost.", NULL, NULL);
+        dlg_message(NULL, "Delete", "Selection lost.");
         return;
     }
     desktop_fs_delete(sel);
@@ -387,9 +387,10 @@ static void rename_done(void *user, const char *name);
 
 static void new_item(bool dir) {
     s_newname_is_dir = dir;
-    dlg_input(NULL, dir ? "New Folder" : "New File",
-              dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
-              newname_done, NULL);
+    s_newname_hidden = false;
+    dlg_input_check(NULL, dir ? "New Folder" : "New File",
+                    dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
+                    "Hidden", &s_newname_hidden, newname_done, NULL);
 }
 static void menu_new_file(void) { new_item(false); }
 static void menu_new_folder(void) { new_item(true); }
@@ -420,17 +421,23 @@ static void menu_rename(void) {
 }
 static void menu_reload(void) { desktop_fs_set_dirty(); }
 
+/* dlg_confirm callback: user is the void(void) action to run on Yes */
+static void run_if_yes(void *fn, bool yes) {
+    if (yes)
+        ((void (*)(void))fn)();
+}
+
 /* Copy (is_cut=false) or cut the selected item to the file clipboard. */
 static void clip_selected(bool is_cut) {
     const char *title = is_cut ? "Cut" : "Copy";
     int sel = selected_idx();
     if (sel < 0) {
-        modal_show(MODAL_ERROR, title, "Nothing selected.", NULL, NULL);
+        dlg_message(NULL, title, "Nothing selected.");
         return;
     }
     desktop_item_t *it = &desktop_fs_items()[sel];
     if (path_is_protected(it->name)) {
-        modal_show(MODAL_ERROR, title, "Protected item.", NULL, NULL);
+        dlg_message(NULL, title, "Protected item.");
         return;
     }
 
@@ -450,17 +457,16 @@ static void clip_selected(bool is_cut) {
 
     clipboard_set_file(desktop_fs_path(), disk_name,
                        it->kind == DESKTOP_ITEM_DIR, is_cut, DRIVE_HDA);
-    modal_show(MODAL_INFO, title,
-               is_cut ? "Item cut. Paste to move."
-                      : "Item copied to clipboard.",
-               NULL, NULL);
+    dlg_message(NULL, title,
+                is_cut ? "Item cut. Paste to move."
+                       : "Item copied to clipboard.");
 }
 static void menu_copy(void) { clip_selected(false); }
 static void menu_cut(void) { clip_selected(true); }
 
 static void menu_paste(void) {
     if (!clipboard_has_file()) {
-        modal_show(MODAL_ERROR, "Paste", "Clipboard is empty.", NULL, NULL);
+        dlg_message(NULL, "Paste", "Clipboard is empty.");
         return;
     }
 
@@ -475,8 +481,7 @@ static void menu_paste(void) {
 
     dir_entry_t de;
     if (fs_find(dst_path, &de)) {
-        modal_show(MODAL_ERROR, "Paste Failed", "Name already exists.", NULL,
-                   NULL);
+        dlg_message(NULL, "Paste Failed", "Name already exists.");
         return;
     }
 
@@ -497,28 +502,26 @@ static void menu_paste(void) {
 
     if (ok) {
         desktop_fs_set_dirty();
-        modal_show(MODAL_INFO, "Paste", "Item pasted successfully.", NULL,
-                   NULL);
+        dlg_message(NULL, "Paste", "Item pasted successfully.");
     } else {
-        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL,
-                   NULL);
+        dlg_message(NULL, "Paste Failed", "Could not paste item.");
     }
 }
 
 static void menu_delete(void) {
     int sel = selected_idx();
     if (sel < 0) {
-        modal_show(MODAL_ERROR, "Delete", "Nothing selected.", NULL, NULL);
+        dlg_message(NULL, "Delete", "Nothing selected.");
         return;
     }
     desktop_item_t *it = &desktop_fs_items()[sel];
     if (path_is_protected(it->name)) {
-        modal_show(MODAL_ERROR, "Delete", "Protected item.", NULL, NULL);
+        dlg_message(NULL, "Delete", "Protected item.");
         return;
     }
     char msg[256];
     sprintf(msg, "Delete %s?", it->name);
-    modal_show(MODAL_CONFIRM, "Confirm Delete", msg, do_delete, NULL);
+    dlg_confirm(NULL, "Confirm Delete", msg, run_if_yes, (void *)do_delete);
 }
 
 static void menu_about_os(void) {
@@ -527,7 +530,7 @@ static void menu_about_os(void) {
             "ASMOS ver %s\nDeveloped by drclcomputers.\n\nCheck out more of my "
             "work here: https://github.com/drclcomputers/ASMOS",
             VER);
-    modal_show(MODAL_INFO, "About ASMOS (c)2026 @drclcomputers", x, NULL, NULL);
+    dlg_message(NULL, "About ASMOS", x);
 }
 
 static void do_shutdown(void) {
@@ -535,18 +538,18 @@ static void do_shutdown(void) {
     cpu_shutdown();
 }
 static void menu_shutdown(void) {
-    modal_show(MODAL_CONFIRM, "Shut Down",
-               "Shut down ASMOS?\n\nAny usnaved work will be lost!",
-               do_shutdown, NULL);
+    dlg_confirm(NULL, "Shut Down",
+                "Shut down ASMOS?\n\nAny unsaved work will be lost!",
+                run_if_yes, (void *)do_shutdown);
 }
 static void do_restart(void) {
     power_anim_run(true);
     cpu_reset();
 }
 static void menu_restart(void) {
-    modal_show(MODAL_CONFIRM, "Restart",
-               "Restart ASMOS?\n\nAny usnaved work will be lost!", do_restart,
-               NULL);
+    dlg_confirm(NULL, "Restart",
+                "Restart ASMOS?\n\nAny unsaved work will be lost!", run_if_yes,
+                (void *)do_restart);
 }
 
 static void menu_eject_fdd(void) {
@@ -560,16 +563,15 @@ static void menu_eject_fdd(void) {
             }
         }
     }
-    modal_show(MODAL_WARNING, "Eject", "No floppy selected or mounted.", NULL,
-               NULL);
+    dlg_message(NULL, "Eject", "No floppy selected or mounted.");
 }
 
 static void menu_insert_fdd(void) {
     if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
         desktop_fs_set_dirty();
     } else {
-        modal_show(MODAL_WARNING, "Insert Floppy",
-                   "No floppy found or already mounted.", NULL, NULL);
+        dlg_message(NULL, "Insert Floppy",
+                    "No floppy found or already mounted.");
     }
 }
 
@@ -594,6 +596,8 @@ static void newname_done(void *user, const char *name) {
         if (ok)
             fs_close(&f);
     }
+    if (ok && s_newname_hidden)
+        fs_set_hidden(name, true);
     dir_context.current_cluster = saved;
     if (!ok)
         dlg_message(NULL, "Create Failed", "Name exists or disk full.");
@@ -727,7 +731,7 @@ void desktop_on_frame(void) {
         }
     }
 
-    if (!modal_active() && mouse.left_clicked && mouse.y >= MENUBAR_H &&
+    if (mouse.left_clicked && mouse.y >= MENUBAR_H &&
         g_menubar.open_index < 0 && !g_menubar_click_consumed) {
         int hit = desktop_hit(mouse.x, mouse.y);
         if (hit >= 0) {
@@ -775,7 +779,7 @@ void desktop_on_frame(void) {
             speaker_beep(880, 300);
             speaker_beep(660, 300);
             speaker_beep(880, 400);
-            modal_show(MODAL_INFO, "Alarm", "Alarm time reached!", NULL, NULL);
+            dlg_message(NULL, "Alarm", "Alarm time reached!");
         }
     }
 }

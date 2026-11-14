@@ -82,6 +82,7 @@ struct window {
     void *dyn_state;            /* set for windows of dynamic .APP apps    */
     struct window *modal_child; /* open dialog blocking this window   */
     struct window *modal_owner; /* for dialogs: the window they block */
+    bool fit_pending; /* shrink/move onto the screen before first draw */
 };
 
 extern window *win_stack[MAX_WINDOWS];
@@ -103,6 +104,10 @@ void wm_update_all(void);
 bool wm_is_registered(const window *win);
 void wm_close(window *win); /* what the close button does */
 menu *window_add_menu(window *win, const char *title);
+/* Draw fn(user) on top of every window each frame (one at a time), e.g.
+ * an icon dragged across windows. Clear it with the same user pointer. */
+void wm_set_overlay(void (*fn)(void *user), void *user);
+void wm_clear_overlay(void *user);
 void window_draw(window *win);
 bool window_update(window *win);
 void window_resize(window *win);

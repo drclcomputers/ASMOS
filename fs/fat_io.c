@@ -63,6 +63,7 @@ uint16_t fat_get(uint8_t drive_id, uint16_t cluster) {
 
 bool fat_set(uint8_t drive_id, uint16_t cluster, uint16_t value) {
     fat_vol_t *v = vol(drive_id);
+    fs_usage_invalidate(drive_id);
     if (cluster < 2 || cluster >= (uint16_t)(v->cluster_count + 2))
         return false;
 

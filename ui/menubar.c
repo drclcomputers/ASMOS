@@ -37,12 +37,16 @@ menu *menubar_add_menu(menubar *mb, char *title) {
     return m;
 }
 
+void (*g_menu_call_hook)(void *state, MenuActionUD fn, void *user);
+
 void menu_add_item(menu *m, char *label, MenuAction action) {
     if (m->item_count >= MAX_MENU_ITEMS)
         return;
     menu_item *it = &m->items[m->item_count++];
     it->label = label;
     it->action = action;
+    it->action_ud = NULL;
+    it->dyn_state = NULL;
     it->disabled = false;
 }
 
@@ -55,6 +59,7 @@ void menu_add_item_ud(menu *m, char *label, MenuActionUD action,
     it->action = NULL;
     it->action_ud = action;
     it->userdata = userdata;
+    it->dyn_state = NULL;
     it->disabled = false;
 }
 
@@ -64,6 +69,8 @@ void menu_add_separator(menu *m) {
     menu_item *it = &m->items[m->item_count++];
     it->label = 0;
     it->action = 0;
+    it->action_ud = NULL;
+    it->dyn_state = NULL;
     it->disabled = true;
 }
 
@@ -211,7 +218,10 @@ void menubar_update(menubar *mb) {
             if (idx >= 0 && idx < m->item_count) {
                 menu_item *it = &m->items[idx];
                 if (it->label && !it->disabled) {
-                    if (it->action_ud)
+                    if (it->dyn_state && g_menu_call_hook)
+                        g_menu_call_hook(it->dyn_state, it->action_ud,
+                                         it->userdata);
+                    else if (it->action_ud)
                         it->action_ud(it->userdata);
                     else if (it->action)
                         it->action();

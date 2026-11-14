@@ -363,6 +363,7 @@ bool fs_mount_drive(uint8_t drive_id) {
     fat_vol_t *v = vol(drive_id);
     v->drive_id = drive_id;
     v->mounted = false;
+    fs_usage_invalidate(drive_id);
 
     uint8_t tmp_buf[512];
     if (!fs_read_sector(drive_id, 0, tmp_buf))
@@ -438,6 +439,7 @@ void fs_unmount(uint8_t drive_id) {
     if (drive_id >= DRIVE_COUNT)
         return;
     g_drives[drive_id].mounted = false;
+    fs_usage_invalidate(drive_id);
 }
 
 bool fs_resolve_dir(const char *path, uint8_t *out_drive,
@@ -520,6 +522,47 @@ bool fs_get_usage(uint32_t *total_bytes, uint32_t *used_bytes) {
     return true;
 }
 
+/* Used-cluster counts. Counting walks the whole FAT, so the result is
+ * cached until the FAT changes (fat_set) or the drive is (un)mounted. */
+static bool s_usage_valid[DRIVE_COUNT];
+static uint32_t s_usage_used[DRIVE_COUNT];
+
+void fs_usage_invalidate(uint8_t drive_id) {
+    if (drive_id < DRIVE_COUNT)
+        s_usage_valid[drive_id] = false;
+}
+
+/* One read per FAT sector (fat_get would re-read a sector per cluster). */
+static bool count_used_clusters(fat_vol_t *v, uint8_t d, uint32_t *out) {
+    uint8_t buf[1024]; /* two sectors: a FAT12 entry may straddle them */
+    uint32_t loaded = 0xFFFFFFFFu, used = 0;
+    uint32_t fat_secs = v->bpb.sectors_per_fat;
+    for (uint32_t c = 2; c < v->cluster_count + 2; c++) {
+        bool fat12 = v->fat_type == FAT_TYPE_FAT12;
+        uint32_t off = fat12 ? c * 3 / 2 : c * 2;
+        uint32_t sec = off / 512;
+        if (sec != loaded) {
+            if (!fs_read_sector(d, v->fat_lba + sec, buf))
+                return false;
+            if (sec + 1 < fat_secs &&
+                !fs_read_sector(d, v->fat_lba + sec + 1, buf + 512))
+                return false;
+            loaded = sec;
+        }
+        uint32_t o = off % 512;
+        uint16_t val = buf[o] | ((uint16_t)buf[o + 1] << 8);
+        if (fat12) {
+            val = (c & 1) ? (val >> 4) : (val & 0x0FFF);
+            if (val != 0 && val != FAT12_BAD)
+                used++;
+        } else if (val != FAT16_FREE && val != FAT16_BAD) {
+            used++;
+        }
+    }
+    *out = used;
+    return true;
+}
+
 bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes,
                         uint32_t *used_bytes) {
     if (drive_id >= DRIVE_COUNT || !g_drives[drive_id].mounted)
@@ -528,13 +571,13 @@ bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes,
     *total_bytes = (v->bpb.total_sectors_32 ? v->bpb.total_sectors_32
                                             : v->bpb.total_sectors_16) *
                    v->bpb.bytes_per_sector;
-    uint32_t used = 0;
-    for (uint16_t c = 2; c < (uint16_t)(v->cluster_count + 2); c++) {
-        uint16_t val = fat_get(drive_id, c);
-        if (val != FAT16_FREE && val != FAT16_BAD)
-            used++;
+    if (!s_usage_valid[drive_id]) {
+        if (!count_used_clusters(v, drive_id, &s_usage_used[drive_id]))
+            return false;
+        s_usage_valid[drive_id] = true;
     }
-    *used_bytes = used * v->bpb.bytes_per_sector * v->bpb.sectors_per_cluster;
+    *used_bytes = s_usage_used[drive_id] * v->bpb.bytes_per_sector *
+                  v->bpb.sectors_per_cluster;
     return true;
 }
 

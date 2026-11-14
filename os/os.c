@@ -11,7 +11,6 @@
 #include "lib/string.h"
 #include "lib/time.h"
 
-#include "ui/modal.h"
 #include "ui/ui.h"
 #include "ui/window.h"
 

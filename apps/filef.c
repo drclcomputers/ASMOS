@@ -76,6 +76,7 @@ typedef struct {
     bool show_hidden;
 
     bool newname_is_dir;
+    bool newname_hidden; /* "Hidden" box of the New File/Folder dialog */
     char rename_old[13];
 
     int drag_idx;  /* item being dragged, -1 = none */
@@ -853,6 +854,11 @@ static void do_newname(void *user, const char *name) {
         dlg_message(s->win, "Create Failed", "Name exists or disk full.");
         return;
     }
+    if (s->newname_hidden) {
+        FF_PUSH_CTX(s);
+        fs_set_hidden(fspath, true);
+        FF_POP_CTX();
+    }
     maybe_notify_desktop(s);
     ff_reload(s);
     strcpy(s->status, s->newname_is_dir ? "Folder created." : "File created.");
@@ -889,9 +895,10 @@ static void new_item(bool dir) {
     if (!s || s->at_vroot)
         return;
     s->newname_is_dir = dir;
-    dlg_input(s->win, dir ? "New Folder" : "New File",
-              dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
-              do_newname, s);
+    s->newname_hidden = false;
+    dlg_input_check(s->win, dir ? "New Folder" : "New File",
+                    dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
+                    "Hidden", &s->newname_hidden, do_newname, s);
 }
 static void menu_new_file(void) { new_item(false); }
 static void menu_new_folder(void) { new_item(true); }
@@ -1375,20 +1382,26 @@ static void paint_view(control *c, int x, int y, int w, int h) {
     for (int i = 0; i < s->item_count; i++)
         if (!s->items[i].dragging)
             ff_draw_item(s, i, x, y - s->scroll_y);
-    if (s->drag_idx >= 0) { /* ghost under the pointer */
-        ff_item_t *it = &s->items[s->drag_idx];
-        int svx = it->icon_x, svy = it->icon_y;
-        it->icon_x = mouse.x - x - ICON_CELL_W / 2;
-        it->icon_y = mouse.y - (y - s->scroll_y) - ICON_H / 2;
-        ff_draw_item(s, s->drag_idx, x, y - s->scroll_y);
-        it->icon_x = svx;
-        it->icon_y = svy;
-    }
+}
+
+/* Dragged icon follows the pointer over every window and the desktop. */
+static void draw_drag_ghost(void *user) {
+    ff_inst_t *s = user;
+    if (s->drag_idx < 0)
+        return;
+    ff_item_t *it = &s->items[s->drag_idx];
+    int svx = it->icon_x, svy = it->icon_y;
+    it->icon_x = mouse.x - ICON_CELL_W / 2;
+    it->icon_y = mouse.y - ICON_H / 2;
+    ff_draw_item(s, s->drag_idx, 0, 0);
+    it->icon_x = svx;
+    it->icon_y = svy;
 }
 
 static void view_drop(ff_inst_t *s) {
     int idx = s->drag_idx;
     s->drag_idx = -1;
+    wm_clear_overlay(s);
     if (!in_content(s, mouse.x, mouse.y)) {
         ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
         if (dst) {
@@ -1469,6 +1482,7 @@ static void on_view(control *c, int ev) {
             break;
         it->dragging = true;
         s->drag_idx = s->press_idx;
+        wm_set_overlay(draw_drag_ghost, s);
         break;
     }
     case EV_MOUSEUP:
@@ -1622,6 +1636,7 @@ static void ff_on_frame(void *state) {
 }
 
 static void ff_destroy(void *state) {
+    wm_clear_overlay(state);
     if (s_last_active == state)
         s_last_active = NULL;
 }

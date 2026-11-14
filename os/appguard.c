@@ -4,7 +4,7 @@
 #include "os/error.h"
 #include "os/os.h"
 #include "os/scheduler.h"
-#include "ui/modal.h"
+#include "ui/dialogs.h"
 
 typedef struct {
     uint32_t ebx, esi, edi, ebp, esp, eip;
@@ -203,7 +203,7 @@ static void fault_kill_task(uint32_t vec, uint32_t eip, uint32_t err,
                  kind, vec, eip);
 
     vmm_load_kernel();
-    modal_show(MODAL_ERROR, "Task Fault — Terminated", msg, NULL, NULL);
+    dlg_post_message("Task Fault - Terminated", msg);
     if (victim)
         os_quit_app(victim);
     /* Never returns. (Old code yielded then hlt-looped with IF=0: once the

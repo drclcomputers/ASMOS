@@ -1,20 +1,20 @@
 /* HexView - read-only hex + ASCII viewer (files up to 64 KB). */
 #include "os/api.h"
 
-#define BPR 16 /* bytes per row */
 #define MAX_FILE_SIZE 65536
 #define CW 5
 #define LH 8
 #define ADDR_CHARS 6                     /* "0000: " */
-#define HEX_X (ADDR_CHARS * CW)          /* hex column start            */
-#define ASC_X (HEX_X + BPR * 3 * CW + 6) /* ascii column start        */
-#define ROW_PX (ASC_X + BPR * 6)
+#define HEX_X (ADDR_CHARS * CW)          /* hex column start           */
+#define ASC_X (HEX_X + BPR * 3 * CW + 6) /* ascii column start         */
+#define ROW_PX (HEX_X + 16 * 3 * CW + 6 + 16 * 6 + 4) /* fits 16/row */
+#define BPR (s->bpr) /* 16 bytes per row when the view is wide, else 8 */
 
 typedef struct {
     window *win; /* must stay first */
     control *view, *vsb, *status;
     uint8_t *data;
-    int len, top, sel, rows_vis;
+    int len, top, sel, rows_vis, bpr;
     char path[128];
 } hexview_state_t;
 
@@ -50,9 +50,8 @@ static void update(hexview_state_t *s) {
                  s->path[0] ? "Empty file." : "No file. File > Open...");
     else {
         uint8_t v = s->data[s->sel];
-        snprintf(b, sizeof(b),
-                 "Offset %04X  Hex %02X  Dec %3d  '%c'   %s, %d bytes", s->sel,
-                 v, v, (v >= 32 && v < 127) ? v : '.', name, s->len);
+        snprintf(b, sizeof(b), "%04X: %02X %3d '%c'  %d bytes  %s", s->sel, v,
+                 v, (v >= 32 && v < 127) ? v : '.', s->len, name);
     }
     ctl_set_text(s->status, b);
 }
@@ -83,6 +82,11 @@ static bool load(hexview_state_t *s, const char *path) {
 static void paint(control *c, int x, int y, int w, int h) {
     hexview_state_t *s = c->user;
     static const char *HX = "0123456789ABCDEF";
+    int bpr = w >= ROW_PX ? 16 : 8;
+    if (bpr != s->bpr) { /* window resized across the threshold */
+        s->bpr = bpr;
+        update(s);
+    }
     fill_rect(x, y, w, h, BLACK);
     /* header */
     fill_rect(x, y, w, LH + 1, DARK_GRAY);
@@ -254,17 +258,23 @@ static void menu_about(void) {
 
 static void hexview_init(void *state) {
     hexview_state_t *s = state;
-    s->win = app_window(s, "HexView", 0, 0, 300, 166, DARK_GRAY, AW_RESIZABLE);
+    /* 16 bytes per row on a 640-wide screen, 8 on 320; resizable either way */
+    int w = g_screen_width >= 640 ? 396 : 236,
+        h = g_screen_height >= 400 ? 180 : 150;
+    s->bpr = g_screen_width >= 640 ? 16 : 8;
+    s->win = app_window(s, "HexView", 10, 10, w, h, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
-    s->win->min_w = 400;
+    s->win->min_w = 236;
+    s->win->min_h = 100;
+    int cw = w - 2, ch = h - 17;
     s->view =
-        ctl_custom(s->win, 2, 2, 384, 162, paint, on_view,
+        ctl_custom(s->win, 2, 2, cw - 14, ch - 18, paint, on_view,
                    CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
     ctl_set_colors(s->view, 0xFF, BLACK);
-    s->vsb = ctl_vscroll(s->win, 388, 2, 162, on_scroll);
+    s->vsb = ctl_vscroll(s->win, cw - 10, 2, ch - 18, on_scroll);
     ctl_style_add(s->vsb, CS_ANCHOR_RIGHT | CS_STRETCH_H);
-    s->status = ctl_label(s->win, 2, 166, 394, 12, "",
+    s->status = ctl_label(s->win, 2, ch - 14, cw - 14, 12, "",
                           CS_BORDER | CS_STRETCH_W | CS_ANCHOR_BOTTOM);
     s->rows_vis = 18;
     menu *f = window_add_menu(s->win, "File");
