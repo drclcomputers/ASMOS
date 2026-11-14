@@ -60,7 +60,6 @@ typedef struct __attribute__((packed)) {
     uint32_t entry_init;
     uint32_t entry_frame;
     uint32_t entry_destroy;
-    /* v2 */
     uint32_t reloc_offset;
     uint32_t reloc_count;
     uint32_t bss_size;
@@ -70,12 +69,13 @@ typedef struct __attribute__((packed)) {
 
 typedef struct {
     asma_header_t hdr;
-    uint8_t *raw;       /* kmalloc'd block (for kfree) */
-    uint8_t *code_base; /* 16-byte aligned inside raw */
+    uint8_t *raw;
+    uint8_t *code_base;
     uint32_t image_size;
     app_descriptor desc;
     bool loaded;
     bool faulted;
+    bool was_run;
     uint32_t file_size;
     uint16_t mod_date, mod_time;
     char path[128];
@@ -86,6 +86,8 @@ app_descriptor *appload_load(const char *path);
 app_instance_t *appload_launch(const char *path);
 /* Refuses (returns false) if any instance is running. */
 bool appload_unload(app_descriptor *desc);
+/* Free images of dynamic apps whose instances have all exited. */
+void appload_gc(void);
 /* Load every *.APP in dir. Returns count loaded. */
 int appload_scan_dir(const char *dir_path);
 app_descriptor *appload_find(const char *name);

@@ -105,9 +105,7 @@ typedef void (*v2_fn)(const os_api_t *api, void *state);
 
 /* adapters so appguard can call either ABI with a uniform (a,b) shape */
 static void call_v1(void *fn, void *state) { ((v1_fn)fn)(state); }
-static void call_v2(void *fn, void *state) {
-    ((v2_fn)fn)(&s_api, state);
-}
+static void call_v2(void *fn, void *state) { ((v2_fn)fn)(&s_api, state); }
 
 static void hex8(char *o, uint32_t v) {
     for (int i = 0; i < 8; i++) {
@@ -123,8 +121,8 @@ static void on_fault(loaded_app_t *la, void *state, const char *what,
                                   [6] = "invalid opcode",
                                   [13] = "general protection",
                                   [14] = "page fault"};
-    const char *kind = (f->vector < 15 && names[f->vector]) ? names[f->vector]
-                                                            : "exception";
+    const char *kind =
+        (f->vector < 15 && names[f->vector]) ? names[f->vector] : "exception";
     char eip[9], cr2[9], off[9];
     hex8(eip, f->eip);
     hex8(cr2, f->cr2);
@@ -174,8 +172,10 @@ static app_descriptor *desc_from_state(void *state) {
 static void tramp_init(void *state) {
     app_descriptor *d = desc_from_state(state);
     loaded_app_t *la = find_by_desc(d);
-    if (la)
+    if (la) {
+        la->was_run = true;
         run_entry(d, la->hdr.entry_init, state, "init");
+    }
 }
 static void tramp_frame(void *state) {
     app_descriptor *d = desc_from_state(state);
@@ -247,15 +247,13 @@ static const char *validate(asma_header_t *h, uint32_t file_size) {
         (uint64_t)h->code_offset + h->code_size > file_size)
         return "Code lies outside the file.";
     if (h->entry_init >= h->code_size || h->entry_frame >= h->code_size ||
-        (h->entry_destroy != ASMA_NO_ENTRY &&
-         h->entry_destroy >= h->code_size))
+        (h->entry_destroy != ASMA_NO_ENTRY && h->entry_destroy >= h->code_size))
         return "Entry point outside code.";
     if (h->reloc_count > ASMA_MAX_RELOCS)
         return "Too many relocations.";
     if (h->reloc_count &&
         (h->reloc_offset < h->header_size ||
-         (uint64_t)h->reloc_offset + (uint64_t)h->reloc_count * 4 >
-             file_size))
+         (uint64_t)h->reloc_offset + (uint64_t)h->reloc_count * 4 > file_size))
         return "Relocation table outside the file.";
     h->name[ASMA_NAME_MAX - 1] = 0;
     if (h->name[0] == 0)
@@ -284,7 +282,8 @@ static bool read_exact(fat_file_t *f, void *buf, uint32_t n) {
 
 app_descriptor *appload_load(const char *path) {
     s_err[0] = 0;
-    if (!path || !path[0] || strlen(path) >= sizeof(((loaded_app_t *)0)->path)) {
+    if (!path || !path[0] ||
+        strlen(path) >= sizeof(((loaded_app_t *)0)->path)) {
         set_err("Bad path.");
         return NULL;
     }
@@ -314,9 +313,9 @@ app_descriptor *appload_load(const char *path) {
         free_slot(old);
     }
 
-    if (fsize < ASMA_HEADER_V1 ||
-        fsize > ASMA_MAX_CODE_SIZE + ASMA_MAX_BSS + ASMA_MAX_RELOCS * 4 +
-                    ASMA_HEADER_V2) {
+    if (fsize < ASMA_HEADER_V1 || fsize > ASMA_MAX_CODE_SIZE + ASMA_MAX_BSS +
+                                              ASMA_MAX_RELOCS * 4 +
+                                              ASMA_HEADER_V2) {
         fs_close(&f);
         set_err("Not a valid .APP (bad file size).");
         return NULL;
@@ -324,7 +323,8 @@ app_descriptor *appload_load(const char *path) {
 
     asma_header_t h;
     memset(&h, 0, sizeof(h));
-    uint32_t hdr_read = fsize < ASMA_HEADER_V2 ? ASMA_HEADER_V1 : ASMA_HEADER_V2;
+    uint32_t hdr_read =
+        fsize < ASMA_HEADER_V2 ? ASMA_HEADER_V1 : ASMA_HEADER_V2;
     if (!read_exact(&f, &h, hdr_read)) {
         fs_close(&f);
         set_err("Could not read .APP header.");
@@ -422,6 +422,14 @@ app_descriptor *appload_load(const char *path) {
     return &slot->desc;
 }
 
+void appload_gc(void) {
+    for (int i = 0; i < MAX_LOADED_APPS; i++) {
+        loaded_app_t *la = &s_loaded[i];
+        if (la->loaded && la->was_run && !has_instances(&la->desc))
+            free_slot(la);
+    }
+}
+
 app_instance_t *appload_launch(const char *path) {
     app_descriptor *d = appload_load(path);
     if (!d)
@@ -496,8 +504,8 @@ bool appload_try_open(const char *p) {
     if (!p || !p[0])
         return false;
 
-    static const char *const dirs[] = {"",        "/apps/",   "/FDD0/",
-                                       "/FDD1/",  "/DESKTOP/", NULL};
+    static const char *const dirs[] = {"",       "/apps/",    "/FDD0/",
+                                       "/FDD1/", "/DESKTOP/", NULL};
     bool ext = ends_with_app(p);
     char t[160];
     char first_err[sizeof(s_err)] = {0};

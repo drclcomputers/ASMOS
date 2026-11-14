@@ -586,47 +586,10 @@ void window_dragged(window *win) {
             win->y += mouse.dy;
             wm_clamp(win);
         } else {
+            /* drag to the bottom edge = minimize (no auto-tiling) */
             int snap_threshold = 2 * TASKBAR_H;
-            int usable_height = SCREEN_HEIGHT - MENUBAR_H_SIZE - TASKBAR_H;
 
-            // left edge
-            if (mouse.x < snap_threshold) {
-                if (win->resizable) {
-                    win->w = SCREEN_WIDTH / 2 > win->max_w ? SCREEN_WIDTH / 2
-                                                           : win->max_w;
-                    win->h =
-                        usable_height > win->max_h ? usable_height : win->max_h;
-                }
-                win->x = 0;
-                win->y = (usable_height - win->h) / 2;
-            }
-            // right edge
-            else if (mouse.x > SCREEN_WIDTH - snap_threshold) {
-                if (win->resizable) {
-                    win->w = SCREEN_WIDTH / 2 > win->max_w ? SCREEN_WIDTH / 2
-                                                           : win->max_w;
-                    win->h =
-                        usable_height > win->max_h ? usable_height : win->max_h;
-                }
-
-                win->x = SCREEN_WIDTH - win->w;
-                win->y = (usable_height - win->h) / 2;
-            }
-
-            // upper edge
-            else if (mouse.y < MENUBAR_H_SIZE + snap_threshold) {
-                if (win->resizable) {
-                    win->w =
-                        SCREEN_WIDTH > win->max_w ? SCREEN_WIDTH : win->max_w;
-                    win->h =
-                        usable_height > win->max_h ? usable_height : win->max_h;
-                }
-                win->x = (SCREEN_WIDTH - win->w) / 2;
-                win->y = (usable_height - win->h) / 2;
-            }
-
-            // downward edge
-            else if (mouse.y > SCREEN_HEIGHT - TASKBAR_H - snap_threshold) {
+            if (mouse.y > SCREEN_HEIGHT - TASKBAR_H - snap_threshold) {
                 win->dragging = false;
                 win->minimized = true;
             }

@@ -1,5 +1,6 @@
 #include "os/os.h"
 #include "os/app_registry.h"
+#include "os/appload.h"
 #include "os/error.h"
 #include "os/scheduler.h"
 
@@ -160,7 +161,8 @@ app_descriptor *os_find_app(const char *name) {
     if (!name)
         return NULL;
     for (int i = 0; i < installed_app_count; i++)
-        if (installed_apps[i]->name && strcmp(installed_apps[i]->name, name) == 0)
+        if (installed_apps[i]->name &&
+            strcmp(installed_apps[i]->name, name) == 0)
             return installed_apps[i];
     return NULL;
 }
@@ -172,11 +174,14 @@ bool window_is_focused(window *win) {
 }
 
 bool os_close_own_instance(window *win) {
-    if (!win) return false;
+    if (!win)
+        return false;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
-        if (!a->running || a->wants_quit) continue;
-        if (os_instance_window(a) != win) continue;
+        if (!a->running || a->wants_quit)
+            continue;
+        if (os_instance_window(a) != win)
+            continue;
         {
             os_quit_app(a);
             return true;
@@ -243,5 +248,6 @@ void os_reap_dead_apps(void) {
         }
     }
 
+    appload_gc();
     scheduler_reap();
 }

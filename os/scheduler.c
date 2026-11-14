@@ -180,7 +180,22 @@ void scheduler_exit_current(void) {
 }
 
 // Global shortcut handler
+extern app_descriptor monitor_app;
+
 static void handle_global_shortcuts(void) {
+    /* Ctrl+Shift+Esc: open / bring Monitor to front */
+    if (kb.key_pressed && kb.ctrl && kb.shift && kb.last_scancode == ESC) {
+        kb.key_pressed = false;
+        app_instance_t *m = os_launch_app(&monitor_app);
+        window *w = os_instance_window(m);
+        if (w) {
+            w->minimized = false;
+            w->visible = true;
+            wm_focus(w);
+        }
+        return;
+    }
+
     if (kb.key_pressed && kb.ctrl && kb.last_scancode == Q_KEY) {
         window *fw = wm_focused_window();
         if (fw && fw->on_close) {
