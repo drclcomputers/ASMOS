@@ -1,11 +1,13 @@
+/* FileF - file manager. The icon view is a custom control; toolbar, path
+ * box, scrollbar and dialogs come from the toolkit. */
 #include "config/runtime_config.h"
 #include "os/api.h"
 #include "os/clipboard.h"
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 
-#define FF_DEFAULT_W 200
-#define FF_DEFAULT_H 150
+#define FF_DEFAULT_W 220
+#define FF_DEFAULT_H 160
 #define FF_DEFAULT_X 40
 #define FF_DEFAULT_Y 20
 #define FF_CASCADE 16
@@ -13,26 +15,15 @@
 #define ICON_CELL_W 44
 #define ICON_CELL_H 30
 #define CONTENT_TOP 6
-#define CONTENT_BOT 4
-#define STATUS_H 8
 #define CHAR_W 5
 #define CHAR_H 6
 #define LABEL_CHARS 8
-#define SCROLLBAR_W 8
 
 #define MAX_ENTRIES 128
 #define SORT_NAME 0
 #define SORT_DATE 1
 #define SORT_SIZE 2
-#define MODE_NORMAL 0
-#define MODE_RENAME 1
-#define MODE_CONFIRM 2
-#define MODE_NEWNAME 3
-#define MODE_INFO 4
 
-/* ── Navigation button bar ──────────────────────────────── */
-#define BUTTON_BAR_H 12
-#define TITLEBAR_H 16
 #define MAX_HISTORY 32
 
 /* ── Virtual root drive entries ─────────────────────────────── */
@@ -71,7 +62,9 @@ typedef struct {
 
 /* ── Instance ─────────────────────────────────────────────────── */
 typedef struct {
-    window *win;
+    window *win; /* must stay first */
+    control *back, *fwd, *up, *home, *desk, *path_edit, *view, *sb, *status_lbl;
+
     uint16_t dir_cluster;
     char path[256];
     uint8_t drive_id;
@@ -79,27 +72,17 @@ typedef struct {
 
     ff_item_t items[MAX_ENTRIES];
     int item_count;
-
     int sort;
-    int mode;
+    bool show_hidden;
 
-    char rename_buf[13];
-    int rename_len;
-    int rename_idx;
-
-    char newname_buf[13];
-    int newname_len;
     bool newname_is_dir;
-    bool newname_hidden;
+    char rename_old[13];
 
-    char confirm_msg[80];
-    void (*confirm_action)(void *inst_state);
+    int drag_idx;  /* item being dragged, -1 = none */
+    int press_idx; /* item under the last mouse-down */
+    int press_x, press_y;
 
-    int drag_idx;
-    uint32_t last_click_tick;
-    int last_click_idx;
-
-    char status[48];
+    char status[48]; /* transient message; empty = item count */
 
     char info_name[13];
     char info_path[270];
@@ -110,12 +93,8 @@ typedef struct {
 
     int scroll_y;
     int content_h_total;
-    int last_win_w;
-    int last_win_h;
+    int last_view_w;
 
-    bool show_hidden;
-
-    /* ── Navigation history ───────────── */
     char history[MAX_HISTORY][256];
     int history_index;
     int history_count;
@@ -127,9 +106,8 @@ static int s_cascade = 0;
 static ff_inst_t *s_last_active = NULL;
 extern void teditor_open_file(const char *path);
 
-/* ── Forward declarations ──────────────────────────────────────── */
+static void ff_sync(ff_inst_t *s);
 static void ff_reload(ff_inst_t *s);
-static void ff_draw_window(window *win, void *ud);
 static void ff_navigate(ff_inst_t *s, uint16_t cluster, const char *path,
                         uint8_t drive_id);
 static void ff_go_vroot(ff_inst_t *s);
@@ -322,15 +300,16 @@ static void ff_sort(ff_inst_t *s) {
 }
 
 static int content_view_h(ff_inst_t *s) {
-    return s->win->h - 16 - BUTTON_BAR_H - CONTENT_TOP - CONTENT_BOT -
-           STATUS_H - 1;
+    return s->view ? s->view->ah - 4 : 100;
+}
+
+static int ff_cols(ff_inst_t *s) {
+    int c = ((s->view ? s->view->aw - 4 : FF_DEFAULT_W) - 4) / ICON_CELL_W;
+    return c < 1 ? 1 : c;
 }
 
 static void ff_layout(ff_inst_t *s) {
-    int ww = s->win->w - 2 - SCROLLBAR_W - 2;
-    int cols = (ww - 4) / ICON_CELL_W;
-    if (cols < 1)
-        cols = 1;
+    int cols = ff_cols(s);
     int col = 0, row = 0, max_row = -1;
     for (int i = 0; i < s->item_count; i++) {
         ff_item_t *it = &s->items[i];
@@ -399,6 +378,7 @@ static void ff_reload(ff_inst_t *s) {
         s->drag_idx = -1;
         s->status[0] = '\0';
         s->scroll_y = 0;
+        ff_sync(s);
         return;
     }
 
@@ -438,6 +418,7 @@ static void ff_reload(ff_inst_t *s) {
     s->drag_idx = -1;
     s->status[0] = '\0';
     s->scroll_y = 0;
+    ff_sync(s);
 }
 
 static void ff_refresh_all(void) {
@@ -519,17 +500,11 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
 }
 
 /* ── Drawing ─────────────────────────────────────────────────── */
-static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
-                         int clip_bottom) {
+/* base: content origin, already offset by scroll; clipped by the view */
+static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     ff_item_t *it = &s->items[i];
     int ax = base_x + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
     int ay = base_y + it->icon_y;
-    int content_top_y =
-        s->win->y + MENUBAR_H + TITLEBAR_H + BUTTON_BAR_H + CONTENT_TOP;
-    if (ay < content_top_y)
-        return;
-    if (ay + ICON_H + CHAR_H + 2 > clip_bottom)
-        return;
 
     if (it->is_vdrive)
         it->vdrive_hdd ? draw_hdd_icon(ax, ay, it->selected)
@@ -578,67 +553,6 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y,
     } else {
         draw_string(lx, ly, it->label, lc, 2);
     }
-}
-
-static void ff_draw_info_overlay(ff_inst_t *s, int wx, int wy, int ww, int wh) {
-    int pw = ww - 16, ph = wh - 20, px = wx + 8, py = wy + 10;
-    fill_rect(px + 3, py + 3, pw, ph, BLACK);
-    fill_rect(px, py, pw, ph, LIGHT_GRAY);
-    draw_rect(px, py, pw, ph, BLACK);
-    fill_rect(px, py, pw, 12, DARK_GRAY);
-    draw_string(px + 4, py + 3, "Get Info", WHITE, 2);
-    fill_rect(px + pw - 14, py + 2, 10, 8, RED);
-    draw_rect(px + pw - 14, py + 2, 10, 8, BLACK);
-    draw_string(px + pw - 12, py + 3, "X", WHITE, 2);
-    draw_line(px, py + 13, px + pw - 1, py + 13, BLACK);
-    int row_y = py + 17, lx2 = px + 4, vx = px + 50, line_h = 10;
-    draw_string(lx2, row_y, "Name:", DARK_GRAY, 2);
-    draw_string(vx, row_y, s->info_name, BLACK, 2);
-    row_y += line_h;
-    draw_string(lx2, row_y, "Path:", DARK_GRAY, 2);
-    {
-        int mc = (pw - 54) / CHAR_W, plen = (int)strlen(s->info_path);
-        if (plen <= mc) {
-            draw_string(vx, row_y, s->info_path, BLACK, 2);
-        } else {
-            char tr[64];
-            strcpy(tr, "...");
-            int start = plen - (mc - 3);
-            if (start < 0)
-                start = 0;
-            strncat(tr, s->info_path + start, 60);
-            draw_string(vx, row_y, tr, BLACK, 2);
-        }
-        int btn_x = vx + (plen > mc ? mc : plen) * CHAR_W + 4;
-        if (btn_x < px + pw - 30) {
-            fill_rect(btn_x, row_y, 23, 8, LIGHT_BLUE);
-            draw_rect(btn_x, row_y, 23, 8, BLACK);
-            draw_string(btn_x + 2, row_y + 1, "Copy", WHITE, 2);
-        }
-    }
-    row_y += line_h;
-    draw_string(lx2, row_y, "Type:", DARK_GRAY, 2);
-    draw_string(vx, row_y, s->info_type, BLACK, 2);
-    row_y += line_h;
-    draw_string(lx2, row_y, "Size:", DARK_GRAY, 2);
-    draw_string(vx, row_y, s->info_size, BLACK, 2);
-    row_y += line_h;
-    draw_string(lx2, row_y, "Date:", DARK_GRAY, 2);
-    draw_string(vx, row_y, s->info_date, BLACK, 2);
-    row_y += line_h;
-    draw_string(lx2, row_y, "Time:", DARK_GRAY, 2);
-    draw_string(vx, row_y, s->info_time, BLACK, 2);
-    row_y += line_h;
-    draw_string(lx2, row_y, "Hidden:", DARK_GRAY, 2);
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected) {
-            draw_string(vx, row_y, s->items[i].hidden ? "Yes" : "No", BLACK, 2);
-            break;
-        }
-    int btn_x = px + pw / 2 - 20, btn_y = py + ph - 14;
-    fill_rect(btn_x, btn_y, 40, 10, LIGHT_BLUE);
-    draw_rect(btn_x, btn_y, 40, 10, BLACK);
-    draw_string(btn_x + 15, btn_y + 2, "OK", WHITE, 2);
 }
 
 static void ff_populate_info(ff_inst_t *s, int sel) {
@@ -724,187 +638,21 @@ static void ff_populate_info(ff_inst_t *s, int sel) {
     }
 }
 
-static void ff_draw_scrollbar(ff_inst_t *s, int wx, int wy, int ww, int wh) {
-    int view_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H + 1;
-    if (view_h < 1)
-        view_h = 1;
-    int sb_x = wx + ww - SCROLLBAR_W - 1, sb_y = wy + 2, sb_h = view_h;
-    fill_rect(sb_x, sb_y, SCROLLBAR_W, sb_h, LIGHT_GRAY);
-    if (s->content_h_total > view_h) {
-        int ms = s->content_h_total - view_h;
-        if (ms < 1)
-            ms = 1;
-        int th = (view_h * sb_h) / s->content_h_total;
-        if (th < 6)
-            th = 6;
-        if (th > sb_h)
-            th = sb_h;
-        int tr = sb_h - th, ty = sb_y;
-        if (tr > 0)
-            ty += (s->scroll_y * tr) / ms;
-        fill_rect(sb_x + 1, ty + 1, SCROLLBAR_W - 2, th - 2, DARK_GRAY);
-    }
-}
-
-static void ff_draw_navbar(ff_inst_t *s, int wx, int wy, int ww) {
-    int bar_h = BUTTON_BAR_H;
-    int bt_w = 18, bt_h = bar_h - 2;
-    int x = wx + 2;
-    int y = wy + 1;
-
-    // Back button
-    if (s->history_index > 0)
-        fill_rect(x, y, bt_w, bt_h, LIGHT_GRAY);
-    else
-        fill_rect(x, y, bt_w, bt_h, DARK_GRAY);
-    draw_rect(x, y, bt_w, bt_h, BLACK);
-    draw_string(x + 5, y + 1, "<", WHITE, 2);
-    x += bt_w + 2;
-
-    // Forward button
-    if (s->history_index < s->history_count - 1)
-        fill_rect(x, y, bt_w, bt_h, LIGHT_GRAY);
-    else
-        fill_rect(x, y, bt_w, bt_h, DARK_GRAY);
-    draw_rect(x, y, bt_w, bt_h, BLACK);
-    draw_string(x + 5, y + 1, ">", WHITE, 2);
-    x += bt_w + 4;
-
-    // Home button
-    fill_rect(x, y, 28, bt_h, LIGHT_GRAY);
-    draw_rect(x, y, 28, bt_h, BLACK);
-    draw_string(x + 2, y + 1, "Home", BLACK, 2);
-    x += 30;
-
-    // Desktop button
-    fill_rect(x, y, 28, bt_h, LIGHT_GRAY);
-    draw_rect(x, y, 28, bt_h, BLACK);
-    draw_string(x + 1, y + 1, "Desk", BLACK, 2);
-    x += 30;
-}
-
-static void ff_draw_window(window *win, void *ud) {
-    ff_inst_t *s = (ff_inst_t *)ud;
-    if (!s)
-        return;
-
-    int wx = win->x + 1;
-    int wy_nav = win->y + MENUBAR_H + TITLEBAR_H;
-    int wy = wy_nav + BUTTON_BAR_H;
-    int ww = win->w - 2;
-    int wh = win->h - TITLEBAR_H - BUTTON_BAR_H;
-    int content_h = wh - CONTENT_TOP - CONTENT_BOT - STATUS_H;
-    int stat_y = wy + wh - STATUS_H - CONTENT_BOT;
-
-    ff_draw_navbar(s, wx, wy_nav, ww);
-
-    fill_rect(wx, stat_y, ww, STATUS_H + CONTENT_BOT, LIGHT_GRAY);
-    draw_line(wx, stat_y, wx + ww - 1, stat_y, LIGHT_GRAY);
-
-    char stat[64];
-    if (s->status[0]) {
-        strncpy(stat, s->status, 63);
-        stat[63] = '\0';
-    } else {
-        int real = s->item_count;
-        if (!s->at_vroot) {
-            for (int i = 0; i < s->item_count; i++)
-                if (s->items[i].is_dotdot) {
-                    real--;
-                    break;
-                }
-        }
-        sprintf(stat, "%d item%s%s", real, real == 1 ? "" : "s",
-                s->show_hidden ? " (hidden shown)" : "");
-    }
-    draw_string(wx + 3, stat_y + 1, stat, DARK_GRAY, 2);
-
-    int clip_bottom = stat_y;
-    for (int i = 0; i < s->item_count; i++) {
-        if (s->items[i].dragging)
-            continue;
-        ff_draw_item(s, i, wx, wy - s->scroll_y, clip_bottom);
-    }
-    if (s->drag_idx >= 0) {
-        ff_item_t *it = &s->items[s->drag_idx];
-        int ax = mouse.x - it->drag_off_x, ay = mouse.y - it->drag_off_y;
-        int svx = it->icon_x, svy = it->icon_y;
-        it->icon_x = ax - wx;
-        it->icon_y = ay - wy + s->scroll_y;
-        ff_draw_item(s, s->drag_idx, wx, wy - s->scroll_y, clip_bottom);
-        it->icon_x = svx;
-        it->icon_y = svy;
-    }
-
-    ff_draw_scrollbar(s, wx, wy, ww, wh);
-
-    if (s->mode == MODE_CONFIRM) {
-        int bx = wx + 4, by = wy + content_h / 2 - 16, bw = ww - 8;
-        fill_rect(bx, by, bw, 34, LIGHT_GRAY);
-        draw_rect(bx, by, bw, 34, BLACK);
-        draw_string(bx + 4, by + 4, s->confirm_msg, BLACK, 2);
-        fill_rect(bx + 4, by + 20, 28, 10, BLACK);
-        draw_rect(bx + 4, by + 20, 28, 10, BLACK);
-        draw_string(bx + 8, by + 22, "Yes", WHITE, 2);
-        fill_rect(bx + 36, by + 20, 28, 10, LIGHT_GRAY);
-        draw_rect(bx + 36, by + 20, 28, 10, BLACK);
-        draw_string(bx + 40, by + 22, "No", BLACK, 2);
-    }
-    if (s->mode == MODE_NEWNAME) {
-        int bx = wx + 4, by = wy + content_h / 2 - 16, bw = ww - 8;
-        fill_rect(bx, by, bw, 44, LIGHT_GRAY);
-        draw_rect(bx, by, bw, 44, BLACK);
-        draw_string(bx + 4, by + 4,
-                    s->newname_is_dir ? "Folder name:" : "File name:", BLACK,
-                    2);
-        fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
-        draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
-        draw_string(bx + 6, by + 15, s->newname_buf, BLACK, 2);
-        if ((pit_ticks / 500) % 2 == 0) {
-            int cx = bx + 6 + s->newname_len * CHAR_W;
-            draw_string(cx, by + 15, "|", BLACK, 2);
-        }
-        fill_rect(bx + 4, by + 28, 10, 10, WHITE);
-        draw_rect(bx + 4, by + 28, 10, 10, BLACK);
-        if (s->newname_hidden)
-            draw_string(bx + 6, by + 29, "x", BLACK, 2);
-        draw_string(bx + 17, by + 29, "Hidden", BLACK, 2);
-    }
-    if (s->mode == MODE_INFO)
-        ff_draw_info_overlay(s, wx, wy, ww, wh);
-    if (s->mode == MODE_RENAME) {
-        int bx = wx + 4, by = wy + content_h / 2 - 16, bw = ww - 8;
-        fill_rect(bx, by, bw, 36, LIGHT_GRAY);
-        draw_rect(bx, by, bw, 36, BLACK);
-        draw_string(bx + 4, by + 4, "Rename:", BLACK, 2);
-        fill_rect(bx + 4, by + 14, bw - 8, 10, WHITE);
-        draw_rect(bx + 4, by + 14, bw - 8, 10, BLACK);
-        draw_string(bx + 6, by + 15, s->rename_buf, BLACK, 2);
-        if ((pit_ticks / 500) % 2 == 0) {
-            int cx = bx + 6 + s->rename_len * CHAR_W;
-            draw_string(cx, by + 15, "|", BLACK, 2);
-        }
-    }
-}
-
 /* ── Hit testing ─────────────────────────────────────────────────── */
 static bool in_content(ff_inst_t *s, int mx, int my) {
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + TITLEBAR_H + BUTTON_BAR_H + CONTENT_TOP;
-    int ww = s->win->w - 2 - SCROLLBAR_W - 2;
-    int wh = content_view_h(s);
-    return mx >= wx && mx < wx + ww && my >= wy && my < wy + wh;
+    control *v = s->view;
+    return v && v->visible && mx >= v->ax + 2 && mx < v->ax + v->aw - 2 &&
+           my >= v->ay + 2 && my < v->ay + v->ah - 2;
 }
 
 static int ff_hit(ff_inst_t *s, int mx, int my) {
     if (!in_content(s, mx, my))
         return -1;
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + TITLEBAR_H + BUTTON_BAR_H;
+    int wx = s->view->ax + 2, wy = s->view->ay + 2 - s->scroll_y;
     for (int i = 0; i < s->item_count; i++) {
         ff_item_t *it = &s->items[i];
         int ax = wx + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
-        int ay = wy + it->icon_y - s->scroll_y;
+        int ay = wy + it->icon_y;
         if (mx >= ax && mx < ax + ICON_W && my >= ay &&
             my < ay + ICON_H + CHAR_H + 4)
             return i;
@@ -912,7 +660,20 @@ static int ff_hit(ff_inst_t *s, int mx, int my) {
     return -1;
 }
 
-/* ── Helpers ─────────────────────────────────────────────────────── */
+static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
+    for (int i = win_count - 1; i >= 0; i--) {
+        window *w = win_stack[i];
+        if (!w->visible)
+            continue;
+        ff_inst_t *t = inst_of(w);
+        if (!t || t == exclude || t->at_vroot)
+            continue;
+        if (in_content(t, mx, my))
+            return t;
+    }
+    return NULL;
+}
+
 #define FF_PUSH_CTX(s)                                                         \
     uint16_t _saved_cluster = dir_context.current_cluster;                     \
     uint8_t _saved_drive = dir_context.drive_id;                               \
@@ -966,17 +727,93 @@ static int ff_selected_file(const ff_inst_t *s) {
     return -1;
 }
 
-/* ── Delete / paste ──────────────────────────────────────────────── */
-static void do_delete(void *ud) {
-    ff_inst_t *s = (ff_inst_t *)ud;
-    int sel = ff_selected_file(s);
-    if (sel < 0) {
-        s->mode = MODE_NORMAL;
+static int ff_selected(const ff_inst_t *s) {
+    for (int i = 0; i < s->item_count; i++)
+        if (s->items[i].selected)
+            return i;
+    return -1;
+}
+
+static void ff_select(ff_inst_t *s, int idx) {
+    for (int i = 0; i < s->item_count; i++)
+        s->items[i].selected = (i == idx);
+    if (idx < 0)
         return;
+    /* keep it visible */
+    int top = s->items[idx].icon_y, bot = top + ICON_CELL_H,
+        vh = content_view_h(s);
+    if (top < s->scroll_y)
+        s->scroll_y = top - CONTENT_TOP;
+    else if (bot > s->scroll_y + vh)
+        s->scroll_y = bot - vh;
+    if (s->scroll_y < 0)
+        s->scroll_y = 0;
+}
+
+/* Status, path box, nav buttons and scrollbar follow the state. */
+static void ff_sync(ff_inst_t *s) {
+    if (!s->view)
+        return;
+    int ms = s->content_h_total - content_view_h(s);
+    if (ms < 0)
+        ms = 0;
+    if (s->scroll_y > ms)
+        s->scroll_y = ms;
+    ctl_set_range(s->sb, 0, ms, content_view_h(s));
+    ctl_set_value(s->sb, s->scroll_y);
+    ctl_enable(s->back, s->history_index > 0);
+    ctl_enable(s->fwd, s->history_index < s->history_count - 1);
+    ctl_enable(s->up, !s->at_vroot);
+    if (s->win->focus != s->path_edit &&
+        strcmp(ctl_text(s->path_edit), s->path))
+        ctl_set_text(s->path_edit, s->path);
+    char stat[64];
+    if (s->status[0]) {
+        strncpy(stat, s->status, 63);
+        stat[63] = 0;
+    } else {
+        int real = s->item_count;
+        if (!s->at_vroot && real && s->items[0].is_dotdot)
+            real--;
+        snprintf(stat, sizeof(stat), "%d item%s%s", real, real == 1 ? "" : "s",
+                 s->show_hidden ? " (hidden shown)" : "");
     }
+    if (strcmp(ctl_text(s->status_lbl), stat))
+        ctl_set_text(s->status_lbl, stat);
+}
+
+static void ff_open_item(ff_inst_t *s, int idx);
+
+static void ff_go_up(ff_inst_t *s) {
+    if (s->at_vroot)
+        return;
+    for (int i = 0; i < s->item_count; i++)
+        if (s->items[i].is_dotdot) {
+            ff_open_item(s, i);
+            return;
+        }
+    ff_go_vroot(s); /* at a drive root */
+}
+
+static void ff_go_desktop(ff_inst_t *s) {
+    char dp[270];
+    uint8_t drv;
+    uint16_t cl;
+    build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));
+    if (resolve_dir(dp, &drv, &cl))
+        ff_navigate(s, cl, dp, drv);
+    else
+        ff_go_vroot(s);
+}
+
+/* ── Delete / new / rename (dialog callbacks) ─────────────────────── */
+static void do_delete(void *user, bool yes) {
+    ff_inst_t *s = user;
+    int sel = ff_selected_file(s);
+    if (!yes || sel < 0)
+        return;
     if (path_is_protected(s->items[sel].name)) {
         strcpy(s->status, "Protected item.");
-        s->mode = MODE_NORMAL;
         return;
     }
     char fspath[270];
@@ -985,38 +822,80 @@ static void do_delete(void *ud) {
     bool ok = (s->items[sel].entry.attr & ATTR_DIRECTORY) ? fs_rm_rf(fspath)
                                                           : fs_delete(fspath);
     FF_POP_CTX();
-    strcpy(s->status, ok ? "Deleted." : "Delete failed.");
-    s->mode = MODE_NORMAL;
     maybe_notify_desktop(s);
     ff_reload(s);
+    strcpy(s->status, ok ? "Deleted." : "Delete failed.");
 }
 
-static void cancel_confirm(void *ud) {
-    ff_inst_t *s = (ff_inst_t *)ud;
-    s->mode = MODE_NORMAL;
+static void do_newname(void *user, const char *name) {
+    ff_inst_t *s = user;
+    const char *err = NULL;
+    if (!name)
+        return;
+    if (!fs_validate_name(name, s->newname_is_dir, &err)) {
+        dlg_message(s->win, "Invalid Name", err);
+        return;
+    }
+    char fspath[270];
+    item_fspath(s, name, fspath, sizeof(fspath));
+    FF_PUSH_CTX(s);
+    bool ok;
+    if (s->newname_is_dir)
+        ok = fs_mkdir(fspath);
+    else {
+        fs_file_t f;
+        ok = fs_create(fspath, &f);
+        if (ok)
+            fs_close(&f);
+    }
+    FF_POP_CTX();
+    if (!ok) {
+        dlg_message(s->win, "Create Failed", "Name exists or disk full.");
+        return;
+    }
+    maybe_notify_desktop(s);
+    ff_reload(s);
+    strcpy(s->status, s->newname_is_dir ? "Folder created." : "File created.");
 }
 
-/* ── Menu handlers ──────────────────────────────────────────────── */
-static void menu_new_file(void) {
+static void do_rename(void *user, const char *name) {
+    ff_inst_t *s = user;
+    const char *err = NULL;
+    if (!name || !strcmp(name, s->rename_old))
+        return;
+    char old_fspath[270];
+    item_fspath(s, s->rename_old, old_fspath, sizeof(old_fspath));
+    dir_entry_t de;
+    bool is_dir = fs_find(old_fspath, &de) && (de.attr & ATTR_DIRECTORY);
+    if (!fs_validate_name(name, is_dir, &err)) {
+        dlg_message(s->win, "Invalid Name", err);
+        return;
+    }
+    FF_PUSH_CTX(s);
+    bool ok = fs_rename(old_fspath, name);
+    FF_POP_CTX();
+    if (!ok) {
+        dlg_message(s->win, "Rename Failed", "Name exists or protected.");
+        return;
+    }
+    maybe_notify_desktop(s);
+    ff_reload(s);
+    strcpy(s->status, "Renamed.");
+}
+
+/* ── Menu handlers (act on the focused FileF) ───────────────────────── */
+static void new_item(bool dir) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
         return;
-    s->newname_buf[0] = '\0';
-    s->newname_len = 0;
-    s->newname_is_dir = false;
-    s->newname_hidden = false;
-    s->mode = MODE_NEWNAME;
+    s->newname_is_dir = dir;
+    dlg_input(s->win, dir ? "New Folder" : "New File",
+              dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
+              do_newname, s);
 }
-static void menu_new_folder(void) {
-    ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
-        return;
-    s->newname_buf[0] = '\0';
-    s->newname_len = 0;
-    s->newname_is_dir = true;
-    s->newname_hidden = false;
-    s->mode = MODE_NEWNAME;
-}
+static void menu_new_file(void) { new_item(false); }
+static void menu_new_folder(void) { new_item(true); }
+
 static void menu_rename(void) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
@@ -1030,34 +909,37 @@ static void menu_rename(void) {
         strcpy(s->status, "Protected.");
         return;
     }
-    s->rename_idx = sel;
-    strncpy(s->rename_buf, s->items[sel].name, 12);
-    s->rename_buf[12] = '\0';
-    s->rename_len = (int)strlen(s->rename_buf);
-    s->mode = MODE_RENAME;
+    strncpy(s->rename_old, s->items[sel].name, 12);
+    s->rename_old[12] = 0;
+    dlg_input(s->win, "Rename", "New name:", s->rename_old, 12, ES_FILENAME,
+              do_rename, s);
 }
+
 static void menu_get_info(void) {
     ff_inst_t *s = active_finder();
     if (!s)
         return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected) {
-            sel = i;
-            break;
-        }
+    int sel = ff_selected(s);
     if (sel < 0) {
         strcpy(s->status, "Nothing selected.");
         return;
     }
     ff_populate_info(s, sel);
-    s->mode = MODE_INFO;
+    static char msg[512];
+    snprintf(msg, sizeof(msg),
+             "Name:   %s\nPath:   %s\nType:   %s\nSize:   %s\n"
+             "Date:   %s %s\nHidden: %s",
+             s->info_name, s->info_path, s->info_type, s->info_size,
+             s->info_date, s->info_time, s->items[sel].hidden ? "Yes" : "No");
+    dlg_message(s->win, "Get Info", msg);
 }
+
 static void menu_reload(void) {
     ff_inst_t *s = active_finder();
     if (s)
         ff_reload(s);
 }
+
 static void menu_toggle_hidden(void) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
@@ -1077,10 +959,11 @@ static void menu_toggle_hidden(void) {
     bool new_hidden = !s->items[sel].hidden;
     bool ok = fs_set_hidden(fspath, new_hidden);
     FF_POP_CTX();
+    ff_reload(s);
     strcpy(s->status,
            ok ? (new_hidden ? "Marked hidden." : "Unmarked.") : "Failed.");
-    ff_reload(s);
 }
+
 static void menu_show_hidden_toggle(void) {
     ff_inst_t *s = active_finder();
     if (!s)
@@ -1124,7 +1007,7 @@ static void menu_paste(void) {
         return;
     if (!clipboard_has_file()) {
         strcpy(s->status, "Clipboard empty.");
-        modal_show(MODAL_INFO, "Paste", "Clipboard is empty.", NULL, NULL);
+        dlg_message(s->win, "Paste", "Clipboard is empty.");
         return;
     }
 
@@ -1164,16 +1047,15 @@ static void menu_paste(void) {
 
     if (strcmp(src_fspath, dst_fspath) == 0 && !g_clipboard.is_cut) {
         strcpy(s->status, "Already here.");
-        modal_show(MODAL_INFO, "Paste", "File already in this folder.", NULL,
-                   NULL);
+        dlg_message(s->win, "Paste", "File already in this folder.");
         return;
     }
 
     dir_entry_t de;
     if (fs_find(dst_fspath, &de)) {
         strcpy(s->status, "Name already exists.");
-        modal_show(MODAL_ERROR, "Paste Failed",
-                   "A file with that name already exists here.", NULL, NULL);
+        dlg_message(s->win, "Paste Failed",
+                    "A file with that name already exists here.");
         return;
     }
 
@@ -1206,8 +1088,7 @@ static void menu_paste(void) {
         desktop_fs_set_dirty();
     } else {
         strcpy(s->status, "Paste failed.");
-        modal_show(MODAL_ERROR, "Paste Failed", "Could not paste item.", NULL,
-                   NULL);
+        dlg_message(s->win, "Paste Failed", "Could not paste item.");
     }
 }
 
@@ -1224,128 +1105,43 @@ static void menu_delete(void) {
         strcpy(s->status, "Protected item.");
         return;
     }
-    sprintf(s->confirm_msg, "Delete %s?", s->items[sel].name);
-    s->confirm_action = do_delete;
-    s->mode = MODE_CONFIRM;
+    char msg[48];
+    snprintf(msg, sizeof(msg), "Delete %s?", s->items[sel].name);
+    dlg_confirm(s->win, "Delete", msg, do_delete, s);
 }
 
-static void menu_sort_name(void) {
+static void set_sort(int sort) {
     ff_inst_t *s = active_finder();
     if (s) {
-        s->sort = SORT_NAME;
+        s->sort = sort;
         ff_sort(s);
         ff_layout(s);
     }
 }
-static void menu_sort_date(void) {
-    ff_inst_t *s = active_finder();
-    if (s) {
-        s->sort = SORT_DATE;
-        ff_sort(s);
-        ff_layout(s);
-    }
-}
-static void menu_sort_size(void) {
-    ff_inst_t *s = active_finder();
-    if (s) {
-        s->sort = SORT_SIZE;
-        ff_sort(s);
-        ff_layout(s);
-    }
-}
+static void menu_sort_name(void) { set_sort(SORT_NAME); }
+static void menu_sort_date(void) { set_sort(SORT_DATE); }
+static void menu_sort_size(void) { set_sort(SORT_SIZE); }
+
 static void menu_about_filef(void) {
-    modal_show(MODAL_INFO, "About FileF (c)2026 @drclcomputers", "FileF v2.0\nASMOS File Manager",
-               NULL, NULL);
-}
-static bool ff_close_cb(window *w) {
-    ff_inst_t *s = inst_of(w);
-    if (!s)
-        return true;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++)
-        if (running_apps[i].running && running_apps[i].desc == &filef_app &&
-            running_apps[i].state == s) {
-            if (s_last_active == s)
-                s_last_active = NULL;
-            os_quit_app(&running_apps[i]);
-            return true;
-        }
-    return true;
+    dlg_message(NULL, "About FileF",
+                "FileF v3.0 - ASMOS File Manager\n"
+                "Enter open, Backspace up, F2 rename, Del delete.\n"
+                "(c)2026 @drclcomputers");
 }
 static void menu_close(void) {
     ff_inst_t *s = active_finder();
     if (s)
-        ff_close_cb(s->win);
-}
-
-/* ── New name / rename ──────────────────────────────────────────── */
-static void ff_handle_newname(ff_inst_t *s) {
-    const char *err = NULL;
-    if (!fs_validate_name(s->newname_buf, s->newname_is_dir, &err)) {
-        s->mode = MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
-        return;
-    }
-    char fspath[270];
-    item_fspath(s, s->newname_buf, fspath, sizeof(fspath));
-    FF_PUSH_CTX(s);
-    bool ok;
-    if (s->newname_is_dir)
-        ok = fs_mkdir(fspath);
-    else {
-        fs_file_t f;
-        ok = fs_create(fspath, &f);
-        if (ok)
-            fs_close(&f);
-    }
-    if (ok && s->newname_hidden)
-        fs_set_hidden(fspath, true);
-    FF_POP_CTX();
-    if (!ok) {
-        s->mode = MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Create Failed", "Name exists or disk full.",
-                   NULL, NULL);
-        return;
-    }
-    strcpy(s->status, s->newname_is_dir ? "Folder created." : "File created.");
-    s->mode = MODE_NORMAL;
-    maybe_notify_desktop(s);
-    ff_reload(s);
-}
-
-static void ff_handle_rename(ff_inst_t *s) {
-    const char *err = NULL;
-    bool is_dir = s->rename_idx >= 0 &&
-                  (s->items[s->rename_idx].entry.attr & ATTR_DIRECTORY);
-    if (!fs_validate_name(s->rename_buf, is_dir, &err)) {
-        s->mode = MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
-        return;
-    }
-    char old_fspath[270], new_fspath[270];
-    item_fspath(s, s->items[s->rename_idx].name, old_fspath,
-                sizeof(old_fspath));
-    item_fspath(s, s->rename_buf, new_fspath, sizeof(new_fspath));
-    FF_PUSH_CTX(s);
-    bool ok = fs_rename(old_fspath, s->rename_buf);
-    FF_POP_CTX();
-    if (!ok) {
-        s->mode = MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Rename Failed", "Name exists or protected.",
-                   NULL, NULL);
-        return;
-    }
-    strcpy(s->status, "Renamed.");
-    s->mode = MODE_NORMAL;
-    maybe_notify_desktop(s);
-    ff_reload(s);
+        os_close_own_instance(s->win);
 }
 
 static void menu_eject_fdd(void) {
     ff_inst_t *s = active_finder();
-    if (!s) return;
+    if (!s)
+        return;
     int sel = -1;
     for (int i = 0; i < s->item_count; i++)
-        if (s->items[i].selected && s->items[i].is_vdrive && !s->items[i].vdrive_hdd) {
+        if (s->items[i].selected && s->items[i].is_vdrive &&
+            !s->items[i].vdrive_hdd) {
             sel = i;
             break;
         }
@@ -1363,28 +1159,15 @@ static void menu_eject_fdd(void) {
 
 static void menu_insert_fdd(void) {
     ff_inst_t *s = active_finder();
-    if (!s) return;
+    if (!s)
+        return;
     if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
         ff_refresh_all();
         strcpy(s->status, "Floppy mounted.");
     } else {
-        modal_show(MODAL_WARNING, "Insert Floppy", "No floppy found or already mounted.", NULL, NULL);
+        dlg_message(s->win, "Insert Floppy",
+                    "No floppy found or already mounted.");
     }
-}
-
-/* ── Drag-and-drop ──────────────────────────────────────────────── */
-static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
-    for (int i = win_count - 1; i >= 0; i--) {
-        window *w = win_stack[i];
-        if (!w->visible)
-            continue;
-        ff_inst_t *t = inst_of(w);
-        if (!t || t == exclude || t->at_vroot)
-            continue;
-        if (in_content(t, mx, my))
-            return t;
-    }
-    return NULL;
 }
 
 static bool over_desktop(int mx, int my) {
@@ -1506,461 +1289,341 @@ static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
     return ok;
 }
 
-/* ── Scroll ─────────────────────────────────────────────────────── */
-static void ff_scroll(ff_inst_t *s, int delta) {
-    int view_h = content_view_h(s);
-    int ms = s->content_h_total - view_h;
-    if (ms < 0)
-        ms = 0;
-    s->scroll_y += delta;
-    if (s->scroll_y < 0)
-        s->scroll_y = 0;
-    if (s->scroll_y > ms)
-        s->scroll_y = ms;
+static void ff_open_item(ff_inst_t *s, int idx) {
+    ff_item_t *it = &s->items[idx];
+    if (it->is_vdrive) {
+        if (fs_drive_mounted(it->vdrive_id)) {
+            ff_navigate(s, 0, it->vdrive_path, it->vdrive_id);
+        } else {
+            dlg_message(s->win, "Drive", "Drive not mounted.");
+        }
+    } else if (it->is_dotdot) {
+        uint8_t drv;
+        char sub[256];
+        bool has_vp = resolve_vpath(s->path, &drv, sub, sizeof(sub));
+        if (has_vp && strcmp(sub, "/") == 0) {
+            ff_go_vroot(s);
+        } else {
+            char parent_logical[256];
+            char *sl = strrchr(s->path, '/');
+            if (sl && sl != s->path) {
+                int plen = (int)(sl - s->path);
+                strncpy(parent_logical, s->path, plen);
+                parent_logical[plen] = '\0';
+            } else
+                strcpy(parent_logical, "/");
+            uint8_t pdrv;
+            uint16_t pcluster;
+            if (!is_vroot_path(parent_logical) &&
+                resolve_dir(parent_logical, &pdrv, &pcluster))
+                ff_navigate(s, pcluster, parent_logical, pdrv);
+            else
+                ff_go_vroot(s);
+        }
+    } else if (item_is_app(it)) {
+        char app_name[9];
+        int ai = 0;
+        for (int k = 0; it->name[k] && it->name[k] != '.' && ai < 8; k++)
+            app_name[ai++] = it->name[k];
+        app_name[ai] = '\0';
+        app_descriptor *desc = os_find_app(app_name);
+        if (!desc) {
+            char low[9];
+            for (int k = 0; k < ai; k++)
+                low[k] = (app_name[k] >= 'A' && app_name[k] <= 'Z')
+                             ? app_name[k] - 'A' + 'a'
+                             : app_name[k];
+            low[ai] = '\0';
+            desc = os_find_app(low);
+        }
+        if (desc)
+            os_launch_app(desc);
+        else {
+            char em[64];
+            sprintf(em, "App '%s' not found.", app_name);
+            dlg_message(s->win, "App Not Found", em);
+        }
+    } else if (it->entry.attr & ATTR_DIRECTORY) {
+        char child_logical[270];
+        snprintf(child_logical, sizeof(child_logical), "%s/%s", s->path,
+                 it->name);
+        uint16_t child_cluster = it->entry.cluster_lo;
+        if (g_cfg.filef_single_window)
+            ff_navigate(s, child_cluster, child_logical, s->drive_id);
+        else
+            ff_open_dir_pub(child_cluster, child_logical);
+    } else {
+        bool is_txt = (it->entry.ext[0] == 'T' && it->entry.ext[1] == 'X' &&
+                       it->entry.ext[2] == 'T');
+        if (is_txt) {
+            char fspath[270];
+            item_fspath(s, it->name, fspath, sizeof(fspath));
+            teditor_open_file(fspath);
+        }
+    }
 }
 
-/* ── on_frame ───────────────────────────────────────────────────── */
-static void ff_on_frame(void *state) {
-    ff_inst_t *s = (ff_inst_t *)state;
-    if (!s->win || !s->win->visible)
-        return;
+/* ── Icon view control ─────────────────────────────────────────────── */
+static void paint_view(control *c, int x, int y, int w, int h) {
+    ff_inst_t *s = c->user;
+    (void)h;
+    if (w != s->last_view_w) { /* window resized */
+        s->last_view_w = w;
+        ff_layout(s);
+        ff_sync(s);
+    }
+    for (int i = 0; i < s->item_count; i++)
+        if (!s->items[i].dragging)
+            ff_draw_item(s, i, x, y - s->scroll_y);
+    if (s->drag_idx >= 0) { /* ghost under the pointer */
+        ff_item_t *it = &s->items[s->drag_idx];
+        int svx = it->icon_x, svy = it->icon_y;
+        it->icon_x = mouse.x - x - ICON_CELL_W / 2;
+        it->icon_y = mouse.y - (y - s->scroll_y) - ICON_H / 2;
+        ff_draw_item(s, s->drag_idx, x, y - s->scroll_y);
+        it->icon_x = svx;
+        it->icon_y = svy;
+    }
+}
 
+static void view_drop(ff_inst_t *s) {
+    int idx = s->drag_idx;
+    s->drag_idx = -1;
+    if (!in_content(s, mouse.x, mouse.y)) {
+        ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
+        if (dst) {
+            ff_drop_move(s, idx, dst); /* reloads both */
+            return;
+        }
+        if (over_desktop(mouse.x, mouse.y)) {
+            ff_drop_to_desktop(s, idx);
+            return;
+        }
+    }
+    s->items[idx].dragging = false;
+    ff_layout(s);
+}
+
+static void view_key(ff_inst_t *s) {
+    uint8_t sc = kb.last_scancode;
+    int sel = ff_selected(s), n = s->item_count, cols = ff_cols(s);
+    int vh = content_view_h(s);
+    if (kb.ctrl_c)
+        menu_copy();
+    else if (kb.ctrl_x)
+        menu_cut();
+    else if (kb.ctrl_v)
+        menu_paste();
+    else if (sc == DELETE)
+        menu_delete();
+    else if (sc == F2)
+        menu_rename();
+    else if (sc == ENTER && sel >= 0)
+        ff_open_item(s, sel);
+    else if (sc == BACKSPACE)
+        ff_go_up(s);
+    else if (sc == PAGE_UP || sc == PAGE_DOWN) {
+        s->scroll_y += sc == PAGE_UP ? -vh : vh;
+        if (s->scroll_y < 0)
+            s->scroll_y = 0;
+    } else if (n > 0 &&
+               (sc == LEFT_ARROW || sc == RIGHT_ARROW || sc == UP_ARROW ||
+                sc == DOWN_ARROW || sc == HOME || sc == END)) {
+        int t = sel < 0             ? 0
+                : sc == LEFT_ARROW  ? sel - 1
+                : sc == RIGHT_ARROW ? sel + 1
+                : sc == UP_ARROW    ? sel - cols
+                : sc == DOWN_ARROW  ? sel + cols
+                : sc == HOME        ? 0
+                                    : n - 1;
+        ff_select(s, t < 0 ? 0 : t >= n ? n - 1 : t);
+    }
+}
+
+static void on_view(control *c, int ev) {
+    ff_inst_t *s = c->user;
+    int hit;
+    switch (ev) {
+    case EV_MOUSEDOWN:
+        hit = ff_hit(s, mouse.x, mouse.y);
+        ff_select(s, hit);
+        s->press_idx = hit;
+        s->press_x = mouse.x;
+        s->press_y = mouse.y;
+        break;
+    case EV_DBLCLICK:
+        hit = ff_hit(s, mouse.x, mouse.y);
+        s->press_idx = -1;
+        if (hit >= 0) {
+            ff_select(s, hit);
+            ff_open_item(s, hit);
+        }
+        break;
+    case EV_MOUSEMOVE: {
+        if (s->drag_idx >= 0 || s->press_idx < 0 || s->at_vroot)
+            break;
+        int dx = mouse.x - s->press_x, dy = mouse.y - s->press_y;
+        ff_item_t *it = &s->items[s->press_idx];
+        if (dx * dx + dy * dy < 9 || it->is_dotdot || it->is_vdrive ||
+            path_is_protected(it->name))
+            break;
+        it->dragging = true;
+        s->drag_idx = s->press_idx;
+        break;
+    }
+    case EV_MOUSEUP:
+        s->press_idx = -1;
+        if (s->drag_idx >= 0)
+            view_drop(s);
+        break;
+    case EV_KEY:
+        view_key(s);
+        break;
+    }
+    ff_sync(s);
+}
+
+static void on_sb(control *c, int ev) {
+    if (ev == EV_CHANGE)
+        ((ff_inst_t *)c->user)->scroll_y = ctl_value(c);
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────── */
+static void on_nav(control *c, int ev) {
+    ff_inst_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    if (c == s->back)
+        ff_history_go(s, s->history_index - 1);
+    else if (c == s->fwd)
+        ff_history_go(s, s->history_index + 1);
+    else if (c == s->up)
+        ff_go_up(s);
+    else if (c == s->home)
+        ff_go_vroot(s);
+    else
+        ff_go_desktop(s);
+    ff_sync(s);
+}
+
+static void on_path(control *c, int ev) {
+    ff_inst_t *s = c->user;
+    if (ev != EV_SUBMIT)
+        return;
+    char p[256];
+    strncpy(p, ctl_text(c), sizeof(p) - 1);
+    p[sizeof(p) - 1] = 0;
+    int n = (int)strlen(p);
+    while (n > 1 && p[n - 1] == '/')
+        p[--n] = 0;
+    uint8_t drv;
+    uint16_t cl;
+    if (!p[0] || is_vroot_path(p))
+        ff_go_vroot(s);
+    else if (resolve_dir(p, &drv, &cl))
+        ff_navigate(s, cl, p, drv);
+    else {
+        ctl_set_text(c, s->path);
+        dlg_message(s->win, "FileF", "Folder not found.");
+        return;
+    }
+    ctl_focus(s->view);
+}
+
+/* ── Init / frame / destroy ───────────────────────────────────────── */
+static void ff_init(void *state) {
+    ff_inst_t *s = state;
+    int x = FF_DEFAULT_X + (s_cascade % 6) * FF_CASCADE;
+    int y = FF_DEFAULT_Y + (s_cascade % 6) * FF_CASCADE;
+    s_cascade++;
+    s->win = app_window(s, "FileF", x, y, FF_DEFAULT_W, FF_DEFAULT_H, DARK_GRAY,
+                        AW_RESIZABLE);
+    if (!s->win)
+        return;
+    window *w = s->win;
+    int wx, wy, cw, ch;
+    win_client_rect(w, &wx, &wy, &cw, &ch);
+
+    s->back = ctl_button(w, 2, 2, 14, 12, "<", 0, on_nav);
+    s->fwd = ctl_button(w, 17, 2, 14, 12, ">", 0, on_nav);
+    s->up = ctl_button(w, 32, 2, 14, 12, "^", 0, on_nav);
+    s->home = ctl_button(w, 47, 2, 24, 12, "Home", 0, on_nav);
+    s->desk = ctl_button(w, 72, 2, 24, 12, "Desk", 0, on_nav);
+    control *tb[] = {s->back, s->fwd, s->up, s->home, s->desk};
+    for (int i = 0; i < 5; i++)
+        ctl_style_add(tb[i], CS_NOFOCUS);
+    s->path_edit = ctl_edit(w, 98, 2, cw - 100, 12, "/", 255,
+                            ES_UPPER | CS_STRETCH_W, on_path);
+    s->view =
+        ctl_custom(w, 2, 16, cw - 12, ch - 29, paint_view, on_view,
+                   CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
+    s->sb = ctl_vscroll(w, cw - 10, 16, ch - 29, on_sb);
+    ctl_style_add(s->sb, CS_ANCHOR_RIGHT | CS_STRETCH_H | CS_NOFOCUS);
+    s->status_lbl = ctl_label(w, 2, ch - 12, cw - 4, 10, "",
+                              CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+
+    menu *m = window_add_menu(w, "File");
+    menu_add_item(m, "New File", menu_new_file);
+    menu_add_item(m, "New Folder", menu_new_folder);
+    menu_add_item(m, "Rename", menu_rename);
+    menu_add_item(m, "Get Info", menu_get_info);
+    menu_add_item(m, "Reload", menu_reload);
+    menu_add_separator(m);
+    menu_add_item(m, "About FileF", menu_about_filef);
+    menu_add_separator(m);
+    menu_add_item(m, "Close", menu_close);
+    m = window_add_menu(w, "Edit");
+    menu_add_item(m, "Copy", menu_copy);
+    menu_add_item(m, "Cut", menu_cut);
+    menu_add_item(m, "Paste", menu_paste);
+    menu_add_separator(m);
+    menu_add_item(m, "Delete", menu_delete);
+    menu_add_item(m, "Copy Path", menu_copy_path);
+    menu_add_separator(m);
+    menu_add_item(m, "Toggle Hidden", menu_toggle_hidden);
+    m = window_add_menu(w, "View");
+    menu_add_item(m, "By Name", menu_sort_name);
+    menu_add_item(m, "By Date", menu_sort_date);
+    menu_add_item(m, "By Size", menu_sort_size);
+    menu_add_separator(m);
+    menu_add_item(m, "Show Hidden", menu_show_hidden_toggle);
+    m = window_add_menu(w, "Drive");
+    menu_add_item(m, "Insert Floppy", menu_insert_fdd);
+    menu_add_item(m, "Eject Floppy", menu_eject_fdd);
+
+    s->drive_id = DRIVE_HDA;
+    s->sort = SORT_NAME;
+    s->drag_idx = -1;
+    s->press_idx = -1;
+    s->at_vroot = true;
+    strcpy(s->path, "/");
+    w->title = s->path;
+    strcpy(s->history[0], "/");
+    s->history_index = 0;
+    s->history_count = 1;
+    ff_reload(s);
+    ctl_focus(s->view);
+    s_last_active = s;
+}
+
+static void ff_on_frame(void *state) {
+    ff_inst_t *s = state;
+    if (!s->win)
+        return;
     if (wm_focused_window() == s->win)
         s_last_active = s;
-
-    if (s->win->w != s->last_win_w || s->win->h != s->last_win_h) {
-        s->last_win_w = s->win->w;
-        s->last_win_h = s->win->h;
-        ff_layout(s);
-        int ms = s->content_h_total - content_view_h(s);
-        if (ms < 0)
-            ms = 0;
-        if (s->scroll_y > ms)
-            s->scroll_y = ms;
-    }
-
     if (!s->at_vroot && desktop_fs_is_dirty()) {
         char dp[270];
         build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));
         if (strcmp(s->path, dp) == 0)
             ff_reload(s);
     }
-
-    int wx = s->win->x + 1;
-    int wy_nav = s->win->y + MENUBAR_H + TITLEBAR_H;
-    int wy_top = wy_nav + BUTTON_BAR_H;
-    int wh_cont = content_view_h(s);
-    int conf_by = wy_top + wh_cont / 2 - 16;
-
-    if (mouse.left_clicked) {
-        if (mouse.y >= wy_nav && mouse.y < wy_nav + BUTTON_BAR_H) {
-            int x = wx + 2;
-            int bt_w = 18;
-            if (mouse.x >= x && mouse.x < x + bt_w) {
-                if (s->history_index > 0)
-                    ff_history_go(s, s->history_index - 1);
-            }
-            x += bt_w + 2;
-            if (mouse.x >= x && mouse.x < x + bt_w) {
-                if (s->history_index < s->history_count - 1)
-                    ff_history_go(s, s->history_index + 1);
-            }
-            x += bt_w + 4;
-            if (mouse.x >= x && mouse.x < x + 28)
-                ff_go_vroot(s);
-            x += 30;
-            if (mouse.x >= x && mouse.x < x + 28) {
-                char dp[270];
-                build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));
-                uint8_t drv;
-                uint16_t cl;
-                if (resolve_dir(dp, &drv, &cl))
-                    ff_navigate(s, cl, dp, drv);
-                else
-                    ff_go_vroot(s);
-            }
-            ff_draw_window(s->win, s);
-            return;
-        }
-    }
-
-    /* Scrollbar drag */
-    {
-        int ww = s->win->w - 2;
-        int sb_x = wx + ww - SCROLLBAR_W - 1, sb_y = wy_top, sb_h = wh_cont;
-        if ((mouse.left_clicked || mouse.left) && mouse.x >= sb_x &&
-            mouse.x < sb_x + SCROLLBAR_W + 1 && mouse.y >= sb_y &&
-            mouse.y < sb_y + sb_h && s->content_h_total > wh_cont) {
-            int ms = s->content_h_total - wh_cont;
-            int ns = ((mouse.y - sb_y) * ms) / sb_h;
-            if (ns < 0)
-                ns = 0;
-            if (ns > ms)
-                ns = ms;
-            s->scroll_y = ns;
-        }
-    }
-
-    /* Keyboard scroll */
-    if (kb.key_pressed) {
-        if (kb.last_scancode == F5)
-            ff_scroll(s, -wh_cont);
-        if (kb.last_scancode == F6)
-            ff_scroll(s, wh_cont);
-    }
-
-    /* Info overlay */
-    if (s->mode == MODE_INFO) {
-        if (mouse.left_clicked) {
-            int ww2 = s->win->w - 2,
-                wh2 = s->win->h - TITLEBAR_H - BUTTON_BAR_H;
-            int wx2 = wx, wy2 = wy_top;
-            int pw = ww2 - 16, ph = wh2 - 20, px = wx2 + 8, py = wy2 + 10;
-
-            // close
-            if (mouse.x >= px + pw - 14 && mouse.x < px + pw - 4 &&
-                mouse.y >= py + 2 && mouse.y < py + 10)
-                s->mode = MODE_NORMAL;
-            // OK
-            int bx = px + pw / 2 - 20, by = py + ph - 14;
-            if (mouse.x >= bx && mouse.x < bx + 40 && mouse.y >= by &&
-                mouse.y < by + 10)
-                s->mode = MODE_NORMAL;
-            // Copy path button
-            int row_y = py + 17 + 10;
-            int vx = px + 50;
-            int mc = (pw - 54) / CHAR_W;
-            int plen = (int)strlen(s->info_path);
-            int path_len_chars = plen > mc ? mc : plen;
-            int copy_btn_x = vx + path_len_chars * CHAR_W + 4;
-            if (mouse.x >= copy_btn_x && mouse.x < copy_btn_x + 22 &&
-                mouse.y >= row_y && mouse.y < row_y + 8) {
-                clipboard_set_text(s->info_path, (int)strlen(s->info_path));
-                strcpy(s->status, "Path copied.");
-                // s->mode = MODE_NORMAL;
-            }
-        }
-        ff_draw_window(s->win, s);
-        return;
-    }
-
-    /* Newname / rename */
-    if (s->mode == MODE_NEWNAME || s->mode == MODE_RENAME) {
-        if (kb.key_pressed) {
-            char *buf =
-                s->mode == MODE_NEWNAME ? s->newname_buf : s->rename_buf;
-            int *len =
-                s->mode == MODE_NEWNAME ? &s->newname_len : &s->rename_len;
-            if (kb.last_scancode == ENTER && *len > 0) {
-                if (s->mode == MODE_NEWNAME)
-                    ff_handle_newname(s);
-                else
-                    ff_handle_rename(s);
-            } else if (kb.last_scancode == ESC)
-                s->mode = MODE_NORMAL;
-            else if (kb.last_scancode == BACKSPACE) {
-                if (*len > 0)
-                    buf[--(*len)] = '\0';
-            } else if (kb.last_char >= 32 && kb.last_char < 127 && *len < 12) {
-                char c = kb.last_char;
-                bool allow =
-                    fs_name_char_ok(c) ||
-                    (c == '.' && (s->mode == MODE_NEWNAME
-                                      ? !s->newname_is_dir
-                                      : !(s->items[s->rename_idx].entry.attr &
-                                          ATTR_DIRECTORY)));
-                if (allow) {
-                    buf[(*len)++] = c;
-                    buf[*len] = '\0';
-                }
-            }
-        }
-        if (s->mode == MODE_NEWNAME && mouse.left_clicked) {
-            int ww2 = s->win->w - 2,
-                wh2 = s->win->h - TITLEBAR_H - BUTTON_BAR_H;
-            int wx2 = wx, wy2 = wy_top;
-            int bx = wx2 + 4, by = wy2 + (wh2 - 16) / 2 - 16;
-            if (mouse.x >= bx + 4 && mouse.x < bx + 14 && mouse.y >= by + 28 &&
-                mouse.y < by + 38)
-                s->newname_hidden = !s->newname_hidden;
-        }
-        ff_draw_window(s->win, s);
-        return;
-    }
-
-    /* Confirm dialog */
-    if (s->mode == MODE_CONFIRM) {
-        if (mouse.left_clicked) {
-            int bx = wx + 4, by = conf_by;
-            if (mouse.x >= bx + 4 && mouse.x < bx + 32 && mouse.y >= by + 20 &&
-                mouse.y < by + 30) {
-                if (s->confirm_action)
-                    s->confirm_action(s);
-            } else if (mouse.x >= bx + 36 && mouse.x < bx + 64 &&
-                       mouse.y >= by + 20 && mouse.y < by + 30) {
-                cancel_confirm(s);
-            }
-        }
-        ff_draw_window(s->win, s);
-        return;
-    }
-
-    /* Drag in progress */
-    if (s->drag_idx >= 0) {
-        ff_item_t *it = &s->items[s->drag_idx];
-        if (mouse.left) {
-            it->icon_x = mouse.x - it->drag_off_x - wx;
-            it->icon_y = mouse.y - it->drag_off_y - wy_top + s->scroll_y;
-        } else {
-            bool handled = false;
-            if (!in_content(s, mouse.x, mouse.y)) {
-                ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
-                if (dst) {
-                    ff_drop_move(s, s->drag_idx, dst);
-                    handled = true;
-                } else if (over_desktop(mouse.x, mouse.y)) {
-                    ff_drop_to_desktop(s, s->drag_idx);
-                    handled = true;
-                }
-            }
-            if (!handled) {
-                it->dragging = false;
-                it->pinned = false;
-                ff_layout(s);
-            }
-            s->drag_idx = -1;
-        }
-        ff_draw_window(s->win, s);
-        return;
-    }
-
-    /* Begin drag */
-    if (mouse.left && !mouse.left_clicked && s->drag_idx < 0 &&
-        wm_focused_window() == s->win && !s->at_vroot) {
-        for (int i = 0; i < s->item_count; i++) {
-            ff_item_t *it = &s->items[i];
-            if (!it->selected || it->is_dotdot || it->is_vdrive)
-                continue;
-            if (path_is_protected(it->name))
-                continue;
-            int ax = wx + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
-            int ay = wy_top + it->icon_y - s->scroll_y;
-            if (mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay &&
-                mouse.y < ay + ICON_H) {
-                if (mouse.dx != 0 || mouse.dy != 0) {
-                    it->dragging = true;
-                    it->drag_off_x = mouse.x - (ax - ICON_W / 2);
-                    it->drag_off_y = mouse.y - ay;
-                    s->drag_idx = i;
-                    s->last_click_idx = -1;
-                }
-                break;
-            }
-        }
-    }
-
-    /* Click / double-click */
-    if (mouse.left_clicked && wm_focused_window() == s->win) {
-        int hit = ff_hit(s, mouse.x, mouse.y);
-        if (hit >= 0) {
-            for (int i = 0; i < s->item_count; i++)
-                s->items[i].selected = false;
-            s->items[hit].selected = true;
-            uint32_t now = time_millis();
-            if (hit == s->last_click_idx && (now - s->last_click_tick) <= DOUBLE_CLICK_SPEED) {
-                ff_item_t *it = &s->items[hit];
-
-                if (it->is_vdrive) {
-                    if (fs_drive_mounted(it->vdrive_id)) {
-                        ff_navigate(s, 0, it->vdrive_path, it->vdrive_id);
-                    } else {
-                        modal_show(MODAL_ERROR, "Drive", "Drive not mounted.",
-                                   NULL, NULL);
-                    }
-                } else if (it->is_dotdot) {
-                    uint8_t drv;
-                    char sub[256];
-                    bool has_vp =
-                        resolve_vpath(s->path, &drv, sub, sizeof(sub));
-                    if (has_vp && strcmp(sub, "/") == 0) {
-                        ff_go_vroot(s);
-                    } else {
-                        char parent_logical[256];
-                        char *sl = strrchr(s->path, '/');
-                        if (sl && sl != s->path) {
-                            int plen = (int)(sl - s->path);
-                            strncpy(parent_logical, s->path, plen);
-                            parent_logical[plen] = '\0';
-                        } else
-                            strcpy(parent_logical, "/");
-                        uint8_t pdrv;
-                        uint16_t pcluster;
-                        if (!is_vroot_path(parent_logical) &&
-                            resolve_dir(parent_logical, &pdrv, &pcluster))
-                            ff_navigate(s, pcluster, parent_logical, pdrv);
-                        else
-                            ff_go_vroot(s);
-                    }
-                } else if (item_is_app(it)) {
-                    char app_name[9];
-                    int ai = 0;
-                    for (int k = 0; it->name[k] && it->name[k] != '.' && ai < 8;
-                         k++)
-                        app_name[ai++] = it->name[k];
-                    app_name[ai] = '\0';
-                    app_descriptor *desc = os_find_app(app_name);
-                    if (!desc) {
-                        char low[9];
-                        for (int k = 0; k < ai; k++)
-                            low[k] = (app_name[k] >= 'A' && app_name[k] <= 'Z')
-                                         ? app_name[k] - 'A' + 'a'
-                                         : app_name[k];
-                        low[ai] = '\0';
-                        desc = os_find_app(low);
-                    }
-                    if (desc)
-                        os_launch_app(desc);
-                    else {
-                        char em[64];
-                        sprintf(em, "App '%s' not found.", app_name);
-                        modal_show(MODAL_ERROR, "App Not Found", em, NULL,
-                                   NULL);
-                    }
-                } else if (it->entry.attr & ATTR_DIRECTORY) {
-                    char child_logical[270];
-                    snprintf(child_logical, sizeof(child_logical), "%s/%s",
-                             s->path, it->name);
-                    uint16_t child_cluster = it->entry.cluster_lo;
-                    if (g_cfg.filef_single_window)
-                        ff_navigate(s, child_cluster, child_logical,
-                                    s->drive_id);
-                    else
-                        ff_open_dir_pub(child_cluster, child_logical);
-                } else {
-                    bool is_txt =
-                        (it->entry.ext[0] == 'T' && it->entry.ext[1] == 'X' &&
-                         it->entry.ext[2] == 'T');
-                    if (is_txt) {
-                        char fspath[270];
-                        item_fspath(s, it->name, fspath, sizeof(fspath));
-                        teditor_open_file(fspath);
-                    }
-                }
-                s->last_click_idx = -1;
-                s->last_click_tick = 0;
-            } else {
-                s->last_click_idx = hit;
-                s->last_click_tick = time_millis();
-            }
-        } else if (in_content(s, mouse.x, mouse.y)) {
-            for (int i = 0; i < s->item_count; i++)
-                s->items[i].selected = false;
-        }
-    }
-
-    if (wm_focused_window() == s->win && kb.key_pressed && s->mode == MODE_NORMAL) {
-        if (kb.ctrl_c) { menu_copy(); }
-        else if (kb.ctrl_x) { menu_cut(); }
-        else if (kb.ctrl_v) { menu_paste(); }
-        else if (kb.last_scancode == DELETE) { menu_delete(); }
-    }
-
-    ff_draw_window(s->win, s);
-}
-
-/* ── Init / destroy ─────────────────────────────────────────────── */
-static void ff_init(void *state) {
-    ff_inst_t *s = (ff_inst_t *)state;
-    s->scroll_y = 0;
-    s->last_win_w = FF_DEFAULT_W;
-    s->last_win_h = FF_DEFAULT_H;
-    s->show_hidden = false;
-    s->at_vroot = true;
-    s->history_index = -1;
-    s->history_count = 0;
-
-    int x = FF_DEFAULT_X + (s_cascade % 6) * FF_CASCADE;
-    int y = FF_DEFAULT_Y + (s_cascade % 6) * FF_CASCADE;
-    s_cascade++;
-
-    const window_spec_t spec = {
-        .x = x,
-        .y = y,
-        .w = FF_DEFAULT_W,
-        .h = FF_DEFAULT_H,
-        .min_w = 80,
-        .min_h = 80,
-        .resizable = true,
-        .title = "FileF",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = WHITE,
-        .visible = true,
-        .on_close = ff_close_cb,
-    };
-    s->win = wm_register(&spec);
-    if (!s->win)
-        return;
-    s->win->on_draw = ff_draw_window;
-    s->win->on_draw_userdata = s;
-
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "New File", menu_new_file);
-    menu_add_item(file_menu, "New Folder", menu_new_folder);
-    menu_add_item(file_menu, "Rename", menu_rename);
-    menu_add_item(file_menu, "Get Info", menu_get_info);
-    menu_add_item(file_menu, "Reload", menu_reload);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "About FileF", menu_about_filef);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "Close", menu_close);
-
-    menu *edit_menu = window_add_menu(s->win, "Edit");
-    menu_add_item(edit_menu, "Copy", menu_copy);
-    menu_add_item(edit_menu, "Cut", menu_cut);
-    menu_add_item(edit_menu, "Paste", menu_paste);
-    menu_add_separator(edit_menu);
-    menu_add_item(edit_menu, "Delete", menu_delete);
-    menu_add_item(edit_menu, "Copy Path", menu_copy_path);
-    menu_add_separator(edit_menu);
-    menu_add_item(edit_menu, "Toggle Hidden", menu_toggle_hidden);
-
-    menu *view_menu = window_add_menu(s->win, "View");
-    menu_add_item(view_menu, "By Name", menu_sort_name);
-    menu_add_item(view_menu, "By Date", menu_sort_date);
-    menu_add_item(view_menu, "By Size", menu_sort_size);
-    menu_add_separator(view_menu);
-    menu_add_item(view_menu, "Show Hidden", menu_show_hidden_toggle);
-
-    menu *drive_menu = window_add_menu(s->win, "Drive");
-    menu_add_item(drive_menu, "Insert Floppy", menu_insert_fdd);
-    menu_add_item(drive_menu, "Eject Floppy", menu_eject_fdd);
-
-    s->dir_cluster = 0;
-    s->drive_id = DRIVE_HDA;
-    s->sort = SORT_NAME;
-    s->drag_idx = -1;
-    s->last_click_idx = -1;
-    s->mode = MODE_NORMAL;
-    strcpy(s->path, "/");
-    s->win->title = s->path;
-
-    strcpy(s->history[0], "/");
-    s->history_index = 0;
-    s->history_count = 1;
-
-    ff_reload(s);
-    s_last_active = s;
+    ff_sync(s);
 }
 
 static void ff_destroy(void *state) {
-    ff_inst_t *s = (ff_inst_t *)state;
-    if (s_last_active == s)
+    if (s_last_active == state)
         s_last_active = NULL;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
 }
 
 app_descriptor filef_app = {

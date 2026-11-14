@@ -68,8 +68,6 @@ void kb_process_byte(uint8_t raw) {
     bool ext = extended;
     extended = false;
 
-    // if (ext) return;
-
     if (sc == LSHIFT || sc == RSHIFT) {
         kb.shift = !released;
         return;
@@ -111,6 +109,13 @@ void kb_process_byte(uint8_t raw) {
         kb.ctrl_shift_s = (kb.shift && sc == S_KEY);
     }
 
+    /* E0-prefixed keys (arrows, Home/End, PgUp/PgDn, Ins/Del) reuse the
+     * numpad scancodes; they must not type '8','4','6','2','7','1','.'. Only
+     * keypad Enter and keypad '/' produce characters. */
+    if (ext) {
+        kb.last_char = (sc == ENTER) ? '\n' : (sc == SLASH) ? '/' : 0;
+        return;
+    }
     bool use_upper = kb.shift ^ kb.capslock;
     if (sc < 128)
         kb.last_char = use_upper ? upper[sc] : lower[sc];

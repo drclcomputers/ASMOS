@@ -1,5 +1,6 @@
 #include "os/appload.h"
 
+#include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "drivers/sb16.h"
 #include "fs/fs.h"
@@ -11,6 +12,8 @@
 #include "os/appguard.h"
 #include "os/error.h"
 #include "os/os.h"
+#include "ui/controls.h"
+#include "ui/dialogs.h"
 #include "ui/modal.h"
 
 static loaded_app_t s_loaded[MAX_LOADED_APPS];
@@ -114,12 +117,12 @@ static bool dyn_on_close(window *w) {
     return true;
 }
 
-static window *api_wm_register(const window_spec_t *spec) {
-    window *w = wm_register(spec);
+static window *adopt(window *w, bool set_close) {
     if (!w || !s_calling_state)
         return w;
-    if (!spec->on_close)
+    if (set_close)
         w->on_close = dyn_on_close;
+    w->dyn_state = s_calling_state; /* its control handlers run guarded */
     for (int i = 0; i < MAX_DYN_WINDOWS; i++)
         if (!s_owned[i].win) {
             s_owned[i].win = w;
@@ -129,10 +132,137 @@ static window *api_wm_register(const window_spec_t *spec) {
     return w;
 }
 
+static window *api_wm_register(const window_spec_t *spec) {
+    return adopt(wm_register(spec), !spec->on_close);
+}
+
+static window *api_app_window(void *state, const char *title, int x, int y,
+                              int w, int h, uint8_t bar, uint32_t flags) {
+    return adopt(app_window(state, title, x, y, w, h, bar, flags), true);
+}
+
 static void api_wm_unregister(window *w) {
     forget_window(w);
     wm_unregister(w);
 }
+
+/* ── guarded callbacks from the UI toolkit ────────────────────────────── */
+
+static void on_fault(loaded_app_t *la, void *state, const char *what,
+                     const appfault_t *f);
+
+static void call_handler(void *c, void *ev) {
+    control *ctl = (control *)c;
+    ctl->handler(ctl, (int)(uintptr_t)ev);
+}
+
+static void guarded(void *state, void (*fn)(void *, void *), void *a, void *b,
+                    const char *what) {
+    app_instance_t *inst = instance_from_state(state);
+    loaded_app_t *la = inst ? find_by_desc(inst->desc) : NULL;
+    if (!la || la->faulted)
+        return;
+    void *prev = s_calling_state;
+    s_calling_state = state;
+    appfault_t f;
+    bool ok = appguard_call2(fn, a, b, &f);
+    s_calling_state = prev;
+    if (!ok)
+        on_fault(la, state, what, &f);
+}
+
+static void hook_ctl(control *c, int ev) {
+    guarded(c->win->dyn_state, call_handler, c, (void *)(uintptr_t)ev,
+            "a control handler");
+}
+
+static void hook_dlg(window *owner, void (*fn)(void *, void *), void *user,
+                     void *arg) {
+    guarded(owner->dyn_state, fn, user, arg, "a dialog callback");
+}
+
+static int api_file_read(const char *path, void *buf, int max) {
+    fat_file_t f;
+    if (!path || !buf || max <= 0 || !fs_open(path, &f))
+        return -1;
+    int n = fs_read(&f, buf, max);
+    fs_close(&f);
+    return n;
+}
+
+static bool api_file_write(const char *path, const void *buf, int len) {
+    dir_entry_t de;
+    if (!path || len < 0)
+        return false;
+    if (fs_find(path, &de) && !fs_delete(path))
+        return false;
+    fat_file_t f;
+    if (!fs_create(path, &f))
+        return false;
+    int n = len ? fs_write(&f, buf, len) : 0;
+    fs_close(&f);
+    return n == len;
+}
+
+static const ui_api_t s_ui = {
+    .size = sizeof(ui_api_t),
+    .app_window = api_app_window,
+    .client_rect = win_client_rect,
+    .label = ctl_label,
+    .button = ctl_button,
+    .check = ctl_check,
+    .radio = ctl_radio,
+    .edit = ctl_edit,
+    .list = ctl_list,
+    .combo = ctl_combo,
+    .vscroll = ctl_vscroll,
+    .hscroll = ctl_hscroll,
+    .slider = ctl_slider,
+    .progress = ctl_progress,
+    .group = ctl_group,
+    .tabs = ctl_tabs,
+    .custom = ctl_custom,
+    .destroy = ctl_destroy,
+    .set_text = ctl_set_text,
+    .text = ctl_text,
+    .set_value = ctl_set_value,
+    .value = ctl_value,
+    .set_range = ctl_set_range,
+    .show = ctl_show,
+    .enable = ctl_enable,
+    .focus = ctl_focus,
+    .set_handler = ctl_set_handler,
+    .set_colors = ctl_set_colors,
+    .style_add = ctl_style_add,
+    .move = ctl_move,
+    .on_page = ctl_on_page,
+    .by_id = ctl_by_id,
+    .list_add = list_add,
+    .list_add_data = list_add_data,
+    .list_set = list_set,
+    .list_remove = list_remove,
+    .list_clear = list_clear,
+    .list_count = list_count,
+    .list_get = list_get,
+    .list_data = list_data,
+    .list_sel = list_sel,
+    .list_set_sel = list_set_sel,
+    .list_set_columns = list_set_columns,
+    .edit_select = edit_select,
+    .edit_insert = edit_insert,
+    .edit_line_of = edit_line_of,
+    .edit_col_of = edit_col_of,
+    .edit_goto = edit_goto,
+    .edit_find = edit_find,
+    .message = dlg_message,
+    .confirm = dlg_confirm,
+    .input = dlg_input,
+    .open_file = dlg_open_file,
+    .save_file = dlg_save_file,
+    .edit_copy = edit_copy,
+    .edit_cut = edit_cut,
+    .edit_paste = edit_paste,
+};
 
 /* ── API table given to v2 apps ─────────────────────────────────────── */
 
@@ -151,7 +281,7 @@ static const os_api_t s_api = {
     .wm_register = api_wm_register,
     .wm_unregister = api_wm_unregister,
     .wm_focus = wm_focus,
-    .window_add_widget = window_add_widget,
+    .reserved0 = NULL,
     .draw_dot = draw_dot,
     .draw_line = draw_line,
     .draw_rect = draw_rect,
@@ -160,6 +290,11 @@ static const os_api_t s_api = {
     .draw_string = draw_string,
     .mouse = &mouse,
     .quit_self = api_quit_self,
+    .ui = &s_ui,
+    .kb = &kb,
+    .file_read = api_file_read,
+    .file_write = api_file_write,
+    .snprintf = snprintf,
 };
 
 /* ── guarded trampolines ────────────────────────────────────────────── */
@@ -352,6 +487,8 @@ static bool read_exact(fat_file_t *f, void *buf, uint32_t n) {
 }
 
 app_descriptor *appload_load(const char *path) {
+    g_ctl_invoke_hook = hook_ctl;
+    g_dlg_call_hook = hook_dlg;
     s_err[0] = 0;
     if (!path || !path[0] ||
         strlen(path) >= sizeof(((loaded_app_t *)0)->path)) {

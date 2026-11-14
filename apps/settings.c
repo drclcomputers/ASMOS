@@ -1,640 +1,276 @@
+/* Settings - edits g_cfg; wallpaper/sound changes apply at once, Save writes
+ * ASMOS.CFG. */
 #include "config/runtime_config.h"
 #include "drivers/sb16.h"
+#include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
 
-#define SET_W 260
-#define SET_H 180
-#define SET_X 30
-#define SET_Y 20
-
-// ── Layout ────────────────────────────────────────────────────────────────
-#define TAB_X 1
-#define TAB_Y 1
-#define TAB_W 54
-#define TAB_H 9
-#define TAB_GAP 1
-
-#define PANEL_X (TAB_W + 4)
-#define PANEL_Y 1
-#define PANEL_W (SET_W - PANEL_X - 4)
-#define PANEL_H (SET_H - 30)
-
-#define ROW_H 12
-#define LBL_X 4
-#define VAL_X 120
-#define FIRST_ROW_Y 6
-
-#define STATUS_H 10
-
-typedef enum {
-    TAB_WALLPAPER = 0,
-    TAB_SOUND,
-    TAB_SYSTEM,
-    TAB_NETWORK,
-    TAB_COUNT
-} settings_tab_t;
-
-static const char *TAB_NAMES[TAB_COUNT] = {
-    "Wallpaper",
-    "Sound",
-    "System",
-    "Network",
-};
+enum { P_WALL, P_SOUND, P_SYSTEM, P_NET };
 
 typedef struct {
-    window *win;
-    settings_tab_t tab;
+    window *win; /* must stay first */
+    control *tabs, *status, *save;
+    control *pattern, *col_a, *col_b;
+    control *vol, *vol_lbl;
+    control *ip[4]; /* ip, gateway, netmask, dns */
     bool dirty;
-    char status[64];
-    uint32_t status_timer;
 } settings_state_t;
 
 app_descriptor settings_app;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-static void set_status(settings_state_t *s, const char *msg) {
-    strncpy(s->status, msg, 63);
-    s->status[63] = '\0';
-    s->status_timer = 180;
+static const char *COLORS[16] = {
+    "Black",     "Blue",          "Green",       "Cyan",
+    "Red",       "Magenta",       "Brown",       "Light Gray",
+    "Dark Gray", "Light Blue",    "Light Green", "Light Cyan",
+    "Light Red", "Light Magenta", "Yellow",      "White"};
+static const char *PATTERNS[5] = {"Solid", "Checkerboard", "Stripes",
+                                  "Vertical stripes", "Dots"};
+
+static void set_dirty(settings_state_t *s, bool d) {
+    s->dirty = d;
+    ctl_set_text(s->status, d ? "Unsaved changes" : "All saved");
+    ctl_set_colors(s->status, d ? RED : DARK_GRAY, 0xFF);
 }
 
-static bool small_btn(int x, int y, int w, int h, const char *lbl, uint8_t bg) {
-    fill_rect(x, y, w, h, bg);
-    draw_rect(x, y, w, h, BLACK);
-    int tx = x + w / 2 - (int)(strlen(lbl) * 5) / 2;
-    int ty = y + h / 2 - 3;
-    draw_string(tx, ty, (char *)lbl, WHITE, 2);
-    return mouse.left_clicked && mouse.x >= x && mouse.x < x + w &&
-           mouse.y >= y && mouse.y < y + h;
-}
+/* ── wallpaper preview ─────────────────────────────────────────────────── */
 
-static void draw_wallpaper_tab(int px, int py) {
-    static const char *WNAMES[] = {"Solid", "Checker", "Stripes", "V.Stripes",
-                                   "Dots"};
-    int row = 0;
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
-
-    draw_string(px + LBL_X, RY(row), "Pattern:", DARK_GRAY, 2);
-    int wp = g_cfg.wallpaper_pattern & 3;
-    draw_string(px + VAL_X - 55, RY(row), (char *)WNAMES[wp], BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 10, 9, "<", DARK_GRAY);
-    small_btn(px + VAL_X + 12, RY(row) - 1, 10, 9, ">", DARK_GRAY);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Color A:", DARK_GRAY, 2);
-    fill_rect(px + VAL_X - 20, RY(row) - 1, 16, 9, g_cfg.wallpaper_main_color);
-    draw_rect(px + VAL_X - 20, RY(row) - 1, 16, 9, BLACK);
-    small_btn(px + VAL_X, RY(row) - 1, 10, 9, "-", DARK_GRAY);
-    small_btn(px + VAL_X + 12, RY(row) - 1, 10, 9, "+", DARK_GRAY);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Color B:", DARK_GRAY, 2);
-    fill_rect(px + VAL_X - 20, RY(row) - 1, 16, 9,
-              g_cfg.wallpaper_secondary_color);
-    draw_rect(px + VAL_X - 20, RY(row) - 1, 16, 9, BLACK);
-    small_btn(px + VAL_X, RY(row) - 1, 10, 9, "-", DARK_GRAY);
-    small_btn(px + VAL_X + 12, RY(row) - 1, 10, 9, "+", DARK_GRAY);
-    row++;
-
-    row++;
-    draw_string(px + LBL_X, RY(row), "Preview:", DARK_GRAY, 2);
-    row++;
-    int sw_x = px + LBL_X, sw_y = RY(row) - 2, sw_w = PANEL_W - 12, sw_h = 18;
+static void paint_preview(control *c, int x, int y, int w, int h) {
+    (void)c;
+    uint8_t a = g_cfg.wallpaper_main_color, b = g_cfg.wallpaper_secondary_color;
     switch (g_cfg.wallpaper_pattern) {
-    case WALLPAPER_CHECKERBOARD: // checkerboard
-        for (int yy = 0; yy < sw_h; yy += 4)
-            for (int xx = 0; xx < sw_w; xx += 4) {
-                uint8_t c = ((xx / 4) + (yy / 4)) % 2 == 0
-                                ? g_cfg.wallpaper_main_color
-                                : g_cfg.wallpaper_secondary_color;
-                fill_rect(sw_x + xx, sw_y + yy, 4, 4, c);
-            }
+    case WALLPAPER_CHECKERBOARD:
+        for (int yy = 0; yy < h; yy += 4)
+            for (int xx = 0; xx < w; xx += 4)
+                fill_rect(x + xx, y + yy, 4, 4,
+                          ((xx / 4) + (yy / 4)) % 2 ? b : a);
         break;
-    case WALLPAPER_STRIPES: // stripes
-        for (int yy = 0; yy < sw_h; yy++)
-            draw_line(sw_x, sw_y + yy, sw_x + sw_w - 1, sw_y + yy,
-                      (yy / 2) % 2 == 0 ? g_cfg.wallpaper_main_color
-                                        : g_cfg.wallpaper_secondary_color);
+    case WALLPAPER_STRIPES:
+        for (int yy = 0; yy < h; yy++)
+            draw_line(x, y + yy, x + w - 1, y + yy, (yy / 2) % 2 ? b : a);
         break;
-    case WALLPAPER_VERTICAL_STRIPES: // vertical stripes
-        for (int xx = 0; xx < sw_w; xx++)
-            draw_line(sw_x + xx, sw_y, sw_x + xx, sw_y + sw_h - 1,
-                      (xx / 3) % 2 == 0 ? g_cfg.wallpaper_main_color
-                                        : g_cfg.wallpaper_secondary_color);
+    case WALLPAPER_VERTICAL_STRIPES:
+        for (int xx = 0; xx < w; xx++)
+            draw_line(x + xx, y, x + xx, y + h - 1, (xx / 3) % 2 ? b : a);
         break;
-    case WALLPAPER_DOTS: // dots
-        fill_rect(sw_x, sw_y, sw_w, sw_h, g_cfg.wallpaper_main_color);
-        for (int yy = 2; yy < sw_h; yy += 4)
-            for (int xx = 2; xx < sw_w; xx += 4)
-                draw_dot(sw_x + xx, sw_y + yy, g_cfg.wallpaper_secondary_color);
+    case WALLPAPER_DOTS:
+        fill_rect(x, y, w, h, a);
+        for (int yy = 2; yy < h; yy += 4)
+            for (int xx = 2; xx < w; xx += 4)
+                draw_dot(x + xx, y + yy, b);
         break;
     default:
-        fill_rect(sw_x, sw_y, sw_w, sw_h, g_cfg.wallpaper_main_color);
-        break;
+        fill_rect(x, y, w, h, a);
     }
-    draw_rect(sw_x, sw_y, sw_w, sw_h, BLACK);
-#undef RY
 }
 
-static void draw_sound_tab(int px, int py) {
-    int row = 0;
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
+/* ── handlers ──────────────────────────────────────────────────────────── */
 
-    // ── PC Speaker ────────────────────────────────────────────────────────
-    draw_string(px + LBL_X, RY(row), "-- PC Speaker --", LIGHT_CYAN, 2);
-    row++;
+static void on_wall(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.wallpaper_pattern = (uint8_t)ctl_value(s->pattern);
+    g_cfg.wallpaper_main_color = (uint8_t)ctl_value(s->col_a);
+    g_cfg.wallpaper_secondary_color = (uint8_t)ctl_value(s->col_b);
+    set_dirty(s, true);
+}
 
-    draw_string(px + LBL_X, RY(row), "Sound:", DARK_GRAY, 2);
-    draw_string(px + VAL_X - 30, RY(row), g_cfg.sound_enabled ? "ON" : "OFF",
-                BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-              g_cfg.sound_enabled ? "Off" : "On", DARK_GRAY);
-    row++;
+/* checkboxes store a pointer to their g_cfg byte in c->id */
+static void on_flag(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    *(uint8_t *)(uintptr_t)c->id = (uint8_t)ctl_value(c);
+    set_dirty(c->user, true);
+}
 
-    draw_string(px + LBL_X, RY(row), "Boot Chime:", DARK_GRAY, 2);
-    draw_string(px + VAL_X - 30, RY(row), g_cfg.play_bootchime ? "ON" : "OFF",
-                BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-              g_cfg.play_bootchime ? "Off" : "On", DARK_GRAY);
-    row++;
+static void on_volume(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.sb16_volume = (uint8_t)ctl_value(c);
+    uint8_t v = (g_cfg.sb16_volume << 4) | g_cfg.sb16_volume;
+    sb16_set_volume(v, v);
+    char b[16];
+    snprintf(b, sizeof(b), "%d / 15", g_cfg.sb16_volume);
+    ctl_set_text(s->vol_lbl, b);
+    set_dirty(s, true);
+}
 
-    row++;
-    // ── Sound Blaster 16 ──────────────────────────────────────────────────
-    draw_string(px + LBL_X, RY(row), "-- Sound Blaster 16 --", LIGHT_CYAN, 2);
-    row++;
+static void on_tz(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.timezone_offset = (uint8_t)(int8_t)(ctl_value(c) - 12);
+    set_dirty(c->user, true);
+}
 
-    bool det = sb16_detected();
-    if (!det) {
-        draw_string(px + LBL_X, RY(row), "Status: NOT INSTALLED", RED, 2);
-        row++;
-        draw_string(px + LBL_X, RY(row), "No SB16-compatible card", DARK_GRAY,
-                    2);
-        row++;
-        draw_string(px + LBL_X, RY(row), "found at 0x220-0x280.", DARK_GRAY, 2);
-        row++;
+static void on_ffmode(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.filef_single_window = (uint8_t)c->id;
+    set_dirty(c->user, true);
+}
+
+static void on_edit(control *c, int ev) {
+    if (ev == EV_CHANGE)
+        set_dirty(c->user, true);
+}
+
+static void on_save(control *c, int ev) {
+    settings_state_t *s = c->user;
+    (void)ev;
+    static const char *names[4] = {"IP address", "Gateway", "Netmask",
+                                   "DNS server"};
+    uint8_t *dst[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
+                       g_cfg.dns_server};
+    uint8_t tmp[4][4];
+    for (int i = 0; i < 4; i++)
+        if (!parse_ip_str(ctl_text(s->ip[i]), tmp[i])) {
+            char m[64];
+            snprintf(m, sizeof(m), "%s must look like 10.0.2.15.", names[i]);
+            ctl_set_value(s->tabs, P_NET);
+            ctl_focus(s->ip[i]);
+            dlg_message(s->win, "Settings", m);
+            return;
+        }
+    for (int i = 0; i < 4; i++)
+        memcpy(dst[i], tmp[i], 4);
+    if (cfg_save()) {
+        set_dirty(s, false);
+        ctl_set_text(s->status, "Saved. Network: applies on restart.");
     } else {
-        // Green status dot + label
-        fill_rect(px + LBL_X, RY(row) + 1, 6, 6, LIGHT_GREEN);
-        draw_string(px + LBL_X + 9, RY(row), "Status: DETECTED", LIGHT_GREEN,
-                    2);
-        row++;
-
-        draw_string(px + LBL_X, RY(row), "Base port:", DARK_GRAY, 2);
-        draw_string(px + VAL_X - 10, RY(row), "0x220", BLACK, 2);
-        row++;
-
-        draw_string(px + LBL_X, RY(row), "IRQ:", DARK_GRAY, 2);
-        draw_string(px + VAL_X - 10, RY(row), "5", BLACK, 2);
-        row++;
-
-        draw_string(px + LBL_X, RY(row), "DMA:", DARK_GRAY, 2);
-        draw_string(px + VAL_X - 10, RY(row), "1", BLACK, 2);
-        row++;
-
-        draw_string(px + LBL_X, RY(row), "Capabilities:", DARK_GRAY, 2);
-        draw_string(px + VAL_X - 10, RY(row), "8/16-bit PCM", BLACK, 2);
-        row++;
-
-        draw_string(px + LBL_X, RY(row), "Volume:", DARK_GRAY, 2);
-        // 4-bit volume stored in g_cfg, range 0-15 mapped to 0x00-0xF0
-        char vol_str[8];
-        uint8_t vol = g_cfg.sb16_volume;
-        sprintf(vol_str, "%d", (int)vol);
-        draw_string(px + VAL_X - 10, RY(row), vol_str, BLACK, 2);
-        small_btn(px + VAL_X + 10, RY(row) - 1, 10, 9, "-", DARK_GRAY);
-        small_btn(px + VAL_X + 22, RY(row) - 1, 10, 9, "+", DARK_GRAY);
-
-        // Volume bar
-        row++;
-        int vb_x = px + LBL_X, vb_y = RY(row) - 2, vb_w = PANEL_W - 12,
-            vb_h = 6;
-        fill_rect(vb_x, vb_y, vb_w, vb_h, DARK_GRAY);
-        int filled = (vol * vb_w) / 15;
-        if (filled > 0)
-            fill_rect(vb_x, vb_y, filled, vb_h, LIGHT_GREEN);
-        draw_rect(vb_x, vb_y, vb_w, vb_h, BLACK);
+        dlg_message(s->win, "Settings", "Could not write ASMOS.CFG.");
     }
-#undef RY
 }
 
-static void draw_system_tab(int px, int py) {
-    int row = 0;
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
+/* ── building the pages ────────────────────────────────────────────────── */
 
-    draw_string(px + LBL_X, RY(row), "-- Display --", LIGHT_CYAN, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Reduce Motion:", DARK_GRAY, 2);
-    draw_string(px + VAL_X - 30, RY(row), g_cfg.reduce_motion ? "ON" : "OFF",
-                BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-              g_cfg.reduce_motion ? "Off" : "On", DARK_GRAY);
-    row++;
-
-    row++;
-    draw_string(px + LBL_X, RY(row), "-- Boot --", LIGHT_CYAN, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Start in GUI:", DARK_GRAY, 2);
-    draw_string(px + VAL_X - 30, RY(row), g_cfg.start_in_gui ? "YES" : "NO",
-                BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 24, 9, g_cfg.start_in_gui ? "No" : "Yes",
-              DARK_GRAY);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Timezone:", DARK_GRAY, 2);
-    char tz_buf[8];
-    int8_t tz = (int8_t)g_cfg.timezone_offset;
-    sprintf(tz_buf, "%+d", (int)tz);
-    draw_string(px + VAL_X - 10, RY(row), tz_buf, BLACK, 2);
-    small_btn(px + VAL_X + 16, RY(row) - 1, 10, 9, "-", DARK_GRAY);
-    small_btn(px + VAL_X + 28, RY(row) - 1, 10, 9, "+", DARK_GRAY);
-    row++;
-
-    row++;
-    draw_string(px + LBL_X, RY(row), "-- File Manager --", LIGHT_CYAN, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "FileF Mode:", DARK_GRAY, 2);
-    draw_string(px + VAL_X - 30, RY(row),
-                g_cfg.filef_single_window ? "Single" : "Multi", BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 36, 9,
-              g_cfg.filef_single_window ? "Multi" : "Single", DARK_GRAY);
-#undef RY
+static control *on_page(settings_state_t *s, control *c, int page) {
+    ctl_on_page(c, s->tabs, page);
+    return c;
 }
 
-static void draw_network_tab(int px, int py) {
-    int row = 0;
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
-
-    draw_string(px + LBL_X, RY(row), "-- Network Status --", LIGHT_CYAN, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Networking:", DARK_GRAY, 2);
-    draw_string(px + VAL_X - 30, RY(row), g_cfg.networking_enabled ? "ON" : "OFF",
-                BLACK, 2);
-    small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-              g_cfg.networking_enabled ? "Off" : "On", DARK_GRAY);
-    row++;
-
-    row++;
-    draw_string(px + LBL_X, RY(row), "-- IP Configuration --", LIGHT_CYAN, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "IP Address:", DARK_GRAY, 2);
-    char ip_str[20];
-    sprintf(ip_str, "%d.%d.%d.%d", g_cfg.ip[0], g_cfg.ip[1], g_cfg.ip[2], g_cfg.ip[3]);
-    draw_string(px + VAL_X - 30, RY(row), ip_str, BLACK, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Gateway:", DARK_GRAY, 2);
-    char gw_str[20];
-    sprintf(gw_str, "%d.%d.%d.%d", g_cfg.gateway[0], g_cfg.gateway[1], g_cfg.gateway[2], g_cfg.gateway[3]);
-    draw_string(px + VAL_X - 30, RY(row), gw_str, BLACK, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "Netmask:", DARK_GRAY, 2);
-    char nm_str[20];
-    sprintf(nm_str, "%d.%d.%d.%d", g_cfg.netmask[0], g_cfg.netmask[1], g_cfg.netmask[2], g_cfg.netmask[3]);
-    draw_string(px + VAL_X - 30, RY(row), nm_str, BLACK, 2);
-    row++;
-
-    row++;
-    draw_string(px + LBL_X, RY(row), "-- DNS --", LIGHT_CYAN, 2);
-    row++;
-
-    draw_string(px + LBL_X, RY(row), "DNS Server:", DARK_GRAY, 2);
-    char dns_str[20];
-    sprintf(dns_str, "%d.%d.%d.%d", g_cfg.dns_server[0], g_cfg.dns_server[1], g_cfg.dns_server[2], g_cfg.dns_server[3]);
-    draw_string(px + VAL_X - 30, RY(row), dns_str, BLACK, 2);
-    row++;
-#undef RY
+static control *flag(settings_state_t *s, int page, int x, int y,
+                     const char *text, uint8_t *field) {
+    control *c = on_page(
+        s, ctl_check(s->win, x, y, 200, text, *field != 0, on_flag), page);
+    c->id = (int)(uintptr_t)field;
+    return c;
 }
 
-// ── Main draw ─────────────────────────────────────────────────────────────
+static void build(settings_state_t *s) {
+    window *w = s->win;
+    s->tabs = ctl_tabs(w, 4, 3, 250, "Wallpaper|Sound|System|Network", NULL);
 
-static void settings_draw(window *win, void *ud) {
-    settings_state_t *s = (settings_state_t *)ud;
-    if (!s)
-        return;
-
-    int wx = win->x + 1;
-    int wy = win->y + MENUBAR_H + 16;
-    int ww = win->w - 2;
-    int wh = win->h - 16;
-
-    fill_rect(wx, wy, ww, wh, LIGHT_GRAY);
-
-    // ── Tab sidebar ───────────────────────────────────────────────────────
-    int tab_base_x = wx + TAB_X;
-    int tab_base_y = wy + TAB_Y;
-
-    for (int i = 0; i < TAB_COUNT; i++) {
-        int ty = tab_base_y + i * (TAB_H + TAB_GAP);
-        bool active = (s->tab == (settings_tab_t)i);
-        uint8_t bg = active ? CYAN : DARK_GRAY;
-        fill_rect(tab_base_x, ty, TAB_W, TAB_H, bg);
-        draw_rect(tab_base_x, ty, TAB_W, TAB_H, BLACK);
-        draw_string(tab_base_x + 3, ty + 2, (char *)TAB_NAMES[i],
-                    active ? BLACK : LIGHT_GRAY, 2);
+    /* Wallpaper */
+    on_page(s, ctl_label(w, 10, 24, 60, 12, "Pattern:", 0), P_WALL);
+    s->pattern = on_page(s, ctl_combo(w, 76, 24, 110, on_wall), P_WALL);
+    for (int i = 0; i < 5; i++)
+        list_add(s->pattern, PATTERNS[i]);
+    on_page(s, ctl_label(w, 10, 40, 60, 12, "Color A:", 0), P_WALL);
+    s->col_a = on_page(s, ctl_combo(w, 76, 40, 110, on_wall), P_WALL);
+    on_page(s, ctl_label(w, 10, 56, 60, 12, "Color B:", 0), P_WALL);
+    s->col_b = on_page(s, ctl_combo(w, 76, 56, 110, on_wall), P_WALL);
+    for (int i = 0; i < 16; i++) {
+        list_add(s->col_a, COLORS[i]);
+        list_add(s->col_b, COLORS[i]);
     }
+    list_set_sel(s->pattern, g_cfg.wallpaper_pattern % 5);
+    list_set_sel(s->col_a, g_cfg.wallpaper_main_color & 15);
+    list_set_sel(s->col_b, g_cfg.wallpaper_secondary_color & 15);
+    on_page(s, ctl_label(w, 10, 76, 60, 8, "Preview:", 0), P_WALL);
+    on_page(s, ctl_custom(w, 10, 86, 238, 44, paint_preview, NULL, CS_BORDER),
+            P_WALL);
 
-    // Divider
-    draw_line(wx + PANEL_X - 2, wy, wx + PANEL_X - 2, wy + wh - STATUS_H - 2,
-              DARK_GRAY);
+    /* Sound */
+    flag(s, P_SOUND, 10, 24, "Sound enabled", &g_cfg.sound_enabled);
+    flag(s, P_SOUND, 10, 37, "Play boot chime", &g_cfg.play_bootchime);
+    on_page(s, ctl_group(w, 6, 52, 244, 78, "Sound Blaster 16"), P_SOUND);
+    bool det = sb16_detected();
+    on_page(s,
+            ctl_label(w, 14, 64, 220, 8,
+                      det ? "Detected: port 0x220, IRQ 5, DMA 1"
+                          : "Not installed (no card at 0x220-0x280)",
+                      0),
+            P_SOUND);
+    on_page(s, ctl_label(w, 14, 80, 50, 11, "Volume:", 0), P_SOUND);
+    s->vol = on_page(
+        s, ctl_slider(w, 60, 80, 120, 0, 15, g_cfg.sb16_volume, on_volume),
+        P_SOUND);
+    s->vol_lbl = on_page(s, ctl_label(w, 186, 80, 50, 11, "", 0), P_SOUND);
+    ctl_enable(s->vol, det);
+    char b[16];
+    snprintf(b, sizeof(b), "%d / 15", g_cfg.sb16_volume);
+    ctl_set_text(s->vol_lbl, b);
 
-    // ── Panel area ────────────────────────────────────────────────────────
-    int px = wx + PANEL_X;
-    int py = wy + PANEL_Y;
-    fill_rect(px, py, PANEL_W, PANEL_H, LIGHT_GRAY);
-
-    switch (s->tab) {
-    case TAB_WALLPAPER:
-        draw_wallpaper_tab(px, py);
-        break;
-    case TAB_SOUND:
-        draw_sound_tab(px, py);
-        break;
-    case TAB_SYSTEM:
-        draw_system_tab(px, py);
-        break;
-    case TAB_NETWORK:
-        draw_network_tab(px, py);
-        break;
-    default:
-        break;
+    /* System */
+    flag(s, P_SYSTEM, 10, 24, "Reduce motion (no window animations)",
+         &g_cfg.reduce_motion);
+    flag(s, P_SYSTEM, 10, 37, "Start in the GUI (else the text shell)",
+         &g_cfg.start_in_gui);
+    on_page(s, ctl_label(w, 10, 54, 60, 12, "Time zone:", 0), P_SYSTEM);
+    control *tz = on_page(s, ctl_combo(w, 76, 54, 80, on_tz), P_SYSTEM);
+    for (int h = -12; h <= 14; h++) {
+        char t[12];
+        snprintf(t, sizeof(t), "UTC%+d", h);
+        list_add(tz, t);
     }
+    list_set_sel(tz, (int)(int8_t)g_cfg.timezone_offset + 12);
+    on_page(s, ctl_group(w, 6, 72, 244, 40, "File manager"), P_SYSTEM);
+    control *r1 = on_page(s,
+                          ctl_radio(w, 14, 84, 220, "One window per folder", 1,
+                                    !g_cfg.filef_single_window, on_ffmode),
+                          P_SYSTEM);
+    control *r2 = on_page(s,
+                          ctl_radio(w, 14, 96, 220, "Reuse a single window", 1,
+                                    g_cfg.filef_single_window, on_ffmode),
+                          P_SYSTEM);
+    r1->id = 0;
+    r2->id = 1;
 
-    // ── Bottom bar ────────────────────────────────────────────────────────
-    int bar_y = wy + wh - STATUS_H - 1;
-    fill_rect(wx, bar_y, ww, STATUS_H + 1, DARK_GRAY);
-    draw_line(wx, bar_y, wx + ww - 1, bar_y, BLACK);
+    /* Network */
+    flag(s, P_NET, 10, 24, "Networking enabled", &g_cfg.networking_enabled);
+    static const char *lbl[4] = {
+        "IP address:", "Gateway:", "Netmask:", "DNS server:"};
+    uint8_t *src[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
+                       g_cfg.dns_server};
+    for (int i = 0; i < 4; i++) {
+        char t[20];
+        snprintf(t, sizeof(t), "%d.%d.%d.%d", src[i][0], src[i][1], src[i][2],
+                 src[i][3]);
+        on_page(s, ctl_label(w, 10, 42 + i * 16, 60, 12, lbl[i], 0), P_NET);
+        s->ip[i] = on_page(
+            s, ctl_edit(w, 76, 42 + i * 16, 90, 12, t, 15, ES_DECIMAL, on_edit),
+            P_NET);
+    }
+    on_page(s,
+            ctl_label(w, 10, 110, 240, 8,
+                      "QEMU user networking: DNS 10.0.2.3 or 8.8.8.8", 0),
+            P_NET);
 
-    // Save button
-    uint8_t save_bg = s->dirty ? RED : DARK_GRAY;
-    small_btn(wx + ww - 46, bar_y + 1, 44, 8, "Save", save_bg);
-
-    // Status text
-    if (s->status_timer > 0)
-        draw_string(wx + 4, bar_y + 2, s->status, LIGHT_GREEN, 2);
-    else if (s->dirty)
-        draw_string(wx + 4, bar_y + 2, "Unsaved changes", YELLOW, 2);
-    else
-        draw_string(wx + 4, bar_y + 2, "All saved", LIGHT_GRAY, 2);
+    /* bottom bar */
+    s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
+    s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
+    ctl_style_add(s->save, CS_DEFAULT);
+    set_dirty(s, false);
 }
 
-// ── Input handlers per tab ────────────────────────────────────────────────
-
-static void handle_wallpaper_input(settings_state_t *s, int px, int py) {
-    int row = 0;
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
-    if (small_btn(px + VAL_X, RY(row) - 1, 10, 9, "<", DARK_GRAY)) {
-        g_cfg.wallpaper_pattern = (g_cfg.wallpaper_pattern + 4) % 5;
-        s->dirty = true;
-    }
-    if (small_btn(px + VAL_X + 12, RY(row) - 1, 10, 9, ">", DARK_GRAY)) {
-        g_cfg.wallpaper_pattern = (g_cfg.wallpaper_pattern + 1) % 5;
-        s->dirty = true;
-    }
-    row++;
-    if (small_btn(px + VAL_X, RY(row) - 1, 10, 9, "-", DARK_GRAY)) {
-        if (g_cfg.wallpaper_main_color > 0) {
-            g_cfg.wallpaper_main_color--;
-            s->dirty = true;
-        }
-    }
-    if (small_btn(px + VAL_X + 12, RY(row) - 1, 10, 9, "+", DARK_GRAY)) {
-        if (g_cfg.wallpaper_main_color < 15) {
-            g_cfg.wallpaper_main_color++;
-            s->dirty = true;
-        }
-    }
-    row++;
-    if (small_btn(px + VAL_X, RY(row) - 1, 10, 9, "-", DARK_GRAY)) {
-        if (g_cfg.wallpaper_secondary_color > 0) {
-            g_cfg.wallpaper_secondary_color--;
-            s->dirty = true;
-        }
-    }
-    if (small_btn(px + VAL_X + 12, RY(row) - 1, 10, 9, "+", DARK_GRAY)) {
-        if (g_cfg.wallpaper_secondary_color < 15) {
-            g_cfg.wallpaper_secondary_color++;
-            s->dirty = true;
-        }
-    }
-#undef RY
-}
-
-static void handle_sound_input(settings_state_t *s, int px, int py) {
-    int row = 1; // skip header row
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
-    if (small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-                  g_cfg.sound_enabled ? "Off" : "On", DARK_GRAY)) {
-        g_cfg.sound_enabled ^= 1;
-        s->dirty = true;
-    }
-    row++;
-    if (small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-                  g_cfg.play_bootchime ? "Off" : "On", DARK_GRAY)) {
-        g_cfg.play_bootchime ^= 1;
-        s->dirty = true;
-    }
-
-    if (!sb16_detected()) {
-        return;
-    }
-
-    row += 3; // skip separator + SB16 header + status
-    row += 5; // skip port / IRQ / DMA rows
-    // Volume row
-    if (small_btn(px + VAL_X + 10, RY(row) - 1, 10, 9, "-", DARK_GRAY)) {
-        if (g_cfg.sb16_volume > 0) {
-            g_cfg.sb16_volume--;
-            uint8_t v = (g_cfg.sb16_volume << 4) | g_cfg.sb16_volume;
-            sb16_set_volume(v, v);
-            s->dirty = true;
-        }
-    }
-    if (small_btn(px + VAL_X + 22, RY(row) - 1, 10, 9, "+", DARK_GRAY)) {
-        if (g_cfg.sb16_volume < 15) {
-            g_cfg.sb16_volume++;
-            uint8_t v = (g_cfg.sb16_volume << 4) | g_cfg.sb16_volume;
-            sb16_set_volume(v, v);
-            s->dirty = true;
-        }
-    }
-#undef RY
-}
-
-static void handle_system_input(settings_state_t *s, int px, int py) {
-    int row = 1;
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
-    if (small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-                  g_cfg.reduce_motion ? "Off" : "On", DARK_GRAY)) {
-        g_cfg.reduce_motion ^= 1;
-        s->dirty = true;
-    }
-    row += 3; // skip spacer + boot header
-    if (small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-                  g_cfg.start_in_gui ? "No" : "Yes", DARK_GRAY)) {
-        g_cfg.start_in_gui ^= 1;
-        s->dirty = true;
-    }
-    row++;
-    if (small_btn(px + VAL_X + 16, RY(row) - 1, 10, 9, "-", DARK_GRAY)) {
-        int8_t tz = (int8_t)g_cfg.timezone_offset;
-        if (tz > -12) {
-            g_cfg.timezone_offset = (uint8_t)(tz - 1);
-            s->dirty = true;
-        }
-    }
-    if (small_btn(px + VAL_X + 28, RY(row) - 1, 10, 9, "+", DARK_GRAY)) {
-        int8_t tz = (int8_t)g_cfg.timezone_offset;
-        if (tz < 14) {
-            g_cfg.timezone_offset = (uint8_t)(tz + 1);
-            s->dirty = true;
-        }
-    }
-    row += 3; // skip spacer + filemanager header
-    if (small_btn(px + VAL_X, RY(row) - 1, 36, 9,
-                  g_cfg.filef_single_window ? "Multi" : "Single", DARK_GRAY)) {
-        g_cfg.filef_single_window ^= 1;
-        s->dirty = true;
-    }
-#undef RY
-}
-
-static void handle_network_input(settings_state_t *s, int px, int py) {
-    int row = 1; // skip header row
-#define RY(r) (py + FIRST_ROW_Y + (r) * ROW_H)
-    if (small_btn(px + VAL_X, RY(row) - 1, 24, 9,
-                  g_cfg.networking_enabled ? "Off" : "On", DARK_GRAY)) {
-        g_cfg.networking_enabled ^= 1;
-        s->dirty = true;
-    }
-#undef RY
-}
-
-// ── on_frame ──────────────────────────────────────────────────────────────
-
-static void settings_on_frame(void *state) {
-    settings_state_t *s = (settings_state_t *)state;
-    if (!s->win || !s->win->visible)
-        return;
-    if (s->status_timer > 0)
-        s->status_timer--;
-
-    bool focused = window_is_focused(s->win);
-
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-    int ww = s->win->w - 2;
-    int wh = s->win->h - 16;
-
-    int px = wx + PANEL_X;
-    int py = wy + PANEL_Y;
-
-    int bar_y = wy + wh - STATUS_H - 1;
-
-    if (mouse.left_clicked && focused) {
-        // Tab clicks
-        int tab_base_x = wx + TAB_X;
-        int tab_base_y = wy + TAB_Y;
-        for (int i = 0; i < TAB_COUNT; i++) {
-            int ty = tab_base_y + i * (TAB_H + TAB_GAP);
-            if (mouse.x >= tab_base_x && mouse.x < tab_base_x + TAB_W &&
-                mouse.y >= ty && mouse.y < ty + TAB_H) {
-                s->tab = (settings_tab_t)i;
-            }
-        }
-
-        // Save button
-        if (small_btn(wx + ww - 46, bar_y + 1, 44, 8, "Save",
-                      s->dirty ? RED : DARK_GRAY)) {
-            if (cfg_save()) {
-                s->dirty = false;
-                set_status(s, "Saved successfully.");
-            } else {
-                set_status(s, "Save failed!");
-            }
-        }
-
-        // Panel input
-        switch (s->tab) {
-        case TAB_WALLPAPER:
-            handle_wallpaper_input(s, px, py);
-            break;
-        case TAB_SOUND:
-            handle_sound_input(s, px, py);
-            break;
-        case TAB_SYSTEM:
-            handle_system_input(s, px, py);
-            break;
-        case TAB_NETWORK:
-            handle_network_input(s, px, py);
-            break;
-        default:
-            break;
-        }
-    }
-
-    settings_draw(s->win, s);
-}
-
-// ── Lifecycle ─────────────────────────────────────────────────────────────
-
-static bool settings_close(window *w) {
-    (void)w;
-    os_quit_app_by_desc(&settings_app);
-    return true;
-}
-static void on_file_close(void) { settings_close(NULL); }
+static void on_close(void) { os_quit_app_by_desc(&settings_app); }
 
 static void settings_init(void *state) {
-    settings_state_t *s = (settings_state_t *)state;
-    const window_spec_t spec = {
-        .x = SET_X,
-        .y = SET_Y,
-        .w = SET_W,
-        .h = SET_H,
-        .resizable = false,
-        .title = "Settings",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = LIGHT_GRAY,
-        .visible = true,
-        .on_close = settings_close,
-    };
-    s->win = wm_register(&spec);
-    s->win->anim_no_of_frames = 10;
-    if (!s->win)
-        return;
-    s->win->on_draw = settings_draw;
-    s->win->on_draw_userdata = s;
-
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "Close", on_file_close);
-
-    s->tab = TAB_WALLPAPER;
-    s->dirty = false;
-
+    settings_state_t *s = state;
     if (g_cfg.sb16_volume == 0)
         g_cfg.sb16_volume = 8;
-}
-
-static void settings_destroy(void *state) {
-    settings_state_t *s = (settings_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
+    s->win = app_window(s, "Settings", 30, 20, 260, 172, DARK_GRAY, 0);
+    if (!s->win)
+        return;
+    build(s);
+    menu *f = window_add_menu(s->win, "File");
+    menu_add_item(f, "Close", on_close);
 }
 
 app_descriptor settings_app = {
     .name = "Settings",
     .state_size = sizeof(settings_state_t),
     .init = settings_init,
-    .on_frame = settings_on_frame,
-    .destroy = settings_destroy,
     .single_instance = true,
 };

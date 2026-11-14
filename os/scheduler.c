@@ -224,6 +224,7 @@ void scheduler_kernel_task(void) {
 
         if (!modal_active()) {
             menubar_update(&g_menubar);
+            ctl_dispatch(); /* controls get their clicks/keys first */
             os_tick_apps();
             wm_update_all();
         }

@@ -1,133 +1,85 @@
+/* ClipView - clipboard history: pick an entry to see it, Copy puts it back
+ * on the clipboard. */
 #include "os/api.h"
 #include "os/clipboard.h"
 
-#define CV_DEFAULT_W 180
-#define CV_DEFAULT_H 140
-#define CV_DEFAULT_X 30
-#define CV_DEFAULT_Y 30
-
-#define LINE_H 8
-#define CHAR_W 5
-#define MARGIN 4
-
 typedef struct {
-    window *win;
-    int scroll;
-    int selected;
+    window *win; /* must stay first */
+    control *list, *preview, *copy;
+    int seen_count, seen_current;
 } cv_state_t;
 
 app_descriptor clipview_app;
 
-static void cv_about(void) {
-    modal_show(MODAL_INFO, "Clipboard Viewer (c)2026 @drclcomputers",
-               "Clipboard Viewer v1.0\nShows text clipboard history.\nClick a "
-               "line to copy it.",
-               NULL, NULL);
-}
-
-static void cv_draw(window *win, void *ud) {
-    cv_state_t *s = (cv_state_t *)ud;
-    int wx = win->x + 1, wy = win->y + MENUBAR_H + 16;
-    int ww = win->w - 2, wh = win->h - 16;
-
-    fill_rect(wx, wy, ww, wh, WHITE);
-    int count = clipboard_history_count();
-    int y = wy + MARGIN;
-    for (int i = s->scroll; i < count && y < wy + wh - 8; i++) {
+static void refill(cv_state_t *s) {
+    s->seen_count = clipboard_history_count();
+    s->seen_current = g_clip_history_current;
+    list_clear(s->list);
+    for (int i = s->seen_count - 1; i >= 0; i--) { /* newest first */
         const char *t = clipboard_history_get_text(i);
-        if (!t)
-            continue;
-        char line[80];
-        int len = (int)strlen(t);
-        int max_chars = (ww - 8) / CHAR_W;
-        int n = len < max_chars ? len : max_chars;
-        memcpy(line, t, n);
-        line[n] = '\0';
-
-        if (i == s->selected)
-            fill_rect(wx + 2, y - 1, ww - 4, LINE_H + 1, LIGHT_BLUE);
-
-        draw_string(wx + 4, y, line, BLACK, 2);
-        y += LINE_H + 2;
+        char line[64];
+        int n = 0;
+        for (int k = 0; t && t[k] && n < 60; k++)
+            line[n++] = (t[k] == '\n' || t[k] == '\t') ? ' ' : t[k];
+        line[n] = 0;
+        list_add_data(s->list, line, (uint32_t)i);
     }
+    list_set_sel(s->list, 0);
+    const char *t = clipboard_history_get_text(s->seen_count - 1);
+    ctl_set_text(s->preview, t ? t : "");
+    ctl_enable(s->copy, s->seen_count > 0);
 }
 
-static void cv_on_frame(void *state) {
-    cv_state_t *s = (cv_state_t *)state;
-    if (!s->win || !s->win->visible)
-        return;
-
-    bool focused = window_is_focused(s->win);
-
-    if (mouse.left_clicked && focused) {
-        int wy = s->win->y + MENUBAR_H + 16 + MARGIN;
-        int click_y = mouse.y - wy;
-        if (click_y >= 0) {
-            int idx = s->scroll + click_y / (LINE_H + 2);
-            int count = clipboard_history_count();
-            if (idx >= 0 && idx < count) {
-                s->selected = idx;
-                const char *txt = clipboard_history_get_text(idx);
-                if (txt) {
-                    clipboard_set_text(txt, (int)strlen(txt));
-                }
-            }
-        }
-    }
-
-    cv_draw(s->win, s);
+static void on_list(control *c, int ev) {
+    cv_state_t *s = c->user;
+    const char *t = clipboard_history_get_text(list_data(c, list_sel(c)));
+    if (ev == EV_CHANGE)
+        ctl_set_text(s->preview, t ? t : "");
+    if (ev == EV_SUBMIT && t)
+        clipboard_set_text(t, (int)strlen(t));
 }
 
-static bool cv_close(window *w) {
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &clipview_app)
-            continue;
-        cv_state_t *s = (cv_state_t *)a->state;
-        if (s->win != w)
-            continue;
-        os_quit_app(a);
-        return true;
-    }
-    return true;
+static void on_copy(control *c, int ev) {
+    cv_state_t *s = c->user;
+    (void)ev;
+    const char *t =
+        clipboard_history_get_text(list_data(s->list, list_sel(s->list)));
+    if (t)
+        clipboard_set_text(t, (int)strlen(t));
+}
+
+static void on_close(void) { os_quit_app_by_desc(&clipview_app); }
+static void on_about(void) {
+    dlg_message(NULL, "About ClipView",
+                "Clipboard Viewer v2.0\nShows the text clipboard history.\n"
+                "Double-click or Copy puts an entry back.");
 }
 
 static void cv_init(void *state) {
-    cv_state_t *s = (cv_state_t *)state;
-    const window_spec_t spec = {
-        .x = CV_DEFAULT_X,
-        .y = CV_DEFAULT_Y,
-        .w = CV_DEFAULT_W,
-        .h = CV_DEFAULT_H,
-        .min_w = 80,
-        .min_h = 60,
-        .resizable = true,
-        .title = "ClipView",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = WHITE,
-        .visible = true,
-        .on_close = cv_close,
-    };
-    s->win = wm_register(&spec);
-    s->win->anim_no_of_frames = 10;
+    cv_state_t *s = state;
+    s->win =
+        app_window(s, "ClipView", 30, 30, 200, 150, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
-    s->win->on_draw = cv_draw;
-    s->win->on_draw_userdata = s;
-    s->scroll = 0;
-    s->selected = -1;
-
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "About", cv_about);
+    s->list = ctl_list(s->win, 4, 4, 190, 54, CS_STRETCH_W, on_list);
+    s->preview = ctl_edit(
+        s->win, 4, 62, 190, 50, "", 0,
+        ES_MULTILINE | ES_READONLY | CS_STRETCH_W | CS_STRETCH_H, NULL);
+    s->copy = ctl_button(s->win, 144, 116, 50, 13, "Copy", 1, on_copy);
+    ctl_style_add(s->copy, CS_ANCHOR_RIGHT | CS_ANCHOR_BOTTOM);
+    menu *f = window_add_menu(s->win, "File");
+    menu_add_item(f, "Close", on_close);
+    menu_add_separator(f);
+    menu_add_item(f, "About", on_about);
+    refill(s);
+    ctl_focus(s->list);
 }
 
-static void cv_destroy(void *state) {
-    cv_state_t *s = (cv_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
+static void cv_on_frame(void *state) {
+    cv_state_t *s = state;
+    if (clipboard_history_count() != s->seen_count ||
+        g_clip_history_current != s->seen_current)
+        refill(s);
 }
 
 app_descriptor clipview_app = {
@@ -135,6 +87,5 @@ app_descriptor clipview_app = {
     .state_size = sizeof(cv_state_t),
     .init = cv_init,
     .on_frame = cv_on_frame,
-    .destroy = cv_destroy,
     .single_instance = true,
 };

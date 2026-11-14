@@ -1,46 +1,13 @@
+/* MIDI Player - plays .MID files through the OPL2 FM synth. */
 #include "drivers/opl2.h"
-#include "fs/fs.h"
-#include "lib/memory.h"
-#include "lib/string.h"
+#include "drivers/sb16.h"
 #include "os/api.h"
 
-#define MIDI_DEFAULT_X 20
-#define MIDI_DEFAULT_Y 20
-#define MIDI_DEFAULT_W 260
-#define MIDI_DEFAULT_H 150
-#define PAD 6
-
-#define PATH_Y 6
-#define PATH_H 12
-#define PATH_X PAD
-#define PATH_W (MIDI_DEFAULT_W - PAD * 2 - 28)
-#define LOAD_BTN_X (PATH_X + PATH_W + 4)
-#define LOAD_BTN_W 24
-
-#define VIZ_Y (PATH_Y + PATH_H + 6)
-#define VIZ_H 52
-#define VIZ_W (MIDI_DEFAULT_W - PAD * 2)
-
-#define TRANS_Y (VIZ_Y + VIZ_H + 6)
-#define TRANS_H 14
-#define BTN_SZ 20
-#define LOOP_BTN_W 30
-
-#define VOL_Y (TRANS_Y + TRANS_H + 10)
-#define VOL_H 10
-#define VOL_LABEL_W 24
-#define VOL_TRACK_X (PAD + VOL_LABEL_W + 4)
-#define VOL_TRACK_W (MIDI_DEFAULT_W - PAD * 2 - VOL_LABEL_W - 24)
-#define VOL_VAL_X (VOL_TRACK_X + VOL_TRACK_W + 4)
-
-#define STATUS_Y (VOL_Y + VOL_H + 4)
-
 #define VU_BARS 24
-#define VU_BAR_W ((VIZ_W - 2) / VU_BARS)
-#define VU_BAR_MAXH (VIZ_H - 2)
-
+#define VU_BAR_MAXH 46
 #define MAX_PATH_LEN 63
 #define MAX_MIDI_SIZE (64 * 1024)
+#define STATUS_MS 4000
 
 typedef enum {
     MIDI_STATE_IDLE,
@@ -50,11 +17,12 @@ typedef enum {
 } midi_ui_state_t;
 
 typedef struct {
-    window *win;
+    window *win; /* must stay first */
+    control *path, *viz, *play, *stop, *rew, *loop, *state_lbl, *vol, *vol_lbl,
+        *status;
 
     char path_buf[MAX_PATH_LEN + 1];
     int path_len;
-    bool path_focused;
 
     uint8_t *midi_buf;
     uint32_t midi_size;
@@ -69,30 +37,14 @@ typedef struct {
     uint32_t vu_frame;
 
     uint32_t play_start_pit;
-    uint32_t total_pit_est;
-
-    char status[64];
-    uint32_t status_timer;
-
-    bool vol_dragging;
+    uint32_t status_until;
 } midiplayer_state_t;
 
 app_descriptor midiplayer_app;
 
-// Helpers
 static void mp_set_status(midiplayer_state_t *s, const char *msg) {
-    strncpy(s->status, msg, 63);
-    s->status[63] = '\0';
-    s->status_timer = 240;
-}
-
-static int win_cx(const midiplayer_state_t *s) { return s->win->x + 1; }
-static int win_cy(const midiplayer_state_t *s) {
-    return s->win->y + MENUBAR_H + 16;
-}
-
-static bool btn_hit(int mx, int my, int bx, int by, int bw, int bh) {
-    return mx >= bx && mx < bx + bw && my >= by && my < by + bh;
+    ctl_set_text(s->status, msg);
+    s->status_until = time_millis() + STATUS_MS;
 }
 
 // meter update
@@ -140,164 +92,6 @@ static void mp_update_vu(midiplayer_state_t *s) {
                 s->vu_peaks[i] = 0;
         }
     }
-}
-
-// Draw
-static void midiplayer_draw(window *win, void *ud) {
-    midiplayer_state_t *s = (midiplayer_state_t *)ud;
-    if (!s)
-        return;
-
-    int cx = win_cx(s);
-    int cy = win_cy(s);
-    int ww = win->w - 2;
-    int wh = win->h - 16;
-
-    fill_rect(cx, cy, ww, wh, BLACK);
-
-    int py = cy + PATH_Y;
-    uint8_t path_border = s->path_focused ? CYAN : DARK_GRAY;
-    fill_rect(cx + PATH_X, py, PATH_W, PATH_H, 1);
-    draw_rect(cx + PATH_X, py, PATH_W, PATH_H, path_border);
-
-    char display_path[MAX_PATH_LEN + 1];
-    int max_vis = (PATH_W - 4) / 5;
-    int start = s->path_len > max_vis ? s->path_len - max_vis : 0;
-    strncpy(display_path, s->path_buf + start, max_vis);
-    display_path[max_vis] = '\0';
-    draw_string(cx + PATH_X + 2, py + 3, display_path, LIGHT_GRAY, 2);
-
-    // Cursor
-    if (s->path_focused) {
-        int vis_len = s->path_len - start;
-        int cursor_x = cx + PATH_X + 2 + vis_len * 5;
-        if (cursor_x < cx + PATH_X + PATH_W - 2)
-            draw_string(cursor_x, py + 3, "|", CYAN, 2);
-    }
-
-    // Load button
-    int lbx = cx + LOAD_BTN_X;
-    fill_rect(lbx, py, LOAD_BTN_W, PATH_H, DARK_GRAY);
-    draw_rect(lbx, py, LOAD_BTN_W, PATH_H, LIGHT_GRAY);
-    draw_string(lbx + 3, py + 3, "GO", WHITE, 2);
-
-    // VU Meter / now-playing panel
-    int vx = cx + PAD;
-    int vy = cy + VIZ_Y;
-    fill_rect(vx, vy, VIZ_W, VIZ_H, 1);
-    draw_rect(vx, vy, VIZ_W, VIZ_H, DARK_GRAY);
-
-    if (s->state == MIDI_STATE_IDLE) {
-        draw_string(vx + 8, vy + VIZ_H / 2 - 3, "No file loaded", DARK_GRAY, 2);
-    } else {
-        draw_string(vx + 3, vy + 3, s->filename, CYAN, 2);
-
-        // VU bars
-        int bar_bottom = vy + VIZ_H - 2;
-        for (int i = 0; i < VU_BARS; i++) {
-            int bx = vx + 1 + i * VU_BAR_W;
-            int bh = s->vu_peaks[i];
-            if (bh < 1)
-                bh = 1;
-            uint8_t col;
-            if (bh < VU_BAR_MAXH * 5 / 10)
-                col = LIGHT_GREEN;
-            else if (bh < VU_BAR_MAXH * 8 / 10)
-                col = YELLOW;
-            else
-                col = LIGHT_RED;
-            fill_rect(bx, bar_bottom - bh, VU_BAR_W - 1, bh, col);
-        }
-    }
-
-    // Transport buttons
-    int tx = cx + PAD;
-    int ty = cy + TRANS_Y;
-
-    // rewind/restart
-    bool active = (s->state != MIDI_STATE_IDLE);
-    fill_rect(tx, ty, BTN_SZ, BTN_SZ, active ? DARK_GRAY : 1);
-    draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? LIGHT_GRAY : DARK_GRAY);
-    draw_string(tx + 3, ty + 4, "|<", active ? WHITE : DARK_GRAY, 2);
-    tx += BTN_SZ + 3;
-
-    // PLAY / PAUSE
-    bool is_playing = (s->state == MIDI_STATE_PLAYING);
-    active = (s->state != MIDI_STATE_IDLE);
-    uint8_t pbg = is_playing ? RED : (active ? LIGHT_GREEN : 1);
-    fill_rect(tx, ty, BTN_SZ, BTN_SZ, pbg);
-    draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? WHITE : DARK_GRAY);
-    const char *plbl =
-        is_playing ? "||" : (s->state == MIDI_STATE_PAUSED ? ">>" : " >");
-    draw_string(tx + 3, ty + 4, (char *)plbl, WHITE, 2);
-    tx += BTN_SZ + 3;
-
-    // STOP
-    active = (s->state == MIDI_STATE_PLAYING || s->state == MIDI_STATE_PAUSED);
-    fill_rect(tx, ty, BTN_SZ, BTN_SZ, active ? DARK_GRAY : 1);
-    draw_rect(tx, ty, BTN_SZ, BTN_SZ, active ? LIGHT_GRAY : DARK_GRAY);
-    draw_string(tx + 5, ty + 4, "[]", active ? WHITE : DARK_GRAY, 2);
-    tx += BTN_SZ + 3;
-
-    // LOOP toggle
-    uint8_t lbg = s->looping ? LIGHT_BLUE : DARK_GRAY;
-    fill_rect(tx, ty, LOOP_BTN_W, BTN_SZ, lbg);
-    draw_rect(tx, ty, LOOP_BTN_W, BTN_SZ, s->looping ? WHITE : LIGHT_GRAY);
-    draw_string(tx + 4, ty + 4, "LOOP", s->looping ? WHITE : LIGHT_GRAY, 2);
-    tx += LOOP_BTN_W + 6;
-
-    // State label on the right
-    const char *state_lbl;
-    uint8_t state_col;
-    switch (s->state) {
-    case MIDI_STATE_IDLE:
-        state_lbl = "IDLE";
-        state_col = DARK_GRAY;
-        break;
-    case MIDI_STATE_LOADED:
-        state_lbl = "READY";
-        state_col = LIGHT_GRAY;
-        break;
-    case MIDI_STATE_PLAYING:
-        state_lbl = "PLAYING";
-        state_col = LIGHT_GREEN;
-        break;
-    case MIDI_STATE_PAUSED:
-        state_lbl = "PAUSED";
-        state_col = YELLOW;
-        break;
-    default:
-        state_lbl = "";
-        state_col = DARK_GRAY;
-        break;
-    }
-    int sw = (int)strlen(state_lbl) * 5;
-    draw_string(cx + PAD + VIZ_W - sw, cy + TRANS_Y + 5, (char *)state_lbl,
-                state_col, 2);
-
-    // Volume
-    int vol_y = cy + VOL_Y;
-    draw_string(cx + PAD, vol_y + 1, "VOL", LIGHT_GRAY, 2);
-
-    int track_x = cx + VOL_TRACK_X;
-    fill_rect(track_x, vol_y + 3, VOL_TRACK_W, VOL_H - 6, 1);
-    draw_rect(track_x, vol_y + 3, VOL_TRACK_W, VOL_H - 6, DARK_GRAY);
-    int knob_x = track_x + (int)((uint32_t)VOL_TRACK_W * s->volume / 100);
-    fill_rect(knob_x - 3, vol_y, 6, VOL_H, LIGHT_GRAY);
-    draw_rect(knob_x - 3, vol_y, 6, VOL_H, WHITE);
-
-    char vol_str[5];
-    sprintf(vol_str, "%d%%", (int)s->volume);
-    draw_string(cx + VOL_VAL_X, vol_y + 1, vol_str, CYAN, 2);
-
-    // Status
-    if (s->status_timer > 0)
-        draw_string(cx + PAD, cy + STATUS_Y, s->status, YELLOW, 2);
-    else
-        draw_string(cx + PAD, cy + STATUS_Y,
-                    s->state == MIDI_STATE_IDLE ? "Type a path and press GO"
-                                                : "",
-                    DARK_GRAY, 2);
 }
 
 // File loading
@@ -441,312 +235,244 @@ static void mp_apply_volume(midiplayer_state_t *s) {
     mixer_write(0x26, (v & 0xF0) | (v >> 4));
 }
 
-// Active-instance helper
-static midiplayer_state_t *active_mp(void) {
-    window *fw = wm_focused_window();
-    if (!fw)
-        return NULL;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &midiplayer_app)
-            continue;
-        midiplayer_state_t *s = (midiplayer_state_t *)a->state;
-        if (s->win == fw)
-            return s;
-    }
-    return NULL;
+static void sync_ui(midiplayer_state_t *s) {
+    static const char *names[] = {"IDLE", "READY", "PLAYING", "PAUSED"};
+    static const uint8_t cols[] = {DARK_GRAY, BLACK, GREEN, BROWN};
+    ctl_set_text(s->state_lbl, names[s->state]);
+    ctl_set_colors(s->state_lbl, cols[s->state], 0xFF);
+    ctl_set_text(s->play, s->state == MIDI_STATE_PLAYING ? "Pause" : "Play");
+    ctl_enable(s->play, s->state != MIDI_STATE_IDLE);
+    ctl_enable(s->rew, s->state != MIDI_STATE_IDLE);
+    ctl_enable(s->stop,
+               s->state == MIDI_STATE_PLAYING || s->state == MIDI_STATE_PAUSED);
+    ctl_set_value(s->loop, s->looping);
+    ctl_set_value(s->vol, s->volume);
+    char b[8];
+    snprintf(b, sizeof(b), "%d%%", s->volume);
+    ctl_set_text(s->vol_lbl, b);
 }
 
-// Menu callbacks
-static void menu_play_pause(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
-    mp_action_play_pause(s);
+static void load_path(midiplayer_state_t *s, const char *p) {
+    strncpy(s->path_buf, p, MAX_PATH_LEN);
+    s->path_buf[MAX_PATH_LEN] = 0;
+    s->path_len = (int)strlen(s->path_buf);
+    ctl_set_text(s->path, s->path_buf);
+    mp_load_file(s);
+    sync_ui(s);
 }
-static void menu_stop(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
-    mp_action_stop(s);
-}
-static void menu_rewind(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
-    mp_action_rewind(s);
-}
-static void menu_toggle_loop(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
+
+static void toggle_loop(midiplayer_state_t *s) {
     s->looping = !s->looping;
     if (s->state == MIDI_STATE_PLAYING)
         midi_player_set_loop(s->looping);
-    mp_set_status(s, s->looping ? "Loop ON." : "Loop OFF.");
-}
-static void menu_vol_up(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
-    if (s->volume < 100) {
-        s->volume += 10;
-        if (s->volume > 100)
-            s->volume = 100;
-    }
-    mp_apply_volume(s);
-}
-static void menu_vol_down(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
-    if (s->volume > 0) {
-        if (s->volume < 10)
-            s->volume = 0;
-        else
-            s->volume -= 10;
-    }
-    mp_apply_volume(s);
-}
-static void menu_close_mp(void) {
-    midiplayer_state_t *s = active_mp();
-    if (!s)
-        return;
-    os_close_own_instance(s->win);
-}
-static void on_about_mp(void) {
-    modal_show(MODAL_INFO, "About MIDI Player (c)2026 @drclcomputers",
-               "MIDI Player v1.0\nASMOS OPL2/FM Synthesizer\nSupports Type-0 "
-               "and Type-1 MIDI",
-               NULL, NULL);
+    mp_set_status(s, s->looping ? "Loop on." : "Loop off.");
 }
 
-static bool midiplayer_close(window *w) {
-    midiplayer_state_t *s = NULL;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &midiplayer_app)
-            continue;
-        midiplayer_state_t *ms = (midiplayer_state_t *)a->state;
-        if (ms->win == w) {
-            s = ms;
-            break;
-        }
+static void set_volume(midiplayer_state_t *s, int v) {
+    s->volume = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v);
+    mp_apply_volume(s);
+}
+
+/* ── visualiser ──────────────────────────────────────────────────────── */
+
+static void paint_viz(control *c, int x, int y, int w, int h) {
+    midiplayer_state_t *s = c->user;
+    fill_rect(x, y, w, h, BLACK);
+    if (s->state == MIDI_STATE_IDLE) {
+        draw_string(x + 8, y + h / 2 - 3, "No file loaded", DARK_GRAY, 2);
+        return;
     }
-    if (s) {
-        midi_player_stop();
-        if (s->midi_buf) {
-            kfree(s->midi_buf);
-            s->midi_buf = NULL;
-        }
+    draw_string(x + 3, y + 3, s->filename, LIGHT_CYAN, 2);
+    int bw = (w - 2) / VU_BARS;
+    int bottom = y + h - 2;
+    for (int i = 0; i < VU_BARS; i++) {
+        int bh = s->vu_peaks[i] * (h - 14) / VU_BAR_MAXH;
+        if (bh < 1)
+            bh = 1;
+        uint8_t col = bh < (h - 14) / 2        ? LIGHT_GREEN
+                      : bh < (h - 14) * 8 / 10 ? YELLOW
+                                               : LIGHT_RED;
+        fill_rect(x + 1 + i * bw, bottom - bh, bw - 1, bh, col);
     }
-    os_close_own_instance(w);
-    return true;
+}
+
+/* ── controls ────────────────────────────────────────────────────────── */
+
+static void got_file(void *user, const char *path) {
+    if (path)
+        load_path(user, path);
+}
+
+enum { B_BROWSE = 1, B_LOAD, B_REW, B_PLAY, B_STOP, B_LOOP };
+
+static void on_button(control *c, int ev) {
+    midiplayer_state_t *s = c->user;
+    (void)ev;
+    switch (c->id) {
+    case B_BROWSE:
+        dlg_open_file(s->win, "Open MIDI file", "/", "MID", got_file, s);
+        return;
+    case B_LOAD:
+        load_path(s, ctl_text(s->path));
+        return;
+    case B_REW:
+        mp_action_rewind(s);
+        break;
+    case B_PLAY:
+        mp_action_play_pause(s);
+        break;
+    case B_STOP:
+        mp_action_stop(s);
+        break;
+    case B_LOOP:
+        toggle_loop(s);
+        break;
+    }
+    sync_ui(s);
+}
+
+static void on_path(control *c, int ev) {
+    if (ev == EV_SUBMIT)
+        load_path(c->user, ctl_text(c));
+}
+
+static void on_vol(control *c, int ev) {
+    if (ev == EV_CHANGE) {
+        set_volume(c->user, ctl_value(c));
+        sync_ui(c->user);
+    }
+}
+
+/* ── menus ───────────────────────────────────────────────────────────── */
+
+static void menu_open(void) {
+    midiplayer_state_t *s = ui_active_state();
+    if (s)
+        dlg_open_file(s->win, "Open MIDI file", "/", "MID", got_file, s);
+}
+#define MENU_ACTION(name, body)                                                \
+    static void name(void) {                                                   \
+        midiplayer_state_t *s = ui_active_state();                             \
+        if (!s)                                                                \
+            return;                                                            \
+        body;                                                                  \
+        sync_ui(s);                                                            \
+    }
+MENU_ACTION(menu_play_pause, mp_action_play_pause(s))
+MENU_ACTION(menu_stop, mp_action_stop(s))
+MENU_ACTION(menu_rewind, mp_action_rewind(s))
+MENU_ACTION(menu_loop, toggle_loop(s))
+MENU_ACTION(menu_vol_up, set_volume(s, s->volume + 10))
+MENU_ACTION(menu_vol_down, set_volume(s, s->volume - 10))
+MENU_ACTION(menu_close, os_close_own_instance(s->win))
+
+static void on_about(void) {
+    dlg_message(NULL, "About MIDI Player",
+                "MIDI Player v2.0\nASMOS OPL2/FM synthesizer\n"
+                "Type-0 and Type-1 MIDI files.\n"
+                "Keys: Space play/pause, S stop, R rewind, L loop, +/- vol.");
 }
 
 static void midiplayer_init(void *state) {
-    midiplayer_state_t *s = (midiplayer_state_t *)state;
-
-    const window_spec_t spec = {
-        .x = MIDI_DEFAULT_X,
-        .y = MIDI_DEFAULT_Y,
-        .w = MIDI_DEFAULT_W,
-        .h = MIDI_DEFAULT_H,
-        .min_w = MIDI_DEFAULT_W,
-        .min_h = MIDI_DEFAULT_H,
-        .resizable = false,
-        .title = "MIDI Player",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = BLACK,
-        .visible = true,
-        .on_close = midiplayer_close,
-    };
-    s->win = wm_register(&spec);
+    midiplayer_state_t *s = state;
+    s->win = app_window(s, "MIDI Player", 20, 20, 262, 146, DARK_GRAY, 0);
     if (!s->win)
         return;
+    window *w = s->win;
+    s->path = ctl_edit(w, 4, 4, 160, 12, "/MUSIC.MID", MAX_PATH_LEN,
+                       ES_FILENAME, on_path);
+    ctl_button(w, 168, 4, 48, 12, "Browse...", B_BROWSE, on_button);
+    ctl_button(w, 220, 4, 36, 12, "Load", B_LOAD, on_button);
+    s->viz = ctl_custom(w, 4, 20, 252, 52, paint_viz, NULL, CS_BORDER);
+    s->rew = ctl_button(w, 4, 77, 30, 14, "|<", B_REW, on_button);
+    s->play = ctl_button(w, 38, 77, 40, 14, "Play", B_PLAY, on_button);
+    s->stop = ctl_button(w, 82, 77, 36, 14, "Stop", B_STOP, on_button);
+    s->loop = ctl_button(w, 122, 77, 36, 14, "Loop", B_LOOP, on_button);
+    ctl_style_add(s->loop, CS_TOGGLE);
+    s->state_lbl = ctl_label(w, 170, 77, 86, 14, "", LS_RIGHT);
+    ctl_label(w, 4, 96, 30, 11, "Volume", 0);
+    s->vol = ctl_slider(w, 40, 96, 180, 0, 100, 80, on_vol);
+    s->vol_lbl = ctl_label(w, 224, 96, 32, 11, "", LS_RIGHT);
+    s->status = ctl_label(w, 4, 112, 252, 12, "", CS_BORDER);
 
-    s->win->on_draw = midiplayer_draw;
-    s->win->on_draw_userdata = s;
-
-    menu *m = window_add_menu(s->win, "Player");
+    menu *m = window_add_menu(w, "Player");
+    menu_add_item(m, "Open...", menu_open);
+    menu_add_separator(m);
     menu_add_item(m, "Play / Pause", menu_play_pause);
     menu_add_item(m, "Stop", menu_stop);
     menu_add_item(m, "Rewind", menu_rewind);
-    menu_add_separator(m);
-    menu_add_item(m, "Toggle Loop", menu_toggle_loop);
+    menu_add_item(m, "Toggle Loop", menu_loop);
     menu_add_separator(m);
     menu_add_item(m, "Volume +10", menu_vol_up);
     menu_add_item(m, "Volume -10", menu_vol_down);
     menu_add_separator(m);
-    menu_add_item(m, "Close", menu_close_mp);
-    menu_add_item(m, "About", on_about_mp);
+    menu_add_item(m, "Close", menu_close);
+    menu_add_item(m, "About", on_about);
 
+    strcpy(s->path_buf, "/MUSIC.MID");
+    s->path_len = (int)strlen(s->path_buf);
     s->state = MIDI_STATE_IDLE;
     s->volume = 80;
-    s->looping = false;
-    s->path_len = 0;
-    s->path_buf[0] = '\0';
-    strncpy(s->path_buf, "/MUSIC.MID", MAX_PATH_LEN);
-    s->path_len = (int)strlen(s->path_buf);
-
-    for (int i = 0; i < VU_BARS; i++) {
-        s->vu_peaks[i] = 0;
-        s->vu_decay[i] = 0;
-    }
-
     mp_apply_volume(s);
+    mp_set_status(s, "Browse... for a .MID file, or type a path + Enter.");
+    s->status_until = 0xFFFFFFFFu;
+    sync_ui(s);
 }
 
 static void midiplayer_on_frame(void *state) {
-    midiplayer_state_t *s = (midiplayer_state_t *)state;
-    if (!s->win || !s->win->visible)
-        return;
-
-    bool focused = window_is_focused(s->win);
-
+    midiplayer_state_t *s = state;
     midi_player_update();
-
     if (s->state == MIDI_STATE_PLAYING && !midi_player_is_playing()) {
         s->state = MIDI_STATE_LOADED;
         for (int i = 0; i < VU_BARS; i++)
             s->vu_peaks[i] = 0;
         mp_set_status(s, "Playback finished.");
+        sync_ui(s);
     }
-
-    if (s->win->minimized)
-        return;
-
-    // VU meter animation
     mp_update_vu(s);
-
-    if (s->status_timer > 0)
-        s->status_timer--;
-
-    if (focused && mouse.left_clicked) {
-        int cx = win_cx(s);
-        int cy = win_cy(s);
-
-        int py = cy + PATH_Y;
-        if (btn_hit(mouse.x, mouse.y, cx + PATH_X, py, PATH_W, PATH_H)) {
-            s->path_focused = true;
-        } else if (btn_hit(mouse.x, mouse.y, cx + LOAD_BTN_X, py, LOAD_BTN_W,
-                           PATH_H)) {
-            s->path_focused = false;
-            mp_load_file(s);
-        } else {
-            s->path_focused = false;
-        }
-
-        int tx = cx + PAD;
-        int ty = cy + TRANS_Y;
-
-        // Rewind
-        if (btn_hit(mouse.x, mouse.y, tx, ty, BTN_SZ, BTN_SZ)) {
-            mp_action_rewind(s);
-            midiplayer_draw(s->win, s);
-        }
-        tx += BTN_SZ + 3;
-
-        // Play/Pause
-        if (btn_hit(mouse.x, mouse.y, tx, ty, BTN_SZ, BTN_SZ)) {
-            mp_action_play_pause(s);
-            midiplayer_draw(s->win, s);
-        }
-        tx += BTN_SZ + 3;
-
-        // Stop
-        if (btn_hit(mouse.x, mouse.y, tx, ty, BTN_SZ, BTN_SZ)) {
-            mp_action_stop(s);
-            midiplayer_draw(s->win, s);
-        }
-        tx += BTN_SZ + 3;
-
-        // Loop
-        if (btn_hit(mouse.x, mouse.y, tx, ty, LOOP_BTN_W, BTN_SZ)) {
-            menu_toggle_loop();
-            midiplayer_draw(s->win, s);
-        }
-
-        // Volume track click/drag
-        int vol_y = cy + VOL_Y;
-        int track_x = cx + VOL_TRACK_X;
-        if (btn_hit(mouse.x, mouse.y, track_x, vol_y - 2, VOL_TRACK_W,
-                    VOL_H + 4)) {
-            s->vol_dragging = true;
-        }
+    if (time_millis() > s->status_until) {
+        ctl_set_text(s->status, "");
+        s->status_until = 0xFFFFFFFFu;
     }
 
-    // Volume drag
-    if (s->vol_dragging) {
-        if (mouse.left) {
-            int cx = win_cx(s);
-            int track_x = cx + VOL_TRACK_X;
-            int rel = mouse.x - track_x;
-            if (rel < 0)
-                rel = 0;
-            if (rel > VOL_TRACK_W)
-                rel = VOL_TRACK_W;
-            s->volume = (uint8_t)((uint32_t)rel * 100 / VOL_TRACK_W);
-            mp_apply_volume(s);
-        } else {
-            s->vol_dragging = false;
-        }
+    /* single-key shortcuts (keys the focused control didn't take) */
+    if (!kb.key_pressed || !window_is_focused(s->win) ||
+        ctl_focused(s->win) == s->path)
+        return;
+    switch (kb.last_char) {
+    case ' ':
+        mp_action_play_pause(s);
+        break;
+    case 's':
+    case 'S':
+        mp_action_stop(s);
+        break;
+    case 'r':
+    case 'R':
+        mp_action_rewind(s);
+        break;
+    case 'l':
+    case 'L':
+        toggle_loop(s);
+        break;
+    case '+':
+        set_volume(s, s->volume + 10);
+        break;
+    case '-':
+        set_volume(s, s->volume - 10);
+        break;
+    default:
+        return;
     }
-
-    // shortcuts
-    if (focused && kb.key_pressed) {
-        if (s->path_focused) {
-            if (kb.last_char && kb.last_char != '\b' && kb.last_char != '\r') {
-                if (s->path_len < MAX_PATH_LEN) {
-                    s->path_buf[s->path_len++] = kb.last_char;
-                    s->path_buf[s->path_len] = '\0';
-                }
-            } else if (kb.last_scancode == BACKSPACE && s->path_len > 0) {
-                s->path_buf[--s->path_len] = '\0';
-            } else if (kb.last_char == '\r') {
-                s->path_focused = false;
-                mp_load_file(s);
-            }
-        } else {
-            switch (kb.last_char) {
-            case ' ':
-                mp_action_play_pause(s);
-                break;
-            case 's':
-            case 'S':
-                mp_action_stop(s);
-                break;
-            case 'r':
-            case 'R':
-                mp_action_rewind(s);
-                break;
-            case 'l':
-            case 'L':
-                menu_toggle_loop();
-                break;
-            case '+':
-                menu_vol_up();
-                break;
-            case '-':
-                menu_vol_down();
-                break;
-            }
-        }
-    }
+    sync_ui(s);
 }
 
 static void midiplayer_destroy(void *state) {
-    midiplayer_state_t *s = (midiplayer_state_t *)state;
+    midiplayer_state_t *s = state;
     midi_player_stop();
-    if (s->midi_buf) {
+    if (s->midi_buf)
         kfree(s->midi_buf);
-        s->midi_buf = NULL;
-    }
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
+    s->midi_buf = NULL;
 }
 
 app_descriptor midiplayer_app = {

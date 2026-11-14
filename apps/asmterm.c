@@ -5,14 +5,6 @@
 #include "shell/cmds.h"
 #include "shell/term_buf.h"
 
-#define TERM_X 4
-#define TERM_Y 2
-#define CHAR_W 5
-#define CHAR_H 6
-#define LINE_H 8
-#define INPUT_H 10
-
-#define SCROLL_BAR_W 8
 #define OUTPUT_LINES 128
 #define OUTPUT_LINE_W 80
 #define HISTORY_DEPTH 32
@@ -60,37 +52,31 @@ static char iq_pop(input_queue_t *q) {
 }
 
 typedef struct {
-    window *win;
+    window *win; /* must stay first */
+    control *out, *sb, *prompt, *input;
 
     bool should_exit;
 
     char lines[OUTPUT_LINES][OUTPUT_LINE_W];
     int line_head;
     int line_count;
-
     int scroll_top;
     int visible_rows;
-
-    char input[INPUT_CAP];
-    int input_len;
-    int input_scroll;
-    bool input_focused;
+    int cols;
 
     char history[HISTORY_DEPTH][INPUT_CAP];
     int hist_count;
     int hist_pos;
     char hist_draft[INPUT_CAP];
 
-    bool binary_waiting;
-    bool line_mode; /* inside readline(): typed text is echoed/edited */
+    bool binary_waiting; /* a program is blocked in readline/getchar */
+    bool line_mode;      /* inside readline(): typed text is echoed */
     bool gopher_mode;
-    int cols; /* visible output columns (updated on draw) */
     input_queue_t iq;
     term_context_t term_ctx;
 } asmterm_state_t;
 
 app_descriptor asmterm_app;
-static asmterm_state_t *s_asmterm_active = NULL;
 
 static inline int line_idx(const asmterm_state_t *s, int n) {
     return (s->line_head + n) % OUTPUT_LINES;
@@ -105,12 +91,8 @@ static void term_push_line(asmterm_state_t *s, const char *text) {
         idx = s->line_head;
         s->line_head = (s->line_head + 1) % OUTPUT_LINES;
     }
-    int i = 0;
-    while (text[i] && i < OUTPUT_LINE_W - 1) {
-        s->lines[idx][i] = text[i];
-        i++;
-    }
-    s->lines[idx][i] = '\0';
+    strncpy(s->lines[idx], text, OUTPUT_LINE_W - 1);
+    s->lines[idx][OUTPUT_LINE_W - 1] = '\0';
 }
 
 static void term_push_output(asmterm_state_t *s, const char *text) {
@@ -133,21 +115,25 @@ static void term_push_output(asmterm_state_t *s, const char *text) {
     }
 }
 
+static int max_scroll(const asmterm_state_t *s) {
+    int ms = s->line_count - s->visible_rows;
+    return ms > 0 ? ms : 0;
+}
+
+static void term_scroll_to(asmterm_state_t *s, int top) {
+    int ms = max_scroll(s);
+    s->scroll_top = top < 0 ? 0 : top > ms ? ms : top;
+}
+
 static void term_scroll_to_bottom(asmterm_state_t *s) {
-    int ms = s->line_count - s->visible_rows;
-    s->scroll_top = (ms > 0) ? ms : 0;
+    term_scroll_to(s, max_scroll(s));
 }
-static void term_scroll_up(asmterm_state_t *s, int l) {
-    s->scroll_top -= l;
-    if (s->scroll_top < 0)
-        s->scroll_top = 0;
+
+static void term_clear(asmterm_state_t *s) {
+    s->line_head = s->line_count = s->scroll_top = 0;
 }
-static void term_scroll_down(asmterm_state_t *s, int l) {
-    int ms = s->line_count - s->visible_rows;
-    s->scroll_top += l;
-    if (s->scroll_top > ms)
-        s->scroll_top = (ms > 0) ? ms : 0;
-}
+
+/* ── term_context for shell programs ───────────────────────────────────── */
 
 static void tctx_print(term_context_t *ctx, const char *str) {
     asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
@@ -167,15 +153,12 @@ static int tctx_readline(term_context_t *ctx, char *buf, int maxchars) {
     asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
     if (!buf || maxchars <= 0)
         return 0;
-
     s->binary_waiting = true;
     s->line_mode = true;
     int len = 0;
     buf[0] = '\0';
-
     while (1) {
         task_yield();
-
         while (!iq_empty(&s->iq)) {
             char c = iq_pop(&s->iq);
             if (c == '\n') {
@@ -187,10 +170,8 @@ static int tctx_readline(term_context_t *ctx, char *buf, int maxchars) {
             if ((unsigned char)c >= 0x80)
                 continue; /* special keys mean nothing to a text line */
             if (c == '\b') {
-                if (len > 0) {
-                    len--;
-                    buf[len] = '\0';
-                }
+                if (len > 0)
+                    buf[--len] = '\0';
                 continue;
             }
             if (len < maxchars - 1) {
@@ -212,10 +193,7 @@ static int tctx_getchar(term_context_t *ctx) {
 }
 
 static void tctx_clear(term_context_t *ctx) {
-    asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
-    s->line_head = 0;
-    s->line_count = 0;
-    s->scroll_top = 0;
+    term_clear((asmterm_state_t *)ctx->userdata);
 }
 
 static void tctx_size(term_context_t *ctx, int *cols, int *rows) {
@@ -227,267 +205,254 @@ static void tctx_size(term_context_t *ctx, int *cols, int *rows) {
 }
 
 void asmterm_set_gopher_mode(term_context_t *ctx, bool on) {
-    if (!ctx || !ctx->userdata)
-        return;
-    asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
-    s->gopher_mode = on;
+    if (ctx && ctx->userdata)
+        ((asmterm_state_t *)ctx->userdata)->gopher_mode = on;
 }
 
-static void term_execute(asmterm_state_t *s) {
-    if (s->input_len == 0) {
-        term_push_line(s, "");
-        term_scroll_to_bottom(s);
+/* ── command line ──────────────────────────────────────────────────────── */
+
+static void history_add(asmterm_state_t *s, const char *line) {
+    if (s->hist_count > 0 &&
+        !strcmp(s->history[(s->hist_count - 1) % HISTORY_DEPTH], line))
         return;
-    }
+    strncpy(s->history[s->hist_count % HISTORY_DEPTH], line, INPUT_CAP - 1);
+    s->hist_count++;
+}
 
+static void term_execute(asmterm_state_t *s, const char *input) {
     char echo[INPUT_CAP + 4];
-    echo[0] = '>';
-    echo[1] = ' ';
-    int ei = 2;
-    for (int i = 0; i < s->input_len && ei < (int)sizeof(echo) - 1; i++)
-        echo[ei++] = s->input[i];
-    echo[ei] = '\0';
-    term_push_line(s, echo);
-
-    bool dup = (s->hist_count > 0 &&
-                strcmp(s->history[(s->hist_count - 1) % HISTORY_DEPTH],
-                       s->input) == 0);
-    if (!dup) {
-        int slot = s->hist_count % HISTORY_DEPTH;
-        int ci = 0;
-        while (s->input[ci] && ci < INPUT_CAP - 1) {
-            s->history[slot][ci] = s->input[ci];
-            ci++;
-        }
-        s->history[slot][ci] = '\0';
-        s->hist_count++;
-    }
+    snprintf(echo, sizeof(echo), "> %s", input);
+    term_push_line(s, input[0] ? echo : "");
+    term_scroll_to_bottom(s);
+    if (!input[0])
+        return;
+    history_add(s, input);
     s->hist_pos = -1;
-    s->hist_draft[0] = '\0';
 
-    static char outbuf[1024];
-    outbuf[0] = '\0';
-    if (strcmp("exit", s->input) == 0) {
+    if (!strcmp(input, "exit")) {
         s->should_exit = true;
         return;
     }
 
-    char command[64] = "";
-    char arg[256] = "";
-    {
-        const char *p = s->input;
-        int ci = 0;
-        while (*p == ' ')
-            p++;
-        while (*p && *p != ' ' && ci < 63)
-            command[ci++] = *p++;
-        command[ci] = '\0';
-        while (*p == ' ')
-            p++;
-        int ai = 0;
-        while (*p && ai < 255)
-            arg[ai++] = *p++;
-        arg[ai] = '\0';
-    }
+    char command[64] = "", arg[256] = "";
+    const char *p = input;
+    int ci = 0;
+    while (*p == ' ')
+        p++;
+    while (*p && *p != ' ' && ci < 63)
+        command[ci++] = *p++;
+    command[ci] = '\0';
+    while (*p == ' ')
+        p++;
+    strncpy(arg, p, sizeof(arg) - 1);
 
+    static char outbuf[1024];
+    outbuf[0] = '\0';
     cmd_status_t status = CMD_STATUS_OK;
-    if (strcmp(command, "run") == 0) {
+    if (!strcmp(command, "run"))
         cmd_run(&s->term_ctx, arg, outbuf, sizeof(outbuf));
-    } else if (strcmp(command, "gopher") == 0) {
+    else if (!strcmp(command, "gopher"))
         cmd_gopher(&s->term_ctx, arg, outbuf, sizeof(outbuf));
-    } else {
-        status = cli_execute_command(s->input, outbuf, sizeof(outbuf));
-    }
+    else
+        status = cli_execute_command(input, outbuf, sizeof(outbuf));
 
     if (outbuf[0]) {
         term_push_output(s, outbuf);
         term_buf_push_text(outbuf);
     }
-
-    if (status == CMD_STATUS_CLEAR) {
-        s->line_count = 0;
-        s->line_head = 0;
-        s->scroll_top = 0;
-    }
-
-    s->input[0] = '\0';
-    s->input_len = 0;
-    s->input_scroll = 0;
+    if (status == CMD_STATUS_CLEAR)
+        term_clear(s);
     term_scroll_to_bottom(s);
 }
 
-void asmterm_window_draw(window *win, void *userdata) {
-    asmterm_state_t *s = (asmterm_state_t *)userdata;
-    if (!win || !win->visible)
-        return;
-    if (win->dragging)
-        return;
-
-    int wx = win->x, wy = win->y + MENUBAR_H + 16, ww = win->w,
-        wh = win->h - 16;
-    int content_x = wx + TERM_X;
-    int output_h = wh - INPUT_H - 6;
-
-    int new_visible = output_h / LINE_H;
-    if (new_visible < 1)
-        new_visible = 1;
-    if (new_visible != s->visible_rows) {
-        s->visible_rows = new_visible;
-        int ms = s->line_count - s->visible_rows;
-        if (s->scroll_top > ms)
-            s->scroll_top = (ms > 0) ? ms : 0;
-    }
-
-    int max_out_cols = (ww - SCROLL_BAR_W - TERM_X - 4) / CHAR_W;
-    s->cols = max_out_cols;
-    if (max_out_cols < 1)
-        max_out_cols = 1;
-
-    for (int row = 0; row < s->visible_rows; row++) {
-        int logical = s->scroll_top + row;
-        if (logical >= s->line_count)
-            break;
-        int py = wy + TERM_Y + row * LINE_H;
-        const char *line = s->lines[line_idx(s, logical)];
-        char draw_buf[OUTPUT_LINE_W + 1];
-        int limit = max_out_cols < OUTPUT_LINE_W ? max_out_cols : OUTPUT_LINE_W;
-        int ci = 0;
-        while (line[ci] && ci < limit) {
-            draw_buf[ci] = line[ci];
-            ci++;
-        }
-        draw_buf[ci] = '\0';
-        draw_string(content_x, py, draw_buf, WHITE, 2);
-    }
-
-    int sb_x = wx + ww - SCROLL_BAR_W - 2, sb_y = wy + TERM_Y, sb_h = output_h;
-    fill_rect(sb_x, sb_y, SCROLL_BAR_W, sb_h, DARK_GRAY);
-    draw_rect(sb_x, sb_y, SCROLL_BAR_W, sb_h, BLACK);
-    if (s->line_count > s->visible_rows) {
-        int total = s->line_count;
-        int thumb_h = (s->visible_rows * sb_h) / total;
-        if (thumb_h < 4)
-            thumb_h = 4;
-        int thumb_range = sb_h - thumb_h;
-        int max_scroll = total - s->visible_rows;
-        int thumb_y = sb_y + (s->scroll_top * thumb_range) / max_scroll;
-        fill_rect(sb_x + 1, thumb_y, SCROLL_BAR_W - 2, thumb_h, LIGHT_GRAY);
-    }
-
-    int div_y = wy + wh - INPUT_H - 4;
-    draw_line(wx + 2, div_y, wx + ww - 2, div_y, DARK_GRAY);
-
-    int iy = wy + wh - INPUT_H - 1, ix = wx + 2, iw = ww - 12;
-    uint8_t iborder = s->input_focused ? CYAN : DARK_GRAY;
-    fill_rect(ix, iy, iw, INPUT_H, BLACK);
-    draw_rect(ix, iy, iw, INPUT_H, iborder);
-
-    if (s->binary_waiting) {
-        const char *label = s->gopher_mode ? "GOPHER>" : "BIN>";
-        draw_string(ix + 2, iy + 2, label, LIGHT_GREEN, 2);
+static void history_step(asmterm_state_t *s, int dir) {
+    if (dir < 0) {
+        if (!s->hist_count)
+            return;
+        if (s->hist_pos == -1) {
+            strncpy(s->hist_draft, ctl_text(s->input), INPUT_CAP - 1);
+            s->hist_pos = s->hist_count - 1;
+        } else if (s->hist_pos > 0 &&
+                   s->hist_pos > s->hist_count - HISTORY_DEPTH)
+            s->hist_pos--;
+        ctl_set_text(s->input, s->history[s->hist_pos % HISTORY_DEPTH]);
     } else {
-        draw_string(ix + 2, iy + 2, ">", CYAN, 2);
+        if (s->hist_pos == -1)
+            return;
+        if (s->hist_pos < s->hist_count - 1) {
+            s->hist_pos++;
+            ctl_set_text(s->input, s->history[s->hist_pos % HISTORY_DEPTH]);
+        } else {
+            s->hist_pos = -1;
+            ctl_set_text(s->input, s->hist_draft);
+        }
     }
+    edit_select(s->input, s->input->text_len, s->input->text_len);
+}
 
-    int label_w =
-        s->binary_waiting
-            ? (int)strlen(s->gopher_mode ? "GOPHER>" : "BIN>") * CHAR_W + 2
-            : CHAR_W + 2;
-    int tax = ix + 2 + label_w + 2;
-    int taw = iw - 12 - CHAR_W - label_w - 2;
-    int mvc = taw / CHAR_W;
-    if (mvc < 1)
-        mvc = 1;
-
-    s->input_scroll = s->input_len - mvc;
-    if (s->input_scroll < 0)
-        s->input_scroll = 0;
-
-    char iv[256];
-    int tc = s->input_len - s->input_scroll;
-    if (tc > mvc)
-        tc = mvc;
-    if (tc >= (int)sizeof(iv))
-        tc = sizeof(iv) - 1;
-    for (int i = 0; i < tc; i++)
-        iv[i] = s->input[s->input_scroll + i];
-    iv[tc] = '\0';
-    draw_string(tax, iy + 2, iv, WHITE, 2);
-
-    if (s->input_focused && (pit_ticks / 500) % 2 == 0) {
-        int cx = tax + tc * CHAR_W;
-        if (cx < ix + iw - 2)
-            draw_string(cx, iy + 2, "|", CYAN, 2);
+static void on_input(control *c, int ev) {
+    asmterm_state_t *s = c->user;
+    if (ev == EV_SUBMIT) {
+        char line[INPUT_CAP];
+        strncpy(line, ctl_text(c), INPUT_CAP - 1);
+        line[INPUT_CAP - 1] = 0;
+        ctl_set_text(c, "");
+        term_execute(s, line);
+    } else if (ev == EV_KEY) {
+        uint8_t sc = kb.last_scancode;
+        if (sc == UP_ARROW || sc == DOWN_ARROW)
+            history_step(s, sc == UP_ARROW ? -1 : 1);
+        else if (sc == PAGE_UP || sc == PAGE_DOWN)
+            term_scroll_to(s, s->scroll_top +
+                                  (sc == PAGE_UP ? -1 : 1) * s->visible_rows);
+    } else if (ev == EV_CHANGE) {
+        s->hist_pos = -1;
     }
 }
 
-static bool asmterm_close(window *w) {
-    (void)w;
-    os_quit_app_by_desc(&asmterm_app);
-    return true;
-}
-static void on_file_close(void) { asmterm_close(NULL); }
-static void on_about(void) {
-    modal_show(MODAL_INFO, "About ASMTerm (c)2026 @drclcomputers",
-               "ASMTerm v1.1", NULL, NULL);
+/* ── output pane (also takes raw keys while a program waits) ───────────── */
+
+static void paint_out(control *c, int x, int y, int w, int h) {
+    asmterm_state_t *s = c->user;
+    fill_rect(x, y, w, h, BLACK);
+    int rows = (h - 4) / TH_LINE_H;
+    if (rows < 1)
+        rows = 1;
+    if (rows != s->visible_rows) {
+        s->visible_rows = rows;
+        term_scroll_to(s, s->scroll_top);
+    }
+    s->cols = (w - 4) / TH_CHAR_W;
+    for (int r = 0; r < rows; r++) {
+        int n = s->scroll_top + r;
+        if (n >= s->line_count)
+            break;
+        draw_text_n(x + 2, y + 2 + r * TH_LINE_H, s->lines[line_idx(s, n)],
+                    s->cols, WHITE, 2);
+    }
 }
 
-static void on_paste_clip(void) {
-    if (!s_asmterm_active || !clipboard_has_text())
+static void raw_key(asmterm_state_t *s) {
+    uint8_t sc = kb.last_scancode;
+    char ch = kb.last_char;
+    bool echo = s->line_mode || !s->gopher_mode;
+    control *in = s->input;
+    if (sc == ENTER) {
+        if (in->text_len > 0) {
+            term_push_line(s, ctl_text(in));
+            term_scroll_to_bottom(s);
+            ctl_set_text(in, "");
+        }
+        iq_push(&s->iq, '\n');
+    } else if (sc == BACKSPACE) {
+        if (in->text_len > 0) {
+            char t[INPUT_CAP];
+            strncpy(t, ctl_text(in), INPUT_CAP - 1);
+            t[in->text_len - 1 < INPUT_CAP - 1 ? in->text_len - 1
+                                               : INPUT_CAP - 1] = 0;
+            ctl_set_text(in, t);
+        }
+        iq_push(&s->iq, '\b');
+    } else if (sc == UP_ARROW || sc == DOWN_ARROW || sc == LEFT_ARROW ||
+               sc == RIGHT_ARROW || sc == PAGE_UP || sc == PAGE_DOWN ||
+               sc == ESC || sc == HOME || sc == END) {
+        iq_push(&s->iq, (char)(sc == UP_ARROW      ? TERM_KEY_UP
+                               : sc == DOWN_ARROW  ? TERM_KEY_DOWN
+                               : sc == LEFT_ARROW  ? TERM_KEY_LEFT
+                               : sc == RIGHT_ARROW ? TERM_KEY_RIGHT
+                               : sc == PAGE_UP     ? TERM_KEY_PGUP
+                               : sc == PAGE_DOWN   ? TERM_KEY_PGDN
+                               : sc == HOME        ? TERM_KEY_HOME
+                               : sc == END         ? TERM_KEY_END
+                                                   : TERM_KEY_ESC));
+    } else if (ch >= 32 && ch < 127) {
+        if (echo) {
+            char t[2] = {ch, 0};
+            edit_select(in, in->text_len, in->text_len);
+            edit_insert(in, t);
+        }
+        iq_push(&s->iq, ch);
+    }
+}
+
+static void on_out(control *c, int ev) {
+    asmterm_state_t *s = c->user;
+    if (ev != EV_KEY)
         return;
-    asmterm_state_t *s = s_asmterm_active;
-    for (int i = 0; i < g_clipboard.text_len && s->input_len < INPUT_CAP - 1;
-         i++) {
-        char c = g_clipboard.text[i];
-        if (c < 32 || c >= 127)
-            continue;
-        s->input[s->input_len++] = c;
+    uint8_t sc = kb.last_scancode;
+    if (s->binary_waiting) {
+        raw_key(s);
+    } else if (sc == PAGE_UP || sc == PAGE_DOWN) {
+        term_scroll_to(s, s->scroll_top +
+                              (sc == PAGE_UP ? -1 : 1) * s->visible_rows);
+    } else if (kb.last_char >= 32 && kb.last_char < 127) {
+        /* typing over the output goes to the command line */
+        char t[2] = {kb.last_char, 0};
+        ctl_focus(s->input);
+        edit_select(s->input, s->input->text_len, s->input->text_len);
+        edit_insert(s->input, t);
+    } else if (sc == ENTER || sc == UP_ARROW || sc == DOWN_ARROW) {
+        ctl_focus(s->input);
     }
-    s->input[s->input_len] = '\0';
+}
+
+static void on_sb(control *c, int ev) {
+    if (ev == EV_CHANGE)
+        term_scroll_to(c->user, ctl_value(c));
+}
+
+/* ── window ────────────────────────────────────────────────────────────── */
+
+static void menu_paste(void) {
+    asmterm_state_t *s = ui_active_state();
+    if (!s || !clipboard_has_text())
+        return;
+    char t[INPUT_CAP];
+    int n = 0;
+    for (int i = 0; i < g_clipboard.text_len && n < INPUT_CAP - 1; i++)
+        if (g_clipboard.text[i] >= 32 && g_clipboard.text[i] < 127)
+            t[n++] = g_clipboard.text[i];
+    t[n] = 0;
+    edit_insert(s->input, t);
+    ctl_focus(s->input);
+}
+static void menu_close(void) {
+    asmterm_state_t *s = ui_active_state();
+    if (s)
+        os_close_own_instance(s->win);
+}
+static void menu_about(void) {
+    dlg_message(NULL, "About ASMTerm",
+                "ASMTerm v1.2\nUp/Down: history, PgUp/PgDn: scroll.\n"
+                "(c)2026 @drclcomputers");
 }
 
 static void asmterm_init(void *state) {
-    asmterm_state_t *s = (asmterm_state_t *)state;
-
-    const window_spec_t spec = {
-        .x = 20,
-        .y = 20,
-        .w = 210,
-        .h = 160,
-        .min_w = 60,
-        .min_h = 60,
-        .resizable = true,
-        .title = "ASMTerm",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = BLACK,
-        .visible = true,
-        .on_close = os_close_own_instance,
-    };
-    s->win = wm_register(&spec);
-    s_asmterm_active = s;
+    asmterm_state_t *s = state;
+    s->win =
+        app_window(s, "ASMTerm", 20, 20, 220, 160, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
-    s->win->on_draw = asmterm_window_draw;
-    s->win->on_draw_userdata = s;
+    window *w = s->win;
+    s->out = ctl_custom(w, 1, 1, 208, 126, paint_out, on_out,
+                        CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
+    s->sb = ctl_vscroll(w, 210, 1, 126, on_sb);
+    ctl_style_add(s->sb, CS_ANCHOR_RIGHT | CS_STRETCH_H | CS_NOFOCUS);
+    s->prompt = ctl_label(w, 2, 131, 32, 9, ">", CS_ANCHOR_BOTTOM);
+    ctl_set_colors(s->prompt, BLUE, 0xFF);
+    s->input = ctl_edit(w, 14, 129, 204, 12, "", INPUT_CAP - 1,
+                        CS_STRETCH_W | CS_ANCHOR_BOTTOM, on_input);
 
-    menu *fm = window_add_menu(s->win, "File");
-    menu_add_item(fm, "Paste", on_paste_clip);
+    menu *fm = window_add_menu(w, "File");
+    menu_add_item(fm, "Paste", menu_paste);
     menu_add_separator(fm);
-    menu_add_item(fm, "About ASMTerm", on_about);
+    menu_add_item(fm, "About ASMTerm", menu_about);
     menu_add_separator(fm);
-    menu_add_item(fm, "Close", on_file_close);
+    menu_add_item(fm, "Close", menu_close);
 
-    int ch = s->win->h - 16, oah = ch - INPUT_H - 4;
-    s->visible_rows = oah / LINE_H;
-    if (s->visible_rows < 1)
-        s->visible_rows = 1;
-    s->input_focused = true;
+    s->visible_rows = 15;
     s->hist_pos = -1;
-    s->input_scroll = 0;
-
     iq_init(&s->iq);
-    s->binary_waiting = false;
     s->term_ctx.print = tctx_print;
     s->term_ctx.putchar = tctx_putchar;
     s->term_ctx.readline = tctx_readline;
@@ -496,193 +461,40 @@ static void asmterm_init(void *state) {
     s->term_ctx.size = tctx_size;
     s->term_ctx.userdata = s;
 
-    term_push_line(s, "ASMOS Terminal v1.1");
-    term_push_line(s, "Commands: help  asm  run");
+    term_push_line(s, "ASMOS Terminal v1.2");
+    term_push_line(s, "Commands: help  asm  run  gopher");
     term_push_line(s, "");
-    term_scroll_to_bottom(s);
+    ctl_focus(s->input);
 }
 
 static void asmterm_on_frame(void *state) {
-    asmterm_state_t *s = (asmterm_state_t *)state;
-    if (!s->win || !s->win->visible)
+    asmterm_state_t *s = state;
+    if (!s->win)
         return;
-
     if (s->should_exit) {
-        asmterm_close(NULL);
+        os_close_own_instance(s->win);
         return;
     }
-
-    s_asmterm_active = s;
-
-    if (mouse.left_clicked) {
-        int wx = s->win->x, wy = s->win->y + MENUBAR_H + 16, ww = s->win->w,
-            wh = s->win->h - 16;
-        int iy = wy + wh - INPUT_H - 1;
-        bool on_input = (mouse.x >= wx + 2 && mouse.x < wx + ww - 2 &&
-                         mouse.y >= iy && mouse.y < iy + INPUT_H);
-        s->input_focused = on_input;
+    /* while a program waits for keys, the output pane owns the keyboard */
+    static const char *const P[] = {">", "BIN>", "GOPHER>"};
+    const char *pr = !s->binary_waiting ? P[0] : s->gopher_mode ? P[2] : P[1];
+    if (strcmp(ctl_text(s->prompt), pr)) {
+        int pw = (int)strlen(pr) * TH_CHAR_W + 3;
+        ctl_set_text(s->prompt, pr);
+        ctl_set_colors(s->prompt, s->binary_waiting ? GREEN : BLUE, 0xFF);
+        int wx, wy, cw, ch;
+        win_client_rect(s->win, &wx, &wy, &cw, &ch);
+        ctl_move(s->input, 2 + pw, s->input->y, cw - 4 - pw, s->input->h);
+        ctl_enable(s->input, !s->binary_waiting);
+        ctl_focus(s->binary_waiting ? s->out : s->input);
     }
-
-    if (mouse.left_clicked || mouse.left) {
-        int wx = s->win->x, wy = s->win->y + MENUBAR_H + 16, ww = s->win->w;
-        int sb_x = wx + ww - SCROLL_BAR_W - 2, sb_y = wy + TERM_Y;
-        int sb_h = (s->win->h - 16) - INPUT_H - 6;
-        if (mouse.x >= sb_x && mouse.x < sb_x + SCROLL_BAR_W &&
-            mouse.y >= sb_y && mouse.y < sb_y + sb_h &&
-            s->line_count > s->visible_rows) {
-            int ms = s->line_count - s->visible_rows;
-            int ns = ((mouse.y - sb_y) * ms) / sb_h;
-            if (ns < 0)
-                ns = 0;
-            if (ns > ms)
-                ns = ms;
-            s->scroll_top = ns;
-        }
-    }
-
-    if (!s->input_focused || !kb.key_pressed) {
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-
-    uint8_t sc = kb.last_scancode;
-    char ch = kb.last_char;
-
-    if (sc == F5) {
-        term_scroll_up(s, s->visible_rows);
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-    if (sc == F6) {
-        term_scroll_down(s, s->visible_rows);
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-
-    if (s->binary_waiting) {
-        /* Each key goes to the program exactly once. (Enter used to push
-         * the whole typed line a second time: readline got "abab" for
-         * "ab", and gopher moved the cursor twice per key.) */
-        bool echo = s->line_mode || !s->gopher_mode;
-        if (sc == ENTER) {
-            if (s->input_len > 0) {
-                term_push_line(s, s->input);
-                term_scroll_to_bottom(s);
-                s->input[0] = '\0';
-                s->input_len = 0;
-                s->input_scroll = 0;
-            }
-            iq_push(&s->iq, '\n');
-        } else if (sc == BACKSPACE) {
-            if (s->input_len > 0)
-                s->input[--s->input_len] = '\0';
-            iq_push(&s->iq, '\b');
-        } else if (sc == UP_ARROW || sc == DOWN_ARROW || sc == LEFT_ARROW ||
-                   sc == RIGHT_ARROW || sc == PAGE_UP || sc == PAGE_DOWN ||
-                   sc == ESC || sc == HOME || sc == END) {
-            char k = (char)(sc == UP_ARROW      ? TERM_KEY_UP
-                            : sc == DOWN_ARROW  ? TERM_KEY_DOWN
-                            : sc == LEFT_ARROW  ? TERM_KEY_LEFT
-                            : sc == RIGHT_ARROW ? TERM_KEY_RIGHT
-                            : sc == PAGE_UP     ? TERM_KEY_PGUP
-                            : sc == PAGE_DOWN   ? TERM_KEY_PGDN
-                            : sc == HOME        ? TERM_KEY_HOME
-                            : sc == END         ? TERM_KEY_END
-                                                : TERM_KEY_ESC);
-            iq_push(&s->iq, k);
-        } else if (ch >= 32 && ch < 127) {
-            if (echo && s->input_len < INPUT_CAP - 1) {
-                s->input[s->input_len++] = ch;
-                s->input[s->input_len] = '\0';
-            }
-            iq_push(&s->iq, ch);
-        }
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-
-    if (sc == ENTER) {
-        term_execute(s);
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-    if (sc == BACKSPACE) {
-        if (s->input_len > 0)
-            s->input[--s->input_len] = '\0';
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-
-    if (sc == 0x48) {
-        if (s->hist_count == 0) {
-            asmterm_window_draw(s->win, s->win->on_draw_userdata);
-            return;
-        }
-        if (s->hist_pos == -1) {
-            int di = 0;
-            while (s->input[di] && di < INPUT_CAP - 1)
-                s->hist_draft[di] = s->input[di++];
-            s->hist_draft[di] = '\0';
-            s->hist_pos = s->hist_count - 1;
-        } else if (s->hist_pos > 0)
-            s->hist_pos--;
-        const char *e = s->history[s->hist_pos % HISTORY_DEPTH];
-        s->input_len = 0;
-        while (e[s->input_len] && s->input_len < INPUT_CAP - 1) {
-            s->input[s->input_len] = e[s->input_len];
-            s->input_len++;
-        }
-        s->input[s->input_len] = '\0';
-        s->input_scroll = 0;
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-
-    if (sc == 0x50) {
-        if (s->hist_pos == -1) {
-            asmterm_window_draw(s->win, s->win->on_draw_userdata);
-            return;
-        }
-        if (s->hist_pos < s->hist_count - 1) {
-            s->hist_pos++;
-            const char *e = s->history[s->hist_pos % HISTORY_DEPTH];
-            s->input_len = 0;
-            while (e[s->input_len] && s->input_len < INPUT_CAP - 1) {
-                s->input[s->input_len] = e[s->input_len];
-                s->input_len++;
-            }
-            s->input[s->input_len] = '\0';
-        } else {
-            s->hist_pos = -1;
-            s->input_len = 0;
-            while (s->hist_draft[s->input_len] &&
-                   s->input_len < INPUT_CAP - 1) {
-                s->input[s->input_len] = s->hist_draft[s->input_len];
-                s->input_len++;
-            }
-            s->input[s->input_len] = '\0';
-        }
-        s->input_scroll = 0;
-        asmterm_window_draw(s->win, s->win->on_draw_userdata);
-        return;
-    }
-
-    if (ch >= 32 && ch < 127) {
-        if (s->input_len < INPUT_CAP - 1) {
-            s->input[s->input_len++] = ch;
-            s->input[s->input_len] = '\0';
-            s->hist_pos = -1;
-        }
-    }
-    asmterm_window_draw(s->win, s->win->on_draw_userdata);
-}
-
-static void asmterm_destroy(void *state) {
-    asmterm_state_t *s = (asmterm_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
+    if (s->binary_waiting && window_is_focused(s->win) &&
+        s->win->focus != s->out)
+        ctl_focus(s->out);
+    /* keep the scrollbar in sync with output */
+    ctl_set_range(s->sb, 0, max_scroll(s), s->visible_rows);
+    if (ctl_value(s->sb) != s->scroll_top)
+        ctl_set_value(s->sb, s->scroll_top);
 }
 
 app_descriptor asmterm_app = {
@@ -690,5 +502,4 @@ app_descriptor asmterm_app = {
     .state_size = sizeof(asmterm_state_t),
     .init = asmterm_init,
     .on_frame = asmterm_on_frame,
-    .destroy = asmterm_destroy,
 };

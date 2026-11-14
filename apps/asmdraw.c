@@ -1,21 +1,5 @@
+/* ASMDraw - small paint program. .PIC = 2x u16 (w, h) + w*h colour bytes */
 #include "os/api.h"
-
-#define ASMDRAW_DEFAULT_X 20
-#define ASMDRAW_DEFAULT_Y 15
-#define ASMDRAW_DEFAULT_W 260
-#define ASMDRAW_DEFAULT_H 162
-
-#define TOOLBAR_W 18
-#define TOOLBAR_PAD 2
-#define TOOL_BTN_SZ 14
-
-#define CANVAS_X_OFF (TOOLBAR_W + 2)
-#define CANVAS_Y_OFF 0
-
-#define PALETTE_H 10
-#define PALETTE_COLS 16
-
-/* Canvas dimensions are determined at runtime from the screen resolution. */
 
 #define TOOL_PENCIL 0
 #define TOOL_ERASER 1
@@ -23,68 +7,36 @@
 #define TOOL_RECT 3
 #define TOOL_FILL 4
 #define NUM_TOOLS 5
-
 #define BRUSH_SIZES 3
 
-static const uint8_t PALETTE_COLORS[PALETTE_COLS] = {
+static const uint8_t PALETTE_COLORS[16] = {
     BLACK,   WHITE,         DARK_GRAY, LIGHT_GRAY, RED,   LIGHT_RED,
     GREEN,   LIGHT_GREEN,   BLUE,      LIGHT_BLUE, BROWN, YELLOW,
     MAGENTA, LIGHT_MAGENTA, CYAN,      LIGHT_CYAN,
 };
 
 typedef struct {
-    window *win;
+    window *win; /* must stay first */
+    control *tools[NUM_TOOLS], *brushes[BRUSH_SIZES], *canvas_ctl, *palette,
+        *status;
 
-    uint8_t *canvas; /* heap-allocated: canvas_w * canvas_h bytes */
-    int canvas_w;
-    int canvas_h;
+    uint8_t *canvas; /* canvas_w * canvas_h colour bytes */
+    int canvas_w, canvas_h;
 
-    int tool;
-    int brush_size;
-    uint8_t fg_color;
-    uint8_t bg_color;
+    int tool, brush_size;
+    uint8_t fg_color, bg_color;
 
     bool drawing;
-    int start_x, start_y;
-
-    int last_cx, last_cy;
-
-    int fname_mode;
-    char fname_buf[64];
-    int fname_len;
-
-    char status[48];
-    uint32_t status_timer;
+    int start_x, start_y, cur_x, cur_y, last_cx, last_cy;
+    char path[128];
+    uint32_t status_until;
 } asmdraw_state_t;
 
 app_descriptor asmdraw_app;
 
 static void draw_set_status(asmdraw_state_t *s, const char *msg) {
-    strncpy(s->status, msg, 47);
-    s->status[47] = '\0';
-    s->status_timer = 240;
-}
-
-static bool mouse_to_canvas(const asmdraw_state_t *s, int mx, int my,
-                            int *cx_out, int *cy_out) {
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-    int wh = s->win->h - 16;
-
-    int canvas_abs_x = wx + CANVAS_X_OFF;
-    int canvas_abs_y = wy;
-    int canvas_px_h = wh - PALETTE_H - 1;
-
-    int cx = mx - canvas_abs_x;
-    int cy = my - canvas_abs_y;
-
-    if (cx < 0 || cy < 0 || cx >= s->canvas_w || cy >= canvas_px_h ||
-        cy >= s->canvas_h)
-        return false;
-
-    *cx_out = cx;
-    *cy_out = cy;
-    return true;
+    ctl_set_text(s->status, msg);
+    s->status_until = time_millis() + 3000;
 }
 
 static void canvas_paint(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
@@ -200,10 +152,7 @@ static void canvas_rect(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
 }
 
 static void update_canvas_size(asmdraw_state_t *s) {
-    int ww = s->win->w - 2;
-    int wh = s->win->h - 16;
-    int cw = ww - CANVAS_X_OFF - 1;
-    int ch = wh - PALETTE_H - 1;
+    int cw = s->canvas_ctl->aw - 4, ch = s->canvas_ctl->ah - 4;
     if (cw > g_screen_width)
         cw = g_screen_width;
     if (ch > g_screen_height)
@@ -212,148 +161,22 @@ static void update_canvas_size(asmdraw_state_t *s) {
         cw = 1;
     if (ch < 1)
         ch = 1;
-
     if (cw == s->canvas_w && ch == s->canvas_h)
-        return; /* nothing changed */
-
-    uint8_t *newbuf = (uint8_t *)kmalloc(cw * ch);
-    if (!newbuf)
-        return; /* keep old size rather than corrupt */
-
-    /* Fill new buffer white, then copy existing pixels into the
-       overlap region with correct per-row stride translation. */
-    memset(newbuf, WHITE, (uint32_t)(cw * ch));
+        return;
+    uint8_t *nb = (uint8_t *)kmalloc(cw * ch);
+    if (!nb)
+        return; /* keep the old size rather than corrupt */
+    memset(nb, WHITE, (uint32_t)(cw * ch));
     if (s->canvas) {
-        int copy_w = cw < s->canvas_w ? cw : s->canvas_w;
-        int copy_h = ch < s->canvas_h ? ch : s->canvas_h;
-        for (int y = 0; y < copy_h; y++)
-            memcpy(newbuf + y * cw, s->canvas + y * s->canvas_w,
-                   (uint32_t)copy_w);
+        int w = cw < s->canvas_w ? cw : s->canvas_w;
+        int h = ch < s->canvas_h ? ch : s->canvas_h;
+        for (int y = 0; y < h; y++)
+            memcpy(nb + y * cw, s->canvas + y * s->canvas_w, (uint32_t)w);
+        kfree(s->canvas);
     }
-
-    kfree(s->canvas);
-    s->canvas = newbuf;
+    s->canvas = nb;
     s->canvas_w = cw;
     s->canvas_h = ch;
-}
-
-static const char *TOOL_LABELS[NUM_TOOLS] = {"P", "E", "L", "R", "F"};
-
-static void asmdraw_draw(window *win, void *ud) {
-    asmdraw_state_t *s = (asmdraw_state_t *)ud;
-    if (!s)
-        return;
-
-    int wx = win->x + 1;
-    int wy = win->y + MENUBAR_H + 16;
-    int ww = win->w - 2;
-    int wh = win->h - 16;
-
-    fill_rect(wx, wy, TOOLBAR_W, wh, DARK_GRAY);
-
-    for (int t = 0; t < NUM_TOOLS; t++) {
-        int bx = wx + TOOLBAR_PAD;
-        int by = wy + TOOLBAR_PAD + t * (TOOL_BTN_SZ + TOOLBAR_PAD);
-        uint8_t bg = (t == s->tool) ? LIGHT_BLUE : LIGHT_GRAY;
-        fill_rect(bx, by, TOOL_BTN_SZ, TOOL_BTN_SZ, bg);
-        draw_rect(bx, by, TOOL_BTN_SZ, TOOL_BTN_SZ, BLACK);
-        draw_string(bx + 4, by + 4, (char *)TOOL_LABELS[t], BLACK, 2);
-    }
-
-    static const int BSIZES[BRUSH_SIZES] = {1, 3, 5};
-    for (int b = 0; b < BRUSH_SIZES; b++) {
-        int bx = wx + TOOLBAR_PAD;
-        int by = wy + TOOLBAR_PAD +
-                 (NUM_TOOLS + 1 + b) * (TOOL_BTN_SZ + TOOLBAR_PAD);
-        uint8_t bg = (b == s->brush_size) ? YELLOW : LIGHT_GRAY;
-        fill_rect(bx, by, TOOL_BTN_SZ, TOOL_BTN_SZ, bg);
-        draw_rect(bx, by, TOOL_BTN_SZ, TOOL_BTN_SZ, BLACK);
-        char lbl[3];
-        lbl[0] = '0' + BSIZES[b];
-        lbl[1] = '\0';
-        draw_string(bx + 4, by + 4, lbl, BLACK, 2);
-    }
-
-    int cax = wx + CANVAS_X_OFF;
-    int cay = wy;
-    int cw = s->canvas_w;
-    int ch = s->canvas_h;
-
-    for (int y = 0; y < ch; y++)
-        for (int x = 0; x < cw; x++)
-            draw_dot(cax + x, cay + y, s->canvas[(y)*s->canvas_w + (x)]);
-
-    draw_rect(cax - 1, cay - 1, cw + 2, ch + 2, DARK_GRAY);
-
-    if (s->drawing && (s->tool == TOOL_LINE || s->tool == TOOL_RECT)) {
-        int sx = cax + s->start_x;
-        int sy = cay + s->start_y;
-        int cx2, cy2;
-        if (mouse_to_canvas(s, mouse.x, mouse.y, &cx2, &cy2)) {
-            int ex = cax + cx2;
-            int ey = cay + cy2;
-            if (s->tool == TOOL_LINE) {
-                draw_line(sx, sy, ex, ey, s->fg_color);
-            } else {
-                int rx0 = sx < ex ? sx : ex;
-                int ry0 = sy < ey ? sy : ey;
-                int rx1 = sx > ex ? sx : ex;
-                int ry1 = sy > ey ? sy : ey;
-                draw_rect(rx0, ry0, rx1 - rx0 + 1, ry1 - ry0 + 1, s->fg_color);
-            }
-        }
-    }
-
-    int pal_y = wy + wh - PALETTE_H;
-    int cell_w = (ww - TOOLBAR_W - 2) / PALETTE_COLS;
-    if (cell_w < 1)
-        cell_w = 1;
-    int pal_x0 = wx + TOOLBAR_W + 2;
-
-    for (int i = 0; i < PALETTE_COLS; i++) {
-        int px = pal_x0 + i * cell_w;
-        fill_rect(px - 1, pal_y, cell_w, PALETTE_H - 1, PALETTE_COLORS[i]);
-        // draw_rect(px, pal_y, cell_w, PALETTE_H-1, BLACK);
-    }
-
-    if (s->status_timer > 0) {
-        draw_string(wx + TOOLBAR_W + 4, pal_y - 8, s->status, DARK_GRAY, 2);
-    } else {
-        char info[48];
-        int cx2, cy2;
-        if (mouse_to_canvas(s, mouse.x, mouse.y, &cx2, &cy2)) {
-            sprintf(info, "%d,%d", cx2, cy2);
-        } else {
-            info[0] = '\0';
-        }
-        draw_string(wx + TOOLBAR_W + 4, pal_y - 9, info, DARK_GRAY, 2);
-    }
-
-    if (s->fname_mode != 0) {
-        int bx = wx + 20, by = wy + wh / 2 - 20;
-        int bw = ww - 40, bh = 40;
-        fill_rect(bx + 3, by + 3, bw, bh, BLACK);
-        fill_rect(bx, by, bw, bh, LIGHT_GRAY);
-        draw_rect(bx, by, bw, bh, BLACK);
-        fill_rect(bx, by, bw, 11, DARK_GRAY);
-        const char *title = (s->fname_mode == 1) ? "Save As" : "Open";
-        draw_string(bx + 4, by + 3, (char *)title, WHITE, 2);
-        draw_string(bx + 4, by + 15, "Path:", DARK_GRAY, 2);
-        fill_rect(bx + 32, by + 14, bw - 36, 10, WHITE);
-        draw_rect(bx + 32, by + 14, bw - 36, 10, BLACK);
-        draw_string(bx + 34, by + 15, s->fname_buf, BLACK, 2);
-        if ((pit_ticks / 500) % 2 == 0) {
-            int cx3 = bx + 34 + s->fname_len * 5;
-            if (cx3 < bx + bw - 6)
-                draw_string(cx3, by + 15, "|", BLACK, 2);
-        }
-        fill_rect(bx + 4, by + 28, 30, 8, LIGHT_BLUE);
-        draw_rect(bx + 4, by + 28, 30, 8, BLACK);
-        draw_string(bx + 11, by + 29, "OK", WHITE, 2);
-        fill_rect(bx + 38, by + 28, 40, 8, DARK_GRAY);
-        draw_rect(bx + 38, by + 28, 40, 8, BLACK);
-        draw_string(bx + 41, by + 29, "Cancel", WHITE, 2);
-    }
 }
 
 static void asmdraw_save(asmdraw_state_t *s, const char *path) {
@@ -414,353 +237,245 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
         int got = fs_read(&f, row, fw);
         if (got < fw)
             break;
-        for (int x = 0; x < fw; x++)
+        if (y >= s->canvas_h)
+            break; /* picture bigger than the canvas: clip */
+        for (int x = 0; x < fw && x < s->canvas_w; x++)
             s->canvas[(y)*s->canvas_w + (x)] = row[x];
     }
     fs_close(&f);
     draw_set_status(s, "Opened.");
 }
 
-static void commit_fname(asmdraw_state_t *s) {
-    bool has_dot = false;
-    for (int i = 0; i < s->fname_len; i++)
-        if (s->fname_buf[i] == '.') {
-            has_dot = true;
-            break;
-        }
-    if (!has_dot && s->fname_len > 0 && s->fname_len <= 8) {
-        if (s->fname_len + 4 < 64) {
-            s->fname_buf[s->fname_len++] = '.';
-            s->fname_buf[s->fname_len++] = 'P';
-            s->fname_buf[s->fname_len++] = 'I';
-            s->fname_buf[s->fname_len++] = 'C';
-            s->fname_buf[s->fname_len] = '\0';
-        }
+/* ── canvas control ────────────────────────────────────────────────────── */
+
+static void paint_canvas(control *c, int x, int y, int w, int h) {
+    asmdraw_state_t *s = c->user;
+    update_canvas_size(s);
+    for (int yy = 0; yy < s->canvas_h && yy < h; yy++)
+        for (int xx = 0; xx < s->canvas_w && xx < w; xx++)
+            draw_dot(x + xx, y + yy, s->canvas[yy * s->canvas_w + xx]);
+    if (s->drawing && (s->tool == TOOL_LINE || s->tool == TOOL_RECT)) {
+        int x0 = x + s->start_x, y0 = y + s->start_y;
+        int x1 = x + s->cur_x, y1 = y + s->cur_y;
+        if (s->tool == TOOL_LINE)
+            draw_line(x0, y0, x1, y1, s->fg_color);
+        else
+            draw_rect(x0 < x1 ? x0 : x1, y0 < y1 ? y0 : y1,
+                      (x1 > x0 ? x1 - x0 : x0 - x1) + 1,
+                      (y1 > y0 ? y1 - y0 : y0 - y1) + 1, s->fg_color);
     }
-    int mode = s->fname_mode;
-    s->fname_mode = 0;
-    if (mode == 1)
-        asmdraw_save(s, s->fname_buf);
-    else
-        asmdraw_load(s, s->fname_buf);
 }
 
-static asmdraw_state_t *active_asmdraw(void) {
-    window *fw = wm_focused_window();
-    if (!fw)
-        return NULL;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &asmdraw_app)
-            continue;
-        asmdraw_state_t *s = (asmdraw_state_t *)a->state;
-        if (s->win == fw)
-            return s;
+static void on_canvas(control *c, int ev) {
+    asmdraw_state_t *s = c->user;
+    int cx = c->mx - 2, cy = c->my - 2; /* inside the border */
+    if (cx < 0)
+        cx = 0;
+    if (cy < 0)
+        cy = 0;
+    if (cx >= s->canvas_w)
+        cx = s->canvas_w - 1;
+    if (cy >= s->canvas_h)
+        cy = s->canvas_h - 1;
+    s->cur_x = cx;
+    s->cur_y = cy;
+    uint8_t col = s->tool == TOOL_ERASER ? s->bg_color : s->fg_color;
+
+    if (ev == EV_MOUSEDOWN || ev == EV_DBLCLICK) {
+        switch (s->tool) {
+        case TOOL_PENCIL:
+        case TOOL_ERASER:
+            canvas_paint(s, cx, cy, col);
+            s->last_cx = cx;
+            s->last_cy = cy;
+            break;
+        case TOOL_FILL:
+            canvas_fill(s, cx, cy, s->fg_color);
+            break;
+        default:
+            s->drawing = true;
+            s->start_x = cx;
+            s->start_y = cy;
+        }
+    } else if (ev == EV_MOUSEMOVE) {
+        if (s->tool == TOOL_PENCIL || s->tool == TOOL_ERASER) {
+            canvas_line(s, s->last_cx, s->last_cy, cx, cy, col);
+            s->last_cx = cx;
+            s->last_cy = cy;
+        }
+    } else if (ev == EV_MOUSEUP && s->drawing) {
+        if (s->tool == TOOL_LINE)
+            canvas_line(s, s->start_x, s->start_y, cx, cy, s->fg_color);
+        else
+            canvas_rect(s, s->start_x, s->start_y, cx, cy, s->fg_color);
+        s->drawing = false;
     }
-    return NULL;
+}
+
+/* ── palette control ───────────────────────────────────────────────────── */
+
+static void paint_palette(control *c, int x, int y, int w, int h) {
+    asmdraw_state_t *s = c->user;
+    /* current colours: fg square over bg square */
+    fill_rect(x + 6, y + 3, 10, h - 6, s->bg_color);
+    draw_rect(x + 6, y + 3, 10, h - 6, BLACK);
+    fill_rect(x + 1, y + 1, 10, h - 6, s->fg_color);
+    draw_rect(x + 1, y + 1, 10, h - 6, BLACK);
+    int cw = (w - 20) / 16;
+    for (int i = 0; i < 16; i++) {
+        fill_rect(x + 20 + i * cw, y + 1, cw - 1, h - 2, PALETTE_COLORS[i]);
+        draw_rect(x + 20 + i * cw, y + 1, cw - 1, h - 2, BLACK);
+    }
+}
+
+static void on_palette(control *c, int ev) {
+    asmdraw_state_t *s = c->user;
+    if (ev != EV_MOUSEDOWN && ev != EV_DBLCLICK)
+        return;
+    int cw = (c->aw - 20) / 16;
+    int i = cw > 0 ? (c->mx - 20) / cw : -1;
+    if (c->mx < 20 || i < 0 || i > 15)
+        return;
+    if (kb.shift)
+        s->bg_color = PALETTE_COLORS[i];
+    else
+        s->fg_color = PALETTE_COLORS[i];
+}
+
+/* ── tool buttons ──────────────────────────────────────────────────────── */
+
+static void select_tool(asmdraw_state_t *s, int t, int b) {
+    if (t >= 0)
+        s->tool = t;
+    if (b >= 0)
+        s->brush_size = b;
+    for (int i = 0; i < NUM_TOOLS; i++)
+        ctl_set_value(s->tools[i], i == s->tool);
+    for (int i = 0; i < BRUSH_SIZES; i++)
+        ctl_set_value(s->brushes[i], i == s->brush_size);
+}
+
+static void on_tool(control *c, int ev) {
+    (void)ev;
+    if (c->id < 10)
+        select_tool(c->user, c->id, -1);
+    else
+        select_tool(c->user, -1, c->id - 10);
+}
+
+/* ── files ─────────────────────────────────────────────────────────────── */
+
+static void saved_as(void *user, const char *path) {
+    asmdraw_state_t *s = user;
+    if (!path)
+        return;
+    strncpy(s->path, path, sizeof(s->path) - 1);
+    asmdraw_save(s, s->path);
+}
+
+static void opened(void *user, const char *path) {
+    asmdraw_state_t *s = user;
+    if (!path)
+        return;
+    strncpy(s->path, path, sizeof(s->path) - 1);
+    asmdraw_load(s, s->path);
 }
 
 static void menu_new(void) {
-    asmdraw_state_t *s = active_asmdraw();
+    asmdraw_state_t *s = ui_active_state();
     if (!s)
         return;
     memset(s->canvas, WHITE, (uint32_t)(s->canvas_w * s->canvas_h));
+    s->path[0] = 0;
     draw_set_status(s, "New canvas.");
 }
-
-static void menu_save(void) {
-    asmdraw_state_t *s = active_asmdraw();
-    if (!s)
-        return;
-    s->fname_buf[0] = '\0';
-    s->fname_len = 0;
-    s->fname_mode = 1;
-}
-
 static void menu_open(void) {
-    asmdraw_state_t *s = active_asmdraw();
-    if (!s)
-        return;
-    s->fname_buf[0] = '\0';
-    s->fname_len = 0;
-    s->fname_mode = 2;
+    asmdraw_state_t *s = ui_active_state();
+    if (s)
+        dlg_open_file(s->win, "Open picture", "/", "PIC", opened, s);
 }
-
-static void menu_close_draw(void) {
-    asmdraw_state_t *s = active_asmdraw();
-    if (!s)
-        return;
-    os_quit_app_by_desc(&asmdraw_app);
+static void menu_save_as(void) {
+    asmdraw_state_t *s = ui_active_state();
+    if (s)
+        dlg_save_file(s->win, "Save picture", "/", "UNTITLED", "PIC", saved_as,
+                      s);
 }
-
-static void on_about_draw(void) {
-    modal_show(MODAL_INFO, "About ASMDraw (c)2026 @drclcomputers", "ASMDraw v1.0\nASMOS Paint App",
-               NULL, NULL);
+static void menu_save(void) {
+    asmdraw_state_t *s = ui_active_state();
+    if (s && s->path[0])
+        asmdraw_save(s, s->path);
+    else
+        menu_save_as();
 }
-
-static bool asmdraw_close(window *w) {
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &asmdraw_app)
-            continue;
-        asmdraw_state_t *s = (asmdraw_state_t *)a->state;
-        if (s->win != w)
-            continue;
-        os_quit_app(a);
-        return true;
-    }
-    return true;
+static void menu_close(void) {
+    asmdraw_state_t *s = ui_active_state();
+    if (s)
+        os_close_own_instance(s->win);
 }
-
-static int toolbar_hit_tool(const asmdraw_state_t *s, int mx, int my) {
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-    for (int t = 0; t < NUM_TOOLS; t++) {
-        int bx = wx + TOOLBAR_PAD;
-        int by = wy + TOOLBAR_PAD + t * (TOOL_BTN_SZ + TOOLBAR_PAD);
-        if (mx >= bx && mx < bx + TOOL_BTN_SZ && my >= by &&
-            my < by + TOOL_BTN_SZ)
-            return t;
-    }
-    return -1;
-}
-
-static int toolbar_hit_brush(const asmdraw_state_t *s, int mx, int my) {
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-    for (int b = 0; b < BRUSH_SIZES; b++) {
-        int bx = wx + TOOLBAR_PAD;
-        int by = wy + TOOLBAR_PAD +
-                 (NUM_TOOLS + 1 + b) * (TOOL_BTN_SZ + TOOLBAR_PAD);
-        if (mx >= bx && mx < bx + TOOL_BTN_SZ && my >= by &&
-            my < by + TOOL_BTN_SZ)
-            return b;
-    }
-    return -1;
-}
-
-static int palette_hit(const asmdraw_state_t *s, int mx, int my) {
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-    int ww = s->win->w - 2;
-    int wh = s->win->h - 16;
-    int pal_y = wy + wh - PALETTE_H;
-    int cell_w = (ww - TOOLBAR_W - 2) / PALETTE_COLS;
-    if (cell_w < 1)
-        cell_w = 1;
-    int pal_x0 = wx + TOOLBAR_W + 2;
-
-    if (my < pal_y || my >= pal_y + PALETTE_H)
-        return -1;
-    int col = (mx - pal_x0) / cell_w;
-    if (col < 0 || col >= PALETTE_COLS)
-        return -1;
-    return col;
+static void menu_about(void) {
+    dlg_message(NULL, "About ASMDraw",
+                "ASMDraw v2.0\nPencil, eraser, line, rectangle, fill.\n"
+                "Click a colour for the pen, Shift+click for the background.");
 }
 
 static void asmdraw_init(void *state) {
-    asmdraw_state_t *s = (asmdraw_state_t *)state;
-
-    /* If re-opening, free the previous canvas so we don't leak it. */
-    kfree(s->canvas);
-    s->canvas = NULL;
-    s->canvas_w = 0;
-    s->canvas_h = 0;
-
-    const window_spec_t spec = {
-        .x = ASMDRAW_DEFAULT_X,
-        .y = ASMDRAW_DEFAULT_Y,
-        .w = ASMDRAW_DEFAULT_W,
-        .h = ASMDRAW_DEFAULT_H,
-        .min_h = ASMDRAW_DEFAULT_H,
-        .min_w = ASMDRAW_DEFAULT_W / 2,
-        .resizable = true,
-        .title = "ASMDraw",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = LIGHT_GRAY,
-        .visible = true,
-        .on_close = asmdraw_close,
-    };
-    s->win = wm_register(&spec);
+    asmdraw_state_t *s = state;
+    s->win =
+        app_window(s, "ASMDraw", 20, 15, 270, 180, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
+    window *w = s->win;
+    static const char *TL[NUM_TOOLS] = {"P", "E", "L", "R", "F"};
+    static const char *BL[BRUSH_SIZES] = {"1", "3", "5"};
+    for (int i = 0; i < NUM_TOOLS; i++) {
+        s->tools[i] = ctl_button(w, 2, 2 + i * 15, 15, 14, TL[i], i, on_tool);
+        ctl_style_add(s->tools[i], CS_TOGGLE | CS_NOFOCUS);
+    }
+    for (int i = 0; i < BRUSH_SIZES; i++) {
+        s->brushes[i] =
+            ctl_button(w, 2, 84 + i * 15, 15, 14, BL[i], 10 + i, on_tool);
+        ctl_style_add(s->brushes[i], CS_TOGGLE | CS_NOFOCUS);
+    }
+    s->canvas_ctl = ctl_custom(w, 20, 2, 246, 134, paint_canvas, on_canvas,
+                               CS_BORDER | CS_STRETCH_W | CS_STRETCH_H);
+    s->palette = ctl_custom(w, 20, 138, 246, 12, paint_palette, on_palette,
+                            CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    s->status =
+        ctl_label(w, 20, 151, 246, 10, "", CS_STRETCH_W | CS_ANCHOR_BOTTOM);
 
-    s->win->on_draw = asmdraw_draw;
-    s->win->on_draw_userdata = s;
+    menu *f = window_add_menu(w, "File");
+    menu_add_item(f, "New", menu_new);
+    menu_add_item(f, "Open...", menu_open);
+    menu_add_item(f, "Save", menu_save);
+    menu_add_item(f, "Save As...", menu_save_as);
+    menu_add_separator(f);
+    menu_add_item(f, "Close", menu_close);
+    menu_add_item(f, "About", menu_about);
 
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "New", menu_new);
-    menu_add_item(file_menu, "Open", menu_open);
-    menu_add_item(file_menu, "Save", menu_save);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "Close", menu_close_draw);
-    menu_add_item(file_menu, "About", on_about_draw);
-
-    s->tool = TOOL_PENCIL;
-    s->brush_size = 0;
     s->fg_color = BLACK;
     s->bg_color = WHITE;
-    s->fname_mode = 0;
-    s->drawing = false;
-    s->last_cx = -1;
-    s->last_cy = -1;
-
+    select_tool(s, TOOL_PENCIL, 0);
     update_canvas_size(s);
-
-    if (!s->canvas)
-        return; /* update_canvas_size failed to allocate */
 }
 
 static void asmdraw_on_frame(void *state) {
-    asmdraw_state_t *s = (asmdraw_state_t *)state;
-    if (!s->win || !s->win->visible)
-        return;
-
-    bool focused = window_is_focused(s->win);
-
-    update_canvas_size(s);
-    if (s->status_timer > 0)
-        s->status_timer--;
-
-    if (s->fname_mode != 0) {
-        if (focused) {
-            if (kb.key_pressed) {
-                if (kb.ctrl && kb.key_pressed && kb.last_scancode == V_KEY) {
-                    if (clipboard_has_text()) {
-                        for (int i = 0;
-                             i < g_clipboard.text_len && s->fname_len < 63;
-                             i++) {
-                            s->fname_buf[s->fname_len++] = g_clipboard.text[i];
-                        }
-                        s->fname_buf[s->fname_len] = '\0';
-                    }
-                }
-                if (kb.last_scancode == ESC) {
-                    s->fname_mode = 0;
-                } else if (kb.last_scancode == ENTER && s->fname_len > 0) {
-                    commit_fname(s);
-                } else if (kb.last_scancode == BACKSPACE) {
-                    if (s->fname_len > 0)
-                        s->fname_buf[--s->fname_len] = '\0';
-                } else if (kb.last_char >= 32 && kb.last_char < 127 &&
-                           s->fname_len < 63) {
-                    char c = kb.last_char;
-                    bool ok = (c == '/' || c == '.' || (c >= 'A' && c <= 'Z') ||
-                               (c >= 'a' && c <= 'z') ||
-                               (c >= '0' && c <= '9') || c == '_' || c == '-');
-                    if (ok) {
-                        s->fname_buf[s->fname_len++] = c;
-                        s->fname_buf[s->fname_len] = '\0';
-                    }
-                }
-            }
-            if (mouse.left_clicked) {
-                int wx2 = s->win->x + 1;
-                int wy2 = s->win->y + MENUBAR_H + 16;
-                int ww2 = s->win->w - 2;
-                int wh2 = s->win->h - 16;
-                int bx = wx2 + 20;
-                int by = wy2 + wh2 / 2 - 20;
-                bool ok_hit = (mouse.x >= bx + 4 && mouse.x < bx + 34 &&
-                               mouse.y >= by + 28 && mouse.y < by + 36);
-                bool can_hit = (mouse.x >= bx + 38 && mouse.x < bx + 78 &&
-                                mouse.y >= by + 28 && mouse.y < by + 36);
-                if (can_hit) {
-                    s->fname_mode = 0;
-                } else if (ok_hit && s->fname_len > 0) {
-                    commit_fname(s);
-                }
-            }
-            asmdraw_draw(s->win, s);
-            return;
-        }
+    asmdraw_state_t *s = state;
+    if (time_millis() > s->status_until) {
+        char info[32] = "";
+        control *c = s->canvas_ctl;
+        if (mouse.x >= c->ax + 2 && mouse.y >= c->ay + 2 &&
+            mouse.x < c->ax + 2 + s->canvas_w &&
+            mouse.y < c->ay + 2 + s->canvas_h)
+            snprintf(info, sizeof(info), "%d,%d", mouse.x - c->ax - 2,
+                     mouse.y - c->ay - 2);
+        ctl_set_text(s->status, info);
     }
-
-    if (mouse.left_clicked && focused) {
-        int t = toolbar_hit_tool(s, mouse.x, mouse.y);
-        if (t >= 0) {
-            s->tool = t;
-            asmdraw_draw(s->win, s);
-            return;
-        }
-
-        int b = toolbar_hit_brush(s, mouse.x, mouse.y);
-        if (b >= 0) {
-            s->brush_size = b;
-            asmdraw_draw(s->win, s);
-            return;
-        }
-
-        int p = palette_hit(s, mouse.x, mouse.y);
-        if (p >= 0) {
-            if (kb.shift)
-                s->bg_color = PALETTE_COLORS[p];
-            else
-                s->fg_color = PALETTE_COLORS[p];
-            asmdraw_draw(s->win, s);
-            return;
-        }
-    }
-    if (mouse.right_clicked && focused) {
-        int p = palette_hit(s, mouse.x, mouse.y);
-        if (p >= 0) {
-            s->bg_color = PALETTE_COLORS[p];
-            asmdraw_draw(s->win, s);
-            return;
-        }
-    }
-
-    int cx, cy;
-    bool on_canvas = mouse_to_canvas(s, mouse.x, mouse.y, &cx, &cy);
-
-    if (focused) {
-        if (s->tool == TOOL_PENCIL || s->tool == TOOL_ERASER) {
-            uint8_t color =
-                (s->tool == TOOL_ERASER) ? s->bg_color : s->fg_color;
-            if (mouse.left && on_canvas) {
-                if (s->last_cx >= 0 && s->last_cy >= 0)
-                    canvas_line(s, s->last_cx, s->last_cy, cx, cy, color);
-                else
-                    canvas_paint(s, cx, cy, color);
-                s->last_cx = cx;
-                s->last_cy = cy;
-            } else {
-                s->last_cx = -1;
-                s->last_cy = -1;
-            }
-        } else if (s->tool == TOOL_FILL) {
-            if (mouse.left_clicked && on_canvas)
-                canvas_fill(s, cx, cy, s->fg_color);
-        } else if (s->tool == TOOL_LINE || s->tool == TOOL_RECT) {
-            if (mouse.left_clicked && on_canvas && !s->drawing) {
-                s->drawing = true;
-                s->start_x = cx;
-                s->start_y = cy;
-            } else if (!mouse.left && s->drawing) {
-                if (on_canvas) {
-                    if (s->tool == TOOL_LINE)
-                        canvas_line(s, s->start_x, s->start_y, cx, cy,
-                                    s->fg_color);
-                    else
-                        canvas_rect(s, s->start_x, s->start_y, cx, cy,
-                                    s->fg_color);
-                }
-                s->drawing = false;
-            }
-        }
-    }
-
-    asmdraw_draw(s->win, s);
 }
 
 static void asmdraw_destroy(void *state) {
-    asmdraw_state_t *s = (asmdraw_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
-    kfree(s->canvas);
+    asmdraw_state_t *s = state;
+    if (s->canvas)
+        kfree(s->canvas);
     s->canvas = NULL;
 }
 

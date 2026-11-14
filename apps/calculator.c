@@ -1,27 +1,16 @@
 #include "os/api.h"
 
-#define CALC_W 105
-#define CALC_H 125
-#define CALC_X 40
-#define CALC_Y 30
-
-#define DISPLAY_X 4
-#define DISPLAY_Y 6
-#define DISPLAY_W 94
-#define DISPLAY_H 14
-
-#define BTN_COLS 4
-#define BTN_ROWS 5
 #define BTN_W 22
 #define BTN_H 14
 #define BTN_PAD 2
-#define BTN_START_X 4
-#define BTN_START_Y 24
+#define BTN_X 4
+#define BTN_Y 24
 
 #define MAX_DISPLAY 16
 
 typedef struct {
-    window *win;
+    window *win; /* must stay first */
+    control *lcd;
 
     char display[MAX_DISPLAY + 1];
     int display_len;
@@ -275,154 +264,72 @@ static void calc_on_button(calc_state_t *s, const char *lbl) {
     }
 }
 
-static void calc_draw(window *win, void *ud) {
-    calc_state_t *s = (calc_state_t *)ud;
-    if (!s)
+static void show(calc_state_t *s) {
+    ctl_set_text(s->lcd, s->display);
+    ctl_set_colors(s->lcd, s->error ? LIGHT_RED : WHITE, BLACK);
+}
+
+static void on_btn(control *c, int ev) {
+    if (ev != EV_CLICK)
         return;
-
-    int wx = win->x + 1;
-    int wy = win->y + MENUBAR_H + 16;
-    int ww = win->w - 2;
-    (void)ww;
-
-    fill_rect(wx + DISPLAY_X, wy + DISPLAY_Y, DISPLAY_W, DISPLAY_H, BLACK);
-    draw_rect(wx + DISPLAY_X, wy + DISPLAY_Y, DISPLAY_W, DISPLAY_H, DARK_GRAY);
-
-    int txt_w = s->display_len * 5;
-    int txt_x = wx + DISPLAY_X + DISPLAY_W - txt_w - 3;
-    if (txt_x < wx + DISPLAY_X + 2)
-        txt_x = wx + DISPLAY_X + 2;
-    draw_string(txt_x, wy + DISPLAY_Y + 4, s->display, s->error ? RED : WHITE,
-                2);
-
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        const btn_def_t *b = &BUTTONS[i];
-        int bx = wx + BTN_START_X + b->col * (BTN_W + BTN_PAD);
-        int by = wy + BTN_START_Y + b->row * (BTN_H + BTN_PAD);
-        int bw = BTN_W * b->span + BTN_PAD * (b->span - 1);
-
-        fill_rect(bx, by, bw, BTN_H, b->bg);
-        draw_rect(bx, by, bw, BTN_H, BLACK);
-
-        int lw = (int)strlen(b->label) * 5;
-        int lx = bx + bw / 2 - lw / 2;
-        int ly = by + BTN_H / 2 - 3;
-        draw_string(lx, ly, (char *)b->label, WHITE, 2);
-    }
+    calc_on_button(c->user, BUTTONS[c->id].label);
+    show(c->user);
 }
 
-static int calc_hit_button(calc_state_t *s, int mx, int my) {
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        const btn_def_t *b = &BUTTONS[i];
-        int bx = wx + BTN_START_X + b->col * (BTN_W + BTN_PAD);
-        int by = wy + BTN_START_Y + b->row * (BTN_H + BTN_PAD);
-        int bw = BTN_W * b->span + BTN_PAD * (b->span - 1);
-        if (mx >= bx && mx < bx + bw && my >= by && my < by + BTN_H)
-            return i;
-    }
-    return -1;
-}
-
-static bool calc_close(window *w) {
-    (void)w;
-    os_quit_app_by_desc(&calculator_app);
-    return true;
-}
-
-static void on_file_close(void) { calc_close(NULL); }
+static void on_close(void) { os_quit_app_by_desc(&calculator_app); }
 static void on_about(void) {
-    modal_show(MODAL_INFO, "About Calculator (c)2026 @drclcomputers",
-               "Calculator v1.0\nASMOS System App", NULL, NULL);
+    dlg_message(NULL, "About Calculator",
+                "Calculator v2.0\nASMOS System App\n(c)2026 @drclcomputers");
 }
 
 static void calc_init(void *state) {
-    calc_state_t *s = (calc_state_t *)state;
-
-    const window_spec_t spec = {
-        .x = CALC_X,
-        .y = CALC_Y,
-        .w = CALC_W,
-        .h = CALC_H,
-        .title = "Calculator",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = LIGHT_GRAY,
-        .visible = true,
-        .resizable = false,
-        .on_close = calc_close,
-    };
-    s->win = wm_register(&spec);
-    s->win->anim_no_of_frames = 10;
+    calc_state_t *s = state;
+    s->win = app_window(s, "Calculator", 40, 30, 105, 124, DARK_GRAY, 0);
     if (!s->win)
         return;
-
-    s->win->on_draw = calc_draw;
-    s->win->on_draw_userdata = s;
-
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "Close", on_file_close);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "About Calculator", on_about);
-
+    s->lcd = ctl_label(s->win, 4, 5, 94, 15, "0", LS_RIGHT | CS_BORDER);
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        const btn_def_t *b = &BUTTONS[i];
+        int w = BTN_W * b->span + BTN_PAD * (b->span - 1);
+        control *c = ctl_button(s->win, BTN_X + b->col * (BTN_W + BTN_PAD),
+                                BTN_Y + b->row * (BTN_H + BTN_PAD), w, BTN_H,
+                                b->label, i, on_btn);
+        ctl_style_add(c, CS_NOFOCUS); /* Enter means "=", not "press again" */
+        if (b->bg != LIGHT_GRAY)
+            ctl_set_colors(c, WHITE, b->bg);
+    }
+    menu *f = window_add_menu(s->win, "File");
+    menu_add_item(f, "Close", on_close);
+    menu_add_separator(f);
+    menu_add_item(f, "About Calculator", on_about);
     calc_reset(s);
+    show(s);
 }
 
+/* keyboard: digits, + - * / . %, Enter (=), Backspace, Esc (clear) */
 static void calc_on_frame(void *state) {
-    calc_state_t *s = (calc_state_t *)state;
-    if (!s->win || !s->win->visible)
+    calc_state_t *s = state;
+    if (!s->win || !kb.key_pressed || !window_is_focused(s->win))
         return;
-
-    bool focused = window_is_focused(s->win);
-
-    if (mouse.left_clicked && focused) {
-        int hit = calc_hit_button(s, mouse.x, mouse.y);
-        if (hit >= 0)
-            calc_on_button(s, BUTTONS[hit].label);
-    }
-
-    if (kb.key_pressed && focused) {
-        char c = kb.last_char;
-        if (c >= '0' && c <= '9') {
-            char tmp[2] = {c, '\0'};
-            calc_on_button(s, tmp);
-        } else if (c == '+') {
-            calc_on_button(s, "+");
-        } else if (c == '-') {
-            calc_on_button(s, "-");
-        } else if (c == '*') {
-            calc_on_button(s, "*");
-        } else if (c == '/') {
-            calc_on_button(s, "/");
-        } else if (c == '.') {
-            calc_on_button(s, ".");
-        } else if (c == '%') {
-            calc_on_button(s, "%");
-        } else if (kb.last_scancode == ENTER) {
-            calc_on_button(s, "=");
-        } else if (kb.last_scancode == BACKSPACE) {
-            if (!s->fresh_operand && !s->result_shown && s->display_len > 1) {
-                s->display[--s->display_len] = '\0';
-            } else {
-                calc_set_display(s, "0");
-                s->fresh_operand = true;
-            }
-        } else if (kb.last_scancode == ESC) {
-            calc_reset(s);
+    char c = kb.last_char;
+    char tmp[2] = {c, 0};
+    if ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '*' ||
+        c == '/' || c == '.' || c == '%')
+        calc_on_button(s, tmp);
+    else if (kb.last_scancode == ENTER || c == '=')
+        calc_on_button(s, "=");
+    else if (kb.last_scancode == ESC)
+        calc_reset(s);
+    else if (kb.last_scancode == BACKSPACE) {
+        if (!s->fresh_operand && !s->result_shown && s->display_len > 1) {
+            s->display[--s->display_len] = '\0';
+        } else {
+            calc_set_display(s, "0");
+            s->fresh_operand = true;
         }
-    }
-
-    calc_draw(s->win, s);
-}
-
-static void calc_destroy(void *state) {
-    calc_state_t *s = (calc_state_t *)state;
-    if (s->win) {
-        wm_unregister(s->win);
-        s->win = NULL;
-    }
+    } else
+        return;
+    show(s);
 }
 
 app_descriptor calculator_app = {
@@ -430,6 +337,5 @@ app_descriptor calculator_app = {
     .state_size = sizeof(calc_state_t),
     .init = calc_init,
     .on_frame = calc_on_frame,
-    .destroy = calc_destroy,
     .single_instance = true,
 };

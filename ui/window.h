@@ -5,13 +5,12 @@
 #include "lib/string.h"
 
 #include "config/config.h"
+#include "ui/controls.h"
 #include "ui/menubar.h"
-#include "ui/widgets.h"
 
 #define TITLEBAR_H 16
 
 #define MAX_WINDOWS 32
-#define MAX_WIN_WIDGETS 128
 #define MAX_WIN_MENUS 16
 #define RESIZE_BUTTON 8
 
@@ -72,12 +71,17 @@ struct window {
     void (*on_draw)(struct window *win, void *userdata);
     void *on_draw_userdata;
 
-    widget widgets[MAX_WIN_WIDGETS];
-    int widget_count;
-
     menu win_menus[MAX_WIN_MENUS];
     int win_menu_count;
     void *app_instance;
+
+    /* UI toolkit (ui/controls.h) */
+    control *controls;          /* creation order = tab order = paint order */
+    control *focus;             /* control with keyboard focus             */
+    void *userdata;             /* app state; default control->user        */
+    void *dyn_state;            /* set for windows of dynamic .APP apps    */
+    struct window *modal_child; /* open dialog blocking this window   */
+    struct window *modal_owner; /* for dialogs: the window they block */
 };
 
 extern window *win_stack[MAX_WINDOWS];
@@ -96,7 +100,8 @@ void wm_sync_menubar(menubar *mb);
 void wm_draw_all(void);
 void wm_update_all(void);
 
-void window_add_widget(window *win, widget wg);
+bool wm_is_registered(const window *win);
+void wm_close(window *win); /* what the close button does */
 menu *window_add_menu(window *win, const char *title);
 void window_draw(window *win);
 bool window_update(window *win);

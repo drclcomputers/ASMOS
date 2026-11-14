@@ -7,9 +7,90 @@
  * (the flat binary has no linker access to them) – go through this table.
  * Only ever append new members; bump `size`, not `version`. */
 
+#include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "lib/core.h"
+#include "ui/controls.h"
+#include "ui/dialogs.h"
 #include "ui/window.h"
+
+/* The UI toolkit (see ui/controls.h and ui/dialogs.h for documentation).
+ * Same functions as built-in apps use, reached through api->ui->... */
+typedef struct ui_api {
+    uint32_t size; /* sizeof(ui_api_t) */
+
+    window *(*app_window)(void *state, const char *title, int x, int y, int w,
+                          int h, uint8_t bar_color, uint32_t flags);
+    void (*client_rect)(const window *w, int *x, int *y, int *cw, int *ch);
+
+    control *(*label)(window *, int, int, int, int, const char *, uint32_t);
+    control *(*button)(window *, int, int, int, int, const char *, int,
+                       ctl_handler);
+    control *(*check)(window *, int, int, int, const char *, bool, ctl_handler);
+    control *(*radio)(window *, int, int, int, const char *, int, bool,
+                      ctl_handler);
+    control *(*edit)(window *, int, int, int, int, const char *, int, uint32_t,
+                     ctl_handler);
+    control *(*list)(window *, int, int, int, int, uint32_t, ctl_handler);
+    control *(*combo)(window *, int, int, int, ctl_handler);
+    control *(*vscroll)(window *, int, int, int, ctl_handler);
+    control *(*hscroll)(window *, int, int, int, ctl_handler);
+    control *(*slider)(window *, int, int, int, int, int, int, ctl_handler);
+    control *(*progress)(window *, int, int, int, int, int);
+    control *(*group)(window *, int, int, int, int, const char *);
+    control *(*tabs)(window *, int, int, int, const char *, ctl_handler);
+    control *(*custom)(window *, int, int, int, int, ctl_painter, ctl_handler,
+                       uint32_t);
+
+    void (*destroy)(control *);
+    void (*set_text)(control *, const char *);
+    const char *(*text)(const control *);
+    void (*set_value)(control *, int);
+    int (*value)(const control *);
+    void (*set_range)(control *, int, int, int);
+    void (*show)(control *, bool);
+    void (*enable)(control *, bool);
+    void (*focus)(control *);
+    void (*set_handler)(control *, ctl_handler, void *);
+    void (*set_colors)(control *, uint8_t, uint8_t);
+    void (*style_add)(control *, uint32_t);
+    void (*move)(control *, int, int, int, int);
+    void (*on_page)(control *, control *, int);
+    control *(*by_id)(window *, int);
+
+    int (*list_add)(control *, const char *);
+    int (*list_add_data)(control *, const char *, uint32_t);
+    void (*list_set)(control *, int, const char *);
+    void (*list_remove)(control *, int);
+    void (*list_clear)(control *);
+    int (*list_count)(const control *);
+    const char *(*list_get)(const control *, int);
+    uint32_t (*list_data)(const control *, int);
+    int (*list_sel)(const control *);
+    void (*list_set_sel)(control *, int);
+    void (*list_set_columns)(control *, const int *, int);
+
+    void (*edit_select)(control *, int, int);
+    void (*edit_insert)(control *, const char *);
+    int (*edit_line_of)(const control *, int);
+    int (*edit_col_of)(const control *, int);
+    void (*edit_goto)(control *, int, int);
+    bool (*edit_find)(control *, const char *, bool);
+
+    void (*message)(window *, const char *, const char *);
+    void (*confirm)(window *, const char *, const char *, dlg_bool_cb, void *);
+    void (*input)(window *, const char *, const char *, const char *, int,
+                  uint32_t, dlg_text_cb, void *);
+    void (*open_file)(window *, const char *, const char *, const char *,
+                      dlg_text_cb, void *);
+    void (*save_file)(window *, const char *, const char *, const char *,
+                      const char *, dlg_text_cb, void *);
+
+    /* clipboard for edits (Ctrl+C/X/V already work from the keyboard) */
+    void (*edit_copy)(control *);
+    void (*edit_cut)(control *);
+    void (*edit_paste)(control *);
+} ui_api_t;
 
 #define OS_API_VERSION 1
 
@@ -24,19 +105,27 @@ typedef struct os_api {
     window *(*wm_register)(const window_spec_t *spec);
     void (*wm_unregister)(window *w);
     void (*wm_focus)(window *w);
-    void (*window_add_widget)(window *w, widget wg);
+    void (*reserved0)(void); /* was window_add_widget (removed) */
 
     void (*draw_dot)(int x, int y, unsigned char c);
     void (*draw_line)(int x0, int y0, int x1, int y1, unsigned char c);
     void (*draw_rect)(int x, int y, int w, int h, unsigned char c);
     void (*fill_rect)(int x, int y, int w, int h, unsigned char c);
     void (*draw_char)(int x, int y, char ch, unsigned char c, int size);
-    void (*draw_string)(int x, int y, char *s, unsigned char c, int size);
+    void (*draw_string)(int x, int y, const char *s, unsigned char c, int size);
 
     const mousevar *mouse;
 
     /* Ask the OS to close this app instance (pass your own state ptr). */
     void (*quit_self)(void *state);
+
+    /* ── appended in API size 2 (check api->size) ── */
+    const ui_api_t *ui;
+    const keyboardvar *kb;
+    /* whole-file helpers: return bytes read / success */
+    int (*file_read)(const char *path, void *buf, int max);
+    bool (*file_write)(const char *path, const void *buf, int len);
+    int (*snprintf)(char *dst, size_t n, const char *fmt, ...);
 } os_api_t;
 
 #endif

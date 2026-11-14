@@ -1,479 +1,206 @@
+/* Monitor - running apps (switch to / end task) and system information. */
 #include "os/api.h"
+#include "os/appload.h"
 
-#define UPDATE_INTERVAL 60
-
-#define WIN_W 210
-#define WIN_H 120
-
-#define TAB_H 12
-#define TAB_W 80
-#define CONTENT_X 6
-#define CONTENT_Y (TAB_H)
-
-#define LIST_PAD 4
-#define LIST_ITEM_H 10
-#define LIST_VISIBLE 5
-#define LIST_H (LIST_VISIBLE * LIST_ITEM_H)
-#define LIST_Y (CONTENT_Y + LIST_PAD + 4)
-#define LIST_W (WIN_W - 14)
-#define SCROLLBAR_W 8
-
-#define BTN_W (WIN_W - 2 * LIST_PAD - 3 * 9) / 3
-#define BTN_H 12
-#define BTN_Y (LIST_Y + LIST_H + 6)
+#define REFRESH_MS 3000
 
 typedef struct {
-    window *win;
-    int tab;
-    int selected;
-    int scroll_top;
-
-    char cpu_str[64];
-    char uptime_str[64];
-    char mem_str[64];
-    char drive_str[4][64];
-    uint32_t drive_used_kb[4];
-    uint32_t drive_total_kb[4];
-    int drive_count;
-    uint32_t frame_counter;
+    window *win; /* must stay first */
+    control *tabs, *list, *sw, *end;
+    control *cpu, *mem, *up, *memmeter;
+    control *drive_lbl[4], *drive_bar[4];
+    uint32_t next_refresh;
+    char sig[64]; /* detects changes in the task list */
 } monitor_state_t;
 
 app_descriptor monitor_app;
 
-static monitor_state_t *active_monitor(void) {
+static void fill_tasks(monitor_state_t *s) {
+    char sig[64];
+    int n = 0;
+    for (int i = 0; i < MAX_RUNNING_APPS && n < 63; i++)
+        sig[n++] = (running_apps[i].running && !running_apps[i].wants_quit)
+                       ? 'A' + (i % 26)
+                       : '.';
+    sig[n] = 0;
+    if (strcmp(sig, s->sig) == 0)
+        return;
+    strcpy(s->sig, sig);
+
+    uint32_t keep = list_data(s->list, list_sel(s->list));
+    list_clear(s->list);
+    list_add(s->list, "App\tKind\tWindow");
+    int pick = 1;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
-        if (!a->running || a->desc != &monitor_app)
+        if (!a->running || a->wants_quit || !a->desc)
             continue;
-        return (monitor_state_t *)a->state;
+        window *w = os_instance_window(a);
+        char row[80];
+        snprintf(row, sizeof(row), "%s\t%s\t%s", a->desc->name,
+                 appload_find(a->desc->name) ? ".APP" : "built-in",
+                 !w             ? "-"
+                 : w->minimized ? "minimized"
+                                : "open");
+        int idx = list_add_data(s->list, row, (uint32_t)i);
+        if ((uint32_t)i == keep)
+            pick = idx;
     }
-    return NULL;
+    list_set_sel(s->list, pick);
 }
 
-static void fmt_bytes(char *dst, int dst_size, uint32_t used, uint32_t total) {
-    char u[12], t[12];
-    uint32_to_str(used, u);
-    uint32_to_str(total, t);
-    int pos = 0;
-    for (int i = 0; u[i] && pos < dst_size - 1; i++)
-        dst[pos++] = u[i];
-    const char *sep = " KB / ";
-    for (int i = 0; sep[i] && pos < dst_size - 1; i++)
-        dst[pos++] = sep[i];
-    for (int i = 0; t[i] && pos < dst_size - 1; i++)
-        dst[pos++] = t[i];
-    const char *unit = " KB";
-    for (int i = 0; unit[i] && pos < dst_size - 1; i++)
-        dst[pos++] = unit[i];
-    dst[pos] = '\0';
-}
-
-static void refresh_uptime(monitor_state_t *s) {
-    time_hms_t u = uptime_hms();
-    snprintf(s->uptime_str, sizeof(s->uptime_str),
-             "Uptime: %02u:%02u:%02u", u.hours, u.minutes, u.seconds);
-}
-
-static void refresh_cpu(monitor_state_t *s) {
+static void refresh_system(monitor_state_t *s) {
+    char b[80];
     cpu_model_init();
-    strcpy(s->cpu_str, cpu_model_str());
-}
+    snprintf(b, sizeof(b), "CPU:  %s", cpu_model_str());
+    ctl_set_text(s->cpu, b);
+    uint32_t used = heap_used() / 1024;
+    uint32_t total = (heap_used() + heap_remaining()) / 1024;
+    snprintf(b, sizeof(b), "Heap: %u KB used of %u KB", used, total);
+    ctl_set_text(s->mem, b);
+    ctl_set_range(s->memmeter, 0, total ? total : 1, 0);
+    ctl_set_value(s->memmeter, used);
+    time_hms_t u = uptime_hms();
+    snprintf(b, sizeof(b), "Up:   %02u:%02u:%02u", u.hours, u.minutes,
+             u.seconds);
+    ctl_set_text(s->up, b);
 
-static void refresh_ram(monitor_state_t *s) {
-    uint32_t mem_used = heap_used() / 1024;
-    uint32_t mem_total = (heap_used() + heap_remaining()) / 1024;
-    char tmp[52];
-    fmt_bytes(tmp, sizeof(tmp), mem_used, mem_total);
-    snprintf(s->mem_str, sizeof(s->mem_str), "Memory: %s", tmp);
-}
-
-static void refresh_drives(monitor_state_t *s) {
     int line = 0;
-    for (int d = 0; d < DRIVE_COUNT; d++) {
+    for (int d = 0; d < DRIVE_COUNT && line < 4; d++) {
         if (!fs_drive_mounted(d))
             continue;
-        uint32_t tot = 0, used = 0;
-        if (fs_get_usage_drive(d, &tot, &used)) {
-            used /= 1024;
-            tot /= 1024;
-            s->drive_used_kb[line] = used;
-            s->drive_total_kb[line] = tot;
-            const char *label = fs_drive_label(d);
-            const char *vpath = (d == DRIVE_HDA)    ? "/HDA"
-                                : (d == DRIVE_HDB)  ? "/HDB"
-                                : (d == DRIVE_FDD0) ? "/FDD0"
-                                                    : "/FDD1";
-            char tmp[52];
-            int llen = strlen(label);
-            int vlen = strlen(vpath);
-            int pos = 0;
-            for (int i = 0; i < llen && pos < 63; i++)
-                s->drive_str[line][pos++] = label[i];
-            s->drive_str[line][pos++] = ' ';
-            s->drive_str[line][pos++] = '(';
-            for (int i = 0; i < vlen && pos < 63; i++)
-                s->drive_str[line][pos++] = vpath[i];
-            s->drive_str[line][pos++] = ')';
-            s->drive_str[line][pos++] = ':';
-            s->drive_str[line][pos++] = ' ';
-            s->drive_str[line][pos] = '\0';
-            fmt_bytes(tmp, sizeof(tmp), used, tot);
-            int tlen = strlen(tmp);
-            for (int i = 0; i < tlen && pos < 63; i++)
-                s->drive_str[line][pos++] = tmp[i];
-            s->drive_str[line][pos] = '\0';
-        } else {
-            snprintf(s->drive_str[line], sizeof(s->drive_str[0]),
-                     "%s: unavailable", fs_drive_label(d));
-            s->drive_used_kb[line] = 0;
-            s->drive_total_kb[line] = 0;
-        }
-        if (++line >= 4)
-            break;
+        uint32_t tot = 0, usedb = 0;
+        if (fs_get_usage_drive(d, &tot, &usedb))
+            snprintf(b, sizeof(b), "%s (%s): %u / %u KB", fs_drive_label(d),
+                     g_drive_paths[d], usedb / 1024, tot / 1024);
+        else
+            snprintf(b, sizeof(b), "%s: unavailable", fs_drive_label(d));
+        ctl_set_text(s->drive_lbl[line], b);
+        ctl_set_range(s->drive_bar[line], 0, tot ? tot / 1024 : 1, 0);
+        ctl_set_value(s->drive_bar[line], usedb / 1024);
+        ctl_show(s->drive_lbl[line], true);
+        ctl_show(s->drive_bar[line], true);
+        line++;
     }
-    s->drive_count = line;
-}
-
-static int count_running(void) {
-    int n = 0;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++)
-        if (running_apps[i].running && !running_apps[i].wants_quit)
-            n++;
-    return n;
-}
-
-static app_instance_t *get_nth(int n) {
-    int idx = 0;
-    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
-        app_instance_t *a = &running_apps[i];
-        if (!a->running || a->wants_quit)
-            continue;
-        if (idx == n)
-            return a;
-        idx++;
-    }
-    return NULL;
-}
-
-static void do_switch(void) {
-    monitor_state_t *s = active_monitor();
-    if (!s || s->selected < 0)
-        return;
-    app_instance_t *a = get_nth(s->selected);
-    if (!a || !a->state)
-        return;
-    window *w = os_instance_window(a);
-    if (w) {
-        w->minimized = false;
-        w->visible = true;
-        wm_focus(w);
-        mouse.left_clicked = false;
+    for (; line < 4; line++) {
+        ctl_show(s->drive_lbl[line], false);
+        ctl_show(s->drive_bar[line], false);
     }
 }
 
-static void do_end_task(void) {
-    monitor_state_t *s = active_monitor();
-    if (!s || s->selected < 0)
+static app_instance_t *selected_app(monitor_state_t *s) {
+    int sel = list_sel(s->list);
+    if (sel < 1)
+        return NULL;
+    app_instance_t *a = &running_apps[list_data(s->list, sel)];
+    return (a->running && !a->wants_quit) ? a : NULL;
+}
+
+static void do_switch(monitor_state_t *s) {
+    app_instance_t *a = selected_app(s);
+    window *w = a ? os_instance_window(a) : NULL;
+    if (!w)
         return;
-    app_instance_t *a = get_nth(s->selected);
+    w->minimized = false;
+    w->visible = true;
+    wm_focus(w);
+}
+
+static void do_end(monitor_state_t *s) {
+    app_instance_t *a = selected_app(s);
     if (!a || a->desc == &monitor_app)
         return;
     window *w = os_instance_window(a);
-    if (w && w->on_close)
-        w->on_close(w);
+    if (w)
+        wm_close(w); /* lets the app ask "save changes?" etc. */
     else
         os_quit_app(a);
-    s->selected = -1;
-    int count = count_running();
-    if (s->scroll_top > 0 && s->scroll_top >= count - LIST_VISIBLE)
-        s->scroll_top = count - LIST_VISIBLE - 1;
-    if (s->scroll_top < 0)
-        s->scroll_top = 0;
 }
 
-static void do_cancel(void) {
-    monitor_state_t *s = active_monitor();
+static void on_button(control *c, int ev) {
+    (void)ev;
+    if (c->id == 1)
+        do_switch(c->user);
+    else
+        do_end(c->user);
+}
+
+static void on_list(control *c, int ev) {
+    if (ev == EV_SUBMIT)
+        do_switch(c->user);
+}
+
+static void on_refresh(void) {
+    monitor_state_t *s = ui_active_state();
     if (s) {
-        s->selected = -1;
-        int count = count_running();
-        if (s->scroll_top > 0 && s->scroll_top >= count - LIST_VISIBLE)
-            s->scroll_top = count - LIST_VISIBLE - 1;
-        if (s->scroll_top < 0)
-            s->scroll_top = 0;
+        s->sig[0] = 0;
+        fill_tasks(s);
+        refresh_system(s);
     }
 }
-
-static void menu_refresh(void) {
-    monitor_state_t *s = active_monitor();
-    if (!s)
-        return;
-    refresh_uptime(s);
-    refresh_cpu(s);
-    refresh_ram(s);
-    refresh_drives(s);
-}
-
-static bool monitor_close(window *w) {
-    (void)w;
-    os_quit_app_by_desc(&monitor_app);
-    return true;
-}
-
-static void on_file_close(void) { monitor_close(NULL); }
-
+static void on_close(void) { os_quit_app_by_desc(&monitor_app); }
 static void on_about(void) {
-    modal_show(MODAL_INFO, "About Monitor (c)2026 @drclcomputers",
-               "Monitor v2.0\nTask List & System Stats", NULL, NULL);
-}
-
-static void draw_tab(int tx, int ty, int idx, int active, const char *label) {
-    uint8_t bg = (idx == active) ? LIGHT_GRAY : DARK_GRAY;
-    uint8_t fg = (idx == active) ? BLACK : WHITE;
-    fill_rect(tx, ty, TAB_W, TAB_H, bg);
-    draw_rect(tx, ty, TAB_W, TAB_H, BLACK);
-
-    int tw = (int)strlen(label) * 5;
-    draw_string(tx + (TAB_W - tw) / 2, ty + 3, (char *)label, fg, 2);
-}
-
-static void draw_btn(int x, int y, const char *label) {
-    fill_rect(x + 2, y + 2, BTN_W, BTN_H, BLACK);
-    fill_rect(x, y, BTN_W, BTN_H, LIGHT_GRAY);
-    draw_rect(x, y, BTN_W, BTN_H, BLACK);
-    draw_line(x + 1, y + 1, x + BTN_W - 2, y + 1, WHITE);
-    draw_line(x + 1, y + 1, x + 1, y + BTN_H - 2, WHITE);
-    int tw = (int)strlen(label) * 5;
-    draw_string(x + (BTN_W - tw) / 2, y + (BTN_H - 6) / 2, (char *)label, BLACK,
-                2);
-}
-
-static bool btn_hit(int x, int y) {
-    return mouse.left_clicked && mouse.x >= x && mouse.x < x + BTN_W &&
-           mouse.y >= y && mouse.y < y + BTN_H;
-}
-
-static void monitor_draw(window *win, void *ud) {
-    monitor_state_t *s = (monitor_state_t *)ud;
-    if (!s)
-        return;
-
-    int wx = win->x + 1;
-    int wy = win->y + MENUBAR_H + 16;
-
-    fill_rect(wx, wy, win->w - 2, win->h - 16, LIGHT_GRAY);
-
-    draw_tab(wx + CONTENT_X + LIST_PAD, wy, 0, s->tab, "Task List");
-    draw_tab(wx + CONTENT_X + LIST_PAD + TAB_W + 2, wy, 1, s->tab, "System");
-
-    int panel_x = wx + CONTENT_X;
-    int panel_y = wy + CONTENT_Y;
-    int panel_w = win->w - 2 - CONTENT_X * 2;
-    int panel_h = win->h - TITLEBAR_H - CONTENT_Y;
-    fill_rect(panel_x + 1, panel_y + 1, panel_w - 2, panel_h - 2, LIGHT_GRAY);
-
-    if (s->tab == 0) {
-        int lx = panel_x + LIST_PAD;
-        int ly = wy + LIST_Y;
-        int lw = panel_w - LIST_PAD * 2 - SCROLLBAR_W;
-
-        fill_rect(lx, ly, lw, LIST_H, WHITE);
-        draw_rect(lx, ly, lw, LIST_H, BLACK);
-
-        int count = count_running();
-        for (int i = 0; i < LIST_VISIBLE; i++) {
-            int idx = s->scroll_top + i;
-            if (idx >= count)
-                break;
-            app_instance_t *a = get_nth(idx);
-            if (!a || !a->desc)
-                continue;
-            int iy = ly + i * LIST_ITEM_H;
-            if (idx == s->selected) {
-                fill_rect(lx + 1, iy, lw - 2, LIST_ITEM_H, DARK_GRAY);
-                draw_string(lx + 4, iy + 2, (char *)a->desc->name, WHITE, 2);
-            } else {
-                draw_string(lx + 4, iy + 2, (char *)a->desc->name, BLACK, 2);
-            }
-        }
-
-        // Scrollbar
-        int sbx = lx + lw;
-        fill_rect(sbx, ly, SCROLLBAR_W, LIST_H, LIGHT_GRAY);
-        draw_rect(sbx, ly, SCROLLBAR_W, LIST_H, BLACK);
-        if (count > LIST_VISIBLE) {
-            int max_scroll = count - LIST_VISIBLE;
-            int thumb_h = (LIST_VISIBLE * LIST_H) / count;
-            if (thumb_h < 4)
-                thumb_h = 4;
-            int thumb_range = LIST_H - thumb_h;
-            int thumb_y = ly + (s->scroll_top * thumb_range) / max_scroll;
-            fill_rect(sbx + 1, thumb_y, SCROLLBAR_W - 2, thumb_h, DARK_GRAY);
-        }
-
-        int b1x = lx;
-        int b2x = b1x + BTN_W + 6;
-        int b3x = b2x + BTN_W + 6;
-        int by = wy + BTN_Y;
-        draw_btn(b1x, by, "Switch To");
-        draw_btn(b2x, by, "End Task");
-        draw_btn(b3x, by, "Cancel");
-    } else {
-        int sy = panel_y + 6;
-        draw_string(panel_x, sy, s->cpu_str, BLACK, 2);
-        sy += 10;
-        draw_string(panel_x, sy, s->mem_str, BLACK, 2);
-        sy += 10;
-        draw_string(panel_x, sy, s->uptime_str, BLACK, 2);
-        sy += 10;
-        draw_line(panel_x - 2, sy, panel_x + panel_w - 4, sy, DARK_GRAY);
-        sy += 6;
-        draw_string(panel_x, sy, "Drives:", BLACK, 2);
-        sy += 10;
-        for (int i = 0; i < s->drive_count; i++) {
-            draw_string(panel_x + 4, sy, s->drive_str[i], BLACK, 2);
-            sy += 8;
-            if (s->drive_total_kb[i] > 0) {
-                int bar_w = panel_w - 8;
-                int pct =
-                    (int)(s->drive_used_kb[i] * 100 / s->drive_total_kb[i]);
-                uint8_t bar_col = (pct < 25)   ? LIGHT_GREEN
-                                  : (pct < 80) ? LIGHT_BLUE
-                                  : (pct < 95) ? LIGHT_RED
-                                               : RED;
-                int filled = s->drive_used_kb[i] * bar_w / s->drive_total_kb[i];
-                fill_rect(panel_x + 4, sy, bar_w, 4, DARK_GRAY);
-                fill_rect(panel_x + 4, sy, filled, 4, bar_col);
-                if (pct >= 99)
-                    fill_rect(panel_x + 4, sy, filled, 4, BLACK);
-                sy += 6;
-            }
-            sy += 4;
-        }
-    }
+    dlg_message(NULL, "About Monitor",
+                "Monitor v3.0\nTask list & system stats\n"
+                "Ctrl+Shift+Esc opens it from anywhere.");
 }
 
 static void monitor_init(void *state) {
-    monitor_state_t *s = (monitor_state_t *)state;
-    s->selected = -1;
-    s->scroll_top = 0;
-    s->tab = 0;
-
-    int drives = 0;
-    for (int d = 0; d < DRIVE_COUNT; d++)
-        if (fs_drive_mounted(d))
-            drives++;
-
-    const window_spec_t spec = {
-        .x = 20,
-        .y = 20,
-        .w = WIN_W,
-        .h = WIN_H,
-        .title = "Monitor",
-        .title_color = WHITE,
-        .bar_color = DARK_GRAY,
-        .content_color = LIGHT_GRAY,
-        .visible = true,
-        .on_close = monitor_close,
-        .resizable = false,
-    };
-    s->win = wm_register(&spec);
+    monitor_state_t *s = state;
+    s->win = app_window(s, "Monitor", 20, 20, 220, 148, DARK_GRAY, 0);
     if (!s->win)
         return;
+    window *w = s->win;
+    s->tabs = ctl_tabs(w, 4, 3, 210, "Tasks|System", NULL);
 
-    s->win->on_draw = monitor_draw;
-    s->win->on_draw_userdata = s;
-    s->win->animate_open_close = false;
+    s->list = ctl_list(w, 4, 20, 210, 92, LBS_HEADER, on_list);
+    int cols[3] = {80, 60, 0};
+    list_set_columns(s->list, cols, 3);
+    s->sw = ctl_button(w, 104, 116, 54, 13, "Switch To", 1, on_button);
+    s->end = ctl_button(w, 162, 116, 52, 13, "End Task", 2, on_button);
+    ctl_style_add(s->sw, CS_DEFAULT);
+    ctl_on_page(s->list, s->tabs, 0);
+    ctl_on_page(s->sw, s->tabs, 0);
+    ctl_on_page(s->end, s->tabs, 0);
 
-    menu *file_menu = window_add_menu(s->win, "File");
-    menu_add_item(file_menu, "Refresh", menu_refresh);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "Close", on_file_close);
-    menu_add_separator(file_menu);
-    menu_add_item(file_menu, "About Monitor", on_about);
+    s->cpu = ctl_label(w, 8, 22, 204, 8, "", 0);
+    s->mem = ctl_label(w, 8, 32, 204, 8, "", 0);
+    s->memmeter = ctl_progress(w, 8, 41, 204, 6, 1);
+    s->up = ctl_label(w, 8, 50, 204, 8, "", 0);
+    control *g = ctl_group(w, 4, 60, 212, 70, "Drives");
+    ctl_on_page(s->cpu, s->tabs, 1);
+    ctl_on_page(s->mem, s->tabs, 1);
+    ctl_on_page(s->memmeter, s->tabs, 1);
+    ctl_on_page(s->up, s->tabs, 1);
+    ctl_on_page(g, s->tabs, 1);
+    for (int i = 0; i < 4; i++) {
+        s->drive_lbl[i] = ctl_label(w, 10, 70 + i * 15, 200, 8, "", 0);
+        s->drive_bar[i] = ctl_progress(w, 10, 78 + i * 15, 200, 5, 1);
+        ctl_on_page(s->drive_lbl[i], s->tabs, 1);
+        ctl_on_page(s->drive_bar[i], s->tabs, 1);
+    }
 
-    refresh_uptime(s);
-    refresh_cpu(s);
-    refresh_ram(s);
-    refresh_drives(s);
+    menu *f = window_add_menu(w, "File");
+    menu_add_item(f, "Refresh", on_refresh);
+    menu_add_separator(f);
+    menu_add_item(f, "Close", on_close);
+    menu_add_separator(f);
+    menu_add_item(f, "About Monitor", on_about);
+
+    fill_tasks(s);
+    refresh_system(s);
+    ctl_focus(s->list);
 }
 
 static void monitor_on_frame(void *state) {
-    monitor_state_t *s = (monitor_state_t *)state;
-    if (!s->win)
-        return;
-
-    int wx = s->win->x + 1;
-    int wy = s->win->y + MENUBAR_H + 16;
-
-    int t0x = wx + CONTENT_X;
-    int t1x = t0x + TAB_W + 2;
-    if (mouse.left_clicked && mouse.y >= wy && mouse.y < wy + TAB_H) {
-        if (mouse.x >= t0x && mouse.x < t0x + TAB_W) {
-            s->tab = 0;
-            return;
-        }
-        if (mouse.x >= t1x && mouse.x < t1x + TAB_W) {
-            s->tab = 1;
-            return;
-        }
+    monitor_state_t *s = state;
+    fill_tasks(s);
+    if (time_millis() >= s->next_refresh) {
+        s->next_refresh = time_millis() + REFRESH_MS;
+        refresh_system(s);
     }
-
-    if (s->tab == 0) {
-        int panel_x = wx + CONTENT_X;
-        int panel_w = s->win->w - 2 - CONTENT_X * 2;
-        int lx = panel_x + LIST_PAD;
-        int ly = wy + LIST_Y;
-        int lw = panel_w - LIST_PAD * 2 - SCROLLBAR_W;
-        int sbx = lx + lw;
-
-        int count = count_running();
-
-        // Scrollbar drag
-        if ((mouse.left_clicked || mouse.left) && mouse.x >= sbx &&
-            mouse.x < sbx + SCROLLBAR_W && mouse.y >= ly &&
-            mouse.y < ly + LIST_H && count > LIST_VISIBLE) {
-            int max_scroll = count - LIST_VISIBLE + 1;
-            int new_scroll = ((mouse.y - ly) * max_scroll) / LIST_H;
-            if (new_scroll < 0)
-                new_scroll = 0;
-            if (new_scroll > max_scroll)
-                new_scroll = max_scroll;
-            s->scroll_top = new_scroll;
-        }
-
-        // List click
-        if (mouse.left_clicked && mouse.x >= lx && mouse.x < lx + lw &&
-            mouse.y >= ly && mouse.y < ly + LIST_H) {
-            int row = (mouse.y - ly) / LIST_ITEM_H;
-            int idx = s->scroll_top + row;
-            if (idx >= 0 && idx < count)
-                s->selected = idx;
-        }
-
-        int b1x = lx;
-        int b2x = b1x + BTN_W + 6;
-        int b3x = b2x + BTN_W + 6;
-        int by = wy + BTN_Y;
-        if (btn_hit(b1x, by))
-            do_switch();
-        else if (btn_hit(b2x, by))
-            do_end_task();
-        else if (btn_hit(b3x, by))
-            do_cancel();
-    }
-
-    s->frame_counter++;
-    if (s->frame_counter >= UPDATE_INTERVAL) {
-        s->frame_counter = 0;
-        refresh_uptime(s);
-        refresh_ram(s);
-    }
-}
-
-static void monitor_destroy(void *state) {
-    monitor_state_t *s = (monitor_state_t *)state;
-    wm_unregister(s->win);
-    s->win = NULL;
+    ctl_enable(s->end,
+               selected_app(s) && selected_app(s)->desc != &monitor_app);
 }
 
 app_descriptor monitor_app = {
@@ -481,6 +208,5 @@ app_descriptor monitor_app = {
     .state_size = sizeof(monitor_state_t),
     .init = monitor_init,
     .on_frame = monitor_on_frame,
-    .destroy = monitor_destroy,
     .single_instance = true,
 };

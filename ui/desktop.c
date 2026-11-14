@@ -1,5 +1,6 @@
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
+#include "ui/dialogs.h"
 #include "ui/icons.h"
 #include "ui/menubar.h"
 #include "ui/modal.h"
@@ -13,10 +14,10 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 
-#include "fs/fdd_ctrl.h"
-#include "lib/core.h"
 #include "drivers/serial.h"
 #include "drivers/speaker.h"
+#include "fs/fdd_ctrl.h"
+#include "lib/core.h"
 
 /* Defined in apps/filef.c (apps have no public headers). */
 void ff_open_dir_pub(uint16_t cluster, const char *path);
@@ -25,10 +26,9 @@ void ff_open_dir_pub(uint16_t cluster, const char *path);
 #include "lib/string.h"
 #include "lib/time.h"
 
-#include "interrupts/idt.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
-
+#include "interrupts/idt.h"
 
 /* ── wallpaper ──────────────────────────────────────────────────────────── */
 void draw_wallpaper_pattern(void) {
@@ -76,8 +76,6 @@ static int s_drag_off_y = 0;
 static int s_last_click_idx = -1;
 static uint32_t s_last_click_tick = 0;
 static int s_rename_idx = -1;
-static char s_rename_buf[13] = {0};
-static int s_rename_len = 0;
 
 /* ── power animations ───────────────────────────────────────────────────── */
 #define BAR_W 160
@@ -162,14 +160,6 @@ void power_anim_run(bool is_restart) {
 
 /* ── dialog state ───────────────────────────────────────────────────────── */
 
-#define DESK_MODE_NORMAL 0
-#define DESK_MODE_CONFIRM 1
-#define DESK_MODE_NEWNAME 2
-#define DESK_MODE_RENAME 3
-
-static int s_mode = DESK_MODE_NORMAL;
-static char s_newname_buf[13];
-static int s_newname_len = 0;
 static bool s_newname_is_dir = false;
 
 /* ── open item ──────────────────────────────────────────────────────────── */
@@ -392,22 +382,18 @@ static void do_delete(void) {
     desktop_fs_delete(sel);
 }
 
-static void menu_new_file(void) {
-    s_newname_buf[0] = '\0';
-    s_newname_len = 0;
-    s_newname_is_dir = false;
-    s_mode = DESK_MODE_NEWNAME;
-}
-static void menu_new_folder(void) {
-    s_newname_buf[0] = '\0';
-    s_newname_len = 0;
-    s_newname_is_dir = true;
-    s_mode = DESK_MODE_NEWNAME;
-}
-static void menu_rename(void) {
-    if (s_mode != DESK_MODE_NORMAL)
-        return;
+static void newname_done(void *user, const char *name);
+static void rename_done(void *user, const char *name);
 
+static void new_item(bool dir) {
+    s_newname_is_dir = dir;
+    dlg_input(NULL, dir ? "New Folder" : "New File",
+              dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
+              newname_done, NULL);
+}
+static void menu_new_file(void) { new_item(false); }
+static void menu_new_folder(void) { new_item(true); }
+static void menu_rename(void) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
     int sel = -1;
@@ -429,11 +415,8 @@ static void menu_rename(void) {
     }
 
     s_rename_idx = sel;
-    strncpy(s_rename_buf, items[sel].name, 12);
-    s_rename_buf[12] = '\0';
-    s_rename_len = (int)strlen(s_rename_buf);
-
-    s_mode = DESK_MODE_RENAME;
+    dlg_input(NULL, "Rename", "New name:", items[sel].name, 12, ES_FILENAME,
+              rename_done, NULL);
 }
 static void menu_reload(void) { desktop_fs_set_dirty(); }
 
@@ -468,7 +451,8 @@ static void clip_selected(bool is_cut) {
     clipboard_set_file(desktop_fs_path(), disk_name,
                        it->kind == DESKTOP_ITEM_DIR, is_cut, DRIVE_HDA);
     modal_show(MODAL_INFO, title,
-               is_cut ? "Item cut. Paste to move." : "Item copied to clipboard.",
+               is_cut ? "Item cut. Paste to move."
+                      : "Item copied to clipboard.",
                NULL, NULL);
 }
 static void menu_copy(void) { clip_selected(false); }
@@ -589,69 +573,39 @@ static void menu_insert_fdd(void) {
     }
 }
 
-/* ── new name / rename dialog * ─────────────────────────────────────────── */
-static void handle_newname(void) {
+/* ── new name / rename (dlg_input callbacks; name NULL = cancelled) ───── */
+static void newname_done(void *user, const char *name) {
+    (void)user;
     const char *err = NULL;
-    if (!fs_validate_name(s_newname_buf, s_newname_is_dir, &err)) {
-        s_mode = DESK_MODE_NORMAL;
-        modal_show(MODAL_ERROR, "Invalid Name", err, NULL, NULL);
+    if (!name)
+        return;
+    if (!fs_validate_name(name, s_newname_is_dir, &err)) {
+        dlg_message(NULL, "Invalid Name", err);
         return;
     }
     uint16_t saved = dir_context.current_cluster;
     dir_context.current_cluster = desktop_fs_cluster();
     bool ok;
     if (s_newname_is_dir) {
-        ok = fs_mkdir(s_newname_buf);
+        ok = fs_mkdir(name);
     } else {
         fat_file_t f;
-        ok = fs_create(s_newname_buf, &f);
+        ok = fs_create(name, &f);
         if (ok)
             fs_close(&f);
     }
     dir_context.current_cluster = saved;
-    s_mode = DESK_MODE_NORMAL;
     if (!ok)
-        modal_show(MODAL_ERROR, "Create Failed", "Name exists or disk full.",
-                   NULL, NULL);
+        dlg_message(NULL, "Create Failed", "Name exists or disk full.");
     desktop_fs_set_dirty();
 }
 
-#define CHAR_W 5
-
-static void draw_newname_dialog(void) {
-    int bx = 60, by = 80, bw = 200, bh = 36;
-    fill_rect(bx + 3, by + 3, bw, bh, BLACK);
-    fill_rect(bx, by, bw, bh, LIGHT_GRAY);
-    draw_rect(bx, by, bw, bh, BLACK);
-    const char *prompt = s_newname_is_dir ? "Folder name:" : "File name:";
-    draw_string(bx + 4, by + 4, (char *)prompt, BLACK, 2);
-    fill_rect(bx + 4, by + 14, bw - 8, 12, WHITE);
-    draw_rect(bx + 4, by + 14, bw - 8, 12, BLACK);
-    draw_string(bx + 6, by + 16, s_newname_buf, BLACK, 2);
-    if ((pit_ticks / 500) % 2 == 0) {
-        int cx = bx + 6 + s_newname_len * CHAR_W;
-        if (cx < bx + bw - 10)
-            draw_string(cx, by + 16, "|", BLACK, 2);
-    }
-}
-static void draw_rename_dialog(void) {
-    int bx = 60, by = 80, bw = 200, bh = 36;
-
-    fill_rect(bx + 3, by + 3, bw, bh, BLACK);
-    fill_rect(bx, by, bw, bh, LIGHT_GRAY);
-    draw_rect(bx, by, bw, bh, BLACK);
-
-    draw_string(bx + 4, by + 4, "Rename item:", BLACK, 2);
-
-    fill_rect(bx + 4, by + 14, bw - 8, 12, WHITE);
-    draw_rect(bx + 4, by + 14, bw - 8, 12, BLACK);
-
-    draw_string(bx + 6, by + 16, s_rename_buf, BLACK, 2);
-    if ((pit_ticks / 500) % 2 == 0) {
-        int cx = bx + 6 + s_rename_len * CHAR_W;
-        if (cx < bx + bw - 10)
-            draw_string(cx, by + 16, "|", BLACK, 2);
-    }
+static void rename_done(void *user, const char *name) {
+    (void)user;
+    if (!name || s_rename_idx < 0 || s_rename_idx >= desktop_fs_count())
+        return;
+    if (!desktop_fs_rename(s_rename_idx, name))
+        dlg_message(NULL, "Rename Failed", "Invalid name or item protected.");
 }
 
 /* ── desktop init ───────────────────────────────────────────────────────── */
@@ -730,59 +684,6 @@ void desktop_on_frame(void) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
 
-    if (s_mode == DESK_MODE_NEWNAME) {
-        draw_items(count, items);
-
-        if (kb.key_pressed) {
-            if (kb.last_scancode == ENTER && s_newname_len > 0) {
-                handle_newname();
-            } else if (kb.last_scancode == ESC) {
-                s_mode = DESK_MODE_NORMAL;
-            } else if (kb.last_scancode == BACKSPACE) {
-                if (s_newname_len > 0)
-                    s_newname_buf[--s_newname_len] = '\0';
-            } else if (kb.last_char >= 32 && kb.last_char < 127 &&
-                       s_newname_len < 12) {
-                char c = kb.last_char;
-                bool allow = fs_name_char_ok(c) || (c == '.' && !s_newname_is_dir);
-                if (allow) {
-                    s_newname_buf[s_newname_len++] = c;
-                    s_newname_buf[s_newname_len] = '\0';
-                }
-            }
-        }
-        draw_newname_dialog();
-        return;
-    }
-
-    if (s_mode == DESK_MODE_RENAME) {
-        draw_items(count, items);
-
-        if (kb.key_pressed) {
-            if (kb.last_scancode == ENTER && s_rename_len > 0) {
-                bool ok = desktop_fs_rename(s_rename_idx, s_rename_buf);
-                if (!ok) {
-                    modal_show(MODAL_ERROR, "Rename Failed",
-                               "Invalid name or item protected.", NULL, NULL);
-                }
-                s_mode = DESK_MODE_NORMAL;
-            } else if (kb.last_scancode == ESC) {
-                s_mode = DESK_MODE_NORMAL;
-            } else if (kb.last_scancode == BACKSPACE) {
-                if (s_rename_len > 0) {
-                    s_rename_buf[--s_rename_len] = '\0';
-                }
-            } else if (kb.last_char >= 32 && kb.last_char < 127 &&
-                       s_rename_len < 12) {
-                s_rename_buf[s_rename_len++] = kb.last_char;
-                s_rename_buf[s_rename_len] = '\0';
-            }
-        }
-
-        draw_rename_dialog();
-        return;
-    }
-
     /* ── drag * ──────────────────────────────────────────────────────────── */
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
@@ -797,8 +698,8 @@ void desktop_on_frame(void) {
                 new_x = SCREEN_WIDTH - ICON_W;
             if (new_y >
                 SCREEN_HEIGHT - MENUBAR_H - ICON_H - ICO_LABEL_H - TASKBAR_H)
-                new_y =
-                    SCREEN_HEIGHT - MENUBAR_H - ICON_H - ICO_LABEL_H - TASKBAR_H;
+                new_y = SCREEN_HEIGHT - MENUBAR_H - ICON_H - ICO_LABEL_H -
+                        TASKBAR_H;
             it->x = new_x;
             it->y = new_y;
         } else {
@@ -851,7 +752,7 @@ void desktop_on_frame(void) {
         }
     }
 
-    if (is_desktop_focused() && s_mode == DESK_MODE_NORMAL && kb.key_pressed) {
+    if (is_desktop_focused() && kb.key_pressed) {
         if (kb.ctrl_c) {
             menu_copy();
         } else if (kb.ctrl_x) {

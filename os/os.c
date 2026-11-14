@@ -209,8 +209,11 @@ void os_reap_dead_apps(void) {
         if (!app->running || !app->wants_quit)
             continue;
 
+        window *own = os_instance_window(app);
         if (app->desc && app->desc->destroy)
             app->desc->destroy(app->state);
+        if (own && wm_is_registered(own)) /* app didn't clean up: we do */
+            wm_unregister(own);
 
         if (app->state) {
             kfree(app->state);

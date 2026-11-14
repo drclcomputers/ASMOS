@@ -1,4 +1,5 @@
 #include "ui/window.h"
+#include "ui/dialogs.h"
 #include "ui/menubar.h"
 
 #include "os/error.h"
@@ -218,18 +219,16 @@ window *wm_register(const window_spec_t *spec) {
 }
 
 void wm_unregister(window *win) {
-    if (!win)
+    if (!win || !wm_is_registered(win))
         return;
+    dlg_owner_destroyed(win);
+    if (win->modal_owner && win->modal_owner->modal_child == win)
+        win->modal_owner->modal_child = NULL;
+    ctl_window_destroyed(win);
 
     for (int i = 0; i < win_count; i++) {
         if (win_stack[i] != win)
             continue;
-
-        for (int j = 0; j < win->widget_count; j++) {
-            if (win->widgets[j].type == WIDGET_TEXTBOX) {
-                widget_textbox_free(&win->widgets[j].as.textbox);
-            }
-        }
 
         if (focused_window == win)
             focused_window = NULL;
@@ -327,10 +326,7 @@ void wm_draw_all(void) {
                     continue;
                 } else if (win->anim_state == WIN_ANIM_CLOSE) {
                     win->anim_state = WIN_ANIM_NONE;
-                    if (win->on_close)
-                        win->on_close(win);
-                    else
-                        win->visible = false;
+                    wm_close(win);
                     continue;
                 } else {
                     win->anim_state = WIN_ANIM_NONE;
@@ -348,10 +344,7 @@ void wm_draw_all(void) {
                 continue;
             } else if (win->anim_state == WIN_ANIM_CLOSE) {
                 win->anim_state = WIN_ANIM_NONE;
-                if (win->on_close)
-                    win->on_close(win);
-                else
-                    win->visible = false;
+                wm_close(win);
                 continue;
             }
             win->anim_state = WIN_ANIM_NONE;
@@ -414,7 +407,7 @@ void wm_update_all(void) {
             bool on_win = mouse.x >= win->x && mouse.x <= win->x + win->w &&
                           mouse.y >= wy && mouse.y <= wy + win->h;
             if (!click_consumed && mouse.left_clicked && on_win) {
-                wm_focus(win);
+                wm_focus(win->modal_child ? win->modal_child : win);
                 click_consumed = true;
                 break;
             }
@@ -467,16 +460,17 @@ void window_draw(window *win) {
 
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
         draw_rect(win->x, wy, win->w, win->h, BLACK);
-        draw_line(win->x, win->y + win->h + MENUBAR_H - 1,
-                  win->x + win->w - 1, win->y + win->h + MENUBAR_H - 1,
-                  BLACK);
+        draw_line(win->x, win->y + win->h + MENUBAR_H - 1, win->x + win->w - 1,
+                  win->y + win->h + MENUBAR_H - 1, BLACK);
     }
 
-    for (int i = 0; i < win->widget_count; i++)
-        widget_draw(&win->widgets[i], win->x, wy);
-
+    /* app painting and controls stay inside the window */
+    gfx_set_clip(win->x, wy, win->w, win->h);
     if (win->on_draw)
         win->on_draw(win, win->on_draw_userdata);
+    if (win->controls)
+        ctl_draw_all(win);
+    gfx_reset_clip();
 
     if (win->resizable) {
         int gx = win->x + win->w - RESIZE_BUTTON - 1;
@@ -504,10 +498,7 @@ bool window_update(window *win) {
             win->anim_state = WIN_ANIM_CLOSE;
             win->anim_frame = 0;
         } else {
-            if (win->on_close)
-                win->on_close(win);
-            else
-                win->visible = false;
+            wm_close(win);
         }
         return true;
     }
@@ -528,9 +519,6 @@ bool window_update(window *win) {
 
     window_resize(win);
     window_dragged(win);
-
-    for (int i = 0; i < win->widget_count; i++)
-        widget_update(&win->widgets[i], win->x, wy);
 
     return true;
 }
@@ -599,16 +587,20 @@ void window_dragged(window *win) {
     }
 }
 
-void window_add_widget(window *win, widget wg) {
-    if (!win) {
-        ERR_WARN_REPORT(ERR_NULL_PTR, "window_add_widget: win");
-        return;
-    }
-    if (win->widget_count >= MAX_WIN_WIDGETS) {
-        ERR_WARN_REPORT(ERR_INVALID_ARG, "window_add_widget: max widgets");
-        return;
-    }
-    win->widgets[win->widget_count++] = wg;
+bool wm_is_registered(const window *win) {
+    for (int i = 0; i < win_count; i++)
+        if (win_stack[i] == win)
+            return true;
+    return false;
+}
+
+/* Close button: the window's own handler, else end the app that owns it,
+ * else just hide it. */
+void wm_close(window *win) {
+    if (win->on_close)
+        win->on_close(win);
+    else if (!os_close_own_instance(win))
+        win->visible = false;
 }
 
 menu *window_add_menu(window *win, const char *title) {
