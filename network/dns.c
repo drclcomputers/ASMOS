@@ -2,6 +2,7 @@
 #include "drivers/ne2000.h"
 #include "lib/core.h"
 #include "lib/memory.h"
+#include "lib/string.h"
 #include "lib/time.h"
 #include "network/net.h"
 #include "os/scheduler.h"
@@ -11,6 +12,15 @@
 #define DNS_LOCAL_COUNT 8
 
 static uint8_t s_dns_server[4] = {8, 8, 8, 8};
+
+#define DNS_CACHE_N 8
+typedef struct {
+    bool used;
+    char name[64];
+    uint8_t ip[4];
+} dns_cache_t;
+static dns_cache_t s_cache[DNS_CACHE_N];
+static unsigned s_cache_next;
 static uint16_t s_dns_txn_id = 0x1234;
 static uint16_t s_dns_local_port = DNS_LOCAL_BASE;
 
@@ -91,6 +101,13 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
         memcpy(ip_out, parts, 4);
         return true;
     }
+
+    /* small cache: gopher menus repeat the same host on every line */
+    for (int c = 0; c < DNS_CACHE_N; c++)
+        if (s_cache[c].used && strcmp(s_cache[c].name, hostname) == 0) {
+            memcpy(ip_out, s_cache[c].ip, 4);
+            return true;
+        }
 
     uint8_t *pkt = (uint8_t *)kmalloc(DNS_PKT_SIZE);
     uint8_t *resp = (uint8_t *)kmalloc(DNS_PKT_SIZE);
@@ -206,5 +223,11 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
 
     kfree(pkt);
     kfree(resp);
+    if (found && strlen(hostname) < sizeof(s_cache[0].name)) {
+        dns_cache_t *e = &s_cache[s_cache_next++ % DNS_CACHE_N];
+        e->used = true;
+        strcpy(e->name, hostname);
+        memcpy(e->ip, ip_out, 4);
+    }
     return found;
 }

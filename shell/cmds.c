@@ -509,7 +509,7 @@ void cmd_history(char *out, size_t max) {
 }
 
 typedef struct {
-    char host[64];
+    char host[200]; /* host, host:port or a full gopher:// URL */
     uint16_t port;
     char selector[128];
     term_context_t *ctx;
@@ -526,7 +526,12 @@ static void gopher_task_entry(void *arg) {
 
 void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max) {
     if (!args || args[0] == '\0') {
-        append(out, max, "Usage: gopher <host|ip> [port] [selector]\n\n");
+        append(out, max,
+               "Usage: gopher <host|ip>[:port] [port] [selector]\n"
+               "       gopher gopher://host[:port]/1/selector\n"
+               "  e.g. gopher gopher.floodgap.com\n"
+               "  Inside: arrows move, Enter opens, b back, d save, "
+               "g go to, ? help\n\n");
         return;
     }
     if (!g_cfg.networking_enabled) {
@@ -552,8 +557,8 @@ void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max) {
     while (args[i] != ' ' && args[i] != '\0')
         i++;
     int hlen = i - hs;
-    if (hlen >= 64)
-        hlen = 63;
+    if (hlen >= (int)sizeof(a->host))
+        hlen = (int)sizeof(a->host) - 1;
     memcpy(a->host, args + hs, hlen);
     a->host[hlen] = '\0';
 

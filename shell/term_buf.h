@@ -18,12 +18,28 @@ bool term_buf_save(const char *path);
 
 typedef struct term_context term_context_t;
 
+/* Non-character keys delivered by getchar() (above the ASCII range, so
+ * they can't be confused with typed letters; raw scancodes used to be
+ * passed, and 0x48 "up" was also the letter 'H'). */
+#define TERM_KEY_UP 0x80
+#define TERM_KEY_DOWN 0x81
+#define TERM_KEY_LEFT 0x82
+#define TERM_KEY_RIGHT 0x83
+#define TERM_KEY_PGUP 0x84
+#define TERM_KEY_PGDN 0x85
+#define TERM_KEY_ESC 0x86
+#define TERM_KEY_HOME 0x87
+#define TERM_KEY_END 0x88
+
 struct term_context {
     void (*print)(term_context_t *ctx, const char *str);
     void (*putchar)(term_context_t *ctx, char c);
     int (*readline)(term_context_t *ctx, char *buf, int maxchars);
     int (*getchar)(term_context_t *ctx);
     void *userdata;
+    /* optional (may be NULL): */
+    void (*clear)(term_context_t *ctx); /* wipe the output area */
+    void (*size)(term_context_t *ctx, int *cols, int *rows); /* visible */
 };
 
 static inline void term_ctx_print(term_context_t *ctx, const char *s) {

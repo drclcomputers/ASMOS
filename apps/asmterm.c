@@ -82,7 +82,9 @@ typedef struct {
     char hist_draft[INPUT_CAP];
 
     bool binary_waiting;
+    bool line_mode; /* inside readline(): typed text is echoed/edited */
     bool gopher_mode;
+    int cols; /* visible output columns (updated on draw) */
     input_queue_t iq;
     term_context_t term_ctx;
 } asmterm_state_t;
@@ -167,6 +169,7 @@ static int tctx_readline(term_context_t *ctx, char *buf, int maxchars) {
         return 0;
 
     s->binary_waiting = true;
+    s->line_mode = true;
     int len = 0;
     buf[0] = '\0';
 
@@ -178,8 +181,11 @@ static int tctx_readline(term_context_t *ctx, char *buf, int maxchars) {
             if (c == '\n') {
                 buf[len] = '\0';
                 s->binary_waiting = false;
+                s->line_mode = false;
                 return len;
             }
+            if ((unsigned char)c >= 0x80)
+                continue; /* special keys mean nothing to a text line */
             if (c == '\b') {
                 if (len > 0) {
                     len--;
@@ -203,6 +209,21 @@ static int tctx_getchar(term_context_t *ctx) {
     char c = iq_pop(&s->iq);
     s->binary_waiting = false;
     return (int)(unsigned char)c;
+}
+
+static void tctx_clear(term_context_t *ctx) {
+    asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
+    s->line_head = 0;
+    s->line_count = 0;
+    s->scroll_top = 0;
+}
+
+static void tctx_size(term_context_t *ctx, int *cols, int *rows) {
+    asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
+    if (cols)
+        *cols = s->cols > 10 ? s->cols : 60;
+    if (rows)
+        *rows = s->visible_rows;
 }
 
 void asmterm_set_gopher_mode(term_context_t *ctx, bool on) {
@@ -318,6 +339,7 @@ void asmterm_window_draw(window *win, void *userdata) {
     }
 
     int max_out_cols = (ww - SCROLL_BAR_W - TERM_X - 4) / CHAR_W;
+    s->cols = max_out_cols;
     if (max_out_cols < 1)
         max_out_cols = 1;
 
@@ -406,10 +428,8 @@ static bool asmterm_close(window *w) {
 }
 static void on_file_close(void) { asmterm_close(NULL); }
 static void on_about(void) {
-    modal_show(
-        MODAL_INFO, "About ASMTerm (c)2026 @drclcomputers",
-        "ASMTerm v1.1", NULL,
-        NULL);
+    modal_show(MODAL_INFO, "About ASMTerm (c)2026 @drclcomputers",
+               "ASMTerm v1.1", NULL, NULL);
 }
 
 static void on_paste_clip(void) {
@@ -472,6 +492,8 @@ static void asmterm_init(void *state) {
     s->term_ctx.putchar = tctx_putchar;
     s->term_ctx.readline = tctx_readline;
     s->term_ctx.getchar = tctx_getchar;
+    s->term_ctx.clear = tctx_clear;
+    s->term_ctx.size = tctx_size;
     s->term_ctx.userdata = s;
 
     term_push_line(s, "ASMOS Terminal v1.1");
@@ -538,28 +560,42 @@ static void asmterm_on_frame(void *state) {
     }
 
     if (s->binary_waiting) {
+        /* Each key goes to the program exactly once. (Enter used to push
+         * the whole typed line a second time: readline got "abab" for
+         * "ab", and gopher moved the cursor twice per key.) */
+        bool echo = s->line_mode || !s->gopher_mode;
         if (sc == ENTER) {
             if (s->input_len > 0) {
                 term_push_line(s, s->input);
                 term_scroll_to_bottom(s);
-                for (int i = 0; i < s->input_len; i++)
-                    iq_push(&s->iq, s->input[i]);
                 s->input[0] = '\0';
                 s->input_len = 0;
                 s->input_scroll = 0;
             }
             iq_push(&s->iq, '\n');
         } else if (sc == BACKSPACE) {
-            if (s->input_len > 0) {
+            if (s->input_len > 0)
                 s->input[--s->input_len] = '\0';
-                iq_push(&s->iq, '\b');
-            }
+            iq_push(&s->iq, '\b');
+        } else if (sc == UP_ARROW || sc == DOWN_ARROW || sc == LEFT_ARROW ||
+                   sc == RIGHT_ARROW || sc == PAGE_UP || sc == PAGE_DOWN ||
+                   sc == ESC || sc == HOME || sc == END) {
+            char k = (char)(sc == UP_ARROW      ? TERM_KEY_UP
+                            : sc == DOWN_ARROW  ? TERM_KEY_DOWN
+                            : sc == LEFT_ARROW  ? TERM_KEY_LEFT
+                            : sc == RIGHT_ARROW ? TERM_KEY_RIGHT
+                            : sc == PAGE_UP     ? TERM_KEY_PGUP
+                            : sc == PAGE_DOWN   ? TERM_KEY_PGDN
+                            : sc == HOME        ? TERM_KEY_HOME
+                            : sc == END         ? TERM_KEY_END
+                                                : TERM_KEY_ESC);
+            iq_push(&s->iq, k);
         } else if (ch >= 32 && ch < 127) {
-            if (s->input_len < INPUT_CAP - 1) {
+            if (echo && s->input_len < INPUT_CAP - 1) {
                 s->input[s->input_len++] = ch;
                 s->input[s->input_len] = '\0';
-                iq_push(&s->iq, ch);
             }
+            iq_push(&s->iq, ch);
         }
         asmterm_window_draw(s->win, s->win->on_draw_userdata);
         return;

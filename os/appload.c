@@ -1,8 +1,8 @@
 #include "os/appload.h"
 
+#include "drivers/mouse.h"
 #include "drivers/sb16.h"
 #include "fs/fs.h"
-#include "drivers/mouse.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -70,6 +70,70 @@ static app_instance_t *instance_from_state(void *state) {
     return NULL;
 }
 
+/* ── window ownership ──────────────────────────────────────────────────
+ * Windows a dynamic app creates are remembered with the app's state, so
+ * the close button can end the app (it used to only hide the window and
+ * the app kept running, still listed in Monitor) and so leftovers are
+ * unregistered when the app goes away. */
+
+#define MAX_DYN_WINDOWS 64
+static struct {
+    window *win;
+    void *state;
+} s_owned[MAX_DYN_WINDOWS];
+static void *s_calling_state; /* state of the app whose code is running */
+
+static void *owner_of(window *w) {
+    for (int i = 0; i < MAX_DYN_WINDOWS; i++)
+        if (s_owned[i].win == w)
+            return s_owned[i].state;
+    return NULL;
+}
+
+static void forget_window(window *w) {
+    for (int i = 0; i < MAX_DYN_WINDOWS; i++)
+        if (s_owned[i].win == w)
+            s_owned[i].win = NULL, s_owned[i].state = NULL;
+}
+
+/* unregister every window still owned by this app instance */
+static void drop_windows_of(void *state) {
+    for (int i = 0; i < MAX_DYN_WINDOWS; i++)
+        if (s_owned[i].win && s_owned[i].state == state) {
+            wm_unregister(s_owned[i].win);
+            s_owned[i].win = NULL;
+            s_owned[i].state = NULL;
+        }
+}
+
+static bool dyn_on_close(window *w) {
+    app_instance_t *a = instance_from_state(owner_of(w));
+    w->visible = false;
+    if (a)
+        os_quit_app(a);
+    return true;
+}
+
+static window *api_wm_register(const window_spec_t *spec) {
+    window *w = wm_register(spec);
+    if (!w || !s_calling_state)
+        return w;
+    if (!spec->on_close)
+        w->on_close = dyn_on_close;
+    for (int i = 0; i < MAX_DYN_WINDOWS; i++)
+        if (!s_owned[i].win) {
+            s_owned[i].win = w;
+            s_owned[i].state = s_calling_state;
+            break;
+        }
+    return w;
+}
+
+static void api_wm_unregister(window *w) {
+    forget_window(w);
+    wm_unregister(w);
+}
+
 /* ── API table given to v2 apps ─────────────────────────────────────── */
 
 static void api_quit_self(void *state) {
@@ -84,8 +148,8 @@ static const os_api_t s_api = {
     .kmalloc = kmalloc,
     .kfree = kfree,
     .time_millis = time_millis,
-    .wm_register = wm_register,
-    .wm_unregister = wm_unregister,
+    .wm_register = api_wm_register,
+    .wm_unregister = api_wm_unregister,
     .wm_focus = wm_focus,
     .window_add_widget = window_add_widget,
     .draw_dot = draw_dot,
@@ -136,8 +200,11 @@ static void on_fault(loaded_app_t *la, void *state, const char *what,
     app_instance_t *inst = instance_from_state(state);
     if (inst) {
         window *w = os_instance_window(inst);
-        if (w)
+        if (w) {
+            forget_window(w);
             wm_unregister(w);
+        }
+        drop_windows_of(state);
         if (la->desc.opaque_state == false && inst->state)
             *(window **)inst->state = NULL;
         os_quit_app(inst);
@@ -154,10 +221,13 @@ static void run_entry(app_descriptor *d, uint32_t off, void *state,
         return;
     appfault_t f;
     void *fn = la->code_base + off;
+    void *prev = s_calling_state;
+    s_calling_state = state;
     bool ok = appguard_call2(la->hdr.version >= ASMA_VERSION_2
                                  ? (void (*)(void *, void *))call_v2
                                  : (void (*)(void *, void *))call_v1,
                              fn, state, &f);
+    s_calling_state = prev;
     if (!ok)
         on_fault(la, state, what, &f);
 }
@@ -188,6 +258,7 @@ static void tramp_destroy(void *state) {
     loaded_app_t *la = find_by_desc(d);
     if (la)
         run_entry(d, la->hdr.entry_destroy, state, "destroy");
+    drop_windows_of(state); /* whatever the app forgot to unregister */
 }
 
 /* ── unload ─────────────────────────────────────────────────────────── */
@@ -520,11 +591,17 @@ bool appload_try_open(const char *p) {
         if (i == 0 && !ext)
             continue;
 
-        /* does it exist at all? avoid noise from missing locations */
+        /* does it exist, and is it a real package? Desktop shortcuts are
+         * also named NAME.APP but are not packages: skip them silently so
+         * the caller falls back to the built-in app of that name. */
         fat_file_t f;
         if (!fs_open(t, &f))
             continue;
+        uint32_t magic = 0;
+        int got = fs_read(&f, &magic, 4);
         fs_close(&f);
+        if (got != 4 || magic != ASMA_MAGIC)
+            continue;
 
         if (appload_launch(t))
             return true;
