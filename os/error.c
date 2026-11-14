@@ -1,18 +1,17 @@
 #include "os/error.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
+#include "drivers/ata.h"
 #include "drivers/gpu.h"
 #include "drivers/ne2000.h"
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
-#include "drivers/ata.h"
 #include "fs/fs.h"
 #include "lib/core.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "ui/modal.h"
-
 
 static bool s_gui_mode = false;
 
@@ -34,6 +33,7 @@ static const char *err_code_str[ERR_COUNT] = {
     [ERR_OOM] = "Out of memory",
     [ERR_HEAP_CORRUPT] = "Heap corruption",
     [ERR_TASK_STACK_OVERFLOW] = "Task stack overflow",
+    [ERR_CPU_EXCEPTION] = "CPU exception",
     [ERR_WM_MAX_WINDOWS] = "Too many windows",
     [ERR_WM_ALLOC] = "Window alloc failed",
     [ERR_APP_MAX_RUNNING] = "Too many apps",
@@ -300,8 +300,8 @@ void boot_check_network(void) {
         uint8_t mac[6];
         ne2000_get_mac(mac);
         char mac_str[32];
-        sprintf(mac_str, "detected - MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1],
-                mac[2], mac[3], mac[4], mac[5]);
+        sprintf(mac_str, "detected - MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         boot_check_line("NE2000 card", true, mac_str);
     } else {
         boot_check_line("NE2000 card", false, "not found");

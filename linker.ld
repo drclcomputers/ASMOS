@@ -32,4 +32,5 @@ SECTIONS {
     }
 
     ASSERT(_kstack_top <= 0xA0000, "Stack overflows into VGA!")
+    ASSERT(_bss_end <= _kstack_bottom, "Kernel image/BSS overlaps the stack at 0x88000!")
 }

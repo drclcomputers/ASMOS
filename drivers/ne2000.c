@@ -19,6 +19,18 @@ static uint8_t *s_rx_buf = NULL;
 
 static uint8_t s_pad_buf[60];
 
+/* The NIC's remote-DMA registers are shared state: an RX interrupt in the
+ * middle of a TX copy corrupts both. Every multi-step NIC access runs with
+ * interrupts off; save/restore so we never re-enable them by accident. */
+static inline uint32_t irq_save(void) {
+    uint32_t f;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f)::"memory");
+    return f;
+}
+static inline void irq_restore(uint32_t f) {
+    __asm__ volatile("pushl %0; popfl" ::"r"(f) : "memory", "cc");
+}
+
 static void ne_write_rdc(uint16_t addr, uint16_t count) {
     outb(P0_RSAR0, addr & 0xFF);
     outb(P0_RSAR1, addr >> 8);
@@ -129,6 +141,7 @@ bool ne2000_send(const uint8_t *data, uint16_t len) {
         len = 60;
     }
 
+    uint32_t fl = irq_save();
     ne_remote_write(TX_PAGE * 256, data, len);
     outb(P0_CMD, CMD_RD2 | CMD_PS0 | CMD_START);
     outb(P0_TPSR, TX_PAGE);
@@ -137,13 +150,14 @@ bool ne2000_send(const uint8_t *data, uint16_t len) {
     outb(P0_CMD, CMD_RD2 | CMD_TXP | CMD_PS0 | CMD_START);
 
     uint32_t t = 0x100000;
-    while ((inb(P0_CMD) & CMD_TXP) && t--)
-        ;
+    while ((inb(P0_CMD) & CMD_TXP) && t)
+        t--; /* (old `&& t--` wrapped to 0xFFFFFFFF, so the check never hit) */
+    uint8_t tsr = inb(P0_TSR);
+    irq_restore(fl);
     if (t == 0) {
         term_buf_push("NE2000: TX timeout");
         return false;
     }
-    uint8_t tsr = inb(P0_TSR);
     if (tsr & 0x02)
         term_buf_push("NE2000: TX abort");
     return true;
@@ -168,9 +182,11 @@ static bool ne_receive_one(void) {
     ne_remote_read(next_page * 256, (uint8_t *)&hdr, sizeof(hdr));
 
     if (hdr.byte_count < sizeof(rx_header_t) ||
-        hdr.byte_count > RX_BUF_SIZE + sizeof(rx_header_t)) {
-        outb(P0_BNRY, next_page);
-        return true;
+        hdr.byte_count > RX_BUF_SIZE + sizeof(rx_header_t) ||
+        hdr.next_page < RX_START || hdr.next_page >= RX_STOP) {
+        /* Corrupt header: drop everything pending (BNRY = CURR - 1). */
+        outb(P0_BNRY, curr == RX_START ? RX_STOP - 1 : curr - 1);
+        return false;
     }
 
     uint16_t pkt_len = hdr.byte_count - sizeof(rx_header_t);
@@ -217,7 +233,8 @@ void ne2000_irq_handler(void) {
 
     if (isr & (ISR_PRX | ISR_RXE)) {
         outb(P0_ISR, ISR_PRX | ISR_RXE);
-        ne_receive_one();
+        while (ne_receive_one()) /* drain all; one IRQ can mean many frames */
+            ;
     }
 
     outb(0x20, 0x20);
@@ -226,7 +243,7 @@ void ne2000_irq_handler(void) {
 void ne2000_poll(void) {
     if (!s_detected)
         return;
-    __asm__ volatile("cli");
+    uint32_t fl = irq_save();
     outb(P0_CMD, CMD_RD2 | CMD_PS0 | CMD_START);
     uint8_t isr = inb(P0_ISR);
 
@@ -249,5 +266,5 @@ void ne2000_poll(void) {
             ;
     }
 
-    __asm__ volatile("sti");
+    irq_restore(fl);
 }

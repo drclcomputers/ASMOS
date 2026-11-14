@@ -148,15 +148,16 @@ void opl2_set_instrument(uint8_t ch, const opl2_instrument_t *inst) {
     opl_write(0xC0 + ch, fb_conn);
 }
 
-static const uint16_t s_fnum_table[12] = {
-    0x156, 0x16B, 0x181, 0x198, 0x1B0, 0x1CA,
-    0x1E5, 0x202, 0x220, 0x241, 0x263, 0x287
-};
+static const uint16_t s_fnum_table[12] = {0x156, 0x16B, 0x181, 0x198,
+                                          0x1B0, 0x1CA, 0x1E5, 0x202,
+                                          0x220, 0x241, 0x263, 0x287};
 
 static void note_to_fnum(uint8_t note, uint16_t *fnum, uint8_t *block) {
     int b = (int)(note / 12);
-    if (b < 0) b = 0;
-    if (b > 7) b = 7;
+    if (b < 0)
+        b = 0;
+    if (b > 7)
+        b = 7;
     *fnum = s_fnum_table[note % 12];
     *block = (uint8_t)b;
 }
@@ -624,7 +625,7 @@ static void note_on_voice(uint8_t midi_ch, uint8_t note, uint8_t vel) {
 
     int32_t bend_cents = (int32_t)s_bend[midi_ch] * 200 / 8192;
     int16_t fnum_bent = fnum;
-    uint8_t block_bent = block;
+    int block_bent = block; /* signed: clamped to 0..7 below */
     while (bend_cents >= 100) {
         fnum_bent =
             (int16_t)((uint32_t)fnum_bent * 1060u / 1000u); // * 2^(1/12)

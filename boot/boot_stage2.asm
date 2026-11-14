@@ -28,15 +28,19 @@ entry:
 
     mov  ah, 0x88
     int  0x15
-    jc   .mem_store             ; CF set — call not supported; leave 0x0500 = 0
+    jc   .mem_fail              ; CF set — call not supported
 
     test ax, ax
-    jz   .mem_store             ; AX=0 — no extended memory reported
+    jz   .mem_fail              ; AX=0 — no extended memory reported
 
     ; AX = KB above 1MB (16-bit, up to 65535 KB ~ 64 MB)
     movzx eax, ax
     shl  eax, 10                ; eax = AX * 1024 (bytes above 1MB)
     add  eax, 0x100000          ; + 1MB base = total RAM in bytes
+    jmp  .mem_store
+
+.mem_fail:
+    xor  eax, eax               ; report "unknown" (0), not leftover EAX
 
 .mem_store:
     xor  bx, bx

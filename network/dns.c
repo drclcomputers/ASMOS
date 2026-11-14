@@ -4,6 +4,7 @@
 #include "lib/memory.h"
 #include "lib/time.h"
 #include "network/net.h"
+#include "os/scheduler.h"
 
 #define DNS_PKT_SIZE 512
 #define DNS_LOCAL_BASE 49160
@@ -40,27 +41,20 @@ static uint16_t encode_name(uint8_t *buf, uint16_t max_len, const char *name) {
     return pos;
 }
 
+/* Returns the offset just past the name at `pos` (in the record being
+ * parsed). A compression pointer ends the name in place: 2 bytes, no jump.
+ * (Following the pointer and returning ITS end made every answer record
+ * parse from the wrong offset, which is why lookups always failed.) */
 static uint16_t skip_name(const uint8_t *pkt, uint16_t pkt_len, uint16_t pos) {
-    uint8_t jumps = 0;
-    while (pos < pkt_len && jumps < 32) {
+    while (pos < pkt_len) {
         uint8_t len = pkt[pos];
         if (len == 0)
             return pos + 1;
-        if ((len & 0xC0) == 0xC0) {
-            if (pos + 1 >= pkt_len)
-                return 0;
-            uint16_t offset = ((len & 0x3F) << 8) | pkt[pos + 1];
-            if (offset >= pkt_len)
-                return 0;
-            pos = offset;
-            jumps++;
-            continue;
-        }
+        if ((len & 0xC0) == 0xC0)
+            return (pos + 1 < pkt_len) ? pos + 2 : 0;
         if (len > 63)
             return 0;
         pos += len + 1;
-        if (pos > pkt_len)
-            return 0;
     }
     return 0;
 }
@@ -150,9 +144,7 @@ bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
         int rlen = 0;
         while (time_millis() < deadline) {
             net_poll();
-            net_poll();
-            net_poll();
-            net_poll();
+            task_yield();
             rlen = udp_recv(sock, resp, DNS_PKT_SIZE, NULL, NULL);
             if (rlen > 12)
                 break;

@@ -6,9 +6,11 @@ static bool ata_wait_drq(void) {
     uint32_t timeout = 0x100000;
     while (--timeout) {
         uint8_t status = inb(ATA_PRIMARY_BASE + ATA_REG_STATUS);
+        if (status & ATA_SR_BSY)
+            continue; /* other bits are undefined while BSY is set */
         if (status & ATA_SR_ERR)
             return false;
-        if (!(status & ATA_SR_BSY) && (status & ATA_SR_DRQ))
+        if (status & ATA_SR_DRQ)
             return true;
     }
     return false;
@@ -18,10 +20,9 @@ static bool ata_wait_ready(void) {
     uint32_t timeout = 0x100000;
     while (--timeout) {
         uint8_t status = inb(ATA_PRIMARY_BASE + ATA_REG_STATUS);
-        if (status & ATA_SR_ERR)
-            return false;
-        if (!(status & ATA_SR_BSY))
-            return true;
+        if (status & ATA_SR_BSY)
+            continue;
+        return !(status & ATA_SR_ERR);
     }
     return false;
 }
@@ -79,10 +80,10 @@ bool ata_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
     for (int i = 0; i < 256; i++)
         outw(ATA_PRIMARY_BASE + ATA_REG_DATA, p[i]);
 
+    if (!ata_wait_ready()) /* drive must finish the write before FLUSH */
+        return false;
     outb(ATA_PRIMARY_BASE + ATA_REG_COMMAND, ATA_CMD_FLUSH);
-    ata_wait_ready();
-
-    return true;
+    return ata_wait_ready();
 }
 
 bool ata_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count,

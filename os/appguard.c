@@ -1,6 +1,7 @@
 #include "os/appguard.h"
 #include "lib/string.h"
 #include "lib/vmm.h"
+#include "os/error.h"
 #include "os/os.h"
 #include "os/scheduler.h"
 #include "ui/modal.h"
@@ -54,9 +55,37 @@ __asm__(
     "  jmp exc_common\n"
     ".endm\n"
     "EXC_NOERR 0\n"
+    "EXC_NOERR 1\n"
+    "EXC_NOERR 2\n"
+    "EXC_NOERR 3\n"
+    "EXC_NOERR 4\n"
+    "EXC_NOERR 5\n"
     "EXC_NOERR 6\n"
+    "EXC_NOERR 7\n"
+    "EXC_ERR 8\n"
+    "EXC_NOERR 9\n"
+    "EXC_ERR 10\n"
+    "EXC_ERR 11\n"
+    "EXC_ERR 12\n"
     "EXC_ERR 13\n"
     "EXC_ERR 14\n"
+    "EXC_NOERR 15\n"
+    "EXC_NOERR 16\n"
+    "EXC_ERR 17\n"
+    "EXC_NOERR 18\n"
+    "EXC_NOERR 19\n"
+    "EXC_NOERR 20\n"
+    "EXC_NOERR 21\n"
+    "EXC_NOERR 22\n"
+    "EXC_NOERR 23\n"
+    "EXC_NOERR 24\n"
+    "EXC_NOERR 25\n"
+    "EXC_NOERR 26\n"
+    "EXC_NOERR 27\n"
+    "EXC_NOERR 28\n"
+    "EXC_NOERR 29\n"
+    "EXC_NOERR 30\n"
+    "EXC_NOERR 31\n"
     "exc_common:\n"
     "  pusha\n"
     "  movl %cr2, %eax\n"
@@ -67,22 +96,78 @@ __asm__(
     "  call exc_handler_c\n"
     "  cli\n"
     "1: hlt\n"
-    "  jmp 1b\n");
+    "  jmp 1b\n"
+    ".section .rodata\n"
+    ".globl exc_stub_table\n"
+    "exc_stub_table:\n"
+    "  .long isr_exc0\n"
+    "  .long isr_exc1\n"
+    "  .long isr_exc2\n"
+    "  .long isr_exc3\n"
+    "  .long isr_exc4\n"
+    "  .long isr_exc5\n"
+    "  .long isr_exc6\n"
+    "  .long isr_exc7\n"
+    "  .long isr_exc8\n"
+    "  .long isr_exc9\n"
+    "  .long isr_exc10\n"
+    "  .long isr_exc11\n"
+    "  .long isr_exc12\n"
+    "  .long isr_exc13\n"
+    "  .long isr_exc14\n"
+    "  .long isr_exc15\n"
+    "  .long isr_exc16\n"
+    "  .long isr_exc17\n"
+    "  .long isr_exc18\n"
+    "  .long isr_exc19\n"
+    "  .long isr_exc20\n"
+    "  .long isr_exc21\n"
+    "  .long isr_exc22\n"
+    "  .long isr_exc23\n"
+    "  .long isr_exc24\n"
+    "  .long isr_exc25\n"
+    "  .long isr_exc26\n"
+    "  .long isr_exc27\n"
+    "  .long isr_exc28\n"
+    "  .long isr_exc29\n"
+    "  .long isr_exc30\n"
+    "  .long isr_exc31\n"
+    ".text\n");
 
-extern void isr_exc0(void);
-extern void isr_exc6(void);
-extern void isr_exc13(void);
-extern void isr_exc14(void);
+/* One stub per CPU exception 0..31. Before, only 0/6/13/14 had handlers;
+ * the rest hit isr_spurious, which sent a PIC EOI and IRET'd with the
+ * error code still on the stack (garbage EIP → triple fault / reboot). */
+extern const uint32_t exc_stub_table[32];
 
-/* ── Unguarded #PF fallback ─────────────────────────────────────────────────
- * Reached only for page faults outside appguard_call2 (e.g. a scheduler
- * task).  Task 0 (kernel) faults are fatal; any other task is killed. */
+/* ── Unguarded fault fallback ───────────────────────────────────────────────
+ * Reached for CPU exceptions outside appguard_call2. A background task
+ * (shell `run`, gopher, ...) is killed; the kernel task panics visibly. */
 #define PF_PRESENT (1u << 0) /* 0=not-present, 1=protection violation */
 #define PF_WRITE (1u << 1)
 #define PF_RSVD (1u << 3)
 #define PF_IFETCH (1u << 4)
 
-static void pf_kill_task(uint32_t eip, uint32_t err, uint32_t fault_addr) {
+static const char *exc_name(uint32_t v) {
+    switch (v) {
+    case 0:
+        return "divide error";
+    case 6:
+        return "invalid opcode";
+    case 8:
+        return "double fault";
+    case 12:
+        return "stack fault";
+    case 13:
+        return "general protection fault";
+    case 14:
+        return "page fault";
+    default:
+        return "CPU exception";
+    }
+}
+
+static void fault_kill_task(uint32_t vec, uint32_t eip, uint32_t err,
+                            uint32_t fault_addr) {
     app_instance_t *victim = NULL;
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         if (running_apps[i].running &&
@@ -95,8 +180,10 @@ static void pf_kill_task(uint32_t eip, uint32_t err, uint32_t fault_addr) {
                                ? victim->desc->name
                                : "Unknown App";
 
-    const char *kind;
-    if (err & PF_RSVD)
+    const char *kind = exc_name(vec);
+    if (vec != 14)
+        ;
+    else if (err & PF_RSVD)
         kind = "reserved-bit violation";
     else if (err & PF_IFETCH)
         kind = "instruction fetch violation";
@@ -108,16 +195,20 @@ static void pf_kill_task(uint32_t eip, uint32_t err, uint32_t fault_addr) {
                                   : "read from unmapped page";
 
     char msg[128];
-    snprintf(msg, sizeof(msg), "%.60s: %s\nat 0x%08X (EIP 0x%08X)", app_name,
-             kind, fault_addr, eip);
+    if (vec == 14)
+        snprintf(msg, sizeof(msg), "%.60s: %s\nat 0x%08X (EIP 0x%08X)",
+                 app_name, kind, fault_addr, eip);
+    else
+        snprintf(msg, sizeof(msg), "%.60s: %s #%u\n(EIP 0x%08X)", app_name,
+                 kind, vec, eip);
 
     vmm_load_kernel();
-    modal_show(MODAL_ERROR, "Page Fault — App Terminated", msg, NULL, NULL);
+    modal_show(MODAL_ERROR, "Task Fault — Terminated", msg, NULL, NULL);
     if (victim)
         os_quit_app(victim);
-    task_yield();
-    for (;;)
-        __asm__ volatile("hlt");
+    /* Never returns. (Old code yielded then hlt-looped with IF=0: once the
+     * scheduler came back to this task the whole OS froze.) */
+    scheduler_exit_current();
 }
 
 static gjmp_t *s_jmp = NULL;
@@ -133,8 +224,15 @@ void exc_handler_c(uint32_t vec, uint32_t err, uint32_t eip, uint32_t cr2) {
         s_fault.cr2 = cr2;
         guard_longjmp(j, 1);
     }
-    if (vec == 14 && current_task != 0)
-        pf_kill_task(eip, err, cr2);
+    if (current_task != 0)
+        fault_kill_task(vec, eip, err, cr2);
+
+    /* Kernel task, unguarded: show what happened instead of a silent hang. */
+    char msg[80];
+    snprintf(msg, sizeof(msg), "%s #%u at EIP 0x%08X, err 0x%X, CR2 0x%08X",
+             exc_name(vec), vec, eip, err, cr2);
+    error_set_gui_mode(false);
+    error_report(ERR_FATAL, ERR_CPU_EXCEPTION, msg); /* halts */
     __asm__ volatile("cli");
     for (;;)
         __asm__ volatile("hlt");
@@ -160,8 +258,7 @@ bool appguard_call2(void (*fn)(void *, void *), void *a, void *b,
 }
 
 void appguard_install_gates(void (*set_gate)(uint8_t, uint32_t)) {
-    set_gate(0, (uint32_t)isr_exc0);
-    set_gate(6, (uint32_t)isr_exc6);
-    set_gate(13, (uint32_t)isr_exc13);
-    set_gate(14, (uint32_t)isr_exc14);
+    for (int v = 0; v < 32; v++)
+        if (v != 2) /* NMI is an interrupt, not a fault: keep the default */
+            set_gate((uint8_t)v, exc_stub_table[v]);
 }

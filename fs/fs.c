@@ -1,7 +1,7 @@
 #include "fs/fs.h"
 #include "drivers/ata.h"
-#include "fs/fat_io.h"
 #include "drivers/fdd.h"
+#include "fs/fat_io.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -380,6 +380,17 @@ bool fs_mount_drive(uint8_t drive_id) {
                                              : v->bpb.total_sectors_32;
     v->cluster_count = (total - v->data_lba) / v->bpb.sectors_per_cluster;
     v->fat_type = (v->cluster_count < 4085) ? FAT_TYPE_FAT12 : FAT_TYPE_FAT16;
+
+    /* Clamp to what one FAT copy can address. The default image has 16110
+     * data clusters but a 32-sector FAT (8192 entries): clusters past 8190
+     * made fat_set write into FAT #2 and then the ROOT DIRECTORY, wiping
+     * files once ~16 MB were used. */
+    uint32_t fat_entries =
+        (v->fat_type == FAT_TYPE_FAT12)
+            ? (uint32_t)v->bpb.sectors_per_fat * 512u * 2u / 3u
+            : (uint32_t)v->bpb.sectors_per_fat * 256u;
+    if (fat_entries >= 2 && v->cluster_count > fat_entries - 2)
+        v->cluster_count = fat_entries - 2;
     v->mounted = true;
 
     extract_volume_label(v);
@@ -925,10 +936,11 @@ int fs_read(fat_file_t *f, void *buf, int len) {
     return total;
 }
 
+/* No EOC rewrite here: fat_alloc() already marks every new cluster EOC.
+ * Forcing EOC at the current cluster truncated (and leaked) the rest of the
+ * chain whenever an existing file was overwritten from the start. */
 static int done_write(fat_file_t *f, int total, fat_vol_t *v) {
-    if (vol_cluster_active(v, f->cur_cluster))
-        fat_set(f->drive_id, f->cur_cluster, FAT16_EOC);
-
+    (void)v;
     if (total >= 0) {
         f->entry.modify_time = now_fat_time();
         f->entry.modify_date = now_fat_date();
@@ -991,7 +1003,7 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             can_write = len;
 
         memcpy(write_sector_buf + offset_in_sector, in, can_write);
-        if(!fs_write_sector(f->drive_id, lba, write_sector_buf)) {
+        if (!fs_write_sector(f->drive_id, lba, write_sector_buf)) {
             return done_write(f, -1, v);
         }
 
@@ -1002,9 +1014,6 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
         if (f->cur_offset > f->entry.file_size)
             f->entry.file_size = f->cur_offset;
     }
-
-    if (vol_cluster_active(v, f->cur_cluster))
-        fat_set(f->drive_id, f->cur_cluster, FAT16_EOC);
 
     f->entry.modify_time = now_fat_time();
     f->entry.modify_date = now_fat_date();
@@ -1018,7 +1027,10 @@ bool fs_seek(fat_file_t *f, uint32_t offset) {
     f->cur_offset = offset;
     f->cur_cluster = f->entry.cluster_lo;
     uint32_t cluster_bytes = v->bpb.sectors_per_cluster * 512;
-    uint32_t clusters_to_skip = offset / cluster_bytes;
+    /* read/write keep cur_cluster on the PREVIOUS cluster at an exact
+     * boundary and advance on the next access; seek the same way, or the
+     * next read/write skips a whole cluster. */
+    uint32_t clusters_to_skip = offset ? (offset - 1) / cluster_bytes : 0;
     for (uint32_t i = 0; i < clusters_to_skip; i++) {
         if (!vol_cluster_active(v, f->cur_cluster))
             return false;
@@ -1255,8 +1267,7 @@ static bool _copy_entry_cb(uint8_t drive_id, dir_entry_t *e, uint16_t cluster,
     (void)idx;
     copy_dir_ctx *ctx = user;
     char child83[12];
-    for (int i = 0; i < 11; i++)
-        child83[i] = (char)e->name[i];
+    memcpy(child83, e->name, 11); /* name[8] + ext[3] are contiguous */
     child83[11] = '\0';
 
     if (e->attr & ATTR_DIRECTORY) {

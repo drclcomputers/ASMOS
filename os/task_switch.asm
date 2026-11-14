@@ -11,13 +11,15 @@ task_switch:
     mov  eax, [esp + 24]       ; old_esp_ptr
     mov  [eax], esp            ; *old_esp_ptr = current ESP
 
-    mov  ecx, [esp + 28]       ; new_esp — read BEFORE we move esp
+    ; Read BOTH args from the current (old) stack before switching.
+    ; (Previously the second read came from the NEW stack, so ESP became the
+    ; new task's saved arg — e.g. its slot number — and every task crashed.)
+    mov  ecx, [esp + 28]       ; new_esp
+    mov  edx, [esp + 32]       ; new_cr3 (0 = keep current)
     mov  esp, ecx
 
-    mov  ecx, [esp + 28]
-    mov  edx, [esp + 32]
-    mov  esp, ecx
-
+    test edx, edx
+    jz   .no_cr3_switch
     mov  cr3, edx
 
 .no_cr3_switch:

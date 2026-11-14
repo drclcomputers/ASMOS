@@ -196,16 +196,15 @@ void cmd_write(const char *args, char *out, size_t max) {
     }
     fs_file_t file;
     dir_entry_t entry;
-    if (fs_find(fn, &entry)) {
-        if (!fs_open(fn, &file)) {
-            append(out, max, "Error: cannot open\n\n");
-            return;
-        }
-    } else {
-        if (!fs_create(fn, &file)) {
-            append(out, max, "Error: cannot create\n\n");
-            return;
-        }
+    /* Replace, don't overwrite in place: file_size never shrinks, so a
+     * shorter write used to leave the old content's tail behind. */
+    if (fs_find(fn, &entry) && !fs_delete(fn)) {
+        append(out, max, "Error: cannot replace\n\n");
+        return;
+    }
+    if (!fs_create(fn, &file)) {
+        append(out, max, "Error: cannot create\n\n");
+        return;
     }
     int tl = 0;
     while (args[i + tl] != '\0')
@@ -665,20 +664,29 @@ void cmd_netconf(const char *args, char *out, size_t max) {
 }
 
 void cmd_app(const char *args, char *out, size_t max) {
-    if (!args) args = "";
-    while (*args == ' ') args++;
+    if (!args)
+        args = "";
+    while (*args == ' ')
+        args++;
 
     if (!*args) {
-        append(out, max, "Usage: app run <name|path> | scan [dir] | list | unload <name>\n");
+        append(
+            out, max,
+            "Usage: app run <name|path> | scan [dir] | list | unload <name>\n");
         return;
     }
     const char *arg = args;
-    while (*arg && *arg != ' ') arg++;
+    while (*arg && *arg != ' ')
+        arg++;
     size_t cl = (size_t)(arg - args);
-    while (*arg == ' ') arg++;
+    while (*arg == ' ')
+        arg++;
 
     if (cl == 3 && !strncmp(args, "run", 3)) {
-        if (!*arg) { append(out, max, "app run: need a name or path\n"); return; }
+        if (!*arg) {
+            append(out, max, "app run: need a name or path\n");
+            return;
+        }
         if (!appload_try_open(arg))
             snprintf(out, max, "app: '%s' not found\n", arg);
     } else if (cl == 4 && !strncmp(args, "scan", 4)) {
@@ -687,18 +695,23 @@ void cmd_app(const char *args, char *out, size_t max) {
     } else if (cl == 4 && !strncmp(args, "list", 4)) {
         int shown = 0;
         for (int i = 0; i < installed_app_count; i++) {
-            if (!appload_find(installed_apps[i]->name)) continue;
+            if (!appload_find(installed_apps[i]->name))
+                continue;
             append(out, max, "  ");
             append(out, max, installed_apps[i]->name);
             append(out, max, "\n");
             shown++;
         }
-        if (!shown) append(out, max, "No external apps loaded\n");
+        if (!shown)
+            append(out, max, "No external apps loaded\n");
     } else if (cl == 6 && !strncmp(args, "unload", 6)) {
         app_descriptor *d = appload_find(arg);
-        if (!d) snprintf(out, max, "app: '%s' is not a loaded external app\n", arg);
-        else if (!appload_unload(d)) append(out, max, "app: still running; close it first\n");
-        else append(out, max, "Unloaded\n");
+        if (!d)
+            snprintf(out, max, "app: '%s' is not a loaded external app\n", arg);
+        else if (!appload_unload(d))
+            append(out, max, "app: still running; close it first\n");
+        else
+            append(out, max, "Unloaded\n");
     } else {
         append(out, max, "app: unknown subcommand\n");
     }

@@ -80,7 +80,7 @@ static bool ip_is_local(const uint8_t ip[4]) {
 
 static void eth_send(const uint8_t dst_mac[6], uint16_t ethertype,
                      const uint8_t *payload, uint16_t plen) {
-    uint8_t frame[1518];
+    static uint8_t frame[1518]; /* static: task stacks are only 16 KB */
     eth_hdr_t *eh = (eth_hdr_t *)frame;
     memcpy(eh->dst, dst_mac, 6);
     memcpy(eh->src, s_mac, 6);
@@ -93,7 +93,7 @@ static uint16_t s_ip_id = 1;
 
 static void ip_send(const uint8_t dst_mac[6], const uint8_t dst_ip[4],
                     uint8_t proto, const uint8_t *payload, uint16_t plen) {
-    uint8_t buf[1480];
+    static uint8_t buf[1480];
     ip_hdr_t *iph = (ip_hdr_t *)buf;
     iph->ihl_ver = 0x45;
     iph->tos = 0;
@@ -111,14 +111,15 @@ static void ip_send(const uint8_t dst_mac[6], const uint8_t dst_ip[4],
 }
 
 static bool resolve_mac(const uint8_t ip[4], uint8_t mac_out[6]) {
-    if (arp_lookup(ip, mac_out))
-        return true;
+    /* Off-subnet hosts are reached via the gateway, so the cache entry to
+     * look for is the gateway's, not the remote IP's (which never exists). */
     const uint8_t *target = ip_is_local(ip) ? ip : s_gw;
+    if (arp_lookup(target, mac_out))
+        return true;
     for (int retry = 0; retry < 3; retry++) {
         arp_request(target);
         uint32_t t = time_millis() + 500;
         while (time_millis() < t) {
-            net_poll();
             net_poll();
             task_yield();
             if (arp_lookup(target, mac_out))
@@ -233,7 +234,7 @@ static void handle_icmp(const ip_hdr_t *iph, const uint8_t *data,
         uint16_t total = sizeof(icmp_hdr_t) + payload_len;
         rep->checksum = net_htons(net_checksum(buf, total));
         uint8_t mac[6];
-        if (arp_lookup(iph->src, mac))
+        if (arp_lookup(ip_is_local(iph->src) ? iph->src : s_gw, mac))
             ip_send(mac, iph->src, IP_PROTO_ICMP, buf, total);
     } else if (ih->type == ICMP_ECHO_REP) {
         if (net_ntohs(ih->id) == s_ping_id && net_ntohs(ih->seq) == s_ping_seq)
@@ -274,6 +275,13 @@ static void handle_udp(const ip_hdr_t *iph, const uint8_t *data, uint16_t len) {
 
 static void tcp_send_flags(net_socket_t *s, uint8_t flags, const uint8_t *data,
                            uint16_t dlen);
+
+static uint16_t tcp_rx_free(const net_socket_t *s) {
+    /* One slot stays empty so head == tail always means "empty". */
+    return (uint16_t)(NET_TCP_BUFSIZE - 1 -
+                      ((s->tcp_rx_tail - s->tcp_rx_head + NET_TCP_BUFSIZE) %
+                       NET_TCP_BUFSIZE));
+}
 
 static void handle_tcp(const ip_hdr_t *iph, const uint8_t *data, uint16_t len) {
     if (len < sizeof(tcp_hdr_t))
@@ -319,28 +327,32 @@ static void handle_tcp(const ip_hdr_t *iph, const uint8_t *data, uint16_t len) {
                 tcp_send_flags(s, TCP_ACK, NULL, 0);
             }
             break;
-        case TCP_ESTABLISHED:
+        case TCP_ESTABLISHED: {
+            if ((plen > 0 || (th->flags & TCP_FIN)) && seg_seq != s->rx_seq) {
+                /* Duplicate / out-of-order: drop, re-ACK what we have. */
+                tcp_send_flags(s, TCP_ACK, NULL, 0);
+                break;
+            }
+            uint16_t copy = 0;
             if (plen > 0) {
-                uint16_t free =
-                    NET_TCP_BUFSIZE -
-                    ((s->tcp_rx_tail - s->tcp_rx_head + NET_TCP_BUFSIZE) %
-                     NET_TCP_BUFSIZE);
-                uint16_t copy = plen < free ? plen : free;
+                uint16_t free = tcp_rx_free(s);
+                copy = plen < free ? plen : free;
                 for (uint16_t j = 0; j < copy; j++) {
                     s->tcp_rx[s->tcp_rx_tail] = payload[j];
                     s->tcp_rx_tail = (s->tcp_rx_tail + 1) % NET_TCP_BUFSIZE;
                 }
-                s->rx_seq = seg_seq + plen;
-                tcp_send_flags(s, TCP_ACK, NULL, 0);
+                s->rx_seq +=
+                    copy; /* only ACK what we kept; peer resends rest */
             }
-            if (th->flags & TCP_FIN) {
-                s->rx_seq = seg_seq + 1;
+            bool fin = (th->flags & TCP_FIN) && copy == plen;
+            if (fin) {
+                s->rx_seq += 1;
                 s->tcp_state = TCP_CLOSE_WAIT;
-                tcp_send_flags(s, TCP_ACK, NULL, 0);
             }
-            if ((th->flags & TCP_ACK) && seg_ack > s->tx_seq)
-                s->tx_seq = seg_ack;
+            if (plen > 0 || fin)
+                tcp_send_flags(s, TCP_ACK, NULL, 0); /* one ACK covers both */
             break;
+        }
         case TCP_FIN_WAIT1:
             if (th->flags & TCP_ACK)
                 s->tcp_state = TCP_FIN_WAIT2;
@@ -512,7 +524,7 @@ bool udp_send(int sock, const uint8_t dst_ip[4], uint16_t dst_port,
     if (!resolve_mac(dst_ip, mac))
         return false;
     uint16_t total = sizeof(udp_hdr_t) + len;
-    uint8_t buf[1460];
+    static uint8_t buf[1460];
     if (total > 1460)
         return false;
     udp_hdr_t *uh = (udp_hdr_t *)buf;
@@ -546,13 +558,11 @@ int udp_recv(int sock, uint8_t *buf, uint16_t maxlen, uint8_t src_ip[4],
 
 static void tcp_send_flags(net_socket_t *s, uint8_t flags, const uint8_t *data,
                            uint16_t dlen) {
-    uint8_t mac[6];
-    if (!arp_lookup(s->remote_ip, mac)) {
-        if (!resolve_mac(s->remote_ip, mac))
-            return;
-    }
+    /* Use the next-hop MAC resolved in tcp_connect. Resolving here would run
+     * ARP (and a nested net_poll) from inside handle_tcp. */
+    const uint8_t *mac = s->remote_mac;
     uint16_t total = sizeof(tcp_hdr_t) + dlen;
-    uint8_t buf[1460];
+    static uint8_t buf[1460];
     if (total > 1460)
         return;
     tcp_hdr_t *th = (tcp_hdr_t *)buf;
@@ -562,7 +572,7 @@ static void tcp_send_flags(net_socket_t *s, uint8_t flags, const uint8_t *data,
     th->ack = net_htonl(s->rx_seq);
     th->data_off = (sizeof(tcp_hdr_t) / 4) << 4;
     th->flags = flags;
-    th->window = net_htons(NET_TCP_BUFSIZE);
+    th->window = net_htons(tcp_rx_free(s)); /* real free space */
     th->checksum = 0;
     th->urgent = 0;
     if (dlen)
@@ -606,7 +616,8 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
     s->local_port = actual_port;
     s->remote_port = dst_port;
     memcpy(s->remote_ip, dst_ip, 4);
-    s->tx_seq = 0x12345678;
+    s->tx_seq =
+        0x12345678u + time_millis() * 2654435761u; /* vary ISN per connection */
     s->tcp_state = TCP_SYN_SENT;
 
     uint8_t mac[6];
@@ -617,15 +628,23 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
         return -1;
     }
     memcpy(s->remote_mac, mac, 6);
+    uint32_t isn = s->tx_seq;
     tcp_send_flags(s, TCP_SYN, NULL, 0);
 
     uint32_t deadline = time_millis() + 3000;
+    uint32_t resend = time_millis() + 1000;
     while (time_millis() < deadline) {
+        net_poll(); /* don't depend on another task polling for us */
         task_yield();
         if (s->tcp_state == TCP_ESTABLISHED)
             return i;
         if (s->tcp_state == TCP_CLOSED)
             break;
+        if (time_millis() >= resend) { /* SYN lost: send it again */
+            s->tx_seq = isn;
+            tcp_send_flags(s, TCP_SYN, NULL, 0);
+            resend = time_millis() + 1000;
+        }
     }
     if (s->tcp_state != TCP_CLOSED)
         tcp_send_flags(s, TCP_RST | TCP_ACK, NULL, 0);
@@ -648,6 +667,7 @@ void tcp_close(int sock) {
         s->tcp_state = next;
         uint32_t deadline = time_millis() + 2000;
         while (time_millis() < deadline) {
+            net_poll();
             task_yield();
             if (s->tcp_state == TCP_CLOSED || s->tcp_state == TCP_TIME_WAIT)
                 break;
@@ -701,14 +721,19 @@ tcp_state_t tcp_state(int sock) {
 static bool s_polling = false;
 
 void net_poll(void) {
-    if (s_polling)
+    /* Guard the whole poll: a handler that sends (or a nested resolve_mac)
+     * must not re-enter and process the same queued frame again. */
+    if (s_polling || !s_rx_queue)
         return;
     s_polling = true;
     ne2000_poll();
-    s_polling = false;
+    static rx_pkt_t pkt; /* copy out, so the IRQ can't overwrite it */
     while (s_rx_tail != s_rx_head) {
         rx_pkt_t *p = &s_rx_queue[s_rx_tail];
-        net_rx_process(p->data, p->len);
+        pkt.len = p->len;
+        memcpy(pkt.data, p->data, p->len);
         s_rx_tail = (s_rx_tail + 1) % RX_QUEUE_SIZE;
+        net_rx_process(pkt.data, pkt.len);
     }
+    s_polling = false;
 }

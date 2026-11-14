@@ -6,7 +6,7 @@
 ;
 ; Loads:
 ;   Stage2   (sectors 1-8)   → 0x07E0:0000 = 0x7E00
-;   Kernel   (sectors 9-1008)→ 0x0800:0000 = 0x8000  (fits in 500KB window)
+;   Kernel   (sectors 9-1008)→ 0x1000:0000 = 0x10000
 ;
 ; Changes vs original:
 ;   • I/O delay (port 0x80) after INT 13h reset, before retry loop
@@ -37,7 +37,7 @@ fat_count:              db 2
 root_entry_count:       dw 512
 total_sectors_16:       dw 0
 media_type:             db 0xF8
-sectors_per_fat:        dw 32
+sectors_per_fat:        dw 64          ; 64*256 entries covers all 16094 data clusters
 sectors_per_track:      dw 63
 head_count:             dw 16
 hidden_sectors:         dd 0
@@ -145,6 +145,26 @@ read_sectors:
     mov  ax, [cur_lba]
     mov  bx, CHS_SPT
     div  bx                     ; AX = LBA/SPT, DX = LBA mod SPT
+
+    ; Clamp chunk so one INT 13h read never crosses a track (real BIOSes
+    ; reject multi-track reads) or a 64 KB physical boundary (DMA limit).
+    push ax
+    mov  ax, CHS_SPT
+    sub  ax, dx                 ; sectors left on this track
+    cmp  ax, [chunk]
+    jae  .trk_ok
+    mov  [chunk], ax
+.trk_ok:
+    mov  ax, [dst_seg]
+    neg  ax
+    and  ax, 0x0FFF             ; paragraphs to next 64 KB boundary
+    jz   .dma_ok                ; already aligned: full 64 KB available
+    shr  ax, 5                  ; → sectors (32 paragraphs each)
+    cmp  ax, [chunk]
+    jae  .dma_ok
+    mov  [chunk], ax
+.dma_ok:
+    pop  ax
     inc  dx
     mov  cl, dl                 ; sector (1-based)
 
