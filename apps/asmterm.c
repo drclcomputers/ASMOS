@@ -440,7 +440,7 @@ static void asmterm_init(void *state) {
     ctl_style_add(s->sb, CS_ANCHOR_RIGHT | CS_STRETCH_H | CS_NOFOCUS);
     s->prompt = ctl_label(w, 2, 131, 32, 9, ">", CS_ANCHOR_BOTTOM);
     ctl_set_colors(s->prompt, BLUE, 0xFF);
-    s->input = ctl_edit(w, 14, 129, 204, 12, "", INPUT_CAP - 1,
+    s->input = ctl_edit(w, 14, 129, 194, 12, "", INPUT_CAP - 1,
                         CS_STRETCH_W | CS_ANCHOR_BOTTOM, on_input);
 
     menu *fm = window_add_menu(w, "File");

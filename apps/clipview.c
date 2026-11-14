@@ -57,8 +57,7 @@ static void on_about(void) {
 
 static void cv_init(void *state) {
     cv_state_t *s = state;
-    s->win =
-        app_window(s, "ClipView", 30, 30, 200, 150, DARK_GRAY, AW_RESIZABLE);
+    s->win = app_window(s, "ClipView", 30, 30, 200, 150, DARK_GRAY, 0);
     if (!s->win)
         return;
     s->list = ctl_list(s->win, 4, 4, 190, 54, CS_STRETCH_W, on_list);

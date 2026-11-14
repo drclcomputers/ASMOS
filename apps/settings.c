@@ -249,7 +249,7 @@ static void build(settings_state_t *s) {
 
     /* bottom bar */
     s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
-    s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
+    s->save = ctl_button(w, 205, 140, 50, 13, "Save", 1, on_save);
     ctl_style_add(s->save, CS_DEFAULT);
     set_dirty(s, false);
 }

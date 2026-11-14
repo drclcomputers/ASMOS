@@ -71,9 +71,9 @@ static void clock_init(void *state) {
     s->win = app_window(s, "Clock", 20, 20, 104, 62, BLACK, 0);
     if (!s->win)
         return;
-    s->time = ctl_label(s->win, 2, 4, 98, 10, "", LS_BIG | LS_CENTER);
-    s->alarm = ctl_label(s->win, 2, 17, 98, 8, "", LS_CENTER);
-    s->date = ctl_label(s->win, 2, 28, 98, 10, "", LS_BIG | LS_CENTER);
+    s->time = ctl_label(s->win, 0, 4, 98, 10, "", LS_BIG | LS_CENTER);
+    s->alarm = ctl_label(s->win, 0, 17, 98, 8, "", LS_CENTER);
+    s->date = ctl_label(s->win, 0, 28, 98, 10, "", LS_BIG | LS_CENTER);
     ctl_set_colors(s->alarm, DARK_GRAY, 0xFF);
 
     menu *f = window_add_menu(s->win, "File");

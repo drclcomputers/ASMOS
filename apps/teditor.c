@@ -220,7 +220,7 @@ static void teditor_init(void *state) {
     s->win->on_close = on_close;
     s->edit = ctl_edit(s->win, 2, 2, 254, 144, "", TEXT_MAX,
                        ES_MULTILINE | CS_STRETCH_W | CS_STRETCH_H, on_edit);
-    s->status = ctl_label(s->win, 2, 147, 254, 11, "",
+    s->status = ctl_label(s->win, 2, 147, 246, 11, "",
                           CS_BORDER | CS_STRETCH_W | CS_ANCHOR_BOTTOM);
     menu *f = window_add_menu(s->win, "File");
     menu_add_item(f, "New", menu_new);

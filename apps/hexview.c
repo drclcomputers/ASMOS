@@ -254,8 +254,7 @@ static void menu_about(void) {
 
 static void hexview_init(void *state) {
     hexview_state_t *s = state;
-    s->win =
-        app_window(s, "HexView", 15, 15, 400, 196, DARK_GRAY, AW_RESIZABLE);
+    s->win = app_window(s, "HexView", 0, 0, 300, 166, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
     s->win->min_w = 400;
