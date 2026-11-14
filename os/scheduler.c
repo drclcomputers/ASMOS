@@ -9,11 +9,10 @@
 #include "lib/time.h"
 
 #include "config/config.h"
+#include "drivers/opl2.h"
 #include "io/ps2.h"
 #include "network/net.h"
 #include "ui/ui.h"
-
-#include "drivers/opl2.h"
 
 task_t tasks[MAX_TASKS];
 int current_task = 0;
@@ -23,34 +22,34 @@ int task_count = 0;
 static void *s_pending_free[MAX_PENDING_FREES];
 static int s_pending_free_count = 0;
 
-extern void scheduler_kernel_task(void);
+extern void task_switch(uint32_t *old_esp, uint32_t new_esp, uint32_t new_cr3);
 
+// Init
 void scheduler_init(void) {
     memset(tasks, 0, sizeof(tasks));
 
     tasks[0].alive = true;
     tasks[0].stack_base = NULL;
-    /* tasks[0] is written by the first task_switch out of the kernel task */
+    tasks[0].vmm = NULL;
     current_task = 0;
     task_count = 1;
 }
 
+// Trampoline
 void task_trampoline_c(int slot) {
     if (slot == 0) {
         scheduler_kernel_task();
     } else {
         task_t *t = &tasks[slot];
-        if (t->entry) {
+        if (t->entry)
             t->entry(t->arg);
-        }
     }
-
     scheduler_exit_current();
-    while (1) {
+    while (1)
         task_yield();
-    }
 }
 
+// Deferred stack free
 static void enqueue_stack_free(void *stack) {
     if (!stack)
         return;
@@ -66,9 +65,8 @@ void scheduler_reap(void) {
     s_pending_free_count = 0;
 }
 
-extern void task_switch(uint32_t *old_esp, uint32_t new_esp);
-
-int scheduler_add_task(void (*entry)(void *), void *arg) {
+// Add task
+int scheduler_add_task(void (*entry)(void *), void *arg, vmm_ctx_t *vmm) {
     int slot = -1;
     for (int i = 1; i < MAX_TASKS; i++) {
         if (!tasks[i].alive) {
@@ -86,6 +84,7 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
     tasks[slot].entry = entry;
     tasks[slot].arg = arg;
     tasks[slot].stack_base = stack;
+    tasks[slot].vmm = vmm;
 
     *(uint32_t *)stack = STACK_CANARY;
 
@@ -95,8 +94,7 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
     *--sp = (uint32_t)slot;
     *--sp = 0;
     *--sp = (uint32_t)task_trampoline;
-
-    *--sp = 0x202; // eflags (Highest address, popped last)
+    *--sp = 0x202; // eflags: IF=1
     *--sp = 0;     // ebp
     *--sp = 0;     // ebx
     *--sp = 0;     // esi
@@ -108,6 +106,7 @@ int scheduler_add_task(void (*entry)(void *), void *arg) {
     return slot;
 }
 
+// Yield / context switch
 void task_yield(void) {
     int old = current_task;
 
@@ -117,20 +116,30 @@ void task_yield(void) {
     }
 
     int next = old;
-
     for (int tries = 0; tries < MAX_TASKS; tries++) {
         next = (next + 1) % MAX_TASKS;
         if (tasks[next].alive)
             break;
     }
-
     if (next == old)
         return;
 
+    uint32_t new_cr3 = 0;
+    if (tasks[next].vmm && tasks[next].vmm->pd_phys)
+        new_cr3 = tasks[next].vmm->pd_phys;
+    else
+        new_cr3 = g_kernel_pd_phys;
+
+    uint32_t cur_cr3 = 0;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
+    if (new_cr3 == cur_cr3)
+        new_cr3 = 0;
+
     current_task = next;
-    task_switch(&tasks[old].esp, tasks[next].esp);
+    task_switch(&tasks[old].esp, tasks[next].esp, new_cr3);
 }
 
+// Kill / exit
 void scheduler_kill_task(int slot) {
     if (slot < 1 || slot >= MAX_TASKS)
         return;
@@ -139,6 +148,11 @@ void scheduler_kill_task(int slot) {
 
     tasks[slot].alive = false;
     task_count--;
+
+    if (tasks[slot].vmm) {
+        vmm_destroy_context(tasks[slot].vmm);
+        tasks[slot].vmm = NULL;
+    }
 
     enqueue_stack_free(tasks[slot].stack_base);
     tasks[slot].stack_base = NULL;
@@ -151,6 +165,11 @@ void scheduler_exit_current(void) {
             task_yield();
     }
 
+    if (tasks[slot].vmm) {
+        vmm_destroy_context(tasks[slot].vmm);
+        tasks[slot].vmm = NULL;
+    }
+
     enqueue_stack_free(tasks[slot].stack_base);
     tasks[slot].stack_base = NULL;
     tasks[slot].alive = false;
@@ -160,6 +179,7 @@ void scheduler_exit_current(void) {
         task_yield();
 }
 
+// Global shortcut handler
 static void handle_global_shortcuts(void) {
     if (kb.key_pressed && kb.ctrl && kb.last_scancode == Q_KEY) {
         window *fw = wm_focused_window();
@@ -170,30 +190,8 @@ static void handle_global_shortcuts(void) {
     }
 }
 
-/*static void handle_global_shortcuts(void) {
-    if (!kb.key_pressed)
-        return;
-
-    if (kb.ctrl) {
-        uint8_t sc = kb.last_scancode;
-        if (sc == Q_KEY) {
-            window *fw = wm_focused_window();
-            if (fw && fw->on_close) {
-                kb.key_pressed = false;
-                fw->on_close(fw);
-            }
-            return;
-        }
-        if (sc == C_KEY) { kb.ctrl_c = true; kb.key_pressed = false; return; }
-        if (sc == X_KEY) { kb.ctrl_x = true; kb.key_pressed = false; return; }
-        if (sc == V_KEY) { kb.ctrl_v = true; kb.key_pressed = false; return; }
-        if (sc == A_KEY) { kb.ctrl_a = true; kb.key_pressed = false; return; }
-    }
-} */
-
+// Kernel main loop
 void scheduler_kernel_task(void) {
-    extern menubar g_menubar;
-
     while (!gui_should_exit) {
         uint32_t frame_start = time_millis();
 

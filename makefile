@@ -14,6 +14,7 @@ OBJ = $(BUILD_DIR)/loader.o                     \
       $(BUILD_DIR)/kernel.o                     \
       \
 	  $(BUILD_DIR)/os/app_registry.o            \
+      $(BUILD_DIR)/os/appload.o                 \
       $(BUILD_DIR)/os/clipboard.o               \
 	  $(BUILD_DIR)/os/error.o                   \
       $(BUILD_DIR)/os/os.o                      \
@@ -22,6 +23,11 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  \
 	  $(BUILD_DIR)/interrupts/interrupt.o  		\
       $(BUILD_DIR)/interrupts/idt.o        		\
+      \
+      $(BUILD_DIR)/lib/memory/alloc.o           \
+      $(BUILD_DIR)/lib/memory/mem.o             \
+      $(BUILD_DIR)/lib/memory/pmm.o             \
+      $(BUILD_DIR)/lib/memory/vmm.o             \
       \
       $(BUILD_DIR)/shell/asm/asm.o              \
       $(BUILD_DIR)/shell/binrun.o               \
@@ -65,9 +71,6 @@ OBJ = $(BUILD_DIR)/loader.o                     \
 	  $(BUILD_DIR)/lib/core/types.o             \
       \
       $(BUILD_DIR)/lib/cpu/cpu_metrics.o        \
-      \
-      $(BUILD_DIR)/lib/memory/mem.o             \
-      $(BUILD_DIR)/lib/memory/alloc.o           \
       \
       $(BUILD_DIR)/lib/string/string.o          \
       \
@@ -121,6 +124,10 @@ $(BUILD_DIR)/interrupts/interrupt.o: interrupts/interrupt.asm | $(BUILD_DIR)
 	$(AS) -f elf32 $< -o $@
 
 $(BUILD_DIR)/os/task_switch.o: os/task_switch.asm | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(AS) -f elf32 $< -o $@
+
+$(BUILD_DIR)/lib/memory/page_fault.o: os/page_fault.asm | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
 

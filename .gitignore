@@ -13,3 +13,6 @@
 *.MID
 *.map
 apps/asmusic.c
+/docs
+/testapps
+/tools

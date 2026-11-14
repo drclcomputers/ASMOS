@@ -6,6 +6,7 @@
 #include "ui/window.h"
 
 #include "os/app_registry.h"
+#include "os/appload.h"
 #include "os/clipboard.h"
 #include "os/os.h"
 
@@ -254,16 +255,52 @@ static void open_item(desktop_item_t *it) {
             names[2][k] = (c >= 'a' && c <= 'z') ? c - 32 : c;
         }
 
-        app_descriptor *desc = NULL;
-        for (int n = 0; n < 3 && !desc; n++)
-            desc = os_find_app(names[n]);
+        /* 1. Prefer a real dynamic .APP package on disk.
+         *    Try exact locations only (no spam).  Floppy first since that
+         *    is how test packages are delivered. */
+        char pathbuf[280];
+        bool launched = false;
 
-        if (desc) {
-            os_launch_app(desc);
-        } else {
+        snprintf(pathbuf, sizeof(pathbuf), "/FDD0/%s.APP", names[0]);
+        if (appload_try_open(pathbuf))
+            launched = true;
+
+        if (!launched) {
+            snprintf(pathbuf, sizeof(pathbuf), "/FDD1/%s.APP", names[0]);
+            if (appload_try_open(pathbuf))
+                launched = true;
+        }
+        if (!launched) {
+            snprintf(pathbuf, sizeof(pathbuf), "%s/%s.APP", desktop_fs_path(),
+                     names[0]);
+            if (appload_try_open(pathbuf))
+                launched = true;
+        }
+        if (!launched) {
+            snprintf(pathbuf, sizeof(pathbuf), "/apps/%s.APP", names[0]);
+            if (appload_try_open(pathbuf))
+                launched = true;
+        }
+
+        /* 2. Fall back to the classic static registry */
+        if (!launched) {
+            app_descriptor *desc = NULL;
+            for (int n = 0; n < 3 && !desc; n++)
+                desc = os_find_app(names[n]);
+
+            if (desc) {
+                os_launch_app(desc);
+                launched = true;
+            }
+        }
+
+        if (!launched) {
             char msg[256];
-            sprintf(msg, "Could not find application '%s'.", names[0]);
-            modal_show(MODAL_ERROR, "App Not Found", msg, NULL, NULL);
+            snprintf(msg, sizeof(msg),
+                     "Could not find application '%s'.\n"
+                     "Put a real .APP package on /FDD0 or rebuild the kernel.",
+                     names[0]);
+            modal_show(MODAL_INFO, "App Not Found", msg, NULL, NULL);
         }
     } else if (it->kind == DESKTOP_ITEM_DIR) {
         extern void ff_open_dir_pub(uint16_t cluster, const char *path);

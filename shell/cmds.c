@@ -574,7 +574,7 @@ void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max) {
         a->selector[si] = '\0';
     }
 
-    int slot = scheduler_add_task(gopher_task_entry, a);
+    int slot = scheduler_add_task(gopher_task_entry, a, NULL);
     if (slot < 0) {
         kfree(a);
         append(out, max, "gopher: no free task slots\n\n");
