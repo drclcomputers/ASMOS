@@ -2,6 +2,7 @@
  * Edit controls live in ctl_edit.c; dialogs in dialogs.c. */
 #include "ui/controls.h"
 #include "ui/ctl_internal.h"
+#include "ui/uifont.h"
 
 #include "config/config.h"
 #include "drivers/keyboard.h"
@@ -231,15 +232,18 @@ static uint8_t bgc(const control *c, uint8_t def) {
 }
 
 /* Text inside a box, vertically centred, clipped by the current clip. */
+/* control text: the Small font (ui/uifont.h); edits stay fixed-width */
+#define CF UI_FONT_SMALL
+
 static void text_in(int x, int y, int w, int h, const char *t, uint8_t col,
                     int align) {
-    int tw = (int)strlen(t) * TH_CHAR_W - 1;
+    int tw = text_width(t, CF) - 1;
     int tx = x;
     if (align == 1)
         tx = x + (w - tw) / 2;
     else if (align == 2)
         tx = x + w - tw;
-    draw_string(tx, y + (h - 6) / 2, t, col, 2);
+    draw_string(tx, y + (h - 6) / 2, t, col, CF);
 }
 
 /* ── scrollbar geometry (shared by lists, edits, standalone bars) ──────── */
@@ -884,7 +888,7 @@ void list_set_columns(control *c, const int *widths, int n) {
 static void list_row(const control *c, int x, int y, int w, const char *t,
                      uint8_t col) {
     if (c->ncols <= 0) {
-        draw_string(x, y + 1, t, col, 2);
+        draw_string(x, y + 1, t, col, CF);
         return;
     }
     int cx = x;
@@ -895,7 +899,7 @@ static void list_row(const control *c, int x, int y, int w, const char *t,
             e++;
         int cw = c->cols[k] > 0 ? c->cols[k] : w - (cx - x);
         clip_push(cx, y, cw - 2, TH_LINE_H);
-        draw_text_n(cx, y + 1, p, (int)(e - p), col, 2);
+        draw_text_n(cx, y + 1, p, (int)(e - p), col, CF);
         clip_pop();
         cx += cw;
         p = *e ? e + 1 : e;
@@ -905,7 +909,7 @@ static void list_row(const control *c, int x, int y, int w, const char *t,
 /* ── drawing ───────────────────────────────────────────────────────────── */
 
 static void draw_label(control *c) {
-    int big = (c->style & LS_BIG) ? 1 : 2;
+    int big = (c->style & LS_BIG) ? 1 : CF;
     int lh = big == 1 ? 10 : 8;
     if (c->bg != 0xFF)
         fill_rect(c->ax, c->ay, c->aw, c->ah, c->bg);
@@ -927,8 +931,7 @@ static void draw_label(control *c) {
         while (*e && *e != '\n')
             e++;
         int n = (int)(e - p);
-        int cw = big == 1 ? 8 : 5;
-        int tw = n * cw;
+        int tw = text_width_n(p, n, big);
         int x = c->ax + pad;
         if (c->style & LS_CENTER)
             x = c->ax + (c->aw - tw) / 2;
@@ -951,19 +954,22 @@ static void draw_status(control *c) {
               c->bg != 0xFF ? c->bg : TH_FACE);
     const char *tab = strchr(c->text, '\t');
     int n = tab ? (int)(tab - c->text) : (int)strlen(c->text);
+    int font = UI_FONT_SMALL;
     int y = c->ay + (c->ah - 6) / 2 + 1;
-    int room = (fw - 8) / 5;
+    int room = fw - 8; /* pixels */
     uint8_t col = fgc(c, TH_TEXT);
     if (tab) { /* right part first: the left part gets what is left */
-        int rn = (int)strlen(tab + 1);
-        if (rn > room)
-            rn = room;
-        draw_text_n(c->ax + fw - 3 - rn * 5, y, tab + 1, rn, col, 2);
-        room -= rn + 1;
+        int rn = text_fit(tab + 1, room, font);
+        int rw = text_width_n(tab + 1, rn, font);
+        draw_text_n(c->ax + fw - 3 - rw, y, tab + 1, rn, col, font);
+        room -= rw + 5;
     }
-    if (n > room)
-        n = room > 0 ? room : 0;
-    draw_text_n(c->ax + 4, y, c->text, n, col, 2);
+    if (room < 0)
+        room = 0;
+    int fit = text_fit(c->text, room, font);
+    if (n > fit)
+        n = fit;
+    draw_text_n(c->ax + 4, y, c->text, n, col, font);
 }
 
 static void draw_button(control *c) {
@@ -1014,9 +1020,9 @@ static void draw_check(control *c, bool radio) {
             draw_line(bx + 4, by + 5, bx + 6, by + 3, BLACK);
         }
     }
-    draw_string(bx + 13, c->ay + (c->ah - 6) / 2, c->text, fgc(c, TH_TEXT), 2);
+    draw_string(bx + 13, c->ay + (c->ah - 6) / 2, c->text, fgc(c, TH_TEXT), CF);
     if (c->focused)
-        th_focus(bx + 11, c->ay, (int)strlen(c->text) * 5 + 4, c->ah);
+        th_focus(bx + 11, c->ay, text_width(c->text, CF) + 3, c->ah);
 }
 
 static void draw_list(control *c) {
@@ -1109,7 +1115,7 @@ static void draw_combo_popup(control *c) {
             fill_rect(x + 2, ry, w - 4, TH_LINE_H, TH_SEL_BG);
             col = TH_SEL_FG;
         }
-        draw_string(x + 4, ry + 1, c->items[i], col, 2);
+        draw_string(x + 4, ry + 1, c->items[i], col, CF);
     }
     clip_pop();
 }
@@ -1143,9 +1149,9 @@ static void draw_group(control *c) {
     draw_rect(c->ax, ty, c->aw, c->ah - 3, TH_SHADOW);
     draw_rect(c->ax + 1, ty + 1, c->aw - 2, c->ah - 5, TH_LIGHT);
     if (c->text[0]) {
-        int tw = (int)strlen(c->text) * 5 + 4;
+        int tw = text_width(c->text, CF) + 3;
         fill_rect(c->ax + 6, c->ay, tw, 7, c->win->content_color);
-        draw_string(c->ax + 8, c->ay, c->text, fgc(c, TH_TEXT), 2);
+        draw_string(c->ax + 8, c->ay, c->text, fgc(c, TH_TEXT), CF);
     }
 }
 
@@ -1157,7 +1163,7 @@ static int tab_extent(const control *c, int i, int *x0) {
         const char *e = p;
         while (*e && *e != '|')
             e++;
-        int w = (int)(e - p) * 5 + 10;
+        int w = text_width_n(p, (int)(e - p), CF) + 9;
         if (k == i) {
             *x0 = x;
             return w;
@@ -1187,7 +1193,7 @@ static void draw_tabs(control *c) {
         draw_line(x0, y0, x0 + w - 1, y0, TH_LIGHT);
         draw_line(x0, y0, x0, base, TH_LIGHT);
         draw_line(x0 + w - 1, y0, x0 + w - 1, base, BLACK);
-        draw_text_n(x0 + 5, y0 + 3, p, (int)(e - p), fgc(c, TH_TEXT), 2);
+        draw_text_n(x0 + 5, y0 + 3, p, (int)(e - p), fgc(c, TH_TEXT), CF);
         if (sel && c->focused)
             th_focus(x0 + 2, y0 + 2, w - 4, base - y0 - 2);
         p = *e ? e + 1 : e;
@@ -1325,7 +1331,8 @@ static window *window_at(int mx, int my) {
         if (!w->visible || w->minimized)
             continue;
         int wy = w->y + MENUBAR_H;
-        if (mx >= w->x && mx < w->x + w->w && my >= wy && my < wy + w->h)
+        if (mx >= w->x && mx < w->x + w->w && my >= wy &&
+            my < wy + win_shown_h(w))
             return w;
     }
     return NULL;
@@ -1876,7 +1883,7 @@ void ctl_draw_tooltip(void) {
     uint32_t t = time_millis() - s_tip_since;
     if (t < TIP_DELAY_MS || t > TIP_SHOW_MS)
         return;
-    int w = (int)strlen(c->tip) * 5 + 6, h = 11;
+    int w = text_width(c->tip, UI_FONT_SMALL) + 6, h = 11;
     int x = mouse.x + 2, y = mouse.y + 14;
     if (x + w > SCREEN_WIDTH)
         x = SCREEN_WIDTH - w;
@@ -1887,7 +1894,7 @@ void ctl_draw_tooltip(void) {
     gfx_reset_clip();
     fill_rect(x, y, w, h, YELLOW);
     draw_rect(x, y, w, h, BLACK);
-    draw_string(x + 3, y + 2, c->tip, BLACK, 2);
+    draw_string(x + 3, y + 2, c->tip, BLACK, UI_FONT_SMALL);
 }
 
 static void hover_cursor(void) {
@@ -2067,7 +2074,7 @@ void ctl_dispatch(void) {
             mouse.left_clicked = false;
             return;
         }
-        if (w && w->controls) {
+        if (w && w->controls && !w->shaded) {
             int cx, cy, cw, ch;
             win_client_rect(w, &cx, &cy, &cw, &ch);
             bool on_grip = w->resizable && mouse.x >= w->x + w->w - 10 &&
@@ -2123,7 +2130,7 @@ void ctl_dispatch(void) {
     if (!kb.key_pressed)
         return;
     window *w = wm_focused_window();
-    if (!w || !w->visible || w->minimized || !w->controls)
+    if (!w || !w->visible || w->minimized || !w->controls || w->shaded)
         return;
     if (w->modal_child)
         return;

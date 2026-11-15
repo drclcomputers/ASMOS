@@ -5,6 +5,7 @@
 #include "drivers/ps2.h"
 #include "fs/fs.h"
 #include "lib/cpu.h"
+#include "ui/uifont.h"
 
 #include "drivers/gpu.h"
 #include "drivers/ne2000.h"
@@ -160,7 +161,9 @@ static void detect_heap_range(void) {
 
 static void boot_banner(void) {
     clear_screen(BLACK);
-    draw_string(4, 2, "ASMOS Boot", WHITE, 2);
+    char title[32];
+    sprintf(title, "ASMOS %s Boot", VER);
+    draw_string(4, 2, title, WHITE, UI_FONT_BOLD);
     blit();
 }
 

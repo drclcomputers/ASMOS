@@ -1,6 +1,7 @@
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include "ui/menubar.h"
+#include "ui/uifont.h"
 
 #include "os/error.h"
 #include "os/os.h"
@@ -12,6 +13,7 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 #include "drivers/mouse.h"
+#include "lib/time.h"
 
 window *win_stack[MAX_WINDOWS];
 int win_count = 0;
@@ -65,7 +67,7 @@ static bool clicked_titlebar_btn(int ax, int ay, int w, int h) {
 }
 
 static int taskbar_label_width(const window *win) {
-    return (int)strlen(win->title) * 5 + 8;
+    return text_width(win->title, UI_FONT_BOLD) + 8;
 }
 
 static int taskbar_x_for(const window *target) {
@@ -367,7 +369,7 @@ void wm_draw_all(void) {
         fill_rect(taskbar_x, ty, lw, TASKBAR_H, win->bar_color);
         draw_rect(taskbar_x, ty, lw, TASKBAR_H, BLACK);
         draw_string(taskbar_x + 4, ty + 2, (char *)win->title, win->title_color,
-                    2);
+                    UI_FONT_BOLD);
         taskbar_x += lw + 1;
     }
 
@@ -423,7 +425,7 @@ void wm_update_all(void) {
                 continue;
             int wy = win->y + MENUBAR_H;
             bool on_win = mouse.x >= win->x && mouse.x <= win->x + win->w &&
-                          mouse.y >= wy && mouse.y <= wy + win->h;
+                          mouse.y >= wy && mouse.y <= wy + win_shown_h(win);
             if (!click_consumed && mouse.left_clicked && on_win) {
                 wm_focus(win->modal_child ? win->modal_child : win);
                 click_consumed = true;
@@ -475,9 +477,10 @@ void window_draw(window *win) {
 
     int wy = win->y + MENUBAR_H;
 
+    int sh = win_shown_h(win);
     if (win->dragging) {
-        draw_rect(win->x + 2, wy + 2, win->w, win->h, BLACK);
-        draw_rect(win->x, wy, win->w, win->h, LIGHT_GRAY);
+        draw_rect(win->x + 2, wy + 2, win->w, sh, BLACK);
+        draw_rect(win->x, wy, win->w, sh, LIGHT_GRAY);
         return;
     }
 
@@ -488,31 +491,40 @@ void window_draw(window *win) {
 
         const char *title = win->title;
         char title_buf[256];
-        int char_pixel_w = 6;
-        int max_width = win->w - 30;
-        int max_chars = max_width / char_pixel_w;
+        int font = UI_FONT_BOLD;
+        int button_offset = 28;
+        int max_width = win->w - button_offset - 6;
 
-        if (max_chars > 3 && (int)strlen(title) > max_chars) {
-            int keep_chars = max_chars - 3;
-            strncpy(title_buf, title, keep_chars);
-            title_buf[keep_chars] = '\0';
+        if (text_width(title, font) > max_width) { /* "Long name..." */
+            int keep =
+                text_fit(title, max_width - text_width("...", font), font);
+            if (keep > (int)sizeof(title_buf) - 4)
+                keep = (int)sizeof(title_buf) - 4;
+            strncpy(title_buf, title, keep);
+            title_buf[keep] = '\0';
             strcat(title_buf, "...");
             title = title_buf;
         }
 
-        int button_offset = 28;
         int title_area_center = (button_offset + win->w) / 2;
-        int tx = win->x + title_area_center -
-                 (int)(strlen(title) * (char_pixel_w / 2));
-        if (tx < win->x + button_offset + 5)
-            tx = win->x + button_offset + 5;
+        int tx = win->x + title_area_center - text_width(title, font) / 2;
+        if (tx < win->x + button_offset + 3)
+            tx = win->x + button_offset + 3;
 
-        draw_string(tx, wy + 6, (char *)title, win->title_color, 2);
+        /* 6-row font sits at +6, the 8-row system font a row higher */
+        draw_string(tx, wy + (font == FONT_MONO ? 6 : 5), (char *)title,
+                    win->title_color, font);
 
+        if (win->shaded) { /* rolled up: the title bar is all there is */
+            draw_rect(win->x, wy, win->w, sh, BLACK);
+            return;
+        }
         fill_rect(win->x, wy + 16, win->w, win->h - 16, win->content_color);
         draw_rect(win->x, wy, win->w, win->h, BLACK);
         draw_line(win->x, win->y + win->h + MENUBAR_H - 1, win->x + win->w - 1,
                   win->y + win->h + MENUBAR_H - 1, BLACK);
+    } else if (win->shaded) {
+        return;
     }
 
     /* app painting and controls stay inside the window */
@@ -568,10 +580,58 @@ bool window_update(window *win) {
         return true;
     }
 
-    window_resize(win);
+    // double-click on the title bar: WindowShade
+    if (mouse.left_clicked && !g_menubar_click_consumed &&
+        !win->pinned_bottom && in_titlebar(win, mouse.x, mouse.y)) {
+        uint32_t now = time_millis();
+        if (win->title_click_t && now - win->title_click_t < 450) {
+            win->title_click_t = 0;
+            wm_shade(win, !win->shaded);
+            return true;
+        }
+        win->title_click_t = now ? now : 1;
+    }
+
+    if (!win->shaded)
+        window_resize(win);
     window_dragged(win);
 
     return true;
+}
+
+void wm_shade(window *win, bool shaded) {
+    if (!win || win->pinned_bottom)
+        return;
+    win->shaded = shaded;
+    win->resizing = false;
+}
+
+void wm_zoom(window *win) {
+    if (!win || !win->resizable)
+        return;
+    win->shaded = false;
+    if (win->zoomed) {
+        win->x = win->zx;
+        win->y = win->zy;
+        win->w = win->zw;
+        win->h = win->zh;
+        win->zoomed = false;
+        return;
+    }
+    win->zx = win->x;
+    win->zy = win->y;
+    win->zw = win->w;
+    win->zh = win->h;
+    int w = SCREEN_WIDTH, h = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H;
+    if (win->max_w > 0 && w > win->max_w)
+        w = win->max_w;
+    if (win->max_h > 0 && h > win->max_h)
+        h = win->max_h;
+    win->x = (SCREEN_WIDTH - w) / 2; /* centred if it can't fill */
+    win->y = 0;
+    win->w = w;
+    win->h = h;
+    win->zoomed = true;
 }
 
 void window_resize(window *win) {
@@ -587,6 +647,8 @@ void window_resize(window *win) {
 
     if (win->resizing) {
         if (mouse.left) {
+            if (mouse.dx || mouse.dy)
+                win->zoomed = false;
             win->w += mouse.dx;
             win->h += mouse.dy;
             int min_w = win->min_w > 0 ? win->min_w : 60;

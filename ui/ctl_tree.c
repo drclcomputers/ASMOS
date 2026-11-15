@@ -17,6 +17,7 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "ui/ctl_internal.h"
+#include "ui/uifont.h"
 
 #define ROW_H 9
 #define SB_W 8 /* same as the list's built-in scrollbar */
@@ -428,11 +429,11 @@ void tree_draw(control *c) {
         }
         uint8_t col = fgc_or(c, TH_TEXT);
         if (i == c->sel) {
-            fill_rect(x - 1, y, text_width(n->text, 2) + 3, ROW_H,
+            fill_rect(x - 1, y, text_width(n->text, UI_FONT_SMALL) + 2, ROW_H,
                       c->focused ? TH_SEL_BG : TH_SHADOW);
             col = TH_SEL_FG;
         }
-        draw_string(x + 1, y + 2, n->text, col, 2);
+        draw_string(x + 1, y + 2, n->text, col, UI_FONT_SMALL);
     }
     clip_pop();
     if (sb)

@@ -2,6 +2,7 @@
 #define PRIMITIVE_GRAPHICS_H
 
 #include "config/config.h"
+#include "fonts/fonts.h"
 #include "lib/color.h"
 #include "lib/core.h"
 #include "lib/math.h"
@@ -18,6 +19,9 @@ void draw_string(int x, int y, const char *str, unsigned char color, int size);
 void draw_text_n(int x, int y, const char *str, int n, unsigned char color,
                  int size);
 int text_width(const char *str, int size);
+int text_width_n(const char *str, int n, int size);
+int text_fit(const char *str, int width, int size); /* chars that fit */
+int font_height(int size);                          /* rows */
 
 /* Clip rectangle for all drawing (screen coordinates). */
 void gfx_set_clip(int x, int y, int w, int h);

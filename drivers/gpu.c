@@ -72,6 +72,10 @@ static void blit_planar(void) {
         const uint8_t *row = BACKBUF + y * w;
         uint8_t *shadow = s_shadow ? s_shadow + y * w : NULL;
         int n = 0;
+        if (!full &&
+            mem_same_run((const uint32_t *)row, (const uint32_t *)shadow,
+                         (uint32_t)w / 4) == (uint32_t)w / 4)
+            continue; /* whole row unchanged: one repe cmpsd */
         for (int b = 0; b < blocks; b++) {
             const uint8_t *px = row + b * 32;
             if (!full && same32(px, shadow + b * 32))
@@ -104,22 +108,32 @@ static void blit_planar(void) {
     s_last_blocks = sent;
 }
 
-/* 320x200x256 linear: compare and copy changed dwords. */
+/* 320x200x256 linear: send the runs of changed dwords. `repe cmpsd` skips
+ * an unchanged run in one instruction (the old C loop compared dword by
+ * dword); each changed run then goes out with rep movsd. */
 static void blit_linear(void) {
     const uint32_t n = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) / 4;
     const uint32_t *src = (const uint32_t *)BACKBUF;
     uint32_t *fb = (uint32_t *)MODEX_FB;
     uint32_t *sh = (uint32_t *)s_shadow;
-    bool full = s_full || !sh;
     uint32_t sent = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        uint32_t v = src[i];
-        if (!full && sh[i] == v)
-            continue;
-        fb[i] = v;
+    if (s_full || !sh) {
+        memcpy(fb, src, n * 4);
         if (sh)
-            sh[i] = v;
-        sent++;
+            memcpy(sh, src, n * 4);
+        s_last_blocks = n / 8;
+        return;
+    }
+    uint32_t i = 0;
+    while (i < n) {
+        i += mem_same_run(src + i, sh + i, n - i);
+        if (i >= n)
+            break;
+        uint32_t run = mem_diff_run(src + i, sh + i, n - i);
+        memcpy(fb + i, src + i, run * 4);
+        memcpy(sh + i, src + i, run * 4);
+        sent += run;
+        i += run;
     }
     s_last_blocks = sent / 8; /* report in 32-pixel units like planar */
 }

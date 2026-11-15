@@ -143,7 +143,62 @@ void draw_pixels(int x, int y, int w, int h, const uint8_t *src, int stride) {
     }
 }
 
+static const pfont_t *pfont(int size) {
+    return size == FONT_SYSTEM  ? &font_system
+           : size == FONT_SMALL ? &font_small
+                                : NULL;
+}
+
+static int glyph_index(char c) {
+    unsigned char u = (unsigned char)c;
+    return (u < 32 || u > 126) ? '?' - 32 : u - 32;
+}
+
+/* one proportional glyph; returns its advance */
+static int draw_pglyph(int x, int y, char c, unsigned char color,
+                       const pfont_t *f) {
+    int g = glyph_index(c);
+    int w = f->width[g], h = f->h;
+    const uint8_t *rows = f->bits + g * h;
+    bool inside = x >= clip_x0 && y >= clip_y0 && x + w <= clip_x1 &&
+                  y + h <= clip_y1 && x >= 0 && y >= 0 &&
+                  x + w <= SCREEN_WIDTH && y + h <= SCREEN_HEIGHT;
+    for (int r = 0; r < h; r++) {
+        uint8_t bits = rows[r];
+        if (!bits)
+            continue;
+        if (inside) {
+            unsigned char *out = BACKBUF + (y + r) * SCREEN_WIDTH + x;
+            for (int col = 0; bits; col++, bits <<= 1)
+                if (bits & 0x80)
+                    out[col] = color;
+        } else {
+            for (int col = 0; bits; col++, bits <<= 1)
+                if (bits & 0x80)
+                    draw_dot(x + col, y + r, color);
+        }
+    }
+    return w + 1;
+}
+
+/* advance of one character in a font */
+static int char_advance(char c, int size) {
+    const pfont_t *f = pfont(size);
+    if (f)
+        return f->width[glyph_index(c)] + 1;
+    return size == FONT_MONO8 ? 8 : 5;
+}
+
+int font_height(int size) {
+    const pfont_t *f = pfont(size);
+    return f ? f->h : size == FONT_MONO8 ? 8 : 6;
+}
+
 void draw_char(int x, int y, char c, unsigned char color, int size) {
+    if (pfont(size)) {
+        draw_pglyph(x, y, c, color, pfont(size));
+        return;
+    }
     if (y < 0 || y >= SCREEN_HEIGHT)
         return;
     if ((unsigned char)c < 32 || (unsigned char)c > 126)
@@ -187,25 +242,57 @@ void draw_char(int x, int y, char c, unsigned char color, int size) {
 }
 
 void draw_string(int x, int y, const char *str, unsigned char color, int size) {
-    int s = (size == 1) ? 8 : 5;
+    const pfont_t *f = pfont(size);
+    int cx = x;
     for (int i = 0; str[i]; i++) {
-        int cx = x + i * s;
-        if (cx >= SCREEN_WIDTH)
+        if (cx >= SCREEN_WIDTH || cx >= clip_x1)
             break;
-        if (cx + s > 0)
-            draw_char(cx, y, str[i], color, size);
+        int adv = char_advance(str[i], size);
+        if (cx + adv > 0) {
+            if (f)
+                draw_pglyph(cx, y, str[i], color, f);
+            else
+                draw_char(cx, y, str[i], color, size);
+        }
+        cx += adv;
     }
 }
 
 void draw_text_n(int x, int y, const char *str, int n, unsigned char color,
                  int size) {
-    int s = (size == 1) ? 8 : 5;
-    for (int i = 0; i < n && str[i]; i++)
-        draw_char(x + i * s, y, str[i], color, size);
+    int cx = x;
+    for (int i = 0; i < n && str[i]; i++) {
+        draw_char(cx, y, str[i], color, size);
+        cx += char_advance(str[i], size);
+    }
 }
 
 int text_width(const char *str, int size) {
-    return (int)strlen(str) * ((size == 1) ? 8 : 5);
+    if (!pfont(size))
+        return (int)strlen(str) * char_advance('x', size);
+    int w = 0;
+    for (; *str; str++)
+        w += char_advance(*str, size);
+    return w;
+}
+
+int text_width_n(const char *str, int n, int size) {
+    int w = 0;
+    for (int i = 0; i < n && str[i]; i++)
+        w += char_advance(str[i], size);
+    return w;
+}
+
+/* how many leading characters of str fit in `width` pixels */
+int text_fit(const char *str, int width, int size) {
+    int w = 0, n = 0;
+    for (; str[n]; n++) {
+        int a = char_advance(str[n], size);
+        if (w + a - 1 > width) /* the last column of gap needn't fit */
+            break;
+        w += a;
+    }
+    return n;
 }
 
 void blit(void) { gpu_blit(); }

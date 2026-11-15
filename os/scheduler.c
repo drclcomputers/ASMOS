@@ -3,6 +3,7 @@
 #include "os/os.h"
 #include "os/watchdog.h"
 #include "ui/popup.h"
+#include "ui/saver.h"
 
 #include "drivers/serial.h"
 #include "drivers/speaker.h"
@@ -246,6 +247,18 @@ void scheduler_kernel_task(void) {
         net_poll();
         speaker_update();
         midi_player_update();
+
+        if (saver_update()) { /* screen saver up: it is the whole frame */
+            os_tick_apps();
+            os_reap_dead_apps();
+            wd_heartbeat();
+            saver_draw();
+            blit();
+            do {
+                task_yield();
+            } while ((time_millis() - frame_start) < FRAME_TIME_MS);
+            continue;
+        }
 
         handle_global_shortcuts();
 

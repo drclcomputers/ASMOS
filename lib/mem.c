@@ -50,6 +50,30 @@ void *memmove(void *dst, const void *src, size_t n) {
     return dst;
 }
 
+uint32_t mem_same_run(const uint32_t *a, const uint32_t *b, uint32_t n) {
+    if (!n)
+        return 0;
+    uint32_t left = n;
+    uint8_t ne;
+    __asm__ volatile("repe cmpsl\n\tsetne %3"
+                     : "+S"(a), "+D"(b), "+c"(left), "=q"(ne)
+                     :
+                     : "memory", "cc");
+    return n - left - ne; /* a mismatch was counted in the scan */
+}
+
+uint32_t mem_diff_run(const uint32_t *a, const uint32_t *b, uint32_t n) {
+    if (!n)
+        return 0;
+    uint32_t left = n;
+    uint8_t eq;
+    __asm__ volatile("repne cmpsl\n\tsete %3"
+                     : "+S"(a), "+D"(b), "+c"(left), "=q"(eq)
+                     :
+                     : "memory", "cc");
+    return n - left - eq;
+}
+
 int memcmp(const void *a, const void *b, size_t n) {
     const uint8_t *p = (const uint8_t *)a;
     const uint8_t *q = (const uint8_t *)b;

@@ -19,6 +19,9 @@ void cfg_init_defaults(void) {
     g_cfg.wallpaper_secondary_color = LIGHT_CYAN;
     g_cfg.filef_single_window = 0;
     g_cfg.reduce_motion = 0;
+    g_cfg.classic_fonts = 0;
+    g_cfg.saver_minutes = 5;
+    g_cfg.saver_effect = 0;
     g_cfg.networking_enabled = 1;
     g_cfg.ip[0] = 10;
     g_cfg.ip[1] = 0;

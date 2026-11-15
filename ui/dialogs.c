@@ -1,6 +1,7 @@
 /* dialogs.c - message / confirm / input / open / save dialogs. */
 #include "ui/dialogs.h"
 #include "ui/ctl_internal.h"
+#include "ui/uifont.h"
 
 #include "config/config.h"
 #include "fs/fs.h"
@@ -620,12 +621,12 @@ void dlg_draw_now(const char *title, const char *msg) {
     fill_rect(x, y, w, h, TH_FACE);
     draw_rect(x, y, w, h, BLACK);
     fill_rect(x + 1, y + 1, w - 2, 14, RED);
-    draw_string(x + 4, y + 4, title ? title : "", WHITE, 2);
+    draw_string(x + 4, y + 3, title ? title : "", WHITE, UI_FONT_BOLD);
     const char *p = text;
     for (int l = 0; l < lines; l++) {
         const char *e = strchr(p, '\n');
         int n = e ? (int)(e - p) : (int)strlen(p);
-        draw_text_n(x + 8, y + 24 + l * 8, p, n, BLACK, 2);
+        draw_text_n(x + 8, y + 24 + l * 8, p, n, BLACK, UI_FONT_SMALL);
         if (!e)
             break;
         p = e + 1;

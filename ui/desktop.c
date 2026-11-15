@@ -5,6 +5,7 @@
 #include "ui/icons.h"
 #include "ui/menubar.h"
 #include "ui/popup.h"
+#include "ui/uifont.h"
 #include "ui/window.h"
 
 #include "os/app_registry.h"
@@ -112,8 +113,9 @@ void power_anim_run(bool is_restart) {
         for (int y = 1; y < SCREEN_HEIGHT; y += 3)
             draw_line(0, y, SCREEN_WIDTH - 1, y, DARK_GRAY);
 
-        int msg_x = (SCREEN_WIDTH - (int)strlen(msg) * 5) / 2;
-        draw_string(msg_x, SCREEN_HEIGHT / 2 - 24, (char *)msg, WHITE, 2);
+        int msg_x = (SCREEN_WIDTH - text_width(msg, UI_FONT_BOLD)) / 2;
+        draw_string(msg_x, SCREEN_HEIGHT / 2 - 24, (char *)msg, WHITE,
+                    UI_FONT_BOLD);
 
         char pct[5];
         int p = (step * 100) / STEPS;
@@ -122,8 +124,8 @@ void power_anim_run(bool is_restart) {
         pct[2] = '0' + p % 10;
         pct[3] = '%';
         pct[4] = '\0';
-        int px = (SCREEN_WIDTH - 4 * 5) / 2;
-        draw_string(px, SCREEN_HEIGHT / 2 - 10, pct, LIGHT_GRAY, 2);
+        int px = (SCREEN_WIDTH - text_width(pct, UI_FONT_SMALL)) / 2;
+        draw_string(px, SCREEN_HEIGHT / 2 - 10, pct, LIGHT_GRAY, UI_FONT_SMALL);
 
         fill_rect(BAR_X + 2, BAR_Y + 2, BAR_W, BAR_H, DARK_GRAY);
 
@@ -157,8 +159,9 @@ void power_anim_run(bool is_restart) {
     }
 
     clear_screen(BLACK);
-    int msg_x = (SCREEN_WIDTH - (int)strlen(msg) * 5) / 2;
-    draw_string(msg_x, SCREEN_HEIGHT / 2 - 4, (char *)msg, bar_col, 2);
+    int msg_x = (SCREEN_WIDTH - text_width(msg, UI_FONT_BOLD)) / 2;
+    draw_string(msg_x, SCREEN_HEIGHT / 2 - 4, (char *)msg, bar_col,
+                UI_FONT_BOLD);
     blit();
     sleep_s(2);
 }
@@ -240,13 +243,13 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
         disp[i] = it->name[i];
     disp[dlen] = '\0';
 
-    int lw = dlen * ICO_LABEL_W;
+    int lw = text_width(disp, UI_FONT_SMALL);
     int lx = ax + ICON_W / 2 - lw / 2;
     int ly = ay + ICON_H + 2;
 
     uint8_t label_col = is_cut ? DARK_GRAY : WHITE;
-    draw_string(lx + 1, ly + 1, disp, BLACK, 2);
-    draw_string(lx, ly, disp, label_col, 2);
+    draw_string(lx + 1, ly + 1, disp, BLACK, UI_FONT_SMALL);
+    draw_string(lx, ly, disp, label_col, UI_FONT_SMALL);
 }
 
 /* Over windows the desktop layer is hidden: draw the dragged icon on top. */

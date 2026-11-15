@@ -17,6 +17,7 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "ui/dialogs.h"
+#include "ui/uifont.h"
 
 static bool s_gui_mode = false;
 
@@ -57,30 +58,36 @@ static const char *sev_prefix[3] = {
 static int boot_cx = 0;
 static int boot_cy = 15;
 #define BOOT_LINE_H 8
-#define BOOT_CHAR_W 5
+
+static void boot_newline(void) {
+    boot_cx = 0;
+    boot_cy += BOOT_LINE_H;
+    if (boot_cy + BOOT_LINE_H >= SCREEN_HEIGHT) {
+        /* scroll up one line, keeping the lines on their grid (it used to
+         * jump to a fixed row a pixel off, so lines overwrote each other) */
+        uint8_t *buf = (uint8_t *)BACKBUF;
+        int line_bytes = SCREEN_WIDTH;
+        memmove(buf + MENUBAR_H * line_bytes,
+                buf + (MENUBAR_H + BOOT_LINE_H) * line_bytes,
+                (SCREEN_HEIGHT - MENUBAR_H - BOOT_LINE_H) * line_bytes);
+        boot_cy -= BOOT_LINE_H;
+        memset(buf + boot_cy * line_bytes, BLACK,
+               (SCREEN_HEIGHT - boot_cy) * line_bytes);
+    }
+}
 
 static void boot_putchar(char c, uint8_t color) {
     if (c == '\n') {
-        boot_cx = 0;
-        boot_cy += BOOT_LINE_H;
-        if (boot_cy + BOOT_LINE_H >= SCREEN_HEIGHT) {
-            uint8_t *buf = (uint8_t *)BACKBUF;
-            int line_bytes = SCREEN_WIDTH;
-            memmove(buf + MENUBAR_H * line_bytes,
-                    buf + (MENUBAR_H + BOOT_LINE_H) * line_bytes,
-                    (SCREEN_HEIGHT - MENUBAR_H - BOOT_LINE_H) * line_bytes);
-            memset(buf + (SCREEN_HEIGHT - BOOT_LINE_H) * line_bytes, BLACK,
-                   BOOT_LINE_H * line_bytes);
-            boot_cy = SCREEN_HEIGHT - BOOT_LINE_H * 2;
-        }
+        boot_newline();
         return;
     }
-    if (boot_cx + BOOT_CHAR_W >= SCREEN_WIDTH) {
-        boot_cx = 0;
-        boot_cy += BOOT_LINE_H;
-    }
-    draw_char(boot_cx, boot_cy, c, color, 2);
-    boot_cx += BOOT_CHAR_W;
+    char one[2] = {c, 0};
+    int font = UI_FONT_SMALL;
+    int adv = text_width(one, font);
+    if (boot_cx + adv >= SCREEN_WIDTH)
+        boot_newline();
+    draw_char(boot_cx, boot_cy, c, color, font);
+    boot_cx += adv;
 }
 
 static void boot_puts(const char *s, uint8_t color) {
@@ -91,7 +98,9 @@ static void boot_puts(const char *s, uint8_t color) {
 
 static void boot_check_line(const char *label, bool ok, const char *detail) {
     boot_puts("  ", WHITE);
-    boot_puts(ok ? "[ OK ] " : "[FAIL] ", ok ? LIGHT_GREEN : LIGHT_RED);
+    int col = boot_cx + text_width("[FAIL] ", UI_FONT_SMALL);
+    boot_puts(ok ? "[ OK ]" : "[FAIL]", ok ? LIGHT_GREEN : LIGHT_RED);
+    boot_cx = col; /* labels line up whatever the tag's width */
     boot_puts(label, WHITE);
     if (detail) {
         boot_puts(": ", WHITE);

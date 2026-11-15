@@ -26,9 +26,12 @@ typedef struct __attribute__((packed)) {
     uint8_t gateway[4];
     uint8_t netmask[4];
     uint8_t dns_server[4];
-    uint8_t no_paging;   /* 1 = run without memory protection */
-    uint8_t fpu_emulate; /* 1 = use the x87 emulator even with an FPU */
-    uint8_t _reserved[34];
+    uint8_t no_paging;     /* 1 = run without memory protection */
+    uint8_t fpu_emulate;   /* 1 = use the x87 emulator even with an FPU */
+    uint8_t classic_fonts; /* 1 = the old 4x6 font everywhere */
+    uint8_t saver_minutes; /* screen saver after this idle time; 0 = never */
+    uint8_t saver_effect;  /* ui/saver.h */
+    uint8_t _reserved[31];
 } os_config_t;
 
 extern os_config_t g_cfg;

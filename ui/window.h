@@ -83,7 +83,20 @@ struct window {
     struct window *modal_child; /* open dialog blocking this window   */
     struct window *modal_owner; /* for dialogs: the window they block */
     bool fit_pending; /* shrink/move onto the screen before first draw */
+
+    /* WindowShade: double-click the title bar to roll up to it */
+    bool shaded;
+    uint32_t title_click_t; /* last click on the title bar (ms) */
+    /* wm_zoom(): toggles between the user's size and the whole desktop;
+     * zx.. is the size to go back to (no title-bar button) */
+    bool zoomed;
+    int zx, zy, zw, zh;
 };
+
+/* height the window takes on screen: just the title bar when shaded */
+static inline int win_shown_h(const window *w) {
+    return w->shaded ? TITLEBAR_H + 1 : w->h;
+}
 
 extern window *win_stack[MAX_WINDOWS];
 extern int win_count;
@@ -112,5 +125,7 @@ void window_draw(window *win);
 bool window_update(window *win);
 void window_resize(window *win);
 void window_dragged(window *win);
+void wm_shade(window *win, bool shaded);
+void wm_zoom(window *win); /* fill the desktop / restore */
 
 #endif

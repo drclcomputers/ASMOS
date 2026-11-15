@@ -8,6 +8,7 @@
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 #include "ui/fileops.h"
+#include "ui/uifont.h"
 
 #define FF_DEFAULT_W 300
 #define TREE_W 78 /* folder tree pane */
@@ -21,7 +22,7 @@
 #define CONTENT_TOP 6
 #define CHAR_W 5
 #define CHAR_H 6
-#define LABEL_CHARS 8
+#define LABEL_CHARS 12 /* a whole 8.3 name; cut to the cell when drawn */
 
 #define MAX_ENTRIES 128
 #define SORT_NAME 0
@@ -578,15 +579,17 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
          g_clipboard.is_cut && strcmp(g_clipboard.name, it->name) == 0 &&
          strcmp(g_clipboard.src_path, s->path) == 0);
 
-    int lw = (int)strlen(it->label) * CHAR_W;
+    int font = UI_FONT_SMALL;
+    int n = text_fit(it->label, ICON_CELL_W - 2, font); /* what fits */
+    int lw = text_width_n(it->label, n, font);
     int lx = ax + ICON_W / 2 - lw / 2;
     int ly = ay + ICON_H + 1;
     uint8_t lc = (is_cut || it->hidden) ? DARK_GRAY : BLACK;
     if (it->selected) {
-        fill_rect(lx - 1, ly - 1, lw + 2, CHAR_H + 2, BLACK);
-        draw_string(lx, ly, it->label, WHITE, 2);
+        fill_rect(lx - 1, ly - 1, lw + 1, CHAR_H + 2, BLACK);
+        draw_text_n(lx, ly, it->label, n, WHITE, font);
     } else {
-        draw_string(lx, ly, it->label, lc, 2);
+        draw_text_n(lx, ly, it->label, n, lc, font);
     }
 }
 
@@ -623,7 +626,7 @@ bool ff_folder_at(int mx, int my, char *out, int sz) {
     for (int i = win_count - 1; i >= 0; i--) {
         window *w = win_stack[i];
         if (w->visible && !w->minimized && mx >= w->x && mx < w->x + w->w &&
-            my >= w->y && my < w->y + w->h + MENUBAR_H) {
+            my >= w->y && my < w->y + win_shown_h(w) + MENUBAR_H) {
             if (w != t->win)
                 return false;
             break;
@@ -972,7 +975,8 @@ static bool over_desktop(int mx, int my) {
         if (!w->visible || w->minimized || w->pinned_bottom)
             continue;
         int wy = w->y + MENUBAR_H;
-        if (mx >= w->x && mx < w->x + w->w && my >= wy && my < wy + w->h)
+        if (mx >= w->x && mx < w->x + w->w && my >= wy &&
+            my < wy + win_shown_h(w))
             return false;
     }
     return true;

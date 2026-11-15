@@ -1,4 +1,5 @@
 #include "ui/popup.h"
+#include "ui/uifont.h"
 
 #include "config/config.h"
 #include "drivers/keyboard.h"
@@ -47,7 +48,7 @@ void popup_show(int x, int y) {
         const menu_item *it = &s_menu.items[i];
         s_h += item_h(it);
         if (it->label) {
-            int w = (int)strlen(it->label) * 5 + PAD * 2 + 4;
+            int w = text_width(it->label, UI_FONT_SMALL) + PAD * 2 + 4;
             if (w > s_w)
                 s_w = w;
         }
@@ -197,7 +198,7 @@ void popup_draw(void) {
         if (i == s_hot)
             fill_rect(s_x + 1, y, s_w - 2, MENU_ITEM_H, POP_SEL);
         draw_string(s_x + PAD, y + 2, it->label,
-                    it->disabled ? POP_DIS : POP_FG, 2);
+                    it->disabled ? POP_DIS : POP_FG, UI_FONT_SMALL);
         y += MENU_ITEM_H;
     }
 }

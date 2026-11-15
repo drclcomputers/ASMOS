@@ -5,8 +5,9 @@
 #include "drivers/sb16.h"
 #include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
+#include "ui/saver.h"
 
-enum { P_WALL, P_SOUND, P_SYSTEM, P_NET };
+enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER };
 
 typedef struct {
     window *win; /* must stay first */
@@ -178,9 +179,39 @@ static control *flag(settings_state_t *s, int page, int x, int y,
     return c;
 }
 
+static const int SAVER_DELAY[] = {0, 1, 2, 3, 5, 10, 15, 30};
+#define SAVER_DELAYS ((int)(sizeof(SAVER_DELAY) / sizeof(SAVER_DELAY[0])))
+
+static void paint_saver(control *c, int x, int y, int w, int h) {
+    (void)c;
+    saver_paint(x, y, w, h, g_cfg.saver_effect);
+}
+
+static void on_saver_fx(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.saver_effect = (uint8_t)ctl_value(c);
+    set_dirty(c->user, true);
+}
+
+static void on_saver_delay(control *c, int ev) {
+    int i = ctl_value(c);
+    if (ev != EV_CHANGE || i < 0 || i >= SAVER_DELAYS)
+        return;
+    g_cfg.saver_minutes = (uint8_t)SAVER_DELAY[i];
+    set_dirty(c->user, true);
+}
+
+static void on_saver_test(control *c, int ev) {
+    (void)c;
+    if (ev == EV_CLICK)
+        saver_start();
+}
+
 static void build(settings_state_t *s) {
     window *w = s->win;
-    s->tabs = ctl_tabs(w, 4, 3, 250, "Display|Sound|System|Network", NULL);
+    s->tabs =
+        ctl_tabs(w, 4, 3, 250, "Display|Sound|System|Network|Saver", NULL);
 
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
@@ -209,9 +240,40 @@ static void build(settings_state_t *s) {
     list_set_sel(s->pattern, g_cfg.wallpaper_pattern % 5);
     list_set_sel(s->col_a, g_cfg.wallpaper_main_color & 15);
     list_set_sel(s->col_b, g_cfg.wallpaper_secondary_color & 15);
-    on_page(s, ctl_label(w, 10, 90, 60, 8, "Preview:", 0), P_WALL);
-    on_page(s, ctl_custom(w, 10, 100, 238, 32, paint_preview, NULL, CS_BORDER),
+    on_page(s, ctl_label(w, 10, 88, 60, 8, "Preview:", 0), P_WALL);
+    on_page(s, ctl_custom(w, 10, 97, 238, 22, paint_preview, NULL, CS_BORDER),
             P_WALL);
+    control *cf = flag(s, P_WALL, 10, 124, "Classic fonts (the old 4x6 type)",
+                       &g_cfg.classic_fonts);
+    ctl_set_tooltip(cf, "Titles, menus and labels in the original font");
+
+    /* Saver */
+    on_page(s, ctl_label(w, 10, 24, 60, 12, "Effect:", 0), P_SAVER);
+    control *fx = on_page(s, ctl_combo(w, 76, 24, 110, on_saver_fx), P_SAVER);
+    for (int i = 0; i < SAVER_COUNT; i++)
+        list_add(fx, SAVER_NAMES[i]);
+    list_set_sel(fx, g_cfg.saver_effect < SAVER_COUNT ? g_cfg.saver_effect : 0);
+    on_page(s, ctl_label(w, 10, 40, 60, 12, "Start after:", 0), P_SAVER);
+    control *dl =
+        on_page(s, ctl_combo(w, 76, 40, 110, on_saver_delay), P_SAVER);
+    int pick = 0;
+    for (int i = 0; i < SAVER_DELAYS; i++) {
+        char t[16];
+        if (SAVER_DELAY[i])
+            snprintf(t, sizeof(t), "%d minute%s", SAVER_DELAY[i],
+                     SAVER_DELAY[i] > 1 ? "s" : "");
+        else
+            strcpy(t, "Never");
+        list_add(dl, t);
+        if (SAVER_DELAY[i] == g_cfg.saver_minutes)
+            pick = i;
+    }
+    list_set_sel(dl, pick);
+    on_page(s, ctl_custom(w, 10, 58, 238, 58, paint_saver, NULL, CS_BORDER),
+            P_SAVER);
+    control *tb = on_page(
+        s, ctl_button(w, 10, 121, 50, 13, "Test", 0, on_saver_test), P_SAVER);
+    ctl_set_tooltip(tb, "Move the mouse or press a key to come back");
 
     /* Sound */
     flag(s, P_SOUND, 10, 24, "Sound enabled", &g_cfg.sound_enabled);

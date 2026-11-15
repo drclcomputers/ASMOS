@@ -1,4 +1,5 @@
 #include "ui/menubar.h"
+#include "ui/uifont.h"
 
 #include "lib/graphics.h"
 #include "lib/memory.h"
@@ -110,7 +111,7 @@ void menubar_layout(menubar *mb) {
     int cursor_x = 2 + CLOCK_W;
     for (int i = 0; i < mb->menu_count; i++) {
         menu *m = &mb->menus[i];
-        int tw = (int)strlen(m->title) * 5 + PADDING * 2;
+        int tw = text_width(m->title, UI_FONT_SMALL) + PADDING * 2;
         m->bar_x = cursor_x;
         m->bar_w = tw;
         cursor_x += tw + 2;
@@ -144,7 +145,7 @@ void menubar_draw(menubar *mb) {
 
     for (int i = 0; i < mb->menu_count; i++) {
         menu *m = &mb->menus[i];
-        int tw = (int)strlen(m->title) * 5 + PADDING * 2;
+        int tw = text_width(m->title, UI_FONT_SMALL) + PADDING * 2;
 
         m->bar_x = cursor_x;
         m->bar_w = tw;
@@ -152,7 +153,7 @@ void menubar_draw(menubar *mb) {
         if (m->open)
             fill_rect(cursor_x, 0, tw, MENUBAR_H, DROP_SEL);
 
-        draw_string(cursor_x + PADDING, 2, m->title, BAR_FG, 2);
+        draw_string(cursor_x + PADDING, 2, m->title, BAR_FG, UI_FONT_SMALL);
         cursor_x += tw + 2;
 
         if (m->open) {
@@ -160,7 +161,8 @@ void menubar_draw(menubar *mb) {
             for (int j = 0; j < m->item_count; j++) {
                 if (!m->items[j].label)
                     continue;
-                int iw = (int)strlen(m->items[j].label) * 5 + PADDING * 2 + 4;
+                int iw = text_width(m->items[j].label, UI_FONT_SMALL) +
+                         PADDING * 2 + 4;
                 if (iw > dw)
                     dw = iw;
             }
@@ -190,7 +192,8 @@ void menubar_draw(menubar *mb) {
                     fill_rect(m->bar_x + 1, iy, dw - 2, MENU_ITEM_H, DROP_SEL);
 
                 unsigned char fg = it->disabled ? DROP_DIS : DROP_FG;
-                draw_string(m->bar_x + PADDING, iy + 2, it->label, fg, 2);
+                draw_string(m->bar_x + PADDING, iy + 2, it->label, fg,
+                            UI_FONT_SMALL);
             }
         }
     }
@@ -231,7 +234,8 @@ void menubar_update(menubar *mb) {
         for (int j = 0; j < m->item_count; j++) {
             if (!m->items[j].label)
                 continue;
-            int iw = (int)strlen(m->items[j].label) * 5 + PADDING * 2 + 4;
+            int iw =
+                text_width(m->items[j].label, UI_FONT_SMALL) + PADDING * 2 + 4;
             if (iw > dw)
                 dw = iw;
         }
