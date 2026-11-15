@@ -1,5 +1,6 @@
 #include "drivers/mouse.h"
 #include "config/config.h"
+#include "drivers/sermouse.h"
 #include "lib/core.h"
 
 #define PS2_DATA 0x60
@@ -7,6 +8,7 @@
 #define PS2_CMD 0x64
 
 mousevar mouse = {160, 100, 0, 0, 0, 0, 0, 0, 0};
+static int s_kinds;
 
 static uint8_t packet[3];
 static int packet_idx = 0;
@@ -30,9 +32,12 @@ static void mouse_write(unsigned char val) {
     outb(PS2_DATA, val);
 }
 
-static unsigned char mouse_read(void) {
-    ps2_wait_read();
-    return inb(PS2_DATA);
+/* Returns -1 on timeout (no aux device / no PS/2 port). */
+static int mouse_read(void) {
+    unsigned int t = 100000;
+    while (!(inb(PS2_STATUS) & 0x01) && --t)
+        ;
+    return t ? inb(PS2_DATA) : -1;
 }
 
 void mouse_init(void) {
@@ -56,7 +61,34 @@ void mouse_init(void) {
     mouse_read();
 
     mouse_write(0xF4);
-    mouse_read();
+    if (mouse_read() == 0xFA) /* ACK: a PS/2 mouse is there */
+        s_kinds |= MOUSE_PS2;
+
+    if (sermouse_init())
+        s_kinds |= MOUSE_SERIAL;
+}
+
+mouse_kind_t mouse_kinds(void) { return (mouse_kind_t)s_kinds; }
+
+void mouse_apply(int dx, int dy, bool left, bool right, bool middle) {
+    bool prev_left = mouse.left, prev_right = mouse.right;
+    mouse.left = left;
+    mouse.right = right;
+    mouse.middle = middle;
+    mouse.left_clicked |= !prev_left && left;
+    mouse.right_clicked |= !prev_right && right;
+    mouse.dx += dx;
+    mouse.dy += dy;
+    mouse.x += dx;
+    mouse.y += dy;
+    if (mouse.x < 0)
+        mouse.x = 0;
+    if (mouse.x >= SCREEN_WIDTH)
+        mouse.x = SCREEN_WIDTH - 1;
+    if (mouse.y < 0)
+        mouse.y = 0;
+    if (mouse.y >= SCREEN_HEIGHT)
+        mouse.y = SCREEN_HEIGHT - 1;
 }
 
 void mouse_update(void) {
@@ -82,29 +114,5 @@ void mouse_process_byte(uint8_t b) {
 
     int dx = (int)b2 - ((b1 & 0x10) ? 256 : 0);
     int dy = -((int)b3 - ((b1 & 0x20) ? 256 : 0));
-
-    mouse.dx = dx;
-    mouse.dy = dy;
-
-    bool prev_left = mouse.left;
-    bool prev_right = mouse.right;
-
-    mouse.left = (b1 & 0x01) != 0;
-    mouse.right = (b1 & 0x02) != 0;
-    mouse.middle = (b1 & 0x04) != 0;
-
-    mouse.left_clicked = (!prev_left && mouse.left);
-    mouse.right_clicked = (!prev_right && mouse.right);
-
-    mouse.x += dx;
-    mouse.y += dy;
-
-    if (mouse.x < 0)
-        mouse.x = 0;
-    if (mouse.x >= SCREEN_WIDTH)
-        mouse.x = SCREEN_WIDTH - 1;
-    if (mouse.y < 0)
-        mouse.y = 0;
-    if (mouse.y >= SCREEN_HEIGHT)
-        mouse.y = SCREEN_HEIGHT - 1;
+    mouse_apply(dx, dy, (b1 & 0x01) != 0, (b1 & 0x02) != 0, (b1 & 0x04) != 0);
 }

@@ -3,7 +3,9 @@ LD = i686-elf-ld
 NM = i686-elf-nm
 AS = nasm
 
-CFLAGS  = -std=gnu11 -ffreestanding -m32 -O2 -Wall -Wextra \
+# -march=i386: runs on 386/486/Pentium (gcc's default i686 emits CMOV,
+# which faults on anything older than a Pentium Pro).
+CFLAGS  = -std=gnu11 -ffreestanding -m32 -march=i386 -mtune=i486 -O2 -Wall -Wextra \
           -fno-stack-protector -fno-pie -nostdlib \
           -fno-builtin-memset -fno-builtin-memcpy \
           -MMD -MP -I. -c
@@ -59,7 +61,10 @@ $(BUILD_DIR)/%.o: %.c
 	$(AS) -f bin $< -o $@
 
 os_image.bin: boot.bin boot_stage2.bin kernel.bin
-	dd if=/dev/zero        of=$@ bs=512 count=65536 2>/dev/null
+	@# 66 cyl x 16 heads x 63 spt = 66528 sectors: a whole number of
+	@# cylinders, so emulators/BIOSes that derive the geometry from the
+	@# file size (86Box) see all 65536 sectors the FAT16 volume uses.
+	dd if=/dev/zero        of=$@ bs=512 count=66528 2>/dev/null
 	dd if=boot.bin         of=$@ bs=512 seek=0 conv=notrunc 2>/dev/null
 	dd if=boot_stage2.bin  of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
 	dd if=kernel.bin       of=$@ bs=512 seek=9 conv=notrunc 2>/dev/null

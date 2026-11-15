@@ -4,11 +4,6 @@
 #include "lib/core.h"
 
 #define SB16_DEFAULT_PORT 0x220
-#define SB16_DMA_CHANNEL 1
-#define SB16_IRQ 5
-
-#define DMA_BUF_SIZE 0x4000
-#define DMA_BUF_ADDR 0x70000
 
 void mixer_write(uint8_t reg, uint8_t val);
 

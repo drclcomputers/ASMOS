@@ -3,6 +3,7 @@
 extern pit_tick_handler
 extern sb16_irq_handler
 extern ne2000_irq_handler
+extern sermouse_irq_handler
 
 global isr_timer
 isr_timer:
@@ -35,5 +36,12 @@ global isr_ne2000
 isr_ne2000:
     pusha
     call ne2000_irq_handler
+    popa
+    iret
+
+global isr_sermouse
+isr_sermouse:
+    pusha
+    call sermouse_irq_handler
     popa
     iret

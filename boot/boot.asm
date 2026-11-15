@@ -2,28 +2,30 @@
 [org 0x7c00]
 
 ; ─────────────────────────────────────────────────────────────────────────────
-; Stage 1 – real-hardware hardened
+; Stage 1
 ;
 ; Loads:
 ;   Stage2   (sectors 1-8)   → 0x07E0:0000 = 0x7E00
 ;   Kernel   (sectors 9-1008)→ 0x1000:0000 = 0x10000
 ;
-; Changes vs original:
-;   • I/O delay (port 0x80) after INT 13h reset, before retry loop
-;   • Drive reset retried up to 3 times before giving up (flaky real drives)
-;   • INT 13h AH=02 retried up to 3 times per chunk (mandatory on real HW)
-;   • DL fixup only applies when DL < 0x80 (floppy); we trust BIOS if ≥ 0x80
-;   • Added read-verify: after each chunk, confirm sector count in AL matches
-;   • Chunk size capped at 63 – already correct, kept
-;   • Stack at 0x7000 – fine, kept
+; Disk access, in order of preference:
+;   1. INT 13h AH=42h extended read (plain LBA, no geometry at all) when
+;      AH=41h says the BIOS supports it (most BIOSes from ~1995 on).
+;   2. INT 13h AH=02h CHS read, using the geometry the BIOS reports with
+;      AH=08h (the BPB values are only a last-resort fallback).
+; Reads never cross a 64 KB physical boundary (ISA DMA) and, in CHS mode,
+; never cross a track. Each read is retried 3 times with a reset between.
+;
+; The BIOS boot drive (DL) is kept as given and handed to the kernel at
+; 0x0608 (drive number) / 0x0609 (1 = LBA reads worked).
 ; ─────────────────────────────────────────────────────────────────────────────
 
 STAGE2_SEG      equ 0x07E0      ; 0x07E0 × 16 = 0x7E00
 STAGE2_SECS     equ 8
 KERNEL_SEG      equ 0x1000      ; 0x1000 × 16 = 0x10000
 SECTORS_TO_LOAD equ 1000
-CHS_SPT         equ 63
-CHS_HEADS       equ 16
+BOOTINFO_DRIVE  equ 0x0608
+BOOTINFO_LBA    equ 0x0609
 
 ; ── FAT16 BPB (required at offset 3 for BIOS to recognise the disk) ──────────
 jmp short start
@@ -51,10 +53,16 @@ fs_type:                db "FAT16   "
 
 ; ── Stage-1 data (after BPB, still within boot sector) ───────────────────────
 boot_drive  db 0x80
+use_lba     db 0
 cur_lba     dw 0
 dst_seg     dw 0
 remaining   dw 0
 chunk       dw 0
+dap:        db 0x10, 0          ; disk address packet for AH=42h
+dap_count   dw 0
+dap_off     dw 0
+dap_seg     dw 0
+dap_lba     dd 0, 0
 
 ; ── Entry point ──────────────────────────────────────────────────────────────
 start:
@@ -65,29 +73,38 @@ start:
     mov  ss, ax
     mov  sp, 0x7000
     sti
+    cld
 
-    ; Save boot drive.  Trust DL only if it looks like a hard disk (≥ 0x80).
-    ; Some BIOSes pass garbage in DL for USB/IDE boots.
-    cmp  dl, 0x80
-    jae  .dl_ok
-    mov  dl, 0x80               ; default to first HDD
-.dl_ok:
-    mov  [boot_drive], dl
+    mov  [boot_drive], dl       ; trust the BIOS (0x00 = floppy/USB-FDD)
 
-    ; Reset drive controller – retry up to 3 times
-    mov  cx, 3
-.reset_loop:
-    xor  ax, ax
-    mov  dl, [boot_drive]
+    ; LBA extensions present?
+    mov  ah, 0x41
+    mov  bx, 0x55AA
     int  0x13
-    jnc  .reset_ok
-    push ax
+    jc   .no_ext
+    cmp  bx, 0xAA55
+    jne  .no_ext
+    test cl, 1                  ; "fixed disk access subset" (AH=42h)
+    jz   .no_ext
+    mov  byte [use_lba], 1
+    jmp  .geo_done
+.no_ext:
+    ; CHS: ask the BIOS for its geometry instead of trusting the BPB
+    mov  ah, 0x08
+    mov  dl, [boot_drive]
+    xor  di, di                 ; some BIOSes need ES:DI = 0 (ralf brown)
+    int  0x13
+    jc   .geo_done              ; keep the BPB values
+    and  cx, 0x3F               ; sectors per track (bits 0-5)
+    jz   .geo_done
+    mov  [sectors_per_track], cx
+    mov  dl, dh                 ; max head index
+    xor  dh, dh
+    inc  dx
+    mov  [head_count], dx
+.geo_done:
     xor  ax, ax
-    out  0x80, al               ; I/O delay
-    pop  ax
-    loop .reset_loop
-    ; If all resets failed, carry on anyway (some BIOSes always fail reset)
-.reset_ok:
+    mov  es, ax                 ; AH=08h changes ES
 
     ; ── Load stage 2 (sectors 1-8) ───────────────────────────────────────────
     mov  word [cur_lba],   1
@@ -96,139 +113,110 @@ start:
     call read_sectors
 
     ; ── Load kernel (sectors 9-1008) ─────────────────────────────────────────
-    mov  ax, STAGE2_SECS + 1    ; = 9
-    mov  [cur_lba],        ax
+    mov  word [cur_lba],   STAGE2_SECS + 1
     mov  word [dst_seg],   KERNEL_SEG
     mov  word [remaining], SECTORS_TO_LOAD
     call read_sectors
 
-    ; ── Initialize video mode flag (0x0602) for stage 2 ──────────────────────
-    ; Default to Mode X (0x01). Stage 2 will check this value to determine
-    ; which video mode to set up. Can be overridden by bootloader config.
-    xor  ax, ax
-    mov  ds, ax
-    mov  byte [0x0602], 0x00    ; 0x01 = Mode X (640x480 planar)
-                                 ; 0x00 = Mode 13h (320x200 linear)
+    ; ── Hand-off ─────────────────────────────────────────────────────────────
+    mov  byte [0x0602], 0x00    ; video mode flag for stage 2 (see stage 2)
+    mov  al, [boot_drive]
+    mov  [BOOTINFO_DRIVE], al
+    mov  al, [use_lba]
+    mov  [BOOTINFO_LBA], al
 
     jmp  STAGE2_SEG:0x0000
 
 ; ─────────────────────────────────────────────────────────────────────────────
-; read_sectors
-;   Reads [remaining] sectors starting at [cur_lba] into [dst_seg]:0000
-;   Advances cur_lba and dst_seg as it goes.
-;   Each INT 13h call is retried up to 3 times.
+; read_sectors: [remaining] sectors from [cur_lba] to [dst_seg]:0000,
+; advancing cur_lba / dst_seg.
 ; ─────────────────────────────────────────────────────────────────────────────
 read_sectors:
-    push ax
-    push bx
-    push cx
-    push dx
-    push es
-
 .loop:
     mov  ax, [remaining]
     test ax, ax
     jz   .done
-
-    ; Clamp chunk to 63 sectors (max safe for real BIOSes)
-    cmp  ax, 63
-    jle  .cnt_ok
+    cmp  ax, 63                 ; old BIOSes: at most 63..127 per call
+    jbe  .c1
     mov  ax, 63
-.cnt_ok:
+.c1:
+    mov  bx, [dst_seg]          ; sectors until the next 64 KB boundary
+    neg  bx
+    and  bx, 0x0FFF
+    jz   .c2                    ; segment is 64 KB aligned
+    shr  bx, 5
+    cmp  ax, bx
+    jbe  .c2
+    mov  ax, bx
+.c2:
     mov  [chunk], ax
+    mov  si, 3                  ; tries
 
-    ; ── LBA → CHS conversion ─────────────────────────────────────────────────
-    ; cylinder = LBA / (SPT × heads),  tempx = LBA / SPT
-    ; head     = temp mod heads
-    ; sector   = (LBA mod SPT) + 1
-    xor  dx, dx
+.try:
+    cmp  byte [use_lba], 0
+    je   .chs
+    mov  ax, [chunk]
+    mov  [dap_count], ax
+    mov  ax, [dst_seg]
+    mov  [dap_seg], ax
     mov  ax, [cur_lba]
-    mov  bx, CHS_SPT
-    div  bx                     ; AX = LBA/SPT, DX = LBA mod SPT
-
-    ; Clamp chunk so one INT 13h read never crosses a track (real BIOSes
-    ; reject multi-track reads) or a 64 KB physical boundary (DMA limit).
-    push ax
-    mov  ax, CHS_SPT
-    sub  ax, dx                 ; sectors left on this track
-    cmp  ax, [chunk]
-    jae  .trk_ok
-    mov  [chunk], ax
-.trk_ok:
-    mov  ax, [dst_seg]
-    neg  ax
-    and  ax, 0x0FFF             ; paragraphs to next 64 KB boundary
-    jz   .dma_ok                ; already aligned: full 64 KB available
-    shr  ax, 5                  ; → sectors (32 paragraphs each)
-    cmp  ax, [chunk]
-    jae  .dma_ok
-    mov  [chunk], ax
-.dma_ok:
-    pop  ax
-    inc  dx
-    mov  cl, dl                 ; sector (1-based)
-
-    xor  dx, dx
-    mov  bx, CHS_HEADS
-    div  bx                     ; AX = cylinder, DX = head
-    mov  dh, dl                 ; head
-    mov  ch, al                 ; cylinder low 8 bits
-    shl  ah, 6
-    or   cl, ah                 ; cylinder high 2 bits into CL[7:6]
-
-    mov  ax, [dst_seg]
-    mov  es, ax
-    xor  bx, bx                 ; ES:BX = destination buffer
-
-    ; ── INT 13h read with retry ───────────────────────────────────────────────
-    mov  si, 3                  ; retry counter
-.read_try:
-    mov  ah, 0x02
-    mov  al, [chunk]
+    mov  [dap_lba], ax
+    push si
+    mov  si, dap
+    mov  ah, 0x42
     mov  dl, [boot_drive]
     int  0x13
-    jnc  .read_ok
+    pop  si
+    jmp  .result
 
-    ; Error: reset and retry
-    push cx
-    xor  ax, ax
-    out  0x80, al               ; I/O delay
-    xor  ax, ax
+.chs:
+    xor  dx, dx
+    mov  ax, [cur_lba]
+    div  word [sectors_per_track]   ; AX = LBA / SPT, DX = LBA mod SPT
+    mov  cx, [sectors_per_track]
+    sub  cx, dx                     ; sectors left on this track
+    cmp  cx, [chunk]
+    jae  .t_ok
+    mov  [chunk], cx
+.t_ok:
+    inc  dx
+    mov  cl, dl                     ; sector (1-based)
+    xor  dx, dx
+    div  word [head_count]          ; AX = cylinder, DX = head
+    mov  dh, dl
+    mov  ch, al                     ; cylinder bits 0-7
+    shl  ah, 6
+    or   cl, ah                     ; cylinder bits 8-9
+    mov  es, [dst_seg]
+    xor  bx, bx
+    mov  al, [chunk]
+    mov  ah, 0x02
     mov  dl, [boot_drive]
-    int  0x13                   ; drive reset
-    xor  ax, ax
-    out  0x80, al
-    pop  cx
+    int  0x13
 
+.result:
+    jnc  .ok
+    xor  ax, ax                     ; reset, then retry
+    mov  dl, [boot_drive]
+    int  0x13
     dec  si
-    jnz  .read_try
-    jmp  disk_error             ; all retries exhausted
+    jnz  .try
+    jmp  disk_error
 
-.read_ok:
-    ; Restore DS (INT 13h can trash it on some BIOSes)
-    xor  ax, ax
+.ok:
+    xor  ax, ax                     ; some BIOSes trash DS
     mov  ds, ax
-
     mov  ax, [chunk]
     sub  [remaining], ax
-    add  [cur_lba],   ax
-    ; Advance destination segment: each sector = 512 bytes = 32 paragraphs
-    shl  ax, 5                  ; × 32 paragraphs
+    add  [cur_lba], ax
+    shl  ax, 5                      ; 512 bytes = 32 paragraphs
     add  [dst_seg], ax
     jmp  .loop
-
 .done:
-    pop  es
-    pop  dx
-    pop  cx
-    pop  bx
-    pop  ax
     ret
 
 ; ─────────────────────────────────────────────────────────────────────────────
 disk_error:
-    xor  ax, ax
-    mov  ds, ax
     mov  si, .msg
 .p:
     lodsb
@@ -242,6 +230,11 @@ disk_error:
     hlt
     jmp  .h
 .msg db "Disk err", 0
+
+; Keep 0x1BE-0x1FD (partition table) zero: some BIOSes validate it.
+%if ($-$$) > 446
+  %error "stage 1 code overlaps the partition table area"
+%endif
 
 ; ── Boot signature ────────────────────────────────────────────────────────────
 times 510-($-$$) db 0

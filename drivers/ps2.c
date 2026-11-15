@@ -1,6 +1,7 @@
 #include "drivers/ps2.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
+#include "drivers/sermouse.h"
 #include "lib/core.h"
 
 void ps2_init(void) {
@@ -11,6 +12,7 @@ void ps2_init(void) {
 void ps2_update(void) {
     kb_update();
     mouse_update();
+    sermouse_poll();
     while (1) {
         unsigned char status = inb(PS2_STATUS);
         if (!(status & 0x01))

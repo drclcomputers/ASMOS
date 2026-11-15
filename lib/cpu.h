@@ -3,7 +3,12 @@
 
 #include "lib/core.h"
 
-void cpu_model_init(void);
+/* Detect CPU (386/486 without CPUID, CPUID otherwise) and the x87 FPU.
+ * Call once at boot, before anything uses floating point. */
+void cpu_init(void);
+bool cpu_has_fpu(void);    /* false: x87 instructions trap (CR0.EM set) */
+int cpu_family(void);      /* 3 = 386, 4 = 486, 5 = Pentium, 6+ later */
+void cpu_model_init(void); /* no-op after cpu_init */
 /* Not called anywhere yet (Monitor only shows the model). Kept for a
  * future CPU-usage readout. */
 void cpu_metrics_init(void);

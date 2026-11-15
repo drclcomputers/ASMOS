@@ -3,10 +3,10 @@
 
 #include "lib/core.h"
 
-#define NE2000_IRQ 3
-#define NE2000_VECTOR (32 + NE2000_IRQ)
-
-#define NE_BASE 0x300
+/* Base port and IRQ are found at init (PCI RTL8029, else ISA probe at
+ * 0x300/0x280/0x320/0x340/0x360/0x240). */
+extern uint16_t g_ne_base;
+#define NE_BASE g_ne_base
 #define NE_RESET_PORT (NE_BASE + 0x1F)
 #define NE_DATA (NE_BASE + 0x10)
 
@@ -72,6 +72,9 @@
 typedef void (*ne2000_rx_cb)(const uint8_t *data, uint16_t len);
 
 bool ne2000_init(void);
+uint16_t ne2000_io_base(void);
+int ne2000_irq(void);         /* -1: no IRQ, polled only */
+const char *ne2000_bus(void); /* "PCI" or "ISA" */
 bool ne2000_detected(void);
 void ne2000_get_mac(uint8_t mac[6]);
 bool ne2000_send(const uint8_t *data, uint16_t len);

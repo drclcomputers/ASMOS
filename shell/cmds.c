@@ -1,4 +1,6 @@
 #include "shell/cmds.h"
+#include "drivers/gpu.h"
+#include "drivers/pci.h"
 
 #include "fs/fs.h"
 
@@ -47,7 +49,8 @@ void cmd_help(char *out, size_t max) {
     append(out, max, "  clock         - System time\n");
     append(out, max, "  df            - Disk usage\n");
     append(out, max, "  mem           - Memory usage\n");
-    append(out, max, "  sysinfo       - CPU model and uptime\n\n");
+    append(out, max, "  sysinfo       - CPU model and uptime\n");
+    append(out, max, "  lspci         - List PCI devices\n\n");
 
     append(out, max, "  shutdown [s]  - Shut down (optional delay)\n");
     append(out, max, "  reboot [s]    - Reboot (optional delay)\n\n");
@@ -425,14 +428,45 @@ void cmd_clock(char *out, size_t max) {
     append(out, max, buf);
 }
 
+void cmd_lspci(char *out, size_t max) {
+    char buf[96];
+    if (!pci_mechanism()) {
+        append(out, max, "No PCI bus (ISA-only machine).\n");
+        return;
+    }
+    sprintf(buf, "PCI config mechanism #%d, %d device(s):\n", pci_mechanism(),
+            pci_count());
+    append(out, max, buf);
+    for (int i = 0; i < pci_count(); i++) {
+        const pci_dev_t *d = pci_get(i);
+        uint16_t io = 0;
+        for (int b = 0; b < 6 && !io; b++)
+            io = pci_bar_io(d, b);
+        sprintf(buf, "%02x:%02x.%u %04X:%04X %-15s", d->bus, d->dev, d->fn,
+                d->vendor, d->device,
+                pci_class_name(d->class_code, d->subclass));
+        append(out, max, buf);
+        if (d->irq != 0xFF) {
+            sprintf(buf, " IRQ %u", d->irq);
+            append(out, max, buf);
+        }
+        if (io) {
+            sprintf(buf, " IO %04X", io);
+            append(out, max, buf);
+        }
+        append(out, max, "\n");
+    }
+}
+
 void cmd_sysinfo(char *out, size_t max) {
     char buf[128];
     cpu_model_init();
     append(out, max, "CPU:    ");
     append(out, max, cpu_model_str());
-    append(out, max, "\n");
+    append(out, max, cpu_has_fpu() ? " + FPU\n" : " (no FPU)\n");
     time_hms_t u = uptime_hms();
-    sprintf(buf, "Uptime: %02u:%02u:%02u\n\n", u.hours, u.minutes, u.seconds);
+    sprintf(buf, "Uptime: %02u:%02u:%02u\nFrames: %u fps\n\n", u.hours,
+            u.minutes, u.seconds, gpu_fps());
     append(out, max, buf);
 }
 

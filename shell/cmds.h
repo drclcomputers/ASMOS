@@ -20,6 +20,7 @@ void cmd_write(const char *args, char *out, size_t max);
 void cmd_echo(const char *text, char *out, size_t max);
 void cmd_clock(char *out, size_t max);
 void cmd_sysinfo(char *out, size_t max);
+void cmd_lspci(char *out, size_t max);
 void cmd_shutdown(const char *args, char *out, size_t max);
 void cmd_reboot(const char *args, char *out, size_t max);
 void cmd_tee(const char *filename, char *out, size_t max);

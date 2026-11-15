@@ -1,4 +1,7 @@
 #include "lib/io.h"
+#include "config/config.h"
+#include "drivers/gpu.h"
+#include "lib/graphics.h"
 
 unsigned char inb(unsigned short port) {
     unsigned char ret;
@@ -35,8 +38,21 @@ void cpu_halt(void) { asm volatile("hlt"); }
 void cpu_idle(void) { asm volatile("sti; hlt"); }
 
 void cpu_shutdown(void) {
-    outw(0x604, 0x2000);
-    outw(0xB004, 0x2000);
+    outw(0x604, 0x2000);  /* QEMU */
+    outw(0xB004, 0x2000); /* Bochs / old QEMU */
+    /* Still running: real hardware (no ACPI/APM driver yet). Say so, the
+     * way DOS-era Windows did. */
+    for (volatile uint32_t i = 0; i < 0x100000; i++)
+        ;
+    clear_screen(BLACK);
+    const char *a = "It's now safe to turn off";
+    const char *b = "your computer.";
+    draw_string((SCREEN_WIDTH - text_width(a, 1)) / 2, SCREEN_HEIGHT / 2 - 12,
+                a, LIGHT_RED, 1);
+    draw_string((SCREEN_WIDTH - text_width(b, 1)) / 2, SCREEN_HEIGHT / 2 + 2, b,
+                LIGHT_RED, 1);
+    gpu_invalidate();
+    blit();
     __asm__ volatile("cli");
     for (;;)
         __asm__ volatile("hlt");

@@ -1,3 +1,4 @@
+#include "lib/cpu.h"
 #include "os/api.h"
 
 #define BTN_W 22
@@ -302,6 +303,15 @@ static void calc_init(void *state) {
     menu_add_item(f, "Close", on_close);
     menu_add_separator(f);
     menu_add_item(f, "About Calculator", on_about);
+    if (!cpu_has_fpu()) {
+        /* the maths is double precision; on a 386/486SX without a
+         * coprocessor x87 instructions fault, so don't run any */
+        ctl_set_text(s->lcd, "No FPU");
+        for (control *c = s->win->controls; c; c = c->next)
+            if (c->type == CTL_BUTTON)
+                ctl_enable(c, false);
+        return;
+    }
     calc_reset(s);
     show(s);
 }
@@ -309,7 +319,8 @@ static void calc_init(void *state) {
 /* keyboard: digits, + - * / . %, Enter (=), Backspace, Esc (clear) */
 static void calc_on_frame(void *state) {
     calc_state_t *s = state;
-    if (!s->win || !kb.key_pressed || !window_is_focused(s->win))
+    if (!s->win || !kb.key_pressed || !window_is_focused(s->win) ||
+        !cpu_has_fpu())
         return;
     char c = kb.last_char;
     char tmp[2] = {c, 0};

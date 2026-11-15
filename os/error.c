@@ -3,11 +3,15 @@
 #include "config/runtime_config.h"
 #include "drivers/ata.h"
 #include "drivers/gpu.h"
+#include "drivers/mouse.h"
 #include "drivers/ne2000.h"
 #include "drivers/opl2.h"
+#include "drivers/pci.h"
 #include "drivers/sb16.h"
+#include "drivers/sermouse.h"
 #include "fs/fs.h"
 #include "lib/core.h"
+#include "lib/cpu.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -158,6 +162,18 @@ void error_report(err_severity_t sev, err_code_t code, const char *context) {
 void boot_check_ata(void) {
     boot_puts("ATA / Disk\n", LIGHT_GRAY);
 
+    boot_check_line("Controller", true, ata_controller_desc());
+    for (uint8_t u = 0; u < 2; u++) {
+        const ata_disk_t *d = ata_unit(u);
+        char det[64];
+        if (d)
+            snprintf(det, sizeof(det), "%.30s, %u MB, %s",
+                     d->model[0] ? d->model : "?", d->sectors / 2048,
+                     d->lba ? "LBA" : "CHS");
+        boot_check_line(u ? "HDB" : "HDA (boot)", d || u,
+                        d ? det : "not found");
+    }
+
     uint8_t buf[512];
     bool ok = ata_read_sector(0, 0, buf);
     boot_check_line("Sector 0 read", ok, ok ? NULL : "timeout or error");
@@ -220,6 +236,32 @@ void boot_check_fat(void) {
                     clust_ok ? NULL : "cluster_count out of range");
     if (!clust_ok)
         error_report(ERR_WARNING, ERR_FAT_CORRUPT, "cluster_count");
+}
+
+void boot_check_pci(void) {
+    boot_puts("CPU / Bus\n", LIGHT_GRAY);
+    boot_check_line(cpu_model_str(), true, cpu_has_fpu() ? "FPU" : "no FPU");
+    char d[40];
+    if (pci_mechanism())
+        snprintf(d, sizeof(d), "mech #%d, %d devices", pci_mechanism(),
+                 pci_count());
+    else
+        strcpy(d, "none (ISA)");
+    boot_check_line("PCI", true, d);
+}
+
+void boot_check_input(void) {
+    boot_puts("Input\n", LIGHT_GRAY);
+    int k = mouse_kinds();
+    char d[40];
+    if (!k)
+        strcpy(d, "none (PS/2 or serial COM1/COM2)");
+    else
+        snprintf(d, sizeof(d), "%s%s%s%s", (k & MOUSE_PS2) ? "PS/2" : "",
+                 (k & MOUSE_PS2) && (k & MOUSE_SERIAL) ? " + " : "",
+                 (k & MOUSE_SERIAL) ? "serial COM" : "",
+                 (k & MOUSE_SERIAL) ? (sermouse_port() == 1 ? "1" : "2") : "");
+    boot_check_line("Mouse", k != 0, d);
 }
 
 void boot_check_heap(void) {
@@ -302,7 +344,16 @@ void boot_check_network(void) {
         sprintf(mac_str, "detected - MAC: %02X:%02X:%02X:%02X:%02X:%02X",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         boot_check_line("NE2000 card", true, mac_str);
+        char where[40];
+        if (ne2000_irq() >= 0)
+            sprintf(where, "%s, I/O %X, IRQ %d", ne2000_bus(), ne2000_io_base(),
+                    ne2000_irq());
+        else
+            sprintf(where, "%s, I/O %X, polled", ne2000_bus(),
+                    ne2000_io_base());
+        boot_check_line("NE2000 location", true, where);
     } else {
-        boot_check_line("NE2000 card", false, "not found");
+        boot_check_line("NE2000 card", false,
+                        "not found (PCI, ISA 300/280/320/340/360/240)");
     }
 }

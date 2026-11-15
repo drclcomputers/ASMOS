@@ -1,5 +1,8 @@
-#include "fs/fs.h"
+#include "drivers/ata.h"
+#include "drivers/pci.h"
 #include "drivers/ps2.h"
+#include "fs/fs.h"
+#include "lib/cpu.h"
 
 #include "drivers/gpu.h"
 #include "drivers/ne2000.h"
@@ -19,9 +22,9 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 
-#include "interrupts/idt.h"
 #include "drivers/serial.h"
 #include "drivers/speaker.h"
+#include "interrupts/idt.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/time.h"
@@ -33,7 +36,6 @@ int g_screen_width = 640;
 int g_screen_height = 400;
 int g_video_mode = 1;
 int g_backbuf_size = 640 * 400;
-
 
 static void play_bootchime(void) {
     if (g_cfg.play_bootchime && g_cfg.sound_enabled) {
@@ -173,6 +175,7 @@ void kmain(void) {
     resolution_set();
 
     detect_heap_range();
+    cpu_init(); /* 386 safe: no CPUID unless present; sets up the FPU */
     idt_init();
     ps2_init();
 
@@ -183,6 +186,10 @@ void kmain(void) {
     sleep_s(1);
 
     boot_check_heap();
+    pci_init(); /* before disks/NIC: they look for their controllers here */
+    boot_check_pci();
+    boot_check_input();
+    ata_init(*(volatile uint8_t *)0x0608); /* BIOS boot drive from stage 1 */
     fs_mount();
     boot_check_ata();
     boot_check_fat();
@@ -214,12 +221,6 @@ void kmain(void) {
     boot_check_network();
 
     sleep_s(2);
-
-    {
-        volatile uint32_t d = 0x1000000;
-        while (d--)
-            __asm__ volatile("nop");
-    }
 
     if (!g_cfg.start_in_gui)
         cli_run();

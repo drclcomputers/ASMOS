@@ -1,109 +1,311 @@
 #include "drivers/ata.h"
-#include "lib/core.h"
+#include "drivers/pci.h"
+#include "lib/io.h"
 #include "lib/memory.h"
+#include "lib/string.h"
 
-static bool ata_wait_drq(void) {
-    uint32_t timeout = 0x100000;
-    while (--timeout) {
-        uint8_t status = inb(ATA_PRIMARY_BASE + ATA_REG_STATUS);
-        if (status & ATA_SR_BSY)
-            continue; /* other bits are undefined while BSY is set */
-        if (status & ATA_SR_ERR)
-            return false;
-        if (status & ATA_SR_DRQ)
+typedef struct {
+    uint16_t base; /* command block (0x1F0) */
+    uint16_t ctrl; /* control block (0x3F6): alt status / device control */
+} ata_channel_t;
+
+static ata_channel_t s_chan[2] = {{0x1F0, 0x3F6}, {0x170, 0x376}};
+static ata_disk_t s_disks[ATA_MAX_DISKS]; /* index = channel*2 + slave */
+static int8_t s_unit[2] = {-1, -1};       /* logical unit -> s_disks index */
+static char s_desc[48] = "legacy ports";
+
+/* ── low level ─────────────────────────────────────────────────────────── */
+
+static inline uint8_t status(const ata_channel_t *c) {
+    return inb(c->base + ATA_REG_STATUS);
+}
+
+/* ~400 ns: four reads of the alternate status register */
+static void delay400(const ata_channel_t *c) {
+    for (int i = 0; i < 4; i++)
+        inb(c->ctrl);
+}
+
+/* Wait for BSY to clear. Generous limit: old drives spin up slowly. */
+static bool wait_not_busy(const ata_channel_t *c, uint32_t limit) {
+    while (limit--) {
+        uint8_t s = status(c);
+        if (s == 0xFF)
+            return false; /* floating bus: nothing there */
+        if (!(s & ATA_SR_BSY))
             return true;
     }
     return false;
 }
 
-static bool ata_wait_ready(void) {
-    uint32_t timeout = 0x100000;
-    while (--timeout) {
-        uint8_t status = inb(ATA_PRIMARY_BASE + ATA_REG_STATUS);
-        if (status & ATA_SR_BSY)
-            continue;
-        return !(status & ATA_SR_ERR);
+static bool wait_drq(const ata_channel_t *c) {
+    uint32_t limit = 0x200000;
+    while (limit--) {
+        uint8_t s = status(c);
+        if (s & ATA_SR_BSY)
+            continue; /* other bits undefined while BSY */
+        if (s & (ATA_SR_ERR | ATA_SR_DF))
+            return false;
+        if (s & ATA_SR_DRQ)
+            return true;
     }
     return false;
 }
 
-static void ata_select_drive(uint8_t drive_id, uint32_t lba) {
-    uint8_t drive_select = (drive_id == 1) ? 0xF0 : 0xE0;
-    outb(ATA_PRIMARY_BASE + ATA_REG_DRIVE, drive_select | ((lba >> 24) & 0x0F));
+static bool wait_ready(const ata_channel_t *c) {
+    if (!wait_not_busy(c, 0x200000))
+        return false;
+    return !(status(c) & (ATA_SR_ERR | ATA_SR_DF));
+}
 
-    for (int i = 0; i < 4; i++) {
-        inb(ATA_PRIMARY_BASE + ATA_REG_STATUS);
+/* Program drive/head + address registers for one sector. */
+static bool set_address(const ata_disk_t *d, const ata_channel_t *c,
+                        uint32_t lba) {
+    if (lba >= d->sectors)
+        return false;
+    uint8_t sel = d->slave ? 0x10 : 0x00;
+    if (d->lba) {
+        outb(c->base + ATA_REG_DRIVE, 0xE0 | sel | ((lba >> 24) & 0x0F));
+        delay400(c);
+        if (!wait_not_busy(c, 0x200000))
+            return false;
+        outb(c->base + ATA_REG_SECCOUNT, 1);
+        outb(c->base + ATA_REG_LBA_LO, lba & 0xFF);
+        outb(c->base + ATA_REG_LBA_MID, (lba >> 8) & 0xFF);
+        outb(c->base + ATA_REG_LBA_HI, (lba >> 16) & 0xFF);
+    } else {
+        uint32_t track = lba / d->spt;
+        uint8_t sector = (uint8_t)(lba % d->spt + 1);
+        uint8_t head = (uint8_t)(track % d->heads);
+        uint16_t cyl = (uint16_t)(track / d->heads);
+        outb(c->base + ATA_REG_DRIVE, 0xA0 | sel | (head & 0x0F));
+        delay400(c);
+        if (!wait_not_busy(c, 0x200000))
+            return false;
+        outb(c->base + ATA_REG_SECCOUNT, 1);
+        outb(c->base + ATA_REG_LBA_LO, sector);
+        outb(c->base + ATA_REG_LBA_MID, cyl & 0xFF);
+        outb(c->base + ATA_REG_LBA_HI, cyl >> 8);
     }
+    return true;
 }
 
-static void ata_select_lba28(uint8_t drive_id, uint32_t lba,
-                             uint8_t sector_count) {
-    ata_select_drive(drive_id, lba);
-    outb(ATA_PRIMARY_BASE + ATA_REG_SECCOUNT, sector_count);
-    outb(ATA_PRIMARY_BASE + ATA_REG_LBA_LO, (lba) & 0xFF);
-    outb(ATA_PRIMARY_BASE + ATA_REG_LBA_MID, (lba >> 8) & 0xFF);
-    outb(ATA_PRIMARY_BASE + ATA_REG_LBA_HI, (lba >> 16) & 0xFF);
+static const ata_disk_t *disk_of(uint8_t unit) {
+    if (unit > 1 || s_unit[unit] < 0)
+        return NULL;
+    return &s_disks[(int)s_unit[unit]];
 }
 
-bool ata_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
-    ata_select_drive(drive_id, lba);
+/* ── detection ─────────────────────────────────────────────────────────── */
 
-    if (!ata_wait_ready())
+/* PCI IDE controller in native mode: use its BARs. Compatibility mode (the
+ * norm on 386-Pentium boards, and ISA cards) keeps the legacy ports. */
+static void find_controller(void) {
+    const pci_dev_t *ide = pci_find_class(0x01, 0x01, 0);
+    if (!ide) {
+        strcpy(s_desc, pci_mechanism() ? "legacy ports (no PCI IDE)"
+                                       : "legacy ports (ISA)");
+        return;
+    }
+    pci_enable(ide, true, false, false);
+    int native = 0;
+    for (int ch = 0; ch < 2; ch++) {
+        if (!(ide->prog_if & (1 << (ch * 2))))
+            continue; /* this channel is in compatibility mode */
+        uint16_t b = pci_bar_io(ide, ch * 2), k = pci_bar_io(ide, ch * 2 + 1);
+        if (b && k) {
+            s_chan[ch].base = b;
+            s_chan[ch].ctrl = (uint16_t)(k + 2);
+            native++;
+        }
+    }
+    snprintf(s_desc, sizeof(s_desc), "PCI %04X:%04X%s", ide->vendor,
+             ide->device, native ? " native" : "");
+}
+
+static void reset_channel(const ata_channel_t *c) {
+    if (status(c) == 0xFF)
+        return;          /* nothing on this cable */
+    outb(c->ctrl, 0x06); /* SRST + nIEN (we poll; keep IRQ 14/15 quiet) */
+    for (int i = 0; i < 40; i++)
+        inb(c->ctrl); /* >5 us */
+    outb(c->ctrl, 0x02);
+    wait_not_busy(c, 0x400000);
+}
+
+static void copy_model(char *dst, const uint16_t *id) {
+    for (int i = 0; i < 20; i++) {
+        dst[i * 2] = (char)(id[27 + i] >> 8);
+        dst[i * 2 + 1] = (char)(id[27 + i] & 0xFF);
+    }
+    dst[40] = 0;
+    for (int i = 39; i >= 0 && (dst[i] == ' ' || !dst[i]); i--)
+        dst[i] = 0;
+}
+
+static bool identify(int ch, int slave, ata_disk_t *d) {
+    const ata_channel_t *c = &s_chan[ch];
+    outb(c->base + ATA_REG_DRIVE, slave ? 0xB0 : 0xA0);
+    delay400(c);
+    if (status(c) == 0xFF)
         return false;
-
-    ata_select_lba28(drive_id, lba, 1);
-    outb(ATA_PRIMARY_BASE + ATA_REG_COMMAND, ATA_CMD_READ_PIO);
-
-    if (!ata_wait_drq())
+    /* registers must hold what we write, or there is no drive */
+    outb(c->base + ATA_REG_SECCOUNT, 0x55);
+    outb(c->base + ATA_REG_LBA_LO, 0xAA);
+    if (inb(c->base + ATA_REG_SECCOUNT) != 0x55 ||
+        inb(c->base + ATA_REG_LBA_LO) != 0xAA)
         return false;
+    outb(c->base + ATA_REG_SECCOUNT, 0);
+    outb(c->base + ATA_REG_LBA_LO, 0);
+    outb(c->base + ATA_REG_LBA_MID, 0);
+    outb(c->base + ATA_REG_LBA_HI, 0);
+    outb(c->base + ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
+    delay400(c);
+    if (status(c) == 0 || !wait_not_busy(c, 0x400000))
+        return false;
+    /* ATAPI / SATA signatures: not a hard disk we can use */
+    if (inb(c->base + ATA_REG_LBA_MID) || inb(c->base + ATA_REG_LBA_HI))
+        return false;
+    if (!wait_drq(c))
+        return false;
+    uint16_t id[256];
+    for (int i = 0; i < 256; i++)
+        id[i] = inw(c->base + ATA_REG_DATA);
 
+    memset(d, 0, sizeof(*d));
+    d->channel = (uint8_t)ch;
+    d->slave = (uint8_t)slave;
+    d->cyls = id[1];
+    d->heads = id[3];
+    d->spt = id[6];
+    if ((id[53] & 1) && id[54] && id[55] && id[56]) { /* current geometry */
+        d->cyls = id[54];
+        d->heads = id[55];
+        d->spt = id[56];
+    }
+    d->lba = (id[49] & (1 << 9)) != 0;
+    uint32_t lba_sectors = id[60] | ((uint32_t)id[61] << 16);
+    if (d->lba && lba_sectors)
+        d->sectors = lba_sectors;
+    else {
+        d->lba = false;
+        d->sectors = (uint32_t)d->cyls * d->heads * d->spt;
+    }
+    if (!d->lba && (!d->heads || !d->spt || d->heads > 16))
+        return false;
+    copy_model(d->model, id);
+    d->present = d->sectors != 0;
+    return d->present;
+}
+
+/* Sector 0 written by our build: FAT BPB with OEM "ASMOS". */
+static bool is_asmos_disk(int idx) {
+    uint8_t buf[512];
+    int8_t saved = s_unit[0];
+    s_unit[0] = (int8_t)idx;
+    bool ok = ata_read_sector(0, 0, buf);
+    s_unit[0] = saved;
+    return ok && buf[510] == 0x55 && buf[511] == 0xAA &&
+           memcmp(buf + 3, "ASMOS", 5) == 0;
+}
+
+int ata_init(uint8_t bios_boot_drive) {
+    find_controller();
+    for (int ch = 0; ch < 2; ch++)
+        reset_channel(&s_chan[ch]);
+    int found = 0;
+    for (int i = 0; i < ATA_MAX_DISKS; i++)
+        if (identify(i / 2, i % 2, &s_disks[i]))
+            found++;
+        else
+            s_disks[i].present = false;
+
+    /* HDA = the disk we booted from: one carrying our boot sector. If
+     * several do, the BIOS drive number picks (0x80 = first disk the BIOS
+     * enumerated = first one we find, normally). */
+    int order[ATA_MAX_DISKS], n = 0, first_asmos = -1;
+    for (int i = 0; i < ATA_MAX_DISKS; i++)
+        if (s_disks[i].present)
+            order[n++] = i;
+    int want = bios_boot_drive >= 0x80 ? bios_boot_drive - 0x80 : -1;
+    for (int k = 0; k < n; k++) {
+        if (!is_asmos_disk(order[k]))
+            continue;
+        if (first_asmos < 0)
+            first_asmos = order[k];
+        if (k == want) {
+            first_asmos = order[k];
+            break;
+        }
+    }
+    s_unit[0] = (int8_t)(first_asmos >= 0 ? first_asmos : n ? order[0] : -1);
+    for (int i = 0; i < ATA_MAX_DISKS; i++)
+        if (s_disks[i].present && i != s_unit[0]) {
+            s_unit[1] = (int8_t)i;
+            break;
+        }
+    return found;
+}
+
+const ata_disk_t *ata_unit(uint8_t unit) { return disk_of(unit); }
+const char *ata_controller_desc(void) { return s_desc; }
+
+/* ── I/O ───────────────────────────────────────────────────────────────── */
+
+bool ata_read_sector(uint8_t unit, uint32_t lba, void *buf) {
+    const ata_disk_t *d = disk_of(unit);
+    if (!d)
+        return false;
+    const ata_channel_t *c = &s_chan[d->channel];
+    if (!set_address(d, c, lba))
+        return false;
+    outb(c->base + ATA_REG_COMMAND, ATA_CMD_READ_PIO);
+    delay400(c);
+    if (!wait_drq(c))
+        return false;
     uint16_t *p = (uint16_t *)buf;
     for (int i = 0; i < 256; i++)
-        p[i] = inw(ATA_PRIMARY_BASE + ATA_REG_DATA);
-
+        p[i] = inw(c->base + ATA_REG_DATA);
     return true;
 }
 
-bool ata_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
-    ata_select_drive(drive_id, lba);
-
-    if (!ata_wait_ready())
+bool ata_write_sector(uint8_t unit, uint32_t lba, const void *buf) {
+    const ata_disk_t *d = disk_of(unit);
+    if (!d)
         return false;
-
-    ata_select_lba28(drive_id, lba, 1);
-    outb(ATA_PRIMARY_BASE + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
-
-    if (!ata_wait_drq())
+    const ata_channel_t *c = &s_chan[d->channel];
+    if (!set_address(d, c, lba))
         return false;
-
+    outb(c->base + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
+    delay400(c);
+    if (!wait_drq(c))
+        return false;
     const uint16_t *p = (const uint16_t *)buf;
     for (int i = 0; i < 256; i++)
-        outw(ATA_PRIMARY_BASE + ATA_REG_DATA, p[i]);
-
-    if (!ata_wait_ready()) /* drive must finish the write before FLUSH */
+        outw(c->base + ATA_REG_DATA, p[i]);
+    if (!wait_ready(c)) /* the write must finish before FLUSH */
         return false;
-    outb(ATA_PRIMARY_BASE + ATA_REG_COMMAND, ATA_CMD_FLUSH);
-    return ata_wait_ready();
-}
-
-bool ata_read_sectors(uint8_t drive_id, uint32_t lba, uint8_t count,
-                      void *buf) {
-    uint8_t *p = (uint8_t *)buf;
-    for (uint8_t i = 0; i < count; i++) {
-        if (!ata_read_sector(drive_id, lba + i, p))
-            return false;
-        p += 512;
-    }
+    /* FLUSH CACHE is ATA-4+; old drives abort it, which is harmless (they
+     * have no write cache), so its error status is ignored. */
+    outb(c->base + ATA_REG_COMMAND, ATA_CMD_FLUSH);
+    delay400(c);
+    wait_not_busy(c, 0x400000);
     return true;
 }
 
-bool ata_write_sectors(uint8_t drive_id, uint32_t lba, uint8_t count,
+bool ata_read_sectors(uint8_t unit, uint32_t lba, uint8_t count, void *buf) {
+    uint8_t *p = (uint8_t *)buf;
+    for (uint8_t i = 0; i < count; i++, p += 512)
+        if (!ata_read_sector(unit, lba + i, p))
+            return false;
+    return true;
+}
+
+bool ata_write_sectors(uint8_t unit, uint32_t lba, uint8_t count,
                        const void *buf) {
     const uint8_t *p = (const uint8_t *)buf;
-    for (uint8_t i = 0; i < count; i++) {
-        if (!ata_write_sector(drive_id, lba + i, p))
+    for (uint8_t i = 0; i < count; i++, p += 512)
+        if (!ata_write_sector(unit, lba + i, p))
             return false;
-        p += 512;
-    }
     return true;
 }

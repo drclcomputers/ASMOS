@@ -1,4 +1,5 @@
 /* Monitor - running apps (switch to / end task) and system information. */
+#include "drivers/gpu.h"
 #include "os/api.h"
 #include "os/appload.h"
 
@@ -58,8 +59,8 @@ static void refresh_system(monitor_state_t *s) {
     ctl_set_range(s->memmeter, 0, total ? total : 1, 0);
     ctl_set_value(s->memmeter, used);
     time_hms_t u = uptime_hms();
-    snprintf(b, sizeof(b), "Up:   %02u:%02u:%02u", u.hours, u.minutes,
-             u.seconds);
+    snprintf(b, sizeof(b), "Up:   %02u:%02u:%02u    Display: %u fps", u.hours,
+             u.minutes, u.seconds, gpu_fps());
     ctl_set_text(s->up, b);
 
     int line = 0;

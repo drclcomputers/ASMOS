@@ -23,8 +23,6 @@ static idt_ptr_t idt_ptr;
 
 extern void isr_timer(void);
 extern void isr_spurious(void);
-extern void isr_sb16(void);
-extern void isr_ne2000(void);
 
 static void idt_set_gate(uint8_t n, uint32_t handler) {
     idt[n].offset_lo = (uint16_t)(handler & 0xFFFF);
@@ -65,9 +63,36 @@ void pit_tick_handler(void) {
 }
 
 static void pit_init(void) {
-    outb(PIT_CMD, 0x36);             // Counter 0, LSB/MSB, Mode 3
+    outb(PIT_CMD, 0x36);                    // Counter 0, LSB/MSB, Mode 3
     outb(PIT_CHANNEL0, PIT_DIVISOR & 0xFF); // LSB
     outb(PIT_CHANNEL0, PIT_DIVISOR >> 8);
+}
+
+static uint16_t s_irq_owned; /* lines handed out by idt_set_irq */
+
+bool idt_irq_in_use(int irq) {
+    return irq >= 0 && irq < 16 && (s_irq_owned & (1u << irq));
+}
+
+void idt_set_irq(int irq, void (*stub)(void)) {
+    if (irq < 0 || irq > 15 || irq == 2)
+        return;
+    s_irq_owned |= (uint16_t)(1u << irq);
+    idt_set_gate(IRQ0_VECTOR + irq, (uint32_t)stub); /* slave is remapped
+                                                        right after master */
+    if (irq < 8) {
+        outb(PIC1_DATA, inb(PIC1_DATA) & ~(1 << irq));
+    } else {
+        outb(PIC2_DATA, inb(PIC2_DATA) & ~(1 << (irq - 8)));
+        outb(PIC1_DATA, inb(PIC1_DATA) & ~(1 << 2)); /* cascade */
+    }
+}
+
+void idt_mask_irq(int irq) {
+    if (irq >= 0 && irq < 8)
+        outb(PIC1_DATA, inb(PIC1_DATA) | (1 << irq));
+    else if (irq >= 8 && irq < 16)
+        outb(PIC2_DATA, inb(PIC2_DATA) | (1 << (irq - 8)));
 }
 
 void idt_init(void) {
@@ -79,8 +104,6 @@ void idt_init(void) {
 
     appguard_install_gates(idt_set_gate);
     idt_set_gate(IRQ0_VECTOR, (uint32_t)isr_timer);
-    idt_set_gate(IRQ0_VECTOR + 3, (uint32_t)isr_ne2000);
-    idt_set_gate(IRQ0_VECTOR + 5, (uint32_t)isr_sb16);
 
     idt_ptr.limit = sizeof(idt) - 1;
     idt_ptr.base = (uint32_t)idt;
@@ -88,7 +111,9 @@ void idt_init(void) {
 
     pic_remap();
 
-    outb(PIC1_DATA, 0xF0);
+    /* IRQ 0 (timer), 1, 2 (cascade) open; drivers open their own line
+     * with idt_set_irq() once they know it. */
+    outb(PIC1_DATA, 0xF8);
     outb(PIC2_DATA, 0xFF);
 
     pit_init();

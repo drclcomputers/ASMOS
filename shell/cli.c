@@ -439,6 +439,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_mem(out_buffer, max_len);
     else if (!strcmp(command, "sysinfo"))
         cmd_sysinfo(out_buffer, max_len);
+    else if (!strcmp(command, "lspci"))
+        cmd_lspci(out_buffer, max_len);
     else if (!strcmp(command, "cp"))
         cmd_cp(argument, out_buffer, max_len);
     else if (!strcmp(command, "mv"))

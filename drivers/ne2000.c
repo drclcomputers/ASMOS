@@ -1,5 +1,8 @@
 #include "drivers/ne2000.h"
+#include "drivers/pci.h"
+#include "interrupts/idt.h"
 #include "lib/core.h"
+#include "lib/io.h"
 #include "lib/memory.h"
 #include "shell/term_buf.h"
 
@@ -9,6 +12,9 @@ typedef struct __attribute__((packed)) {
     uint16_t byte_count;
 } rx_header_t;
 
+uint16_t g_ne_base = 0x300;
+static int s_irq = -1;
+static bool s_pci;
 static bool s_detected = false;
 static uint8_t s_mac[6];
 static uint8_t s_curr;
@@ -61,14 +67,20 @@ static void ne_remote_write(uint16_t dst, const uint8_t *src, uint16_t len) {
     outb(P0_CMD, CMD_RD2 | CMD_PS0 | CMD_START);
 }
 
-bool ne2000_init(void) {
-    s_rx_buf = (uint8_t *)kmalloc(RX_BUF_SIZE);
-    if (!s_rx_buf)
-        return false;
-
+/* Reset the card at g_ne_base and read its station address PROM. True if
+ * an 8390/NE2000 answered with a plausible MAC. */
+static bool probe_at(uint16_t base) {
+    g_ne_base = base;
+    uint8_t cmd = inb(P0_CMD);
+    if (cmd == 0xFF)
+        return false; /* nothing decodes this port */
     outb(NE_RESET_PORT, inb(NE_RESET_PORT));
-    for (volatile int i = 0; i < 0x8000; i++)
-        __asm__ volatile("nop");
+    uint32_t t = 0x20000;
+    while (!(inb(P0_ISR) & ISR_RST) && --t)
+        ;
+    if (!t)
+        return false; /* no 8390 reset acknowledge */
+    outb(P0_ISR, 0xFF);
 
     outb(P0_CMD, CMD_STOP | CMD_RD2);
     outb(P0_DCR, DCR_FT1 | DCR_LS);
@@ -85,14 +97,80 @@ bool ne2000_init(void) {
 
     uint8_t prom[32];
     ne_remote_read(0, prom, 32);
-
-    bool valid = false;
+    bool all_ff = true, all_00 = true;
     for (int i = 0; i < 6; i++) {
         s_mac[i] = prom[i * 2];
-        if (s_mac[i] != 0xFF)
-            valid = true;
+        all_ff &= s_mac[i] == 0xFF;
+        all_00 &= s_mac[i] == 0x00;
     }
-    if (!valid) {
+    return !all_ff && !all_00 && !(s_mac[0] & 1); /* unicast address */
+}
+
+/* ISA card with an unknown jumper: make it raise "remote DMA complete" and
+ * see which PIC request line goes up. -1 if none did. */
+static int detect_isa_irq(void) {
+    uint32_t fl = irq_save();
+    outb(0x20, 0x0A); /* OCW3: read IRR */
+    outb(0xA0, 0x0A);
+    uint16_t before = inb(0x20) | (inb(0xA0) << 8);
+    outb(P0_ISR, 0xFF);
+    outb(P0_IMR, ISR_RDC);
+    /* 2-byte remote write; completion sets RDC and raises the IRQ line. The
+     * line must still be high when IRR is read (the 8259 forgets edges that
+     * drop before they are acknowledged), so ISR is cleared afterwards. */
+    outb(P0_CMD, CMD_RD2 | CMD_PS0 | CMD_START);
+    ne_write_rdc(0x4000, 2);
+    outb(P0_CMD, CMD_RD1 | CMD_PS0 | CMD_START);
+    outb(NE_DATA, 0);
+    outb(NE_DATA, 0);
+    uint32_t t = 0x10000;
+    while (!(inb(P0_ISR) & ISR_RDC) && --t)
+        ;
+    uint16_t after = inb(0x20) | (inb(0xA0) << 8);
+    outb(P0_IMR, 0x00);
+    outb(P0_ISR, 0xFF);
+    outb(P0_CMD, CMD_RD2 | CMD_PS0 | CMD_START);
+    irq_restore(fl);
+    if (!t)
+        return -1;
+    uint16_t rose =
+        (uint16_t)(after & ~before) & ~(uint16_t)0x0007; /* not 0-2 */
+    for (int irq = 3; irq < 16; irq++)
+        if (rose == (1u << irq))
+            return irq; /* exactly one line: trust it */
+    return -1;
+}
+
+extern void isr_ne2000(void);
+
+bool ne2000_init(void) {
+    s_rx_buf = (uint8_t *)kmalloc(RX_BUF_SIZE);
+    if (!s_rx_buf)
+        return false;
+
+    bool found = false;
+    /* PCI NE2000 clones: Realtek RTL8029, Winbond W89C940, VIA, Compex... */
+    static const uint16_t ids[][2] = {
+        {0x10EC, 0x8029}, {0x1050, 0x0940}, {0x1050, 0x5A5A}, {0x11F6, 0x1401},
+        {0x8E2E, 0x3000}, {0x4A14, 0x5000}, {0x1106, 0x0926}, {0x10BD, 0x0E34}};
+    for (unsigned i = 0; i < sizeof(ids) / sizeof(ids[0]) && !found; i++) {
+        const pci_dev_t *d = pci_find(ids[i][0], ids[i][1], 0);
+        uint16_t io = pci_bar_io(d, 0);
+        if (!io)
+            continue;
+        pci_enable(d, true, false, false);
+        if (probe_at(io)) {
+            found = s_pci = true;
+            s_irq = d->irq != 0xFF ? d->irq : -1;
+        }
+    }
+    static const uint16_t isa[] = {0x300, 0x280, 0x320, 0x340, 0x360, 0x240};
+    for (unsigned i = 0; i < sizeof(isa) / sizeof(isa[0]) && !found; i++)
+        if (probe_at(isa[i])) {
+            found = true;
+            s_irq = detect_isa_irq();
+        }
+    if (!found) {
         kfree(s_rx_buf);
         s_rx_buf = NULL;
         return false;
@@ -117,11 +195,23 @@ bool ne2000_init(void) {
     outb(P0_PSTOP, RX_STOP);
     outb(P0_BNRY, RX_START);
     outb(P0_ISR, 0xFF);
-    outb(P0_IMR, ISR_PRX | ISR_RXE | ISR_OVW);
 
     s_detected = true;
+    /* Interrupts only when we know the line; otherwise net_poll() drives
+     * the card (it already polls every frame). */
+    if (s_irq >= 3 && s_irq <= 15 && s_irq != 8 && !idt_irq_in_use(s_irq)) {
+        outb(P0_IMR, ISR_PRX | ISR_RXE | ISR_OVW);
+        idt_set_irq(s_irq, isr_ne2000);
+    } else {
+        s_irq = -1;
+        outb(P0_IMR, 0x00);
+    }
     return true;
 }
+
+uint16_t ne2000_io_base(void) { return g_ne_base; }
+int ne2000_irq(void) { return s_irq; }
+const char *ne2000_bus(void) { return s_pci ? "PCI" : "ISA"; }
 
 bool ne2000_detected(void) { return s_detected; }
 
@@ -209,9 +299,15 @@ static bool ne_receive_one(void) {
     return true;
 }
 
+static inline void eoi(void) {
+    if (s_irq >= 8)
+        outb(0xA0, 0x20);
+    outb(0x20, 0x20);
+}
+
 void ne2000_irq_handler(void) {
     if (!s_detected) {
-        outb(0x20, 0x20);
+        eoi();
         return;
     }
 
@@ -237,7 +333,7 @@ void ne2000_irq_handler(void) {
             ;
     }
 
-    outb(0x20, 0x20);
+    eoi();
 }
 
 void ne2000_poll(void) {

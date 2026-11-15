@@ -67,6 +67,8 @@ void error_report(err_severity_t sev, err_code_t code, const char *context);
 void boot_check_ata(void);
 void boot_check_fat(void);
 void boot_check_heap(void);
+void boot_check_pci(void);
+void boot_check_input(void);
 void boot_check_sound(void);
 void boot_check_graphics(void);
 void boot_check_network(void);

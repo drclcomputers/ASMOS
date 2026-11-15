@@ -1,6 +1,6 @@
 #include "lib/string.h"
-#include "lib/core.h"
 #include "lib/alloc.h"
+#include "lib/core.h"
 #include "lib/mem.h"
 
 // String functions
@@ -300,11 +300,12 @@ double str_to_double(const char *s, char **end) {
 int vsnprintf(char *str, size_t size, const char *format, va_list args) {
     size_t total = 0;
 
-    #define PUTC(c) do { \
-        if (size > 0 && total < size - 1 && str) { \
-            str[total] = (char)(c); \
-        } \
-        total++; \
+#define PUTC(c)                                                                \
+    do {                                                                       \
+        if (size > 0 && total < size - 1 && str) {                             \
+            str[total] = (char)(c);                                            \
+        }                                                                      \
+        total++;                                                               \
     } while (0)
 
     while (*format) {
@@ -314,15 +315,30 @@ int vsnprintf(char *str, size_t size, const char *format, va_list args) {
         }
         format++;
 
-        bool left_align = false, zero_pad = false, plus_sign = false, space_sign = false;
+        bool left_align = false, zero_pad = false, plus_sign = false,
+             space_sign = false;
         bool parsing_flags = true;
         while (parsing_flags) {
             switch (*format) {
-                case '-': left_align = true; format++; break;
-                case '0': zero_pad = true;  format++; break;
-                case '+': plus_sign = true;  format++; break;
-                case ' ': space_sign = true; format++; break;
-                default:  parsing_flags = false;    break;
+            case '-':
+                left_align = true;
+                format++;
+                break;
+            case '0':
+                zero_pad = true;
+                format++;
+                break;
+            case '+':
+                plus_sign = true;
+                format++;
+                break;
+            case ' ':
+                space_sign = true;
+                format++;
+                break;
+            default:
+                parsing_flags = false;
+                break;
             }
         }
 
@@ -342,100 +358,133 @@ int vsnprintf(char *str, size_t size, const char *format, va_list args) {
             }
         }
 
-        if (*format == 'l' || *format == 'h') format++;
+        if (*format == 'l' || *format == 'h')
+            format++;
 
-        #define WRITE_PADDED_SAFE(s, slen) do { \
-            int _len = (slen); \
-            int _pad = (width > _len) ? width - _len : 0; \
-            char _pc = (zero_pad && !left_align) ? '0' : ' '; \
-            if (!left_align) \
-                for (int _i = 0; _i < _pad; _i++) PUTC(_pc); \
-            for (int _i = 0; _i < _len; _i++) PUTC((s)[_i]); \
-            if (left_align) \
-                for (int _i = 0; _i < _pad; _i++) PUTC(' '); \
-        } while (0)
+#define WRITE_PADDED_SAFE(s, slen)                                             \
+    do {                                                                       \
+        int _len = (slen);                                                     \
+        int _pad = (width > _len) ? width - _len : 0;                          \
+        char _pc = (zero_pad && !left_align) ? '0' : ' ';                      \
+        if (!left_align)                                                       \
+            for (int _i = 0; _i < _pad; _i++)                                  \
+                PUTC(_pc);                                                     \
+        for (int _i = 0; _i < _len; _i++)                                      \
+            PUTC((s)[_i]);                                                     \
+        if (left_align)                                                        \
+            for (int _i = 0; _i < _pad; _i++)                                  \
+                PUTC(' ');                                                     \
+    } while (0)
 
         switch (*format) {
-            case 'c': {
-                char buf[1] = { (char)va_arg(args, int) };
-                WRITE_PADDED_SAFE(buf, 1);
-                break;
-            }
-            case 's': {
-                char *s = va_arg(args, char *);
-                if (!s) s = "(null)";
-                int slen = (int)strlen(s);
-                if (precision >= 0 && slen > precision) slen = precision;
-                WRITE_PADDED_SAFE(s, slen);
-                break;
-            }
-            case 'd':
-            case 'i': {
-                int val = va_arg(args, int);
-                char tmp[24];
-                int ti = 0;
-                bool neg = (val < 0);
-                uint32_t uval = neg ? (uint32_t)(-(int32_t)val) : (uint32_t)val;
-                if (uval == 0) tmp[ti++] = '0';
-                else {
-                    while (uval > 0) {
-                        tmp[ti++] = '0' + (uval % 10);
-                        uval /= 10;
-                    }
+        case 'c': {
+            char buf[1] = {(char)va_arg(args, int)};
+            WRITE_PADDED_SAFE(buf, 1);
+            break;
+        }
+        case 's': {
+            char *s = va_arg(args, char *);
+            if (!s)
+                s = "(null)";
+            int slen = (int)strlen(s);
+            if (precision >= 0 && slen > precision)
+                slen = precision;
+            WRITE_PADDED_SAFE(s, slen);
+            break;
+        }
+        case 'd':
+        case 'i': {
+            int val = va_arg(args, int);
+            char tmp[24];
+            int ti = 0;
+            bool neg = (val < 0);
+            uint32_t uval = neg ? (uint32_t)(-(int32_t)val) : (uint32_t)val;
+            if (uval == 0)
+                tmp[ti++] = '0';
+            else {
+                while (uval > 0) {
+                    tmp[ti++] = '0' + (uval % 10);
+                    uval /= 10;
                 }
-                while (ti < precision && ti < (int)sizeof(tmp) - 2) tmp[ti++] = '0';
-                for (int a = 0, b = ti - 1; a < b; a++, b--) {
-                    char c = tmp[a]; tmp[a] = tmp[b]; tmp[b] = c;
-                }
-                char prefix[2];
-                int plen = 0;
-                if (neg) prefix[plen++] = '-';
-                else if (plus_sign) prefix[plen++] = '+';
-                else if (space_sign) prefix[plen++] = ' ';
+            }
+            while (ti < precision && ti < (int)sizeof(tmp) - 2)
+                tmp[ti++] = '0';
+            for (int a = 0, b = ti - 1; a < b; a++, b--) {
+                char c = tmp[a];
+                tmp[a] = tmp[b];
+                tmp[b] = c;
+            }
+            char prefix[2] = {0, 0};
+            int plen = 0;
+            if (neg)
+                prefix[plen++] = '-';
+            else if (plus_sign)
+                prefix[plen++] = '+';
+            else if (space_sign)
+                prefix[plen++] = ' ';
 
-                int sub_total = plen + ti;
-                int pad = (width > sub_total) ? width - sub_total : 0;
-                char pc = (zero_pad && !left_align) ? '0' : ' ';
-                if (!left_align && !zero_pad) for (int i = 0; i < pad; i++) PUTC(' ');
-                for (int i = 0; i < plen; i++) PUTC(prefix[i]);
-                if (!left_align && zero_pad) for (int i = 0; i < pad; i++) PUTC(pc);
-                for (int i = 0; i < ti; i++) PUTC(tmp[i]);
-                if (left_align) for (int i = 0; i < pad; i++) PUTC(' ');
-                break;
-            }
-            case 'u':
-            case 'x':
-            case 'X':
-            case 'o': {
-                uint32_t val = va_arg(args, uint32_t);
-                const char *digits = (*format == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
-                int base = (*format == 'o') ? 8 : ((*format == 'u') ? 10 : 16);
-                char tmp[24];
-                int ti = 0;
-                if (val == 0) tmp[ti++] = '0';
-                else {
-                    while (val > 0) {
-                        tmp[ti++] = digits[val % base];
-                        val /= base;
-                    }
+            int sub_total = plen + ti;
+            int pad = (width > sub_total) ? width - sub_total : 0;
+            char pc = (zero_pad && !left_align) ? '0' : ' ';
+            if (!left_align && !zero_pad)
+                for (int i = 0; i < pad; i++)
+                    PUTC(' ');
+            for (int i = 0; i < plen; i++)
+                PUTC(prefix[i]);
+            if (!left_align && zero_pad)
+                for (int i = 0; i < pad; i++)
+                    PUTC(pc);
+            for (int i = 0; i < ti; i++)
+                PUTC(tmp[i]);
+            if (left_align)
+                for (int i = 0; i < pad; i++)
+                    PUTC(' ');
+            break;
+        }
+        case 'u':
+        case 'x':
+        case 'X':
+        case 'o': {
+            uint32_t val = va_arg(args, uint32_t);
+            const char *digits =
+                (*format == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+            int base = (*format == 'o') ? 8 : ((*format == 'u') ? 10 : 16);
+            char tmp[24];
+            int ti = 0;
+            if (val == 0)
+                tmp[ti++] = '0';
+            else {
+                while (val > 0) {
+                    tmp[ti++] = digits[val % base];
+                    val /= base;
                 }
-                while (precision > ti && ti < (int)sizeof(tmp) - 1) tmp[ti++] = '0';
-                for (int a = 0, b = ti - 1; a < b; a++, b--) {
-                    char c = tmp[a]; tmp[a] = tmp[b]; tmp[b] = c;
-                }
-                WRITE_PADDED_SAFE(tmp, ti);
-                break;
             }
-            case 'p': {
-                uint32_t val = (uint32_t)(uintptr_t)va_arg(args, void *);
-                char tmp[10] = { '0', 'x' };
-                const char *hd = "0123456789abcdef";
-                for (int i = 0; i < 8; i++) tmp[2 + i] = hd[(val >> (28 - i * 4)) & 0xF];
-                WRITE_PADDED_SAFE(tmp, 10);
-                break;
+            while (precision > ti && ti < (int)sizeof(tmp) - 1)
+                tmp[ti++] = '0';
+            for (int a = 0, b = ti - 1; a < b; a++, b--) {
+                char c = tmp[a];
+                tmp[a] = tmp[b];
+                tmp[b] = c;
             }
-            case '%': PUTC('%'); break;
-            default:  PUTC('%'); PUTC(*format); break;
+            WRITE_PADDED_SAFE(tmp, ti);
+            break;
+        }
+        case 'p': {
+            uint32_t val = (uint32_t)(uintptr_t)va_arg(args, void *);
+            char tmp[10] = {'0', 'x'};
+            const char *hd = "0123456789abcdef";
+            for (int i = 0; i < 8; i++)
+                tmp[2 + i] = hd[(val >> (28 - i * 4)) & 0xF];
+            WRITE_PADDED_SAFE(tmp, 10);
+            break;
+        }
+        case '%':
+            PUTC('%');
+            break;
+        default:
+            PUTC('%');
+            PUTC(*format);
+            break;
         }
         format++;
     }
