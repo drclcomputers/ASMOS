@@ -1,5 +1,6 @@
 #include "os/appload.h"
 
+#include "config/runtime_config.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "drivers/sb16.h"
@@ -524,6 +525,27 @@ static void api_quit_self(void *state) {
         os_quit_app(a);
 }
 
+/* size 4: speed */
+static void api_set_lazy(window *w, bool on) {
+    if (w && s_calling_state && w->dyn_state == s_calling_state) {
+        w->lazy_custom = on;
+        wm_invalidate(w);
+    }
+}
+
+static void api_invalidate(window *w) {
+    if (w)
+        wm_invalidate(w);
+}
+
+static uint32_t api_speed_flags(void) {
+    return (cfg_is_low_end() ? SPEED_LOW_END : 0) |
+           (g_cfg.reduce_motion ? SPEED_NO_ANIM : 0) |
+           (g_cfg.outline_drag ? SPEED_OUTLINE : 0) |
+           (g_cfg.caret_no_blink ? SPEED_NO_BLINK : 0) |
+           (g_cfg.no_tooltips ? SPEED_NO_TIPS : 0);
+}
+
 static const os_api_t s_api = {
     .version = OS_API_VERSION,
     .size = sizeof(os_api_t),
@@ -551,6 +573,16 @@ static const os_api_t s_api = {
     .prefs_get_int = api_prefs_get_int,
     .prefs_set = api_prefs_set,
     .prefs_set_int = api_prefs_set_int,
+    .set_lazy = api_set_lazy,
+    .invalidate = api_invalidate,
+    .draw_pixels = draw_pixels,
+    .draw_text_n = draw_text_n,
+    .text_width = text_width,
+    .font_height = font_height,
+    .mem_copy = memcpy,
+    .mem_set = memset,
+    .speed_flags = api_speed_flags,
+    .frame_ms = cfg_frame_ms,
 };
 
 /* ── guarded trampolines ────────────────────────────────────────────── */

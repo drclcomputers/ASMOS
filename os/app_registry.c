@@ -9,21 +9,17 @@ extern app_descriptor filef_app;
 extern app_descriptor hexview_app;
 extern app_descriptor midiplayer_app;
 extern app_descriptor monitor_app;
+extern app_descriptor puzzle_app;
 extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 
 registered_app_t app_registry[] = {
-    {&asmdraw_app, "ASMDraw"},
-    {&asmterm_app, "ASMTerm"},
-    {&calculator_app, "Calculator"},
-    {&clock_app, "Clock"},
-    {&clipview_app, "ClipView"},
-    {&filef_app, "FileF"},
-    {&hexview_app, "HexView"},
-    {&midiplayer_app, "MIDI Player"},
-    {&monitor_app, "Monitor"},
-    {&settings_app, "Settings"},
-    {&teditor_app, "TEditor"},
+    {&asmdraw_app, "ASMDraw"},       {&asmterm_app, "ASMTerm"},
+    {&calculator_app, "Calculator"}, {&clock_app, "Clock"},
+    {&clipview_app, "ClipView"},     {&filef_app, "FileF"},
+    {&hexview_app, "HexView"},       {&midiplayer_app, "MIDI Player"},
+    {&monitor_app, "Monitor"},       {&puzzle_app, "Puzzle"},
+    {&settings_app, "Settings"},     {&teditor_app, "TEditor"},
 };
 
 int app_registry_count = sizeof(app_registry) / sizeof(app_registry[0]);

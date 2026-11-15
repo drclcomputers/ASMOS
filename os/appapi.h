@@ -180,6 +180,35 @@ typedef struct os_api {
     int (*prefs_get_int)(const char *key, int def);
     bool (*prefs_set)(const char *key, const char *value);
     bool (*prefs_set_int)(const char *key, int value);
+
+    /* ── appended in API size 4: speed ── */
+    /* Lazy redraw (docs/UI_TOOLKIT.md "Lazy redraw"). A window with custom
+     * drawing (ui->custom painters, an on_draw) is drawn every frame. Call
+     * set_lazy(w, true) when that drawing only changes in your handlers,
+     * menu commands or dialogs: then it is drawn only when it changes, after
+     * input, or after invalidate(w). Changing it from on_frame or a timer?
+     * Call invalidate(w) then, or the window shows old content. */
+    void (*set_lazy)(window *w, bool on); /* your own windows only */
+    void (*invalidate)(window *w);        /* draw w again next frame */
+    /* fast drawing: rep movsd / stosd, row copies, clipped */
+    void (*draw_pixels)(int x, int y, int w, int h, const uint8_t *src,
+                        int stride);
+    void (*draw_text_n)(int x, int y, const char *s, int n, unsigned char c,
+                        int size);
+    int (*text_width)(const char *s, int size); /* pixels */
+    int (*font_height)(int size);               /* rows */
+    void *(*mem_copy)(void *dst, const void *src, size_t n);
+    void *(*mem_set)(void *dst, int c, size_t n);
+    /* the user's Settings > Speed choices: go lighter when asked */
+    uint32_t (*speed_flags)(void); /* SPEED_* bits */
+    int (*frame_ms)(void);         /* ms per frame: 16, 33 or 50 */
 } os_api_t;
+
+/* api->speed_flags() */
+#define SPEED_LOW_END (1u << 0)  /* the "Low-end machine" preset is on   */
+#define SPEED_NO_ANIM (1u << 1)  /* no animations (reduce motion)        */
+#define SPEED_OUTLINE (1u << 2)  /* outline move/resize                  */
+#define SPEED_NO_BLINK (1u << 3) /* carets / cursors don't blink         */
+#define SPEED_NO_TIPS (1u << 4)  /* no tooltips                          */
 
 #endif
