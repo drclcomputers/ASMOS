@@ -22,4 +22,11 @@ bool edit_key(control *c);
 void edit_mouse(control *c, int mx, int my, bool down, bool dbl);
 void edit_fix_scroll(control *c);
 
+void tree_draw(control *c);
+void tree_mouse(control *c, int mx, int my, bool down, bool dbl);
+bool tree_key(control *c, uint8_t sc, char ch);
+void tree_free(control *c);
+void tree_select_at(control *c, int mx, int my); /* right-click */
+void tree_sel_point(const control *c, int *mx, int *my);
+
 #endif

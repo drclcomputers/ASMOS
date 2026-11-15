@@ -10,10 +10,12 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
+#include "os/clipboard.h"
 #include "os/os.h"
 #include "ui/cursor.h"
 #include "ui/dialogs.h"
 #include "ui/menubar.h"
+#include "ui/popup.h"
 #include "ui/window.h"
 
 void (*g_ctl_invoke_hook)(control *c, int ev) = NULL;
@@ -464,6 +466,22 @@ control *ctl_custom(window *w, int x, int y, int cw, int ch, ctl_painter p,
     return c;
 }
 
+/* type-specific storage + tooltip: freed for every control type */
+static control *s_tip_ctl;
+static control *s_menu_ctl;
+static void free_extras(control *c) {
+    if (c == s_tip_ctl)
+        s_tip_ctl = NULL;
+    if (c == s_menu_ctl)
+        s_menu_ctl = NULL;
+    if (c->type == CTL_TREE)
+        tree_free(c);
+    if (c->tip) {
+        kfree(c->tip);
+        c->tip = NULL;
+    }
+}
+
 static void free_items(control *c) {
     for (int i = 0; i < c->count && c->items; i++)
         kfree(c->items[i]);
@@ -501,6 +519,7 @@ void ctl_destroy(control *c) {
         if (o->tab_owner == c)
             o->tab_owner = NULL;
     forget(c);
+    free_extras(c);
     if (c->type != CTL_TABS)
         free_items(c);
     if (c->text)
@@ -509,10 +528,12 @@ void ctl_destroy(control *c) {
 }
 
 void ctl_window_destroyed(window *w) {
+    popup_window_gone(w);
     control *c = w->controls;
     while (c) {
         control *n = c->next;
         forget(c);
+        free_extras(c);
         if (c->type != CTL_TABS)
             free_items(c);
         if (c->text)
@@ -1178,6 +1199,9 @@ void ctl_draw_all(window *w) {
         case CTL_LIST:
             draw_list(c);
             break;
+        case CTL_TREE:
+            tree_draw(c);
+            break;
         case CTL_COMBO:
             draw_combo(c);
             break;
@@ -1296,6 +1320,11 @@ static void mouse_down(control *c) {
     case CTL_EDIT:
         edit_mouse(c, mx, my, true, dbl);
         break;
+    case CTL_TREE:
+        tree_mouse(c, mx, my, true, dbl);
+        if (dbl)
+            s_last_down = NULL;
+        return; /* the handler may have destroyed c */
     case CTL_LIST: {
         int first = (c->style & LBS_HEADER) ? 1 : 0;
         int rows = list_rows(c);
@@ -1392,6 +1421,9 @@ static void mouse_move(control *c) {
     case CTL_EDIT:
         if (mouse.dx || mouse.dy)
             edit_mouse(c, mx, my, false, false);
+        break;
+    case CTL_TREE:
+        tree_mouse(c, mx, my, false, false);
         break;
     case CTL_LIST:
         if (s_drag_part == 15) {
@@ -1659,6 +1691,8 @@ static bool key_to(control *c) {
         return edit_key(c);
     case CTL_LIST:
         return list_key(c, sc, ch);
+    case CTL_TREE:
+        return tree_key(c, sc, ch);
     case CTL_COMBO:
         return combo_key(c, sc);
     case CTL_VSCROLL:
@@ -1736,12 +1770,68 @@ static control *find_style(window *w, uint32_t st) {
     return NULL;
 }
 
+/* ── tooltips ──────────────────────────────────────────────────────────── */
+
+#define TIP_DELAY_MS 600
+#define TIP_SHOW_MS 6000
+
+/* s_tip_ctl: control under the pointer (declared above) */
+static uint32_t s_tip_since; /* when the pointer arrived on it */
+static bool s_tip_gone;      /* clicked/typed: not again until it leaves */
+
+void ctl_set_tooltip(control *c, const char *text) {
+    if (!c)
+        return;
+    if (c->tip) {
+        kfree(c->tip);
+        c->tip = NULL;
+    }
+    if (text && text[0]) {
+        int n = (int)strlen(text);
+        c->tip = (char *)kmalloc((size_t)n + 1);
+        if (c->tip)
+            memcpy(c->tip, text, (size_t)n + 1);
+    }
+}
+
+static void tip_track(control *c) {
+    if (c != s_tip_ctl) {
+        s_tip_ctl = c;
+        s_tip_since = time_millis();
+        s_tip_gone = false;
+    }
+    if (mouse.left || mouse.right || kb.key_pressed || popup_is_open())
+        s_tip_gone = true;
+}
+
+void ctl_draw_tooltip(void) {
+    control *c = s_tip_ctl;
+    if (!c || !c->tip || s_tip_gone || !c->visible)
+        return;
+    uint32_t t = time_millis() - s_tip_since;
+    if (t < TIP_DELAY_MS || t > TIP_SHOW_MS)
+        return;
+    int w = (int)strlen(c->tip) * 5 + 6, h = 11;
+    int x = mouse.x + 2, y = mouse.y + 14;
+    if (x + w > SCREEN_WIDTH)
+        x = SCREEN_WIDTH - w;
+    if (y + h > SCREEN_HEIGHT)
+        y = mouse.y - h - 2;
+    if (x < 0)
+        x = 0;
+    gfx_reset_clip();
+    fill_rect(x, y, w, h, YELLOW);
+    draw_rect(x, y, w, h, BLACK);
+    draw_string(x + 3, y + 2, c->tip, BLACK, 2);
+}
+
 static void hover_cursor(void) {
     static bool ours;
     window *w = window_at(mouse.x, mouse.y);
     control *c = (w && !w->modal_child && w->controls && !s_capture)
                      ? hit(w, mouse.x, mouse.y)
                      : (s_capture ? s_capture : NULL);
+    tip_track(c);
     if (c && c->type == CTL_EDIT) {
         CHOSEN_CURSOR = 3; /* I-beam over text fields */
         ours = true;
@@ -1749,6 +1839,119 @@ static void hover_cursor(void) {
         CHOSEN_CURSOR = 0;
         ours = false;
     }
+}
+
+/* ── context menus ─────────────────────────────────────────────────────── */
+
+/* s_menu_ctl (declared above): edit control the built-in menu acts on */
+static bool s_menu_key; /* current EV_MENU came from the keyboard */
+
+bool ctl_menu_from_key(void) { return s_menu_key; }
+
+/* c still belongs to the focused window (handlers may destroy controls) */
+static bool ctl_alive(const control *c) {
+    window *w = wm_focused_window();
+    for (control *k = w ? w->controls : NULL; k; k = k->next)
+        if (k == c)
+            return true;
+    return false;
+}
+
+static control *menu_target(void) {
+    return s_menu_ctl && ctl_alive(s_menu_ctl) ? s_menu_ctl : NULL;
+}
+static void em_cut(void *u) {
+    (void)u;
+    edit_cut(menu_target());
+}
+static void em_copy(void *u) {
+    (void)u;
+    edit_copy(menu_target());
+}
+static void em_paste(void *u) {
+    (void)u;
+    edit_paste(menu_target());
+}
+static void em_delete(void *u) {
+    (void)u;
+    edit_delete_sel(menu_target());
+}
+static void em_all(void *u) {
+    (void)u;
+    control *c = menu_target();
+    if (c)
+        edit_select_all(c);
+}
+
+static void edit_context_menu(control *c) {
+    bool ro = (c->style & ES_READONLY) != 0;
+    bool sel = edit_has_sel(c);
+    bool pw = (c->style & ES_PASSWORD) != 0;
+    s_menu_ctl = c;
+    menu *m = popup_menu();
+    menu_add_item_ud(m, "Cut", em_cut, NULL);
+    menu_enable_last(m, sel && !ro && !pw);
+    menu_add_item_ud(m, "Copy", em_copy, NULL);
+    menu_enable_last(m, sel && !pw);
+    menu_add_item_ud(m, "Paste", em_paste, NULL);
+    menu_enable_last(m, !ro && clipboard_has_text());
+    menu_add_item_ud(m, "Delete", em_delete, NULL);
+    menu_enable_last(m, sel && !ro);
+    menu_add_separator(m);
+    menu_add_item_ud(m, "Select All", em_all, NULL);
+    menu_enable_last(m, c->text_len > 0);
+    popup_show_for(c);
+}
+
+/* Right-click / Menu key on c (c->mx/my already set). Lists and trees
+ * select the row under the point first, like a left click would. */
+static void context_menu(control *c) {
+    if (c->type == CTL_EDIT) {
+        edit_context_menu(c);
+        return;
+    }
+    if (c->type == CTL_LIST) {
+        int first = (c->style & LBS_HEADER) ? 1 : 0;
+        int ry = c->my - 2 - (first ? TH_LINE_H + 1 : 0);
+        int i = first + c->top + (ry < 0 ? -1 : ry / TH_LINE_H);
+        if (ry >= 0 && i < c->count && i != c->sel &&
+            c->mx < c->aw - 2 - SB_W) {
+            c->sel = i;
+            list_ensure_visible(c);
+            ctl_invoke(c, EV_CHANGE); /* may destroy c */
+            if (!ctl_alive(c))
+                return;
+        }
+    } else if (c->type == CTL_TREE) {
+        tree_select_at(c, c->mx, c->my);
+        if (!ctl_alive(c))
+            return;
+    }
+    ctl_invoke(c, EV_MENU);
+}
+
+/* Menu key / Shift+F10: point at the selection (or the control's corner). */
+static void key_context_menu(control *c) {
+    c->mx = 8;
+    c->my = 8;
+    if (c->type == CTL_LIST && c->sel >= 0) {
+        int first = (c->style & LBS_HEADER) ? 1 : 0;
+        c->my = 2 + (first ? TH_LINE_H + 1 : 0) +
+                (c->sel - c->top) * TH_LINE_H + TH_LINE_H / 2;
+    } else if (c->type == CTL_TREE) {
+        tree_sel_point(c, &c->mx, &c->my);
+    } else if (c->type == CTL_EDIT && !(c->style & ES_MULTILINE)) {
+        c->my = c->ah / 2;
+    }
+    if (c->my < 0 || c->my >= c->ah)
+        c->my = 8;
+    if (c->type == CTL_EDIT) {
+        edit_context_menu(c);
+        return;
+    }
+    s_menu_key = true;
+    ctl_invoke(c, EV_MENU);
+    s_menu_key = false;
 }
 
 void ctl_dispatch(void) {
@@ -1820,6 +2023,37 @@ void ctl_dispatch(void) {
         }
     }
 
+    /* 3b) right-click: focus like a click, then the context menu */
+    if (mouse.right_clicked && !g_menubar_click_consumed &&
+        mouse.y >= MENUBAR_H) {
+        window *w = window_at(mouse.x, mouse.y);
+        if (w && w->pinned_bottom) /* the desktop layer: its own menu */
+            w = NULL;
+        if (w && w->modal_child) {
+            wm_focus(w->modal_child);
+            mouse.right_clicked = false;
+            return;
+        }
+        if (w) {
+            if (wm_focused_window() != w)
+                wm_focus(w);
+            int cx, cy, cw, ch;
+            win_client_rect(w, &cx, &cy, &cw, &ch);
+            control *c = w->controls && inside(mouse.x, mouse.y, cx, cy, cw, ch)
+                             ? hit(w, mouse.x, mouse.y)
+                             : NULL;
+            mouse.right_clicked = false; /* windows eat it; desktop gets rest */
+            if (c) {
+                if (focusable(c))
+                    set_focus(w, c);
+                c->mx = mouse.x - c->ax;
+                c->my = mouse.y - c->ay;
+                context_menu(c); /* may destroy c */
+            }
+            return;
+        }
+    }
+
     /* 4) keyboard → focused control of the focused window */
     if (!kb.key_pressed)
         return;
@@ -1843,6 +2077,12 @@ void ctl_dispatch(void) {
           !(f->style & ES_READONLY) && !kb.shift)) {
         focus_step(w, kb.shift);
         kb.key_pressed = false;
+        return;
+    }
+    if (f && (kb.last_scancode == MENU_KEY ||
+              (kb.last_scancode == F10 && kb.shift))) {
+        kb.key_pressed = false;
+        key_context_menu(f);
         return;
     }
     if (f && key_to(f)) {

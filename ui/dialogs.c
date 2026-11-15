@@ -7,6 +7,7 @@
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "ui/fileops.h"
 #include "ui/window.h"
 
 void (*g_dlg_call_hook)(window *owner, void (*fn)(void *, void *), void *user,
@@ -22,6 +23,7 @@ typedef struct {
     dlg_bool_cb bcb;
     void *user;
     control *edit, *list, *path, *check;
+    control *tree;   /* file dialogs: folder tree */
     bool *check_out; /* dlg_input_check: receives the box on OK */
     char dir[128];
     char ext[4];
@@ -360,6 +362,10 @@ static void fill_list(dlg_t *d) {
     }
     if (n)
         list_set_sel(d->list, 0);
+    if (d->tree) /* follow in the tree, without re-triggering it */
+        tree_set_sel(d->tree, strcmp(d->dir, "/")
+                                  ? tree_find_path(d->tree, d->dir)
+                                  : -1);
 }
 
 static void go_dir(dlg_t *d, const char *name) {
@@ -498,10 +504,29 @@ static void on_list(control *c, int ev) {
     }
 }
 
+static void on_dir_tree(control *c, int ev) {
+    dlg_t *d = (dlg_t *)c->user;
+    char path[128];
+    if (ev == EV_EXPAND) {
+        int node = tree_event_node(c);
+        tree_path(c, node, path, sizeof(path));
+        static char names[64][13];
+        int n = fo_list_dirs(path, names, 64, false);
+        for (int i = 0; i < n; i++)
+            tree_add(c, node, names[i], 0, true);
+    } else if (ev == EV_CHANGE && tree_sel(c) >= 0) {
+        tree_path(c, tree_sel(c), path, sizeof(path));
+        if (strcmp(path, d->dir)) {
+            strncpy(d->dir, path, sizeof(d->dir) - 1);
+            fill_list(d);
+        }
+    }
+}
+
 static void file_dialog(window *owner, int kind, const char *title,
                         const char *dir, const char *name, const char *ext,
                         dlg_text_cb cb, void *user) {
-    dlg_t *d = open_dlg(owner, kind, title, 230, 172);
+    dlg_t *d = open_dlg(owner, kind, title, 310, 172);
     if (!d)
         return;
     d->tcb = cb;
@@ -516,15 +541,22 @@ static void file_dialog(window *owner, int kind, const char *title,
         d->ext[3] = 0;
     }
     window *w = d->win;
-    d->path = ctl_label(w, 6, 5, 180, 12, d->dir, CS_BORDER);
-    ctl_button(w, 190, 5, 30, 12, "Up", 3, on_up);
-    d->list = ctl_list(w, 6, 21, 214, 98, 0, on_list);
+    d->path = ctl_label(w, 6, 5, 260, 12, d->dir, CS_BORDER);
+    ctl_set_tooltip(ctl_button(w, 270, 5, 30, 12, "Up", 3, on_up),
+                    "Parent folder");
+    d->tree = ctl_tree(w, 6, 21, 78, 98, TS_FOLDERS, on_dir_tree);
+    if (fs_drive_mounted(DRIVE_HDA))
+        tree_add(d->tree, -1, "HDA", 0, true);
+    for (int m = 0; m < VFS_MOUNT_COUNT; m++)
+        if (fs_drive_mounted(g_vfs_mounts[m].drive_id))
+            tree_add(d->tree, -1, g_vfs_mounts[m].path + 1, 0, true);
+    d->list = ctl_list(w, 86, 21, 214, 98, 0, on_list);
     ctl_label(w, 6, 125, 30, 12, "Name:", 0);
     d->edit =
-        ctl_edit(w, 36, 125, 184, 12, name ? name : "", 63, ES_FILENAME, NULL);
-    control *ok = ctl_button(w, 114, 142, 50, 13,
+        ctl_edit(w, 36, 125, 264, 12, name ? name : "", 63, ES_FILENAME, NULL);
+    control *ok = ctl_button(w, 194, 142, 50, 13,
                              kind == K_SAVE ? "Save" : "Open", 1, on_file_ok);
-    control *ca = ctl_button(w, 170, 142, 50, 13, "Cancel", 2, on_cancel);
+    control *ca = ctl_button(w, 250, 142, 50, 13, "Cancel", 2, on_cancel);
     ctl_style_add(ok, CS_DEFAULT);
     ctl_style_add(ca, CS_CANCEL);
     fill_list(d);

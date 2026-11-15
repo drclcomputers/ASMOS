@@ -1,8 +1,10 @@
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 #include "ui/dialogs.h"
+#include "ui/fileops.h"
 #include "ui/icons.h"
 #include "ui/menubar.h"
+#include "ui/popup.h"
 #include "ui/window.h"
 
 #include "os/app_registry.h"
@@ -20,6 +22,7 @@
 
 /* Defined in apps/filef.c (apps have no public headers). */
 void ff_open_dir_pub(uint16_t cluster, const char *path);
+bool ff_folder_at(int mx, int my, char *out, int sz);
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -70,11 +73,11 @@ void draw_wallpaper_pattern(void) {
 #define DESK_ORIGIN_Y MENUBAR_H
 
 static int s_drag_idx = -1;
+static int s_press_idx = -1, s_press_x, s_press_y; /* button-down spot */
 static int s_drag_off_x = 0;
 static int s_drag_off_y = 0;
 static int s_last_click_idx = -1;
 static uint32_t s_last_click_tick = 0;
-static int s_rename_idx = -1;
 
 /* ── power animations ───────────────────────────────────────────────────── */
 #define BAR_W 160
@@ -157,107 +160,28 @@ void power_anim_run(bool is_restart) {
     sleep_s(2);
 }
 
-/* ── dialog state ───────────────────────────────────────────────────────── */
-
-static bool s_newname_is_dir = false;
-static bool s_newname_hidden = false; /* the dialog's "Hidden" box */
-
 /* ── open item ──────────────────────────────────────────────────────────── */
 
 static void launch_app_ud(void *userdata) {
     os_launch_app((app_descriptor *)userdata);
 }
 
-static void open_item(desktop_item_t *it) {
-    if (it->kind == DESKTOP_ITEM_APP) {
-        char names[3][64];
-        int ai = 0;
-        for (int k = 0; it->name[k] && ai < 63; k++)
-            names[0][ai++] = it->name[k];
-        names[0][ai] = '\0';
-
-        for (int k = 0; k <= ai; k++) {
-            char c = names[0][k];
-            names[1][k] = (k == 0 && c >= 'a' && c <= 'z')  ? c - 32
-                          : (k > 0 && c >= 'A' && c <= 'Z') ? c + 32
-                                                            : c;
-        }
-        for (int k = 0; k <= ai; k++) {
-            char c = names[0][k];
-            names[2][k] = (c >= 'a' && c <= 'z') ? c - 32 : c;
-        }
-
-        /* 1. Prefer a real dynamic .APP package on disk.
-         *    Try exact locations only (no spam).  Floppy first since that
-         *    is how test packages are delivered. */
-        char pathbuf[280];
-        bool launched = false;
-
-        snprintf(pathbuf, sizeof(pathbuf), "/FDD0/%s.APP", names[0]);
-        if (appload_try_open(pathbuf))
-            launched = true;
-
-        if (!launched) {
-            snprintf(pathbuf, sizeof(pathbuf), "/FDD1/%s.APP", names[0]);
-            if (appload_try_open(pathbuf))
-                launched = true;
-        }
-        if (!launched) {
-            snprintf(pathbuf, sizeof(pathbuf), "%s/%s.APP", desktop_fs_path(),
-                     names[0]);
-            if (appload_try_open(pathbuf))
-                launched = true;
-        }
-        if (!launched) {
-            snprintf(pathbuf, sizeof(pathbuf), "/apps/%s.APP", names[0]);
-            if (appload_try_open(pathbuf))
-                launched = true;
-        }
-
-        /* 2. Fall back to the classic static registry */
-        if (!launched) {
-            app_descriptor *desc = NULL;
-            for (int n = 0; n < 3 && !desc; n++)
-                desc = os_find_app(names[n]);
-
-            if (desc) {
-                os_launch_app(desc);
-                launched = true;
+/* Drives open their root in FileF; everything else follows the shared
+ * open-by-type rules (ui/fileops). */
+static void open_item(int idx) {
+    desktop_item_t *it = &desktop_fs_items()[idx];
+    if (it->kind == DESKTOP_ITEM_FDD || it->kind == DESKTOP_ITEM_HDD) {
+        for (int m = 0; m < VFS_MOUNT_COUNT; m++)
+            if (g_vfs_mounts[m].drive_id == it->drive_id &&
+                fs_drive_mounted(it->drive_id)) {
+                ff_open_dir_pub(0, g_vfs_mounts[m].path);
+                return;
             }
-        }
-
-        if (!launched) {
-            char msg[256];
-            snprintf(msg, sizeof(msg),
-                     "Could not find application '%s'.\n"
-                     "Put %s.APP in /apps or /FDD0, or rebuild the kernel.",
-                     names[0], names[0]);
-            dlg_message(NULL, "App Not Found", msg);
-        }
-    } else if (it->kind == DESKTOP_ITEM_DIR) {
-        dir_entry_t de;
-        uint16_t saved = dir_context.current_cluster;
-        dir_context.current_cluster = desktop_fs_cluster();
-        bool found = fs_find(it->name, &de);
-        dir_context.current_cluster = saved;
-        if (found && (de.attr & ATTR_DIRECTORY)) {
-            char path[280];
-            sprintf(path, "%s/%s", desktop_fs_path(), it->name);
-            ff_open_dir_pub(de.cluster_lo, path);
-        }
-    } else if (it->kind == DESKTOP_ITEM_FDD || it->kind == DESKTOP_ITEM_HDD) {
-        const char *vfs_path = NULL;
-        for (int m = 0; m < VFS_MOUNT_COUNT; m++) {
-            if (g_vfs_mounts[m].drive_id == it->drive_id) {
-                vfs_path = g_vfs_mounts[m].path;
-                break;
-            }
-        }
-        if (vfs_path && fs_drive_mounted(it->drive_id))
-            ff_open_dir_pub(0, vfs_path);
-    } else {
-        ff_open_dir_pub(desktop_fs_cluster(), desktop_fs_path());
+        return;
     }
+    char path[270];
+    if (desktop_fs_item_path(idx, path, sizeof(path)))
+        fo_open(NULL, path);
 }
 
 /* ── drawing ────────────────────────────────────────────────────────────── */
@@ -319,11 +243,19 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     draw_string(lx, ly, disp, label_col, 2);
 }
 
-static int desktop_hit(int mx, int my) {
+/* Over windows the desktop layer is hidden: draw the dragged icon on top. */
+static void draw_drag_overlay(void *user) {
+    int idx = *(int *)user;
+    if (idx >= 0 && idx < desktop_fs_count())
+        draw_desktop_item(&desktop_fs_items()[idx], true);
+}
+
+/* Icon under (mx, my), ignoring `skip` (the one being dragged). */
+static int desktop_hit_except(int mx, int my, int skip) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
     for (int i = 0; i < count; i++) {
-        if (!items[i].used)
+        if (!items[i].used || i == skip)
             continue;
         int ax = DESK_ORIGIN_X + items[i].x;
         int ay = DESK_ORIGIN_Y + items[i].y;
@@ -334,33 +266,8 @@ static int desktop_hit(int mx, int my) {
     return -1;
 }
 
-bool desktop_accept_drop(const char *src_path, const char *src_name,
-                         uint8_t src_drive) {
-    (void)src_drive;
-    if (!src_path || !src_name)
-        return false;
-
-    char dst_path[270];
-    snprintf(dst_path, sizeof(dst_path), "%s/%s", desktop_fs_path(), src_name);
-
-    dir_entry_t de;
-    if (fs_find(dst_path, &de)) {
-        return false;
-    }
-
-    dir_entry_t src_de;
-    if (!fs_find(src_path, &src_de))
-        return false;
-
-    bool ok;
-    if (src_de.attr & ATTR_DIRECTORY)
-        ok = fs_move_dir(src_path, dst_path);
-    else
-        ok = fs_move_file(src_path, dst_path);
-
-    if (ok)
-        desktop_fs_set_dirty();
-    return ok;
+static int desktop_hit(int mx, int my) {
+    return desktop_hit_except(mx, my, -1);
 }
 
 static int selected_idx(void) {
@@ -372,156 +279,58 @@ static int selected_idx(void) {
     return -1;
 }
 
-/* ── menu actions ───────────────────────────────────────────────────────── */
-static void do_delete(void) {
+/* ── menu actions: file operations go through ui/fileops ─────────────── */
+
+/* Path of the selected file/folder/app; false (with a message) if none. */
+static bool sel_path(const char *title, char *out, int sz) {
     int sel = selected_idx();
-    if (sel < 0) {
-        dlg_message(NULL, "Delete", "Selection lost.");
-        return;
+    if (sel < 0 || !desktop_fs_item_path(sel, out, sz)) {
+        dlg_message(NULL, title, "Select a file or folder first.");
+        return false;
     }
-    desktop_fs_delete(sel);
+    return true;
 }
 
-static void newname_done(void *user, const char *name);
-static void rename_done(void *user, const char *name);
-
-static void new_item(bool dir) {
-    s_newname_is_dir = dir;
-    s_newname_hidden = false;
-    dlg_input_check(NULL, dir ? "New Folder" : "New File",
-                    dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
-                    "Hidden", &s_newname_hidden, newname_done, NULL);
+static void menu_new_file(void) {
+    fo_ask_new(NULL, DESKTOP_PATH, false, NULL, NULL);
 }
-static void menu_new_file(void) { new_item(false); }
-static void menu_new_folder(void) { new_item(true); }
+static void menu_new_folder(void) {
+    fo_ask_new(NULL, DESKTOP_PATH, true, NULL, NULL);
+}
 static void menu_rename(void) {
-    desktop_item_t *items = desktop_fs_items();
-    int count = desktop_fs_count();
-    int sel = -1;
-
-    for (int i = 0; i < count; i++) {
-        if (items[i].used && items[i].selected) {
-            sel = i;
-            break;
-        }
-    }
-
-    if (sel < 0) {
-        return;
-    }
-
-    if (items[sel].kind == DESKTOP_ITEM_FDD ||
-        items[sel].kind == DESKTOP_ITEM_HDD) {
-        return;
-    }
-
-    s_rename_idx = sel;
-    dlg_input(NULL, "Rename", "New name:", items[sel].name, 12, ES_FILENAME,
-              rename_done, NULL);
+    char p[270];
+    if (sel_path("Rename", p, sizeof(p)))
+        fo_ask_rename(NULL, p, NULL, NULL);
+}
+static void menu_delete(void) {
+    char p[270];
+    if (sel_path("Delete", p, sizeof(p)))
+        fo_ask_delete(NULL, p, NULL, NULL);
+}
+static void menu_info(void) {
+    char p[270];
+    if (sel_path("Get Info", p, sizeof(p)))
+        fo_show_info(NULL, p);
 }
 static void menu_reload(void) { desktop_fs_set_dirty(); }
+static void menu_copy(void) {
+    char p[270];
+    if (sel_path("Copy", p, sizeof(p)))
+        fo_report(NULL, "Copy", fo_clip(p, false));
+}
+static void menu_cut(void) {
+    char p[270];
+    if (sel_path("Cut", p, sizeof(p)))
+        fo_report(NULL, "Cut", fo_clip(p, true));
+}
+static void menu_paste(void) {
+    fo_report(NULL, "Paste", fo_paste(DESKTOP_PATH));
+}
 
 /* dlg_confirm callback: user is the void(void) action to run on Yes */
 static void run_if_yes(void *fn, bool yes) {
     if (yes)
         ((void (*)(void))fn)();
-}
-
-/* Copy (is_cut=false) or cut the selected item to the file clipboard. */
-static void clip_selected(bool is_cut) {
-    const char *title = is_cut ? "Cut" : "Copy";
-    int sel = selected_idx();
-    if (sel < 0) {
-        dlg_message(NULL, title, "Nothing selected.");
-        return;
-    }
-    desktop_item_t *it = &desktop_fs_items()[sel];
-    if (path_is_protected(it->name)) {
-        dlg_message(NULL, title, "Protected item.");
-        return;
-    }
-
-    /* App icons are backed by NAME.APP on disk. */
-    char disk_name[16];
-    if (it->kind == DESKTOP_ITEM_APP) {
-        int fi = 0;
-        for (int k = 0; it->name[k] && fi < 8; k++) {
-            char c = it->name[k];
-            disk_name[fi++] = (c >= 'a' && c <= 'z') ? c - 32 : c;
-        }
-        strcpy(disk_name + fi, ".APP");
-    } else {
-        strncpy(disk_name, it->name, 15);
-        disk_name[15] = '\0';
-    }
-
-    clipboard_set_file(desktop_fs_path(), disk_name,
-                       it->kind == DESKTOP_ITEM_DIR, is_cut, DRIVE_HDA);
-    dlg_message(NULL, title,
-                is_cut ? "Item cut. Paste to move."
-                       : "Item copied to clipboard.");
-}
-static void menu_copy(void) { clip_selected(false); }
-static void menu_cut(void) { clip_selected(true); }
-
-static void menu_paste(void) {
-    if (!clipboard_has_file()) {
-        dlg_message(NULL, "Paste", "Clipboard is empty.");
-        return;
-    }
-
-    char src_path[270];
-    if (g_clipboard.src_path[0] == '/' && g_clipboard.src_path[1] == '\0')
-        sprintf(src_path, "/%s", g_clipboard.name);
-    else
-        sprintf(src_path, "%s/%s", g_clipboard.src_path, g_clipboard.name);
-
-    char dst_path[270];
-    sprintf(dst_path, "%s/%s", desktop_fs_path(), g_clipboard.name);
-
-    dir_entry_t de;
-    if (fs_find(dst_path, &de)) {
-        dlg_message(NULL, "Paste Failed", "Name already exists.");
-        return;
-    }
-
-    bool ok;
-    if (g_clipboard.is_cut) {
-        if (g_clipboard.is_dir)
-            ok = fs_move_dir(src_path, dst_path);
-        else
-            ok = fs_move_file(src_path, dst_path);
-        if (ok)
-            clipboard_clear();
-    } else {
-        if (g_clipboard.is_dir)
-            ok = fs_copy_dir(src_path, dst_path);
-        else
-            ok = fs_copy_file(src_path, dst_path);
-    }
-
-    if (ok) {
-        desktop_fs_set_dirty();
-        dlg_message(NULL, "Paste", "Item pasted successfully.");
-    } else {
-        dlg_message(NULL, "Paste Failed", "Could not paste item.");
-    }
-}
-
-static void menu_delete(void) {
-    int sel = selected_idx();
-    if (sel < 0) {
-        dlg_message(NULL, "Delete", "Nothing selected.");
-        return;
-    }
-    desktop_item_t *it = &desktop_fs_items()[sel];
-    if (path_is_protected(it->name)) {
-        dlg_message(NULL, "Delete", "Protected item.");
-        return;
-    }
-    char msg[256];
-    sprintf(msg, "Delete %s?", it->name);
-    dlg_confirm(NULL, "Confirm Delete", msg, run_if_yes, (void *)do_delete);
 }
 
 static void menu_about_os(void) {
@@ -575,43 +384,6 @@ static void menu_insert_fdd(void) {
     }
 }
 
-/* ── new name / rename (dlg_input callbacks; name NULL = cancelled) ───── */
-static void newname_done(void *user, const char *name) {
-    (void)user;
-    const char *err = NULL;
-    if (!name)
-        return;
-    if (!fs_validate_name(name, s_newname_is_dir, &err)) {
-        dlg_message(NULL, "Invalid Name", err);
-        return;
-    }
-    uint16_t saved = dir_context.current_cluster;
-    dir_context.current_cluster = desktop_fs_cluster();
-    bool ok;
-    if (s_newname_is_dir) {
-        ok = fs_mkdir(name);
-    } else {
-        fat_file_t f;
-        ok = fs_create(name, &f);
-        if (ok)
-            fs_close(&f);
-    }
-    if (ok && s_newname_hidden)
-        fs_set_hidden(name, true);
-    dir_context.current_cluster = saved;
-    if (!ok)
-        dlg_message(NULL, "Create Failed", "Name exists or disk full.");
-    desktop_fs_set_dirty();
-}
-
-static void rename_done(void *user, const char *name) {
-    (void)user;
-    if (!name || s_rename_idx < 0 || s_rename_idx >= desktop_fs_count())
-        return;
-    if (!desktop_fs_rename(s_rename_idx, name))
-        dlg_message(NULL, "Rename Failed", "Invalid name or item protected.");
-}
-
 /* ── desktop init ───────────────────────────────────────────────────────── */
 static menu *s_apps_menu;
 
@@ -643,6 +415,7 @@ void desktop_init(void) {
     menu_add_item(file_menu, "New File", menu_new_file);
     menu_add_item(file_menu, "New Folder", menu_new_folder);
     menu_add_item(file_menu, "Rename", menu_rename);
+    menu_add_item(file_menu, "Get Info", menu_info);
     menu_add_item(file_menu, "Reload", menu_reload);
     menu_add_separator(file_menu);
     menu_add_item(file_menu, "About OS", menu_about_os);
@@ -679,6 +452,64 @@ static void draw_items(int count, desktop_item_t *items) {
         draw_desktop_item(&items[s_drag_idx], false);
 }
 
+/* ── context menus ─────────────────────────────────────────────────────── */
+
+static int s_ctx_idx = -1; /* icon the menu was opened on */
+
+static void ctx_open(void) {
+    if (s_ctx_idx >= 0 && s_ctx_idx < desktop_fs_count())
+        open_item(s_ctx_idx);
+}
+
+static void ctx_paste_into(void) {
+    char p[270];
+    if (s_ctx_idx >= 0 && desktop_fs_item_path(s_ctx_idx, p, sizeof(p)))
+        fo_report(NULL, "Paste", fo_paste(p));
+}
+
+static void context_menu(int hit, int x, int y) {
+    desktop_item_t *items = desktop_fs_items();
+    s_ctx_idx = hit;
+    menu *m = popup_menu();
+    if (hit < 0) {
+        menu_add_item(m, "New File", menu_new_file);
+        menu_add_item(m, "New Folder", menu_new_folder);
+        menu_add_separator(m);
+        menu_add_item(m, "Paste", menu_paste);
+        menu_enable_last(m, clipboard_has_file());
+        menu_add_separator(m);
+        menu_add_item(m, "Reload", menu_reload);
+        menu_add_item(m, "About OS", menu_about_os);
+    } else if (items[hit].kind == DESKTOP_ITEM_FDD) {
+        menu_add_item(m, "Open", ctx_open);
+        if (items[hit].drive_id == DRIVE_FDD0) {
+            menu_add_separator(m);
+            menu_add_item(m, "Eject Floppy", menu_eject_fdd);
+        }
+    } else {
+        menu_add_item(m, "Open", ctx_open);
+        menu_add_separator(m);
+        menu_add_item(m, "Cut", menu_cut);
+        menu_add_item(m, "Copy", menu_copy);
+        if (items[hit].kind == DESKTOP_ITEM_DIR) {
+            menu_add_item(m, "Paste Into", ctx_paste_into);
+            menu_enable_last(m, clipboard_has_file());
+        }
+        menu_add_separator(m);
+        menu_add_item(m, "Rename", menu_rename);
+        menu_add_item(m, "Delete", menu_delete);
+        menu_add_item(m, "Get Info", menu_info);
+    }
+    popup_show(x, y);
+}
+
+static void select_only(int hit) {
+    desktop_item_t *items = desktop_fs_items();
+    int count = desktop_fs_count();
+    for (int i = 0; i < count; i++)
+        items[i].selected = (i == hit);
+}
+
 void desktop_on_frame(void) {
     draw_wallpaper_pattern();
 
@@ -707,33 +538,53 @@ void desktop_on_frame(void) {
             it->x = new_x;
             it->y = new_y;
         } else {
-            desktop_fs_move_icon(s_drag_idx, it->x, it->y);
+            /* dropped on a FileF window or on a desktop folder: move the
+             * file there; anywhere else just places the icon */
+            int idx = s_drag_idx;
             s_drag_idx = -1;
+            wm_clear_overlay(&s_drag_idx);
+            char src[270], dst[270];
+            int target = desktop_hit_except(mouse.x, mouse.y, idx);
+            bool into = false;
+            if (desktop_fs_item_path(idx, src, sizeof(src))) {
+                if (ff_folder_at(mouse.x, mouse.y, dst, sizeof(dst)))
+                    into = true;
+                else if (target >= 0 && target != idx &&
+                         items[target].kind == DESKTOP_ITEM_DIR &&
+                         desktop_fs_item_path(target, dst, sizeof(dst)))
+                    into = true;
+            }
+            if (into)
+                fo_report(NULL, "Move", fo_move(src, dst));
+            else
+                desktop_fs_move_icon(idx, it->x, it->y);
         }
     }
 
-    if (mouse.left && !mouse.left_clicked && s_drag_idx < 0) {
-        for (int i = 0; i < count; i++) {
-            if (!items[i].selected || !items[i].used)
-                continue;
-            int ax = DESK_ORIGIN_X + items[i].x;
-            int ay = DESK_ORIGIN_Y + items[i].y;
-            if (mouse.x >= ax && mouse.x < ax + ICON_W && mouse.y >= ay &&
-                mouse.y < ay + ICON_H) {
-                if (mouse.dx != 0 || mouse.dy != 0) {
-                    s_drag_off_x = mouse.x - ax;
-                    s_drag_off_y = mouse.y - ay;
-                    s_drag_idx = i;
-                    s_last_click_idx = -1;
-                }
-                break;
-            }
-        }
+    /* Start a drag once the pointer moves with the button held on a
+     * selected icon. Decided from where the button went down: on a slow
+     * machine one frame can carry the pointer well off the icon. */
+    if (mouse.left && !mouse.left_clicked && s_drag_idx < 0 &&
+        s_press_idx >= 0 && s_press_idx < count &&
+        items[s_press_idx].selected &&
+        (mouse.x != s_press_x || mouse.y != s_press_y)) {
+        int i = s_press_idx;
+        s_drag_off_x = s_press_x - (DESK_ORIGIN_X + items[i].x);
+        s_drag_off_y = s_press_y - (DESK_ORIGIN_Y + items[i].y);
+        s_drag_idx = i;
+        s_press_idx = -1;
+        wm_set_overlay(draw_drag_overlay, &s_drag_idx);
+        s_last_click_idx = -1;
     }
+    if (!mouse.left)
+        s_press_idx = -1;
 
     if (mouse.left_clicked && mouse.y >= MENUBAR_H &&
         g_menubar.open_index < 0 && !g_menubar_click_consumed) {
         int hit = desktop_hit(mouse.x, mouse.y);
+        s_press_idx = hit;
+        s_press_x = mouse.x;
+        s_press_y = mouse.y;
         if (hit >= 0) {
             for (int i = 0; i < count; i++)
                 items[i].selected = false;
@@ -742,7 +593,8 @@ void desktop_on_frame(void) {
             uint32_t now = pit_ticks;
             if (hit == s_last_click_idx &&
                 (now - s_last_click_tick) <= DOUBLE_CLICK_SPEED) {
-                open_item(&items[hit]);
+                open_item(hit);
+                s_press_idx = -1; /* no drag out of a double-click */
                 s_last_click_idx = -1;
                 s_last_click_tick = 0;
             } else {
@@ -754,6 +606,29 @@ void desktop_on_frame(void) {
                 items[i].selected = false;
             s_last_click_idx = -1;
         }
+    }
+
+    /* right-click on the desktop (windows already took theirs) */
+    if (mouse.right_clicked && mouse.y >= MENUBAR_H &&
+        mouse.y < SCREEN_HEIGHT - TASKBAR_H && !g_menubar_click_consumed &&
+        s_drag_idx < 0) {
+        mouse.right_clicked = false;
+        int hit = desktop_hit(mouse.x, mouse.y);
+        select_only(hit);
+        s_last_click_idx = -1;
+        context_menu(hit, mouse.x, mouse.y);
+    }
+
+    if (is_desktop_focused() && kb.key_pressed &&
+        (kb.last_scancode == MENU_KEY ||
+         (kb.last_scancode == F10 && kb.shift))) {
+        kb.key_pressed = false;
+        int sel = selected_idx();
+        if (sel >= 0)
+            context_menu(sel, DESK_ORIGIN_X + items[sel].x + ICON_W / 2,
+                         DESK_ORIGIN_Y + items[sel].y + ICON_H);
+        else
+            context_menu(-1, SCREEN_WIDTH / 3, SCREEN_HEIGHT / 3);
     }
 
     if (is_desktop_focused() && kb.key_pressed) {

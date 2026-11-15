@@ -8,6 +8,7 @@
 #include "ui/dialogs.h"
 #include "ui/icons.h"
 #include "ui/menubar.h"
+#include "ui/popup.h"
 #include "ui/window.h"
 
 #endif

@@ -44,6 +44,7 @@ void menu_add_item(menu *m, char *label, MenuAction action);
 void menu_add_item_ud(menu *m, char *label, MenuActionUD action,
                       void *userdata);
 void menu_add_separator(menu *m);
+void menu_enable_last(menu *m, bool on); /* grey out the last item */
 /* set by the .APP loader: runs a dynamic app's menu command guarded */
 extern void (*g_menu_call_hook)(void *state, MenuActionUD fn, void *user);
 void menubar_layout(menubar *mb);

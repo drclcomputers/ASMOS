@@ -427,19 +427,26 @@ static void asmdraw_init(void *state) {
     window *w = s->win;
     static const char *TL[NUM_TOOLS] = {"P", "E", "L", "R", "F"};
     static const char *BL[BRUSH_SIZES] = {"1", "3", "5"};
+    static const char *TT[NUM_TOOLS] = {"Pencil", "Eraser", "Line", "Rectangle",
+                                        "Fill"};
+    static const char *BT[BRUSH_SIZES] = {"Thin brush", "Medium brush",
+                                          "Thick brush"};
     for (int i = 0; i < NUM_TOOLS; i++) {
         s->tools[i] = ctl_button(w, 2, 2 + i * 15, 15, 14, TL[i], i, on_tool);
         ctl_style_add(s->tools[i], CS_TOGGLE | CS_NOFOCUS);
+        ctl_set_tooltip(s->tools[i], TT[i]);
     }
     for (int i = 0; i < BRUSH_SIZES; i++) {
         s->brushes[i] =
             ctl_button(w, 2, 84 + i * 15, 15, 14, BL[i], 10 + i, on_tool);
         ctl_style_add(s->brushes[i], CS_TOGGLE | CS_NOFOCUS);
+        ctl_set_tooltip(s->brushes[i], BT[i]);
     }
     s->canvas_ctl = ctl_custom(w, 20, 2, 246, 134, paint_canvas, on_canvas,
                                CS_BORDER | CS_STRETCH_W | CS_STRETCH_H);
     s->palette = ctl_custom(w, 20, 138, 246, 12, paint_palette, on_palette,
                             CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    ctl_set_tooltip(s->palette, "Click: pen colour, Shift+click: background");
     s->status =
         ctl_label(w, 20, 151, 246, 10, "", CS_STRETCH_W | CS_ANCHOR_BOTTOM);
 
@@ -477,6 +484,16 @@ static void asmdraw_destroy(void *state) {
     if (s->canvas)
         kfree(s->canvas);
     s->canvas = NULL;
+}
+
+/* Used by FileF / the desktop: open a .PIC in a new ASMDraw window. */
+void asmdraw_open_file(const char *path) {
+    app_instance_t *a = os_launch_app(&asmdraw_app);
+    asmdraw_state_t *s = a ? a->state : NULL;
+    if (!s || !s->win)
+        return;
+    strncpy(s->path, path, sizeof(s->path) - 1);
+    asmdraw_load(s, s->path);
 }
 
 app_descriptor asmdraw_app = {

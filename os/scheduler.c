@@ -1,6 +1,7 @@
 #include "os/scheduler.h"
 #include "os/error.h"
 #include "os/os.h"
+#include "ui/popup.h"
 
 #include "drivers/serial.h"
 #include "drivers/speaker.h"
@@ -222,6 +223,7 @@ void scheduler_kernel_task(void) {
         wm_sync_menubar(&g_menubar);
         menubar_layout(&g_menubar);
 
+        popup_update(); /* an open context menu gets input first */
         menubar_update(&g_menubar);
         ctl_dispatch(); /* controls get their clicks/keys first */
         os_tick_apps();
@@ -232,6 +234,8 @@ void scheduler_kernel_task(void) {
         desktop_on_frame();
         wm_draw_all();
         menubar_draw(&g_menubar);
+        popup_draw();
+        ctl_draw_tooltip();
 
         draw_cursor(mouse.x, mouse.y);
 

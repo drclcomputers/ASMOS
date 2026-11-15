@@ -99,6 +99,40 @@ typedef struct ui_api {
     /* input dialog with a check box (*checked is written before cb) */
     void (*input_check)(window *, const char *, const char *, const char *, int,
                         uint32_t, const char *, bool *, dlg_text_cb, void *);
+
+    /* ── appended in ui size 2 (check api->ui->size) ── */
+
+    /* context menus: on EV_MENU, fill popup_menu() with menu_item /
+     * menu_separator, then popup_show_for(c). Labels must stay valid
+     * (string literals). Items run fn(state) like window menu items. */
+    menu *(*popup_menu)(void);
+    void (*popup_show)(int x, int y);         /* screen coordinates */
+    void (*popup_show_for)(const control *c); /* at c->mx/my */
+    void (*menu_enable)(menu *m, bool on);    /* greys out the last item */
+    bool (*menu_from_key)(void); /* EV_MENU came from Menu key/Shift+F10 */
+
+    void (*set_tooltip)(control *c, const char *text); /* copied */
+
+    /* tree view (see ui/controls.h "tree_*") */
+    control *(*tree)(window *, int, int, int, int, uint32_t, ctl_handler);
+    int (*tree_add)(control *, int parent, const char *, uint32_t, bool);
+    void (*tree_clear)(control *);
+    void (*tree_clear_children)(control *, int);
+    int (*tree_parent)(const control *, int);
+    int (*tree_first_child)(const control *, int);
+    int (*tree_next_sibling)(const control *, int);
+    const char *(*tree_text)(const control *, int);
+    void (*tree_set_text)(control *, int, const char *);
+    uint32_t (*tree_data)(const control *, int);
+    int (*tree_sel)(const control *);
+    void (*tree_set_sel)(control *, int);
+    void (*tree_expand)(control *, int, bool);
+    bool (*tree_is_expanded)(const control *, int);
+    int (*tree_event_node)(const control *);
+    void (*tree_path)(const control *, int, char *, int);
+    int (*tree_find_path)(control *, const char *);
+
+    void (*edit_select_all)(control *);
 } ui_api_t;
 
 #define OS_API_VERSION 1

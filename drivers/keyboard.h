@@ -26,6 +26,7 @@
 #define F10 0x44
 #define F11 0x57
 #define F12 0x58
+#define MENU_KEY 0x5D /* E0 5D: the "application"/context menu key */
 
 #define SPACE 0x39
 #define UP_ARROW 0x48

@@ -252,6 +252,19 @@ void edit_cut(control *c) {
     }
 }
 
+void edit_delete_sel(control *c) {
+    if (!c || c->type != CTL_EDIT || (c->style & ES_READONLY))
+        return;
+    if (del_sel(c)) {
+        edit_fix_scroll(c);
+        ctl_invoke(c, EV_CHANGE);
+    }
+}
+
+bool edit_has_sel(const control *c) {
+    return c && c->type == CTL_EDIT && c->cursor != c->anchor;
+}
+
 void edit_paste(control *c) {
     if (!c || c->type != CTL_EDIT || (c->style & ES_READONLY) ||
         !clipboard_has_text())

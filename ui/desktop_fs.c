@@ -1,10 +1,10 @@
 #include "ui/desktop_fs.h"
-#include "ui/icons.h"
-#include "fs/fs.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
+#include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "ui/icons.h"
 
 static desktop_item_t s_items[DESKTOP_MAX_ITEMS];
 static int s_count = 0;
@@ -34,7 +34,8 @@ static bool entry_is_app(const dir_entry_t *e) {
 static void grid_slot(int n, int *out_x, int *out_y) {
     int available_height = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H;
     int rows_avail = (available_height - ICON_START_Y) / ICON_SPACING_Y;
-    if (rows_avail < 1) rows_avail = 1;
+    if (rows_avail < 1)
+        rows_avail = 1;
     int col = n / rows_avail;
     int row = n % rows_avail;
     *out_x = ICON_START_X + col * ICON_SPACING_X;
@@ -215,63 +216,17 @@ bool desktop_fs_add_app(const char *app_name) {
     return ok;
 }
 
-bool desktop_fs_delete(int idx) {
+/* Real path of a desktop item ("/DESKTOP/NAME.APP" for app icons, which
+ * are shown without the extension). False for drive icons. */
+bool desktop_fs_item_path(int idx, char *out, int sz) {
     if (idx < 0 || idx >= s_count || !s_items[idx].used)
         return false;
     desktop_item_t *it = &s_items[idx];
-
-    uint8_t saved_drive = dir_context.drive_id;
-    uint16_t saved_cluster = dir_context.current_cluster;
-    dir_context.drive_id = DRIVE_HDA;
-    dir_context.current_cluster = s_cluster;
-
-    bool ok = false;
-    if (it->kind == DESKTOP_ITEM_DIR) {
-        ok = fs_rm_rf(it->name);
-    } else if (it->kind == DESKTOP_ITEM_APP) {
-        char fname[DESKTOP_NAME_MAX];
-        int fi = 0;
-        for (int k = 0; it->name[k] && fi < 8; k++) {
-            char c = it->name[k];
-            if (c >= 'a' && c <= 'z')
-                c -= 32;
-            fname[fi++] = c;
-        }
-        fname[fi++] = '.';
-        fname[fi++] = 'A';
-        fname[fi++] = 'P';
-        fname[fi++] = 'P';
-        fname[fi] = '\0';
-        ok = fs_delete(fname);
-    } else {
-        ok = fs_delete(it->name);
-    }
-
-    dir_context.drive_id = saved_drive;
-    dir_context.current_cluster = saved_cluster;
-
-    if (ok)
-        desktop_fs_reload();
-    return ok;
-}
-
-bool desktop_fs_rename(int idx, const char *new_name) {
-    if (idx < 0 || idx >= s_count || !s_items[idx].used)
+    if (it->kind == DESKTOP_ITEM_FDD || it->kind == DESKTOP_ITEM_HDD)
         return false;
-
-    uint8_t saved_drive = dir_context.drive_id;
-    uint16_t saved_cluster = dir_context.current_cluster;
-    dir_context.drive_id = DRIVE_HDA;
-    dir_context.current_cluster = s_cluster;
-
-    bool ok = fs_rename(s_items[idx].name, new_name);
-
-    dir_context.drive_id = saved_drive;
-    dir_context.current_cluster = saved_cluster;
-
-    if (ok)
-        desktop_fs_reload();
-    return ok;
+    snprintf(out, sz, "%s/%s%s", DESKTOP_PATH, it->name,
+             it->kind == DESKTOP_ITEM_APP ? ".APP" : "");
+    return true;
 }
 
 void desktop_fs_move_icon(int idx, int new_x, int new_y) {

@@ -14,6 +14,7 @@
 #include "os/os.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
+#include "ui/popup.h"
 
 static loaded_app_t s_loaded[MAX_LOADED_APPS];
 static char s_err[160];
@@ -203,6 +204,27 @@ static void api_menu_item(menu *m, const char *label, void (*fn)(void *)) {
         m->items[n].dyn_state = s_calling_state;
 }
 
+/* Context menus: the popup belongs to whichever app fills it; items carry
+ * the app's state like window menu items do. */
+static menu *api_popup_menu(void) {
+    return s_calling_state ? popup_menu() : NULL;
+}
+
+static void api_popup_show(int x, int y) {
+    if (s_calling_state)
+        popup_show(x, y);
+}
+
+static void api_popup_show_for(const control *c) {
+    if (s_calling_state && c && c->win && c->win->dyn_state == s_calling_state)
+        popup_show_for(c);
+}
+
+static void api_menu_enable(menu *m, bool on) {
+    if (m)
+        menu_enable_last(m, on);
+}
+
 static void api_menu_separator(menu *m) {
     if (m)
         menu_add_separator(m);
@@ -293,6 +315,30 @@ static const ui_api_t s_ui = {
     .menu_item = api_menu_item,
     .menu_separator = api_menu_separator,
     .input_check = dlg_input_check,
+    .popup_menu = api_popup_menu,
+    .popup_show = api_popup_show,
+    .popup_show_for = api_popup_show_for,
+    .menu_enable = api_menu_enable,
+    .menu_from_key = ctl_menu_from_key,
+    .set_tooltip = ctl_set_tooltip,
+    .tree = ctl_tree,
+    .tree_add = tree_add,
+    .tree_clear = tree_clear,
+    .tree_clear_children = tree_clear_children,
+    .tree_parent = tree_parent,
+    .tree_first_child = tree_first_child,
+    .tree_next_sibling = tree_next_sibling,
+    .tree_text = tree_text,
+    .tree_set_text = tree_set_text,
+    .tree_data = tree_data,
+    .tree_sel = tree_sel,
+    .tree_set_sel = tree_set_sel,
+    .tree_expand = tree_expand,
+    .tree_is_expanded = tree_is_expanded,
+    .tree_event_node = tree_event_node,
+    .tree_path = tree_path,
+    .tree_find_path = tree_find_path,
+    .edit_select_all = edit_select_all,
 };
 
 /* ── API table given to v2 apps ─────────────────────────────────────── */

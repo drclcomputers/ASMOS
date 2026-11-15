@@ -388,6 +388,8 @@ static void midiplayer_init(void *state) {
     s->play = ctl_button(w, 38, 77, 40, 14, "Play", B_PLAY, on_button);
     s->stop = ctl_button(w, 82, 77, 36, 14, "Stop", B_STOP, on_button);
     s->loop = ctl_button(w, 122, 77, 36, 14, "Loop", B_LOOP, on_button);
+    ctl_set_tooltip(s->rew, "Back to the start");
+    ctl_set_tooltip(s->loop, "Repeat when the song ends");
     ctl_style_add(s->loop, CS_TOGGLE);
     s->state_lbl = ctl_label(w, 170, 77, 86, 14, "", LS_RIGHT);
     ctl_label(w, 4, 96, 30, 11, "Volume", 0);

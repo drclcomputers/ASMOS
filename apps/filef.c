@@ -6,8 +6,10 @@
 #include "os/clipboard.h"
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
+#include "ui/fileops.h"
 
-#define FF_DEFAULT_W 220
+#define FF_DEFAULT_W 300
+#define TREE_W 78 /* folder tree pane */
 #define FF_DEFAULT_H 160
 #define FF_DEFAULT_X 40
 #define FF_DEFAULT_Y 20
@@ -65,6 +67,9 @@ typedef struct {
 typedef struct {
     window *win; /* must stay first */
     control *back, *fwd, *up, *home, *desk, *path_edit, *view, *sb, *status_lbl;
+    control *tree; /* folder tree pane (View > Folder Tree) */
+    bool tree_shown;
+    char tree_at[256]; /* path the tree selection was last synced to */
 
     uint16_t dir_cluster;
     char path[256];
@@ -106,11 +111,11 @@ app_descriptor filef_app;
 
 static int s_cascade = 0;
 static ff_inst_t *s_last_active = NULL;
-extern void teditor_open_file(const char *path);
-extern void hexview_open_file(const char *path);
 
 static void ff_sync(ff_inst_t *s);
 static void ff_reload(ff_inst_t *s);
+static void tree_fill_roots(ff_inst_t *s);
+static void tree_refresh_dir(ff_inst_t *s, const char *dir);
 static void ff_navigate(ff_inst_t *s, uint16_t cluster, const char *path,
                         uint8_t drive_id);
 static void ff_go_vroot(ff_inst_t *s);
@@ -266,13 +271,6 @@ static ff_inst_t *active_finder(void) {
     return NULL;
 }
 
-static void maybe_notify_desktop(ff_inst_t *s) {
-    char dp[270];
-    build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));
-    if (strcmp(s->path, dp) == 0)
-        desktop_fs_set_dirty();
-}
-
 /* ── Sort & Layout ──────────────────────────────────────────────── */
 static int item_sort_cmp(const ff_item_t *a, const ff_item_t *b, int sort) {
     if (a->is_dotdot || a->is_vdrive)
@@ -424,15 +422,36 @@ static void ff_reload(ff_inst_t *s) {
     ff_sync(s);
 }
 
+/* Drives appeared/disappeared: every window and the desktop. */
 static void ff_refresh_all(void) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
-        if (a->running && a->desc == &filef_app) {
+        if (a->running && a->desc == &filef_app && a->state) {
             ff_inst_t *fs = (ff_inst_t *)a->state;
+            if (fs->tree_shown)
+                tree_fill_roots(fs);
             ff_reload(fs);
         }
     }
     desktop_fs_set_dirty();
+}
+
+/* fileops: something in `dir` changed -> reload windows showing it */
+void ff_dir_changed_pub(const char *dir) {
+    char want[270], have[270];
+    fo_norm(dir, want, sizeof(want));
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *a = &running_apps[i];
+        if (!a->running || a->desc != &filef_app || !a->state)
+            continue;
+        ff_inst_t *fs = (ff_inst_t *)a->state;
+        if (fs->at_vroot)
+            continue;
+        fo_norm(fs->path, have, sizeof(have));
+        if (!strcmp(want, have))
+            ff_reload(fs);
+        tree_refresh_dir(fs, dir); /* folder pane may show `dir` */
+    }
 }
 
 /* ── Navigation (internal) ──────────────────────────────────────── */
@@ -558,89 +577,6 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     }
 }
 
-static void ff_populate_info(ff_inst_t *s, int sel) {
-    ff_item_t *it = &s->items[sel];
-    strncpy(s->info_name, it->name, 12);
-    s->info_name[12] = '\0';
-    if (it->is_vdrive)
-        snprintf(s->info_path, sizeof(s->info_path), "/%s", it->name);
-    else
-        snprintf(s->info_path, sizeof(s->info_path), "%s/%s", s->path,
-                 it->name);
-
-    if (it->is_vdrive) {
-        strcpy(s->info_type, "Drive");
-        uint32_t dv_total = 0, dv_used = 0;
-        if (fs_get_usage_drive(it->vdrive_id, &dv_total, &dv_used) &&
-            dv_total > 0) {
-            uint32_t used_kb = dv_used / 1024;
-            uint32_t total_kb = dv_total / 1024;
-            sprintf(s->info_size, "%u / %u KB", used_kb, total_kb);
-        } else {
-            strcpy(s->info_size, "-");
-        }
-    } else if (it->is_dotdot) {
-        strcpy(s->info_type, "Parent Dir");
-        strcpy(s->info_size, "-");
-    } else if (it->entry.attr & ATTR_DIRECTORY) {
-        strcpy(s->info_type, "Folder");
-        uint32_t dir_total = 0;
-        {
-            dir_entry_t stack_entries[128];
-            int stack_count = 0;
-            uint16_t clusters[32];
-            int cluster_top = 0;
-            clusters[cluster_top++] = it->entry.cluster_lo;
-            while (cluster_top > 0) {
-                uint16_t cur = clusters[--cluster_top];
-                stack_count = 0;
-                fs_list_dir(s->drive_id, cur, stack_entries, 128, &stack_count);
-                for (int ei = 0; ei < stack_count; ei++) {
-                    if (stack_entries[ei].name[0] == '.')
-                        continue;
-                    if (stack_entries[ei].attr & ATTR_DIRECTORY) {
-                        if (cluster_top < 32)
-                            clusters[cluster_top++] =
-                                stack_entries[ei].cluster_lo;
-                    } else {
-                        dir_total += stack_entries[ei].file_size;
-                    }
-                }
-            }
-        }
-        if (dir_total >= 1024)
-            sprintf(s->info_size, "%u KB", dir_total / 1024);
-        else
-            sprintf(s->info_size, "%u B", dir_total);
-    } else if (item_is_app(it)) {
-        strcpy(s->info_type, "Application");
-        sprintf(s->info_size, "%u B", it->entry.file_size);
-    } else {
-        const char *dot = strchr(it->name, '.');
-        const char *ext = dot ? dot + 1 : "";
-        if (!strcmp(ext, "TXT") || !strcmp(ext, "txt"))
-            strcpy(s->info_type, "Text File");
-        else if (!strlen(ext))
-            strcpy(s->info_type, "File");
-        else {
-            strcpy(s->info_type, ext);
-            strcat(s->info_type, " File");
-        }
-        sprintf(s->info_size, "%u B", it->entry.file_size);
-    }
-    uint16_t fd = it->entry.modify_date, ft = it->entry.modify_time;
-    if (!fd) {
-        strcpy(s->info_date, "Unknown");
-        strcpy(s->info_time, "Unknown");
-    } else {
-        uint16_t yr = ((fd >> 9) & 0x7F) + 1980;
-        uint8_t mo = (fd >> 5) & 0x0F, dy = fd & 0x1F, hr = (ft >> 11) & 0x1F,
-                mn = (ft >> 5) & 0x3F, sc = (ft & 0x1F) * 2;
-        sprintf(s->info_date, "%04d/%02d/%02d", yr, mo, dy);
-        sprintf(s->info_time, "%02d:%02d:%02d", hr, mn, sc);
-    }
-}
-
 /* ── Hit testing ─────────────────────────────────────────────────── */
 static bool in_content(ff_inst_t *s, int mx, int my) {
     control *v = s->view;
@@ -661,6 +597,28 @@ static int ff_hit(ff_inst_t *s, int mx, int my) {
             return i;
     }
     return -1;
+}
+
+static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude);
+
+/* For the desktop: folder shown by the FileF window under (mx, my). */
+bool ff_folder_at(int mx, int my, char *out, int sz) {
+    ff_inst_t *t = ff_find_target(mx, my, NULL);
+    if (!t)
+        return false;
+    /* only if that window is the one on top at this point */
+    for (int i = win_count - 1; i >= 0; i--) {
+        window *w = win_stack[i];
+        if (w->visible && !w->minimized && mx >= w->x && mx < w->x + w->w &&
+            my >= w->y && my < w->y + w->h + MENUBAR_H) {
+            if (w != t->win)
+                return false;
+            break;
+        }
+    }
+    strncpy(out, t->path, sz - 1);
+    out[sz - 1] = 0;
+    return true;
 }
 
 static ff_inst_t *ff_find_target(int mx, int my, ff_inst_t *exclude) {
@@ -753,7 +711,10 @@ static void ff_select(ff_inst_t *s, int idx) {
         s->scroll_y = 0;
 }
 
-/* Status, path box, nav buttons and scrollbar follow the state. */
+static void tree_sync(ff_inst_t *s);
+
+/* Status, path box, nav buttons, scrollbar and folder tree follow the
+ * state. */
 static void ff_sync(ff_inst_t *s) {
     if (!s->view)
         return;
@@ -783,6 +744,7 @@ static void ff_sync(ff_inst_t *s) {
     }
     if (strcmp(ctl_text(s->status_lbl), stat))
         ctl_set_text(s->status_lbl, stat);
+    tree_sync(s);
 }
 
 static void ff_open_item(ff_inst_t *s, int idx);
@@ -809,119 +771,44 @@ static void ff_go_desktop(ff_inst_t *s) {
         ff_go_vroot(s);
 }
 
-/* ── Delete / new / rename (dialog callbacks) ─────────────────────── */
-static void do_delete(void *user, bool yes) {
-    ff_inst_t *s = user;
-    int sel = ff_selected_file(s);
-    if (!yes || sel < 0)
-        return;
-    if (path_is_protected(s->items[sel].name)) {
-        strcpy(s->status, "Protected item.");
-        return;
+/* ── File operations: all through ui/fileops (shared with the desktop) ─ */
+
+/* Full path of the selected real item; false (and a status) if none. */
+static bool sel_path(ff_inst_t *s, char *out, int sz) {
+    int sel = s->at_vroot ? -1 : ff_selected_file(s);
+    if (sel < 0) {
+        strcpy(s->status, "Nothing selected.");
+        return false;
     }
-    char fspath[270];
-    item_fspath(s, s->items[sel].name, fspath, sizeof(fspath));
-    FF_PUSH_CTX(s);
-    bool ok = (s->items[sel].entry.attr & ATTR_DIRECTORY) ? fs_rm_rf(fspath)
-                                                          : fs_delete(fspath);
-    FF_POP_CTX();
-    maybe_notify_desktop(s);
-    ff_reload(s);
-    strcpy(s->status, ok ? "Deleted." : "Delete failed.");
+    item_fspath(s, s->items[sel].name, out, sz);
+    return true;
 }
 
-static void do_newname(void *user, const char *name) {
+static void op_done(void *user) {
     ff_inst_t *s = user;
-    const char *err = NULL;
-    if (!name)
-        return;
-    if (!fs_validate_name(name, s->newname_is_dir, &err)) {
-        dlg_message(s->win, "Invalid Name", err);
-        return;
-    }
-    char fspath[270];
-    item_fspath(s, name, fspath, sizeof(fspath));
-    FF_PUSH_CTX(s);
-    bool ok;
-    if (s->newname_is_dir)
-        ok = fs_mkdir(fspath);
-    else {
-        fs_file_t f;
-        ok = fs_create(fspath, &f);
-        if (ok)
-            fs_close(&f);
-    }
-    FF_POP_CTX();
-    if (!ok) {
-        dlg_message(s->win, "Create Failed", "Name exists or disk full.");
-        return;
-    }
-    if (s->newname_hidden) {
-        FF_PUSH_CTX(s);
-        fs_set_hidden(fspath, true);
-        FF_POP_CTX();
-    }
-    maybe_notify_desktop(s);
-    ff_reload(s);
-    strcpy(s->status, s->newname_is_dir ? "Folder created." : "File created.");
+    strcpy(s->status, "Done.");
 }
 
-static void do_rename(void *user, const char *name) {
-    ff_inst_t *s = user;
-    const char *err = NULL;
-    if (!name || !strcmp(name, s->rename_old))
-        return;
-    char old_fspath[270];
-    item_fspath(s, s->rename_old, old_fspath, sizeof(old_fspath));
-    dir_entry_t de;
-    bool is_dir = fs_find(old_fspath, &de) && (de.attr & ATTR_DIRECTORY);
-    if (!fs_validate_name(name, is_dir, &err)) {
-        dlg_message(s->win, "Invalid Name", err);
-        return;
-    }
-    FF_PUSH_CTX(s);
-    bool ok = fs_rename(old_fspath, name);
-    FF_POP_CTX();
-    if (!ok) {
-        dlg_message(s->win, "Rename Failed", "Name exists or protected.");
-        return;
-    }
-    maybe_notify_desktop(s);
-    ff_reload(s);
-    strcpy(s->status, "Renamed.");
-}
-
-/* ── Menu handlers (act on the focused FileF) ───────────────────────── */
 static void new_item(bool dir) {
     ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
-        return;
-    s->newname_is_dir = dir;
-    s->newname_hidden = false;
-    dlg_input_check(s->win, dir ? "New Folder" : "New File",
-                    dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
-                    "Hidden", &s->newname_hidden, do_newname, s);
+    if (s && !s->at_vroot)
+        fo_ask_new(s->win, s->path, dir, op_done, s);
 }
 static void menu_new_file(void) { new_item(false); }
 static void menu_new_folder(void) { new_item(true); }
 
 static void menu_rename(void) {
     ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
-        return;
-    int sel = ff_selected_file(s);
-    if (sel < 0) {
-        strcpy(s->status, "Nothing selected.");
-        return;
-    }
-    if (path_is_protected(s->items[sel].name)) {
-        strcpy(s->status, "Protected.");
-        return;
-    }
-    strncpy(s->rename_old, s->items[sel].name, 12);
-    s->rename_old[12] = 0;
-    dlg_input(s->win, "Rename", "New name:", s->rename_old, 12, ES_FILENAME,
-              do_rename, s);
+    char p[270];
+    if (s && sel_path(s, p, sizeof(p)))
+        fo_ask_rename(s->win, p, op_done, s);
+}
+
+static void menu_delete(void) {
+    ff_inst_t *s = active_finder();
+    char p[270];
+    if (s && sel_path(s, p, sizeof(p)))
+        fo_ask_delete(s->win, p, op_done, s);
 }
 
 static void menu_get_info(void) {
@@ -929,18 +816,16 @@ static void menu_get_info(void) {
     if (!s)
         return;
     int sel = ff_selected(s);
-    if (sel < 0) {
+    if (sel < 0 || s->items[sel].is_dotdot) {
         strcpy(s->status, "Nothing selected.");
         return;
     }
-    ff_populate_info(s, sel);
-    static char msg[512];
-    snprintf(msg, sizeof(msg),
-             "Name:   %s\nPath:   %s\nType:   %s\nSize:   %s\n"
-             "Date:   %s %s\nHidden: %s",
-             s->info_name, s->info_path, s->info_type, s->info_size,
-             s->info_date, s->info_time, s->items[sel].hidden ? "Yes" : "No");
-    dlg_message(s->win, "Get Info", msg);
+    char p[270];
+    if (s->items[sel].is_vdrive)
+        strncpy(p, s->items[sel].vdrive_path, sizeof(p) - 1);
+    else
+        item_fspath(s, s->items[sel].name, p, sizeof(p));
+    fo_show_info(s->win, p);
 }
 
 static void menu_reload(void) {
@@ -951,26 +836,14 @@ static void menu_reload(void) {
 
 static void menu_toggle_hidden(void) {
     ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
+    char p[270];
+    if (!s || !sel_path(s, p, sizeof(p)))
         return;
-    int sel = ff_selected_file(s);
-    if (sel < 0) {
-        strcpy(s->status, "Nothing selected.");
-        return;
-    }
-    if (path_is_protected(s->items[sel].name)) {
-        strcpy(s->status, "Protected.");
-        return;
-    }
-    char fspath[270];
-    item_fspath(s, s->items[sel].name, fspath, sizeof(fspath));
-    FF_PUSH_CTX(s);
-    bool new_hidden = !s->items[sel].hidden;
-    bool ok = fs_set_hidden(fspath, new_hidden);
-    FF_POP_CTX();
-    ff_reload(s);
-    strcpy(s->status,
-           ok ? (new_hidden ? "Marked hidden." : "Unmarked.") : "Failed.");
+    bool hide = !s->items[ff_selected_file(s)].hidden;
+    const char *err = fo_set_hidden(p, hide);
+    fo_report(s->win, "Hidden", err);
+    if (!err)
+        strcpy(s->status, hide ? "Marked hidden." : "Unmarked.");
 }
 
 static void menu_show_hidden_toggle(void) {
@@ -991,21 +864,13 @@ static void menu_copy_path(void) {
 
 static void ff_clip_selected(bool is_cut) {
     ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
+    char p[270];
+    if (!s || !sel_path(s, p, sizeof(p)))
         return;
-    int sel = ff_selected_file(s);
-    if (sel < 0) {
-        strcpy(s->status, "Nothing selected.");
-        return;
-    }
-    if (path_is_protected(s->items[sel].name)) {
-        strcpy(s->status, "Protected.");
-        return;
-    }
-    clipboard_set_file(s->path, s->items[sel].name,
-                       (s->items[sel].entry.attr & ATTR_DIRECTORY) != 0, is_cut,
-                       s->drive_id);
-    strcpy(s->status, is_cut ? "Cut." : "Copied.");
+    const char *err = fo_clip(p, is_cut);
+    fo_report(s->win, is_cut ? "Cut" : "Copy", err);
+    if (!err)
+        strcpy(s->status, is_cut ? "Cut." : "Copied.");
 }
 static void menu_copy(void) { ff_clip_selected(false); }
 static void menu_cut(void) { ff_clip_selected(true); }
@@ -1014,109 +879,10 @@ static void menu_paste(void) {
     ff_inst_t *s = active_finder();
     if (!s || s->at_vroot)
         return;
-    if (!clipboard_has_file()) {
-        strcpy(s->status, "Clipboard empty.");
-        dlg_message(s->win, "Paste", "Clipboard is empty.");
-        return;
-    }
-
-    char src_fspath[270];
-    {
-        uint8_t src_drv = g_clipboard.src_drive;
-        char sub[256];
-        if (resolve_vpath(g_clipboard.src_path, &src_drv, sub, sizeof(sub))) {
-            if (strcmp(sub, "/") == 0)
-                snprintf(src_fspath, sizeof(src_fspath), "/%s/%s",
-                         k_vdrives[src_drv].label, g_clipboard.name);
-            else
-                snprintf(src_fspath, sizeof(src_fspath), "/%s%s/%s",
-                         k_vdrives[src_drv].label, sub, g_clipboard.name);
-        } else {
-            snprintf(src_fspath, sizeof(src_fspath), "%s/%s",
-                     g_clipboard.src_path, g_clipboard.name);
-        }
-    }
-
-    char dst_fspath[270];
-    {
-        uint8_t dst_drv = s->drive_id;
-        char sub[256];
-        if (resolve_vpath(s->path, &dst_drv, sub, sizeof(sub))) {
-            if (strcmp(sub, "/") == 0)
-                snprintf(dst_fspath, sizeof(dst_fspath), "/%s/%s",
-                         k_vdrives[dst_drv].label, g_clipboard.name);
-            else
-                snprintf(dst_fspath, sizeof(dst_fspath), "/%s%s/%s",
-                         k_vdrives[dst_drv].label, sub, g_clipboard.name);
-        } else {
-            snprintf(dst_fspath, sizeof(dst_fspath), "%s/%s", s->path,
-                     g_clipboard.name);
-        }
-    }
-
-    if (strcmp(src_fspath, dst_fspath) == 0 && !g_clipboard.is_cut) {
-        strcpy(s->status, "Already here.");
-        dlg_message(s->win, "Paste", "File already in this folder.");
-        return;
-    }
-
-    dir_entry_t de;
-    if (fs_find(dst_fspath, &de)) {
-        strcpy(s->status, "Name already exists.");
-        dlg_message(s->win, "Paste Failed",
-                    "A file with that name already exists here.");
-        return;
-    }
-
-    bool ok = false;
-    if (g_clipboard.is_cut) {
-        if (g_clipboard.src_drive == s->drive_id) {
-            ok = g_clipboard.is_dir ? fs_move_dir(src_fspath, dst_fspath)
-                                    : fs_move_file(src_fspath, dst_fspath);
-        } else {
-            ok = g_clipboard.is_dir ? fs_copy_dir(src_fspath, dst_fspath)
-                                    : fs_copy_file(src_fspath, dst_fspath);
-            if (ok) {
-                if (g_clipboard.is_dir)
-                    fs_rm_rf(src_fspath);
-                else
-                    fs_delete(src_fspath);
-            }
-        }
-        if (ok)
-            clipboard_clear();
-    } else {
-        ok = g_clipboard.is_dir ? fs_copy_dir(src_fspath, dst_fspath)
-                                : fs_copy_file(src_fspath, dst_fspath);
-    }
-
-    if (ok) {
+    const char *err = fo_paste(s->path);
+    fo_report(s->win, "Paste", err);
+    if (!err)
         strcpy(s->status, "Pasted.");
-        maybe_notify_desktop(s);
-        ff_refresh_all();
-        desktop_fs_set_dirty();
-    } else {
-        strcpy(s->status, "Paste failed.");
-        dlg_message(s->win, "Paste Failed", "Could not paste item.");
-    }
-}
-
-static void menu_delete(void) {
-    ff_inst_t *s = active_finder();
-    if (!s || s->at_vroot)
-        return;
-    int sel = ff_selected_file(s);
-    if (sel < 0) {
-        strcpy(s->status, "Nothing selected.");
-        return;
-    }
-    if (path_is_protected(s->items[sel].name)) {
-        strcpy(s->status, "Protected item.");
-        return;
-    }
-    char msg[48];
-    snprintf(msg, sizeof(msg), "Delete %s?", s->items[sel].name);
-    dlg_confirm(s->win, "Delete", msg, do_delete, s);
 }
 
 static void set_sort(int sort) {
@@ -1193,109 +959,18 @@ static bool over_desktop(int mx, int my) {
     return true;
 }
 
-static bool is_ancestor_of(uint8_t drive_id, uint16_t src_cluster,
-                           uint16_t candidate_cluster) {
-    if (src_cluster == candidate_cluster)
-        return true;
-    uint16_t cur = candidate_cluster;
-    for (int depth = 0; cur != 0 && depth < 64; depth++) {
-        if (cur == src_cluster)
-            return true;
-        char name83[12];
-        fs_make_83("..", name83);
-        dir_entry_t dotdot;
-        if (!fs_find_in_dir(drive_id, cur, name83, &dotdot))
-            break;
-        uint16_t parent = dotdot.cluster_lo;
-        if (parent == cur)
-            break;
-        cur = parent;
-    }
-    return false;
-}
-
-static bool ff_drop_move(ff_inst_t *src, int drag_idx, ff_inst_t *dst) {
-    ff_item_t *it = &src->items[drag_idx];
+/* Drop item `idx` of `src` into folder `dst_dir` (another FileF window or
+ * the desktop). */
+static void ff_drop_into(ff_inst_t *src, int idx, const char *dst_dir) {
+    ff_item_t *it = &src->items[idx];
     if (it->is_dotdot || it->is_vdrive)
-        return false;
-    if (src->drive_id == dst->drive_id && src->dir_cluster == dst->dir_cluster)
-        return false;
-    if (path_is_protected(it->name)) {
-        strcpy(src->status, "Protected item.");
-        ff_reload(src);
-        return false;
-    }
-    if ((it->entry.attr & ATTR_DIRECTORY) && src->drive_id == dst->drive_id) {
-        if (is_ancestor_of(src->drive_id, it->entry.cluster_lo,
-                           dst->dir_cluster)) {
-            strcpy(src->status, "Can't move into subfolder.");
-            ff_reload(src);
-            ff_reload(dst);
-            return false;
-        }
-    }
-
-    char src_fspath[270], dst_fspath[270];
-    item_fspath(src, it->name, src_fspath, sizeof(src_fspath));
-    item_fspath(dst, it->name, dst_fspath, sizeof(dst_fspath));
-
-    bool ok;
-    if (src->drive_id == dst->drive_id) {
-        FF_PUSH_CTX(dst);
-        ok = (it->entry.attr & ATTR_DIRECTORY)
-                 ? fs_move_dir(src_fspath, dst_fspath)
-                 : fs_move_file(src_fspath, dst_fspath);
-        FF_POP_CTX();
-    } else {
-        uint16_t sc = dir_context.current_cluster, sd = dir_context.drive_id;
-        dir_context.current_cluster = dst->dir_cluster;
-        dir_context.drive_id = dst->drive_id;
-        ok = (it->entry.attr & ATTR_DIRECTORY)
-                 ? fs_copy_dir(src_fspath, dst_fspath)
-                 : fs_copy_file(src_fspath, dst_fspath);
-        dir_context.current_cluster = sc;
-        dir_context.drive_id = sd;
-        if (ok) {
-            uint16_t sc2 = dir_context.current_cluster,
-                     sd2 = dir_context.drive_id;
-            dir_context.current_cluster = src->dir_cluster;
-            dir_context.drive_id = src->drive_id;
-            if (it->entry.attr & ATTR_DIRECTORY)
-                fs_rm_rf(src_fspath);
-            else
-                fs_delete(src_fspath);
-            dir_context.current_cluster = sc2;
-            dir_context.drive_id = sd2;
-        }
-    }
-
-    if (ok) {
+        return;
+    char p[270];
+    item_fspath(src, it->name, p, sizeof(p));
+    const char *err = fo_move(p, dst_dir);
+    fo_report(src->win, "Move", err);
+    if (!err)
         strcpy(src->status, "Moved.");
-        maybe_notify_desktop(src);
-        maybe_notify_desktop(dst);
-    } else
-        strcpy(src->status, "Move failed.");
-    ff_reload(src);
-    ff_reload(dst);
-    return ok;
-}
-
-static bool ff_drop_to_desktop(ff_inst_t *src, int drag_idx) {
-    ff_item_t *it = &src->items[drag_idx];
-    if (it->is_dotdot || it->is_vdrive)
-        return false;
-    if (path_is_protected(it->name)) {
-        strcpy(src->status, "Protected.");
-        return false;
-    }
-    char src_fspath[270];
-    item_fspath(src, it->name, src_fspath, sizeof(src_fspath));
-    char src_logical[270];
-    snprintf(src_logical, sizeof(src_logical), "%s/%s", src->path, it->name);
-    bool ok = desktop_accept_drop(src_logical, it->name, src->drive_id);
-    strcpy(src->status, ok ? "Moved to Desktop." : "Drop failed.");
-    ff_reload(src);
-    return ok;
 }
 
 static void ff_open_item(ff_inst_t *s, int idx) {
@@ -1329,29 +1004,6 @@ static void ff_open_item(ff_inst_t *s, int idx) {
             else
                 ff_go_vroot(s);
         }
-    } else if (item_is_app(it)) {
-        char app_name[9];
-        int ai = 0;
-        for (int k = 0; it->name[k] && it->name[k] != '.' && ai < 8; k++)
-            app_name[ai++] = it->name[k];
-        app_name[ai] = '\0';
-        app_descriptor *desc = os_find_app(app_name);
-        if (!desc) {
-            char low[9];
-            for (int k = 0; k < ai; k++)
-                low[k] = (app_name[k] >= 'A' && app_name[k] <= 'Z')
-                             ? app_name[k] - 'A' + 'a'
-                             : app_name[k];
-            low[ai] = '\0';
-            desc = os_find_app(low);
-        }
-        if (desc)
-            os_launch_app(desc);
-        else {
-            char em[64];
-            sprintf(em, "App '%s' not found.", app_name);
-            dlg_message(s->win, "App Not Found", em);
-        }
     } else if (it->entry.attr & ATTR_DIRECTORY) {
         char child_logical[270];
         snprintf(child_logical, sizeof(child_logical), "%s/%s", s->path,
@@ -1362,20 +1014,10 @@ static void ff_open_item(ff_inst_t *s, int idx) {
         else
             ff_open_dir_pub(child_cluster, child_logical);
     } else {
-        const uint8_t *e = it->entry.ext;
+        /* files and apps: same rules as the desktop */
         char fspath[270];
         item_fspath(s, it->name, fspath, sizeof(fspath));
-        if (e[0] == 'T' && e[1] == 'X' && e[2] == 'T') {
-            teditor_open_file(fspath);
-        } else if (e[0] == 'W' && e[1] == 'A' && e[2] == 'V') {
-            const char *err = wav_play_file(fspath, false);
-            if (err)
-                dlg_message(s->win, "Play WAV", err);
-            else
-                snprintf(s->status, sizeof(s->status), "Playing %s", it->name);
-        } else {
-            hexview_open_file(fspath); /* anything else: look inside */
-        }
+        fo_open(s->win, fspath);
     }
 }
 
@@ -1414,11 +1056,13 @@ static void view_drop(ff_inst_t *s) {
     if (!in_content(s, mouse.x, mouse.y)) {
         ff_inst_t *dst = ff_find_target(mouse.x, mouse.y, s);
         if (dst) {
-            ff_drop_move(s, idx, dst); /* reloads both */
+            s->items[idx].dragging = false;
+            ff_drop_into(s, idx, dst->path); /* both windows reload */
             return;
         }
         if (over_desktop(mouse.x, mouse.y)) {
-            ff_drop_to_desktop(s, idx);
+            s->items[idx].dragging = false;
+            ff_drop_into(s, idx, DESKTOP_PATH);
             return;
         }
     }
@@ -1462,6 +1106,94 @@ static void view_key(ff_inst_t *s) {
     }
 }
 
+/* ── Context menus ────────────────────────────────────────────────── */
+
+static void ctx_open(void) {
+    ff_inst_t *s = active_finder();
+    int sel = s ? ff_selected(s) : -1;
+    if (sel >= 0)
+        ff_open_item(s, sel);
+}
+
+/* Paste into the folder that was right-clicked, else the current one. */
+static void ctx_paste_into(void) {
+    ff_inst_t *s = active_finder();
+    char p[270];
+    int sel = s ? ff_selected_file(s) : -1;
+    if (!s || sel < 0 || !(s->items[sel].entry.attr & ATTR_DIRECTORY)) {
+        menu_paste();
+        return;
+    }
+    item_fspath(s, s->items[sel].name, p, sizeof(p));
+    const char *err = fo_paste(p);
+    fo_report(s->win, "Paste", err);
+    if (!err)
+        strcpy(s->status, "Pasted.");
+}
+
+static void view_context_menu(ff_inst_t *s, control *c) {
+    int hit;
+    if (ctl_menu_from_key()) {
+        hit = ff_selected(s);
+        if (hit >= 0) { /* show it by the item */
+            c->mx = 2 + s->items[hit].icon_x + ICON_CELL_W / 2;
+            c->my = 2 + s->items[hit].icon_y - s->scroll_y + ICON_H;
+        }
+    } else {
+        hit = ff_hit(s, c->ax + c->mx, c->ay + c->my);
+        ff_select(s, hit);
+    }
+    menu *m = popup_menu();
+    ff_item_t *it = hit >= 0 ? &s->items[hit] : NULL;
+    if (it && (it->is_dotdot || it->is_vdrive)) {
+        menu_add_item(m, "Open", ctx_open);
+        if (it->is_vdrive) {
+            menu_add_item(m, "Get Info", menu_get_info);
+            if (it->vdrive_path[1] == 'F') { /* /FDD0, /FDD1 */
+                menu_add_separator(m);
+                menu_add_item(m, "Eject Floppy", menu_eject_fdd);
+            }
+        }
+    } else if (it) {
+        bool dir = (it->entry.attr & ATTR_DIRECTORY) != 0;
+        bool prot = path_is_protected(it->name);
+        menu_add_item(m, "Open", ctx_open);
+        menu_add_separator(m);
+        menu_add_item(m, "Cut", menu_cut);
+        menu_enable_last(m, !prot);
+        menu_add_item(m, "Copy", menu_copy);
+        menu_enable_last(m, !prot);
+        if (dir) {
+            menu_add_item(m, "Paste Into", ctx_paste_into);
+            menu_enable_last(m, clipboard_has_file());
+        }
+        menu_add_separator(m);
+        menu_add_item(m, "Rename", menu_rename);
+        menu_enable_last(m, !prot);
+        menu_add_item(m, "Delete", menu_delete);
+        menu_enable_last(m, !prot);
+        menu_add_item(m, it->hidden ? "Unhide" : "Hide", menu_toggle_hidden);
+        menu_enable_last(m, !prot);
+        menu_add_separator(m);
+        menu_add_item(m, "Get Info", menu_get_info);
+    } else if (s->at_vroot) {
+        menu_add_item(m, "Insert Floppy", menu_insert_fdd);
+        menu_add_item(m, "Reload", menu_reload);
+    } else {
+        menu_add_item(m, "New File", menu_new_file);
+        menu_add_item(m, "New Folder", menu_new_folder);
+        menu_add_separator(m);
+        menu_add_item(m, "Paste", menu_paste);
+        menu_enable_last(m, clipboard_has_file());
+        menu_add_separator(m);
+        menu_add_item(m, "Copy Path", menu_copy_path);
+        menu_add_item(m, s->show_hidden ? "Hide Hidden" : "Show Hidden",
+                      menu_show_hidden_toggle);
+        menu_add_item(m, "Reload", menu_reload);
+    }
+    popup_show_for(c);
+}
+
 static void on_view(control *c, int ev) {
     ff_inst_t *s = c->user;
     int hit;
@@ -1501,6 +1233,9 @@ static void on_view(control *c, int ev) {
         break;
     case EV_KEY:
         view_key(s);
+        break;
+    case EV_MENU:
+        view_context_menu(s, c);
         break;
     }
     ff_sync(s);
@@ -1553,6 +1288,112 @@ static void on_path(control *c, int ev) {
     ctl_focus(s->view);
 }
 
+/* ── Folder tree pane ─────────────────────────────────────────────── */
+
+/* "/HDA/A/B" for a node: drive label at the root, then folder names. */
+static void tree_fill_roots(ff_inst_t *s) {
+    tree_clear(s->tree);
+    s->tree_at[0] = 0; /* re-sync */
+    for (int i = 0; i < VDRIVE_COUNT; i++)
+        if (fs_drive_mounted(k_vdrives[i].drive_id))
+            tree_add(s->tree, -1, k_vdrives[i].label, k_vdrives[i].drive_id,
+                     true);
+}
+
+/* Called on every ff_sync (often): only does work when the folder shown
+ * changed, as finding a path may read directories. */
+static void tree_sync(ff_inst_t *s) {
+    if (!s->tree || !s->tree_shown || !strcmp(s->tree_at, s->path))
+        return;
+    strncpy(s->tree_at, s->path, sizeof(s->tree_at) - 1);
+    tree_set_sel(s->tree, s->at_vroot ? -1 : tree_find_path(s->tree, s->path));
+}
+
+/* A folder's contents changed: re-read that branch if it is open. */
+static void tree_refresh_dir(ff_inst_t *s, const char *dir) {
+    if (!s->tree || !s->tree_shown)
+        return;
+    char v[270];
+    fo_vpath(dir, v, sizeof(v));
+    int node = tree_find_path(s->tree, v);
+    if (node >= 0 && tree_is_expanded(s->tree, node)) {
+        int sel = tree_sel(s->tree);
+        tree_clear_children(s->tree, node);
+        tree_expand(s->tree, node, true);
+        (void)sel;
+        s->tree_at[0] = 0;
+        tree_sync(s);
+    }
+}
+
+static void ctx_folder_info(void) {
+    ff_inst_t *s = active_finder();
+    if (s && !s->at_vroot)
+        fo_show_info(s->win, s->path);
+}
+
+static void tree_context_menu(ff_inst_t *s, control *c) {
+    if (tree_sel(c) < 0 || s->at_vroot)
+        return;
+    menu *m = popup_menu();
+    menu_add_item(m, "New File", menu_new_file);
+    menu_add_item(m, "New Folder", menu_new_folder);
+    menu_add_separator(m);
+    menu_add_item(m, "Paste", menu_paste);
+    menu_enable_last(m, clipboard_has_file());
+    menu_add_item(m, "Copy Path", menu_copy_path);
+    menu_add_separator(m);
+    menu_add_item(m, "Get Info", ctx_folder_info);
+    popup_show_for(c);
+}
+
+static void on_tree(control *c, int ev) {
+    ff_inst_t *s = c->user;
+    if (ev == EV_EXPAND) {
+        int node = tree_event_node(c);
+        char path[270];
+        tree_path(c, node, path, sizeof(path));
+        static char names[64][13];
+        int n = fo_list_dirs(path, names, 64, s->show_hidden);
+        for (int i = 0; i < n; i++)
+            tree_add(c, node, names[i], 0, true);
+    } else if (ev == EV_CHANGE) {
+        int node = tree_sel(c);
+        if (node < 0)
+            return;
+        char path[270];
+        tree_path(c, node, path, sizeof(path));
+        uint8_t drv;
+        uint16_t cl;
+        if (strcmp(path, s->path) && resolve_dir(path, &drv, &cl))
+            ff_navigate(s, cl, path, drv);
+    } else if (ev == EV_MENU) {
+        tree_context_menu(s, c);
+    }
+}
+
+static void set_tree_shown(ff_inst_t *s, bool on) {
+    int wx, wy, cw, ch;
+    win_client_rect(s->win, &wx, &wy, &cw, &ch);
+    s->tree_shown = on;
+    ctl_show(s->tree, on);
+    int vx = on ? 2 + TREE_W + 2 : 2;
+    ctl_move(s->view, vx, s->view->y, cw - 12 - vx + 2, s->view->h);
+    if (on) {
+        tree_fill_roots(s);
+        tree_sync(s);
+    } else if (s->win->focus == s->tree) {
+        ctl_focus(s->view);
+    }
+    s->last_view_w = -1; /* relayout icons */
+}
+
+static void menu_toggle_tree(void) {
+    ff_inst_t *s = active_finder();
+    if (s)
+        set_tree_shown(s, !s->tree_shown);
+}
+
 /* ── Init / frame / destroy ───────────────────────────────────────── */
 static void ff_init(void *state) {
     ff_inst_t *s = state;
@@ -1572,11 +1413,18 @@ static void ff_init(void *state) {
     s->up = ctl_button(w, 32, 2, 14, 12, "^", 0, on_nav);
     s->home = ctl_button(w, 47, 2, 24, 12, "Home", 0, on_nav);
     s->desk = ctl_button(w, 72, 2, 24, 12, "Desk", 0, on_nav);
+    ctl_set_tooltip(s->back, "Back");
+    ctl_set_tooltip(s->fwd, "Forward");
+    ctl_set_tooltip(s->up, "Up one folder");
+    ctl_set_tooltip(s->home, "All drives");
+    ctl_set_tooltip(s->desk, "Desktop folder");
     control *tb[] = {s->back, s->fwd, s->up, s->home, s->desk};
     for (int i = 0; i < 5; i++)
         ctl_style_add(tb[i], CS_NOFOCUS);
     s->path_edit = ctl_edit(w, 98, 2, cw - 100, 12, "/", 255,
                             ES_UPPER | CS_STRETCH_W, on_path);
+    s->tree =
+        ctl_tree(w, 2, 16, TREE_W, ch - 29, TS_FOLDERS | CS_STRETCH_H, on_tree);
     s->view =
         ctl_custom(w, 2, 16, cw - 12, ch - 29, paint_view, on_view,
                    CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
@@ -1610,6 +1458,7 @@ static void ff_init(void *state) {
     menu_add_item(m, "By Size", menu_sort_size);
     menu_add_separator(m);
     menu_add_item(m, "Show Hidden", menu_show_hidden_toggle);
+    menu_add_item(m, "Folder Tree", menu_toggle_tree);
     m = window_add_menu(w, "Drive");
     menu_add_item(m, "Insert Floppy", menu_insert_fdd);
     menu_add_item(m, "Eject Floppy", menu_eject_fdd);
@@ -1624,6 +1473,7 @@ static void ff_init(void *state) {
     strcpy(s->history[0], "/");
     s->history_index = 0;
     s->history_count = 1;
+    set_tree_shown(s, true);
     ff_reload(s);
     ctl_focus(s->view);
     s_last_active = s;

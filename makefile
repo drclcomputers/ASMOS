@@ -5,7 +5,7 @@ AS = nasm
 
 # -march=i386: runs on 386/486/Pentium (gcc's default i686 emits CMOV,
 # which faults on anything older than a Pentium Pro).
-CFLAGS  = -std=gnu11 -ffreestanding -m32 -march=i386 -mtune=i486 -O2 -Wall -Wextra \
+CFLAGS  = -std=gnu11 -ffreestanding -m32 -march=i386 -mtune=i486 -O2 -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Wextra \
           -fno-stack-protector -fno-pie -nostdlib \
           -fno-builtin-memset -fno-builtin-memcpy \
           -MMD -MP -I. -c

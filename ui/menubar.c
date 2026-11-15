@@ -74,6 +74,11 @@ void menu_add_separator(menu *m) {
     it->disabled = true;
 }
 
+void menu_enable_last(menu *m, bool on) {
+    if (m->item_count > 0 && m->items[m->item_count - 1].label)
+        m->items[m->item_count - 1].disabled = !on;
+}
+
 void menubar_close_all(menubar *mb) {
     for (int i = 0; i < mb->menu_count; i++)
         mb->menus[i].open = false;

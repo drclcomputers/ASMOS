@@ -37,8 +37,7 @@ bool desktop_fs_is_dirty(void);
 desktop_item_t *desktop_fs_items(void);
 int desktop_fs_count(void);
 bool desktop_fs_add_app(const char *app_name);
-bool desktop_fs_delete(int idx);
-bool desktop_fs_rename(int idx, const char *new_name);
+bool desktop_fs_item_path(int idx, char *out, int sz);
 void desktop_fs_move_icon(int idx, int new_x, int new_y);
 
 uint16_t desktop_fs_cluster(void);

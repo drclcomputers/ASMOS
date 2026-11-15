@@ -40,6 +40,10 @@ enum {
     EV_MOUSEMOVE, /* custom: while the button is held                    */
     EV_MOUSEUP,   /* custom                                              */
     EV_DBLCLICK,  /* custom / list item double-clicked                   */
+    EV_EXPAND,    /* tree: a node opens for the first time; add its
+                     children now (tree_event_node says which)          */
+    EV_MENU,      /* right-click / Menu key / Shift+F10: c->mx/my = where;
+                     show a context menu (ui/popup.h)                   */
 };
 
 typedef void (*ctl_handler)(control *c, int ev);
@@ -60,6 +64,7 @@ typedef enum {
     CTL_GROUP,
     CTL_TABS,
     CTL_CUSTOM,
+    CTL_TREE,
 } ctl_type;
 
 /* ── styles ──────────────────────────────────────────────────────────────
@@ -89,6 +94,7 @@ typedef enum {
 #define ES_DECIMAL (1u << 18)  /* digits, '.', '-'                    */
 /* Lists */
 #define LBS_HEADER (1u << 12) /* first row is a header (see list_*) */
+#define TS_FOLDERS (1u << 12) /* tree: folder icon before each node      */
 
 /* All fields are readable; change them through the functions below. */
 struct control {
@@ -126,6 +132,12 @@ struct control {
     control *tab_owner;
     int tab_page;
 
+    /* type-specific data owned by the control (tree nodes) */
+    void *ext;
+
+    /* tooltip shown when the mouse rests on the control (owned) */
+    char *tip;
+
     /* custom */
     ctl_painter paint;
     int mx, my; /* mouse, relative to the control (mouse events) */
@@ -148,6 +160,13 @@ void win_set_userdata(window *w, void *ud);
  * handy in menu callbacks, which get no arguments. */
 void *ui_active_state(void);
 void win_client_rect(const window *w, int *x, int *y, int *cw, int *ch);
+/* During EV_MENU: true if it came from the keyboard (act on the current
+ * selection rather than on what is under c->mx/my). */
+bool ctl_menu_from_key(void);
+
+/* Tooltip: shown after the pointer rests on c for a moment (copied). */
+void ctl_set_tooltip(control *c, const char *text);
+void ctl_draw_tooltip(void); /* main loop, after everything else */
 
 /* ── creating controls ─────────────────────────────────────────────────── */
 control *ctl_create(window *w, ctl_type type, int x, int y, int cw, int ch,
@@ -162,6 +181,9 @@ control *ctl_radio(window *w, int x, int y, int cw, const char *text, int group,
                    bool selected, ctl_handler h);
 control *ctl_edit(window *w, int x, int y, int cw, int ch, const char *text,
                   int max_len, uint32_t style, ctl_handler h);
+/* Tree view (see "tree_*"). style: TS_FOLDERS, CS_* layout. */
+control *ctl_tree(window *w, int x, int y, int cw, int ch, uint32_t style,
+                  ctl_handler h);
 control *ctl_list(window *w, int x, int y, int cw, int ch, uint32_t style,
                   ctl_handler h);
 control *ctl_combo(window *w, int x, int y, int cw, ctl_handler h);
@@ -209,6 +231,31 @@ void list_set_sel(control *c, int i);
 /* columns: item text is split on '\t'; widths in pixels */
 void list_set_columns(control *c, const int *widths, int n);
 
+/* ── tree view ─────────────────────────────────────────────────────────────
+ * Nodes are ints. parent -1 = top level. can_expand shows [+] before the
+ * children are known: on first open the handler gets EV_EXPAND with
+ * tree_event_node() = that node and may tree_add() children then.
+ * EV_CHANGE = selection moved, EV_SUBMIT = Enter / double-click. */
+int tree_add(control *c, int parent, const char *text, uint32_t data,
+             bool can_expand);
+void tree_clear(control *c);
+void tree_clear_children(control *c, int node); /* reloaded on next open */
+int tree_parent(const control *c, int node);
+int tree_first_child(const control *c, int node);
+int tree_next_sibling(const control *c, int node);
+const char *tree_text(const control *c, int node);
+void tree_set_text(control *c, int node, const char *text);
+uint32_t tree_data(const control *c, int node);
+int tree_sel(const control *c);
+void tree_set_sel(control *c, int node); /* opens ancestors, scrolls */
+void tree_expand(control *c, int node, bool open);
+bool tree_is_expanded(const control *c, int node);
+int tree_event_node(const control *c);
+/* Paths: node texts joined as "/A/B/C". tree_find_path opens (and loads)
+ * branches down to the deepest node matching path; -1 if none. */
+void tree_path(const control *c, int node, char *out, int sz);
+int tree_find_path(control *c, const char *path);
+
 /* ── edits ─────────────────────────────────────────────────────────────── */
 void edit_select(control *c, int from, int to);
 void edit_select_all(control *c);
@@ -221,6 +268,8 @@ bool edit_find(control *c, const char *needle, bool from_start);
 void edit_copy(control *c); /* selection -> clipboard */
 void edit_cut(control *c);
 void edit_paste(control *c); /* clipboard text at the cursor */
+void edit_delete_sel(control *c);
+bool edit_has_sel(const control *c);
 
 /* ── called by the system ──────────────────────────────────────────────── */
 void ctl_dispatch(void);      /* before apps run, every frame */
