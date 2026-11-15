@@ -184,20 +184,25 @@ static void build(settings_state_t *s) {
     /* Sound */
     flag(s, P_SOUND, 10, 24, "Sound enabled", &g_cfg.sound_enabled);
     flag(s, P_SOUND, 10, 37, "Play boot chime", &g_cfg.play_bootchime);
-    on_page(s, ctl_group(w, 6, 52, 244, 78, "Sound Blaster 16"), P_SOUND);
     bool det = sb16_detected();
-    on_page(s,
-            ctl_label(w, 14, 64, 220, 8,
-                      det ? "Detected: port 0x220, IRQ 5, DMA 1"
-                          : "Not installed (no card at 0x220-0x280)",
-                      0),
-            P_SOUND);
+    on_page(
+        s,
+        ctl_group(w, 6, 52, 244, 78, det ? sb_model_name() : "Sound Blaster"),
+        P_SOUND);
+    char sbinfo[64];
+    if (det)
+        snprintf(sbinfo, sizeof(sbinfo), "Port %X, IRQ %d, DMA %d, DSP %d.%02d",
+                 sb_port(), sb_irq(), sb_dma(), sb_dsp_version() >> 8,
+                 sb_dsp_version() & 0xFF);
+    else
+        strcpy(sbinfo, "Not installed (no card at 0x220-0x280)");
+    on_page(s, ctl_label(w, 14, 64, 220, 8, sbinfo, 0), P_SOUND);
     on_page(s, ctl_label(w, 14, 80, 50, 11, "Volume:", 0), P_SOUND);
     s->vol = on_page(
         s, ctl_slider(w, 60, 80, 120, 0, 15, g_cfg.sb16_volume, on_volume),
         P_SOUND);
     s->vol_lbl = on_page(s, ctl_label(w, 186, 80, 50, 11, "", 0), P_SOUND);
-    ctl_enable(s->vol, det);
+    ctl_enable(s->vol, det && sb_dsp_version() >= 0x300); /* SB Pro+ mixer */
     char b[16];
     snprintf(b, sizeof(b), "%d / 15", g_cfg.sb16_volume);
     ctl_set_text(s->vol_lbl, b);
@@ -249,7 +254,7 @@ static void build(settings_state_t *s) {
 
     /* bottom bar */
     s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
-    s->save = ctl_button(w, 205, 140, 50, 13, "Save", 1, on_save);
+    s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
     ctl_style_add(s->save, CS_DEFAULT);
     set_dirty(s, false);
 }

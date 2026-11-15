@@ -1,4 +1,5 @@
 /* TEditor - text editor built on the multi-line edit control. */
+#include "drivers/lpt.h"
 #include "os/api.h"
 
 #define TEXT_MAX (256 * 1024)
@@ -170,6 +171,29 @@ static void do_goto(teditor_state_t *s) {
               goto_line, s);
 }
 
+static void do_print(teditor_state_t *s) {
+    if (!lpt_count()) {
+        dlg_message(s->win, "Print", "No parallel port found.");
+        return;
+    }
+    lpt_status_t st = lpt_status(0);
+    if (st != LPT_READY && st != LPT_BUSY) {
+        char m[64];
+        snprintf(m, sizeof(m), "LPT1: %s.", lpt_status_text(st));
+        dlg_message(s->win, "Print", m);
+        return;
+    }
+    uint32_t sent =
+        lpt_print_text(0, ctl_text(s->edit), s->edit->text_len, &st);
+    char m[80];
+    if (st == LPT_READY)
+        snprintf(m, sizeof(m), "Sent %u bytes to LPT1.", sent);
+    else
+        snprintf(m, sizeof(m), "Stopped after %u bytes:\n%s.", sent,
+                 lpt_status_text(st));
+    dlg_message(s->win, "Print", m);
+}
+
 /* closing with unsaved changes asks first */
 static void confirm_discard(void *user, bool yes) {
     teditor_state_t *s = user;
@@ -199,6 +223,7 @@ ACTION(menu_open, do_open(s))
 ACTION(menu_save, do_save(s))
 ACTION(menu_save_as, do_save_as(s))
 ACTION(menu_close, on_close(s->win))
+ACTION(menu_print, do_print(s))
 ACTION(menu_cut, edit_cut(s->edit))
 ACTION(menu_copy, edit_copy(s->edit))
 ACTION(menu_paste, edit_paste(s->edit))
@@ -227,6 +252,7 @@ static void teditor_init(void *state) {
     menu_add_item(f, "Open...", menu_open);
     menu_add_item(f, "Save", menu_save);
     menu_add_item(f, "Save As...", menu_save_as);
+    menu_add_item(f, "Print", menu_print);
     menu_add_separator(f);
     menu_add_item(f, "Close", menu_close);
     menu_add_item(f, "About", menu_about);

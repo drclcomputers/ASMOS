@@ -1,4 +1,5 @@
 #include "drivers/ata.h"
+#include "drivers/lpt.h"
 #include "drivers/pci.h"
 #include "drivers/ps2.h"
 #include "fs/fs.h"
@@ -188,6 +189,7 @@ void kmain(void) {
     boot_check_heap();
     pci_init(); /* before disks/NIC: they look for their controllers here */
     boot_check_pci();
+    lpt_init();
     boot_check_input();
     ata_init(*(volatile uint8_t *)0x0608); /* BIOS boot drive from stage 1 */
     fs_mount();

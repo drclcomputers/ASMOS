@@ -1,6 +1,7 @@
 /* FileF - file manager. The icon view is a custom control; toolbar, path
  * box, scrollbar and dialogs come from the toolkit. */
 #include "config/runtime_config.h"
+#include "lib/wav.h"
 #include "os/api.h"
 #include "os/clipboard.h"
 #include "ui/desktop.h"
@@ -106,6 +107,7 @@ app_descriptor filef_app;
 static int s_cascade = 0;
 static ff_inst_t *s_last_active = NULL;
 extern void teditor_open_file(const char *path);
+extern void hexview_open_file(const char *path);
 
 static void ff_sync(ff_inst_t *s);
 static void ff_reload(ff_inst_t *s);
@@ -1360,12 +1362,19 @@ static void ff_open_item(ff_inst_t *s, int idx) {
         else
             ff_open_dir_pub(child_cluster, child_logical);
     } else {
-        bool is_txt = (it->entry.ext[0] == 'T' && it->entry.ext[1] == 'X' &&
-                       it->entry.ext[2] == 'T');
-        if (is_txt) {
-            char fspath[270];
-            item_fspath(s, it->name, fspath, sizeof(fspath));
+        const uint8_t *e = it->entry.ext;
+        char fspath[270];
+        item_fspath(s, it->name, fspath, sizeof(fspath));
+        if (e[0] == 'T' && e[1] == 'X' && e[2] == 'T') {
             teditor_open_file(fspath);
+        } else if (e[0] == 'W' && e[1] == 'A' && e[2] == 'V') {
+            const char *err = wav_play_file(fspath, false);
+            if (err)
+                dlg_message(s->win, "Play WAV", err);
+            else
+                snprintf(s->status, sizeof(s->status), "Playing %s", it->name);
+        } else {
+            hexview_open_file(fspath); /* anything else: look inside */
         }
     }
 }

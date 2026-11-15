@@ -1,6 +1,10 @@
 #include "shell/cmds.h"
 #include "drivers/gpu.h"
+#include "drivers/lpt.h"
 #include "drivers/pci.h"
+#include "drivers/sb16.h"
+#include "drivers/sermouse.h"
+#include "lib/wav.h"
 
 #include "fs/fs.h"
 
@@ -50,7 +54,10 @@ void cmd_help(char *out, size_t max) {
     append(out, max, "  df            - Disk usage\n");
     append(out, max, "  mem           - Memory usage\n");
     append(out, max, "  sysinfo       - CPU model and uptime\n");
-    append(out, max, "  lspci         - List PCI devices\n\n");
+    append(out, max, "  lspci         - List PCI devices\n");
+    append(out, max, "  play <f.wav>  - Play WAV (stop / loop)\n");
+    append(out, max, "  lpt           - Parallel/serial ports\n");
+    append(out, max, "  print <f> [n] - Print text file on LPTn\n\n");
 
     append(out, max, "  shutdown [s]  - Shut down (optional delay)\n");
     append(out, max, "  reboot [s]    - Reboot (optional delay)\n\n");
@@ -425,6 +432,102 @@ void cmd_clock(char *out, size_t max) {
     char buf[64];
     sprintf(buf, "%04d-%02d-%02d  %02d:%02d:%02d\n\n", t.year, t.month, t.day,
             t.hours, t.minutes, t.seconds);
+    append(out, max, buf);
+}
+
+void cmd_play(const char *args, char *out, size_t max) {
+    while (*args == ' ')
+        args++;
+    if (!*args || !strcmp(args, "stop")) {
+        wav_stop();
+        append(out, max,
+               *args ? "Stopped.\n"
+                     : "usage: play <file.wav> [loop] | play stop\n");
+        return;
+    }
+    char path[128];
+    int n = 0;
+    while (args[n] && args[n] != ' ' && n < 127) {
+        path[n] = args[n];
+        n++;
+    }
+    path[n] = 0;
+    bool loop = strstr(args + n, "loop") != NULL;
+    const char *err = wav_play_file(path, loop);
+    char buf[160];
+    if (err)
+        sprintf(buf, "play: %s\n", err);
+    else
+        sprintf(buf, "Playing %s on %s%s. 'play stop' to stop.\n", path,
+                sb_model_name(), loop ? " (loop)" : "");
+    append(out, max, buf);
+}
+
+void cmd_lpt(char *out, size_t max) {
+    char buf[96];
+    if (!lpt_count())
+        append(out, max, "No parallel ports.\n");
+    for (int i = 0; i < lpt_count(); i++) {
+        sprintf(buf, "LPT%d  %03X  %s\n", i + 1, lpt_base(i),
+                lpt_status_text(lpt_status(i)));
+        append(out, max, buf);
+    }
+    for (int i = 0; i < 4; i++)
+        if (bios_data_word(i * 2)) {
+            sprintf(buf, "COM%d  %03X%s\n", i + 1, bios_data_word(i * 2),
+                    sermouse_port() == i + 1 ? "  (mouse)" : "");
+            append(out, max, buf);
+        }
+}
+
+/* print <file> [1|2|3] : text file to a parallel port */
+void cmd_print(const char *args, char *out, size_t max) {
+    char path[128], buf[128];
+    int n = 0, port = 0;
+    while (*args == ' ')
+        args++;
+    while (args[n] && args[n] != ' ' && n < 127) {
+        path[n] = args[n];
+        n++;
+    }
+    path[n] = 0;
+    const char *p = args + n;
+    while (*p == ' ')
+        p++;
+    if (*p >= '1' && *p <= '3')
+        port = *p - '1';
+    if (!path[0]) {
+        append(out, max, "usage: print <file> [port 1-3]\n");
+        return;
+    }
+    if (!lpt_base(port)) {
+        sprintf(buf, "print: LPT%d not present\n", port + 1);
+        append(out, max, buf);
+        return;
+    }
+    fat_file_t f;
+    if (!fs_open(path, &f)) {
+        append(out, max, "print: file not found\n");
+        return;
+    }
+    uint32_t size = f.entry.file_size;
+    char *text = (char *)kmalloc(size ? size : 1);
+    if (!text) {
+        fs_close(&f);
+        append(out, max, "print: out of memory\n");
+        return;
+    }
+    int got = fs_read(&f, text, (int)size);
+    fs_close(&f);
+    lpt_status_t st;
+    uint32_t sent =
+        lpt_print_text(port, text, got > 0 ? (uint32_t)got : 0, &st);
+    kfree(text);
+    if (st == LPT_READY)
+        sprintf(buf, "Printed %u bytes on LPT%d.\n", sent, port + 1);
+    else
+        sprintf(buf, "print: stopped after %u bytes: %s\n", sent,
+                lpt_status_text(st));
     append(out, max, buf);
 }
 

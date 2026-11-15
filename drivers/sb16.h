@@ -3,6 +3,9 @@
 
 #include "lib/core.h"
 
+/* Whole Sound Blaster family (DSP 1.x - 4.x); names kept as sb16_* for
+ * the existing callers. 8-bit mono PCM. */
+
 #define SB16_DEFAULT_PORT 0x220
 
 void mixer_write(uint8_t reg, uint8_t val);
@@ -17,5 +20,13 @@ void sb16_play_pcm(const uint8_t *data, uint32_t len, uint32_t sample_rate,
 void sb16_stop(void);
 bool sb16_is_playing(void);
 void sb16_unmute_fm(void);
+void sb16_set_loop(bool loop);
+
+const char *sb_model_name(void); /* "Sound Blaster Pro", ... */
+int sb_dsp_version(void);        /* major << 8 | minor, 0 = none */
+uint16_t sb_port(void);
+int sb_irq(void);
+int sb_dma(void);
+uint32_t sb_max_rate(void); /* 22050 before the SB16, else 44100 */
 
 #endif

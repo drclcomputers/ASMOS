@@ -3,6 +3,7 @@
 #include "config/runtime_config.h"
 #include "drivers/ata.h"
 #include "drivers/gpu.h"
+#include "drivers/lpt.h"
 #include "drivers/mouse.h"
 #include "drivers/ne2000.h"
 #include "drivers/opl2.h"
@@ -262,6 +263,24 @@ void boot_check_input(void) {
                  (k & MOUSE_SERIAL) ? "serial COM" : "",
                  (k & MOUSE_SERIAL) ? (sermouse_port() == 1 ? "1" : "2") : "");
     boot_check_line("Mouse", k != 0, d);
+
+    char ports[48] = "";
+    for (int i = 0; i < lpt_count(); i++) {
+        char one[12];
+        snprintf(one, sizeof(one), "%sLPT%d %X", i ? ", " : "", i + 1,
+                 lpt_base(i));
+        strcat(ports, one);
+    }
+    boot_check_line("Parallel", true, lpt_count() ? ports : "none");
+    ports[0] = 0;
+    for (int i = 0; i < 4; i++)
+        if (bios_data_word(i * 2)) {
+            char one[12];
+            snprintf(one, sizeof(one), "%sCOM%d %X", ports[0] ? ", " : "",
+                     i + 1, bios_data_word(i * 2));
+            strcat(ports, one);
+        }
+    boot_check_line("Serial", true, ports[0] ? ports : "none");
 }
 
 void boot_check_heap(void) {
@@ -302,9 +321,14 @@ void boot_check_sound(void) {
     // PC Speaker
     boot_check_line("PC Speaker", true, "PIT channel 2");
 
-    // Sound Blaster 16
+    // Sound Blaster (any generation)
     bool sb_ok = sb16_detected();
-    boot_check_line("Sound Blaster 16", sb_ok, sb_ok ? NULL : "not found");
+    char sbd[48];
+    if (sb_ok)
+        snprintf(sbd, sizeof(sbd), "%s, DSP %d.%02d, %X IRQ %d DMA %d",
+                 sb_model_name(), sb_dsp_version() >> 8,
+                 sb_dsp_version() & 0xFF, sb_port(), sb_irq(), sb_dma());
+    boot_check_line("Sound Blaster", sb_ok, sb_ok ? sbd : "not found");
 
     // OPL2 FM Synthesizer
     bool opl_ok = opl2_detected();
