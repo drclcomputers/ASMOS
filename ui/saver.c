@@ -8,6 +8,7 @@
 #include "drivers/mouse.h"
 #include "lib/graphics.h"
 #include "lib/time.h"
+#include "ui/window.h"
 
 const char *const SAVER_NAMES[SAVER_COUNT] = {"Starfield", "Mystic lines",
                                               "Rain", "Random"};
@@ -328,6 +329,7 @@ bool saver_update(void) {
 }
 
 void saver_draw(void) {
+    wm_invalidate_all(); /* the desktop is gone from the back buffer */
     gfx_reset_clip();
     saver_paint(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, g_cfg.saver_effect);
 }

@@ -4,6 +4,7 @@
 #include "shell/binrun.h"
 #include "shell/cmds.h"
 #include "shell/term_buf.h"
+#include "ui/uifont.h"
 
 #define OUTPUT_LINES 128
 #define OUTPUT_LINE_W 80
@@ -93,6 +94,7 @@ static void term_push_line(asmterm_state_t *s, const char *text) {
     }
     strncpy(s->lines[idx], text, OUTPUT_LINE_W - 1);
     s->lines[idx][OUTPUT_LINE_W - 1] = '\0';
+    wm_invalidate(s->win); /* output can come from a background task */
 }
 
 static void term_push_output(asmterm_state_t *s, const char *text) {
@@ -123,6 +125,7 @@ static int max_scroll(const asmterm_state_t *s) {
 static void term_scroll_to(asmterm_state_t *s, int top) {
     int ms = max_scroll(s);
     s->scroll_top = top < 0 ? 0 : top > ms ? ms : top;
+    wm_invalidate(s->win);
 }
 
 static void term_scroll_to_bottom(asmterm_state_t *s) {
@@ -131,6 +134,7 @@ static void term_scroll_to_bottom(asmterm_state_t *s) {
 
 static void term_clear(asmterm_state_t *s) {
     s->line_head = s->line_count = s->scroll_top = 0;
+    wm_invalidate(s->win);
 }
 
 /* ── term_context for shell programs ───────────────────────────────────── */
@@ -322,13 +326,13 @@ static void paint_out(control *c, int x, int y, int w, int h) {
         s->visible_rows = rows;
         term_scroll_to(s, s->scroll_top);
     }
-    s->cols = (w - 4) / TH_CHAR_W;
+    s->cols = (w - 4) / UI_TERM_CW;
     for (int r = 0; r < rows; r++) {
         int n = s->scroll_top + r;
         if (n >= s->line_count)
             break;
         draw_text_n(x + 2, y + 2 + r * TH_LINE_H, s->lines[line_idx(s, n)],
-                    s->cols, WHITE, 2);
+                    s->cols, WHITE, UI_FONT_TERM);
     }
 }
 
@@ -433,6 +437,7 @@ static void asmterm_init(void *state) {
         app_window(s, "ASMTerm", 20, 20, 220, 160, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
+    s->win->lazy_custom = true; /* output: the term_* functions invalidate */
     window *w = s->win;
     s->out = ctl_custom(w, 1, 1, 208, 126, paint_out, on_out,
                         CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
@@ -440,8 +445,9 @@ static void asmterm_init(void *state) {
     ctl_style_add(s->sb, CS_ANCHOR_RIGHT | CS_STRETCH_H | CS_NOFOCUS);
     s->prompt = ctl_label(w, 2, 131, 32, 9, ">", CS_ANCHOR_BOTTOM);
     ctl_set_colors(s->prompt, BLUE, 0xFF);
-    s->input = ctl_edit(w, 14, 129, 194, 12, "", INPUT_CAP - 1,
-                        CS_STRETCH_W | CS_ANCHOR_BOTTOM, on_input);
+    s->input =
+        ctl_edit(w, 14, 129, 194, 12, "", INPUT_CAP - 1,
+                 CS_STRETCH_W | CS_ANCHOR_BOTTOM | ES_TERMFONT, on_input);
 
     menu *fm = window_add_menu(w, "File");
     menu_add_item(fm, "Paste", menu_paste);
@@ -479,7 +485,7 @@ static void asmterm_on_frame(void *state) {
     static const char *const P[] = {">", "BIN>", "GOPHER>"};
     const char *pr = !s->binary_waiting ? P[0] : s->gopher_mode ? P[2] : P[1];
     if (strcmp(ctl_text(s->prompt), pr)) {
-        int pw = (int)strlen(pr) * TH_CHAR_W + 3;
+        int pw = text_width(pr, UI_FONT_SMALL) + 3; /* the label's font */
         ctl_set_text(s->prompt, pr);
         ctl_set_colors(s->prompt, s->binary_waiting ? GREEN : BLUE, 0xFF);
         int wx, wy, cw, ch;

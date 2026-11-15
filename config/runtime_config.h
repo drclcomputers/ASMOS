@@ -31,12 +31,24 @@ typedef struct __attribute__((packed)) {
     uint8_t classic_fonts; /* 1 = the old 4x6 font everywhere */
     uint8_t saver_minutes; /* screen saver after this idle time; 0 = never */
     uint8_t saver_effect;  /* ui/saver.h */
-    uint8_t _reserved[31];
+    /* Performance (Settings): 0 everywhere = everything on */
+    uint8_t outline_drag;   /* move/resize show a frame, not the window */
+    uint8_t clock_no_secs;  /* menu bar clock without seconds */
+    uint8_t caret_no_blink; /* text cursor stays on */
+    uint8_t no_tooltips;
+    uint8_t no_power_anim; /* shut down / restart at once */
+    uint8_t fps_cap;       /* 0 = 60, 1 = 30, 2 = 20 frames a second */
+    uint8_t _reserved[25];
 } os_config_t;
 
 extern os_config_t g_cfg;
 
 void cfg_init_defaults(void);
+/* the Performance settings: true = everything light (for a 386), false =
+ * everything on */
+void cfg_set_low_end(bool low);
+bool cfg_is_low_end(void);
+int cfg_frame_ms(void); /* from fps_cap */
 bool cfg_load(void);
 bool cfg_save(void);
 

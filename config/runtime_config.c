@@ -41,6 +41,28 @@ void cfg_init_defaults(void) {
     g_cfg.dns_server[3] = 8;
 }
 
+void cfg_set_low_end(bool low) {
+    uint8_t v = low ? 1 : 0;
+    g_cfg.reduce_motion = v;
+    g_cfg.outline_drag = v;
+    g_cfg.clock_no_secs = v;
+    g_cfg.caret_no_blink = v;
+    g_cfg.no_tooltips = v;
+    g_cfg.no_power_anim = v;
+    g_cfg.fps_cap = low ? 1 : 0;
+}
+
+bool cfg_is_low_end(void) {
+    return g_cfg.reduce_motion && g_cfg.outline_drag && g_cfg.clock_no_secs &&
+           g_cfg.caret_no_blink && g_cfg.no_tooltips && g_cfg.no_power_anim &&
+           g_cfg.fps_cap == 1;
+}
+
+int cfg_frame_ms(void) {
+    static const int ms[3] = {1000 / 60, 1000 / 30, 1000 / 20};
+    return ms[g_cfg.fps_cap < 3 ? g_cfg.fps_cap : 0];
+}
+
 bool cfg_load(void) {
     fat_file_t f;
     if (!fs_open(CFG_PATH, &f))

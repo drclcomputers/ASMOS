@@ -9,6 +9,8 @@
 #define FONT_MONO 2   /* 4x6 fixed: the classic UI font, editors   */
 #define FONT_SYSTEM 3 /* bold, proportional, 8 rows: titles, menus */
 #define FONT_SMALL 4  /* proportional, 7 rows: labels, status bars */
+#define FONT_TERM 5   /* the Small glyphs in fixed 6 px cells: terminals */
+#define FONT_TERM_W 6
 
 extern unsigned char font1_data[];
 extern unsigned char font2_data[];

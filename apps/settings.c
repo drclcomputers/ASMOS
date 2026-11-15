@@ -7,7 +7,9 @@
 #include "os/api.h"
 #include "ui/saver.h"
 
-enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER };
+enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER, P_PERF };
+
+#define PERF_FLAGS 6
 
 typedef struct {
     window *win; /* must stay first */
@@ -16,6 +18,7 @@ typedef struct {
     int screen_saved; /* mode on the boot disk (config/video_cfg.h) */
     control *vol, *vol_lbl;
     control *ip[4]; /* ip, gateway, netmask, dns */
+    control *perf[PERF_FLAGS], *fps;
     bool dirty;
 } settings_state_t;
 
@@ -179,12 +182,55 @@ static control *flag(settings_state_t *s, int page, int x, int y,
     return c;
 }
 
+/* Speed tab: shown as "on" when the stored "off" flag is 0 */
+static const struct {
+    const char *text, *tip;
+    uint8_t *off;
+} PERF[PERF_FLAGS] = {
+    {"Window animations", "Windows zoom open, closed and to the taskbar",
+     &g_cfg.reduce_motion},
+    {"Show windows while moving and resizing",
+     "Off: only a frame moves; the window follows when you let go",
+     &g_cfg.outline_drag},
+    {"Seconds in the menu bar clock", "Off: the clock changes once a minute",
+     &g_cfg.clock_no_secs},
+    {"Blinking text cursor", "Off: the cursor stays on", &g_cfg.caret_no_blink},
+    {"Tooltips", "Notes like this one", &g_cfg.no_tooltips},
+    {"Shut down and restart animation", "Off: at once", &g_cfg.no_power_anim},
+};
+
+static void on_perf(control *c, int ev) {
+    if (ev != EV_CHANGE || c->id < 0 || c->id >= PERF_FLAGS)
+        return;
+    *PERF[c->id].off = ctl_value(c) ? 0 : 1;
+    set_dirty(c->user, true);
+}
+
+static void on_fps(control *c, int ev) {
+    int i = ctl_value(c);
+    if (ev != EV_CHANGE || i < 0 || i > 2)
+        return;
+    g_cfg.fps_cap = (uint8_t)i;
+    set_dirty(c->user, true);
+}
+
+static void on_preset(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    cfg_set_low_end(c->id != 0);
+    for (int i = 0; i < PERF_FLAGS; i++)
+        ctl_set_value(s->perf[i], *PERF[i].off == 0);
+    list_set_sel(s->fps, g_cfg.fps_cap);
+    set_dirty(s, true);
+}
+
 static const int SAVER_DELAY[] = {0, 1, 2, 3, 5, 10, 15, 30};
 #define SAVER_DELAYS ((int)(sizeof(SAVER_DELAY) / sizeof(SAVER_DELAY[0])))
 
 static void paint_saver(control *c, int x, int y, int w, int h) {
-    (void)c;
     saver_paint(x, y, w, h, g_cfg.saver_effect);
+    wm_invalidate(c->win); /* animated: draw again next frame */
 }
 
 static void on_saver_fx(control *c, int ev) {
@@ -210,8 +256,8 @@ static void on_saver_test(control *c, int ev) {
 
 static void build(settings_state_t *s) {
     window *w = s->win;
-    s->tabs =
-        ctl_tabs(w, 4, 3, 250, "Display|Sound|System|Network|Saver", NULL);
+    s->tabs = ctl_tabs(w, 4, 3, 250, "Display|Sound|System|Network|Saver|Speed",
+                       NULL);
 
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
@@ -302,9 +348,7 @@ static void build(settings_state_t *s) {
     ctl_set_text(s->vol_lbl, b);
 
     /* System */
-    flag(s, P_SYSTEM, 10, 24, "Reduce motion (no window animations)",
-         &g_cfg.reduce_motion);
-    flag(s, P_SYSTEM, 10, 37, "Start in the GUI (else the text shell)",
+    flag(s, P_SYSTEM, 10, 24, "Start in the GUI (else the text shell)",
          &g_cfg.start_in_gui);
     on_page(s, ctl_label(w, 10, 54, 60, 12, "Time zone:", 0), P_SYSTEM);
     control *tz = on_page(s, ctl_combo(w, 76, 54, 80, on_tz), P_SYSTEM);
@@ -352,6 +396,34 @@ static void build(settings_state_t *s) {
                       "QEMU user networking: DNS 10.0.2.3 or 8.8.8.8", 0),
             P_NET);
 
+    /* Speed: what a slow machine can do without (each flag is stored as
+     * "off", so 0 = all on) */
+    for (int i = 0; i < PERF_FLAGS; i++) {
+        s->perf[i] = on_page(s,
+                             ctl_check(w, 10, 22 + i * 13, 240, PERF[i].text,
+                                       *PERF[i].off == 0, on_perf),
+                             P_PERF);
+        s->perf[i]->id = i;
+        ctl_set_tooltip(s->perf[i], PERF[i].tip);
+    }
+    on_page(s, ctl_label(w, 10, 102, 60, 12, "Frame rate:", 0), P_PERF);
+    s->fps = on_page(s, ctl_combo(w, 76, 102, 80, on_fps), P_PERF);
+    list_add(s->fps, "60 a second");
+    list_add(s->fps, "30 a second");
+    list_add(s->fps, "20 a second");
+    list_set_sel(s->fps, g_cfg.fps_cap < 3 ? g_cfg.fps_cap : 0);
+    ctl_set_tooltip(s->fps, "Lower leaves more time for programs "
+                            "working in the background");
+    control *lo = on_page(
+        s, ctl_button(w, 10, 121, 90, 13, "Low-end machine", 0, on_preset),
+        P_PERF);
+    lo->id = 1;
+    ctl_set_tooltip(lo, "Everything light: for a 386");
+    control *hi =
+        on_page(s, ctl_button(w, 106, 121, 70, 13, "All effects", 0, on_preset),
+                P_PERF);
+    hi->id = 0;
+
     /* bottom bar */
     s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
     s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
@@ -368,6 +440,8 @@ static void settings_init(void *state) {
     s->win = app_window(s, "Settings", 30, 20, 260, 172, DARK_GRAY, 0);
     if (!s->win)
         return;
+    s->win->lazy_custom =
+        true; /* previews: handlers; the saver one asks itself */
     build(s);
     menu *f = window_add_menu(s->win, "File");
     menu_add_item(f, "Close", on_close);

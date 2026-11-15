@@ -1,6 +1,7 @@
 /* controls.c - ASMOS UI toolkit: control objects, drawing, input routing.
  * Edit controls live in ctl_edit.c; dialogs in dialogs.c. */
 #include "ui/controls.h"
+#include "config/runtime_config.h"
 #include "ui/ctl_internal.h"
 #include "ui/uifont.h"
 
@@ -106,6 +107,13 @@ static void call_handler(void *c, void *ev) {
 void ctl_invoke(control *c, int ev) {
     if (!c || !c->handler)
         return;
+    /* lazy redraw: a handler can change anything its app shows. Moves
+     * (painting with the button held) redraw that app's windows; clicks,
+     * changes and the rest redraw the scene. */
+    if (ev == EV_MOUSEMOVE)
+        wm_invalidate_app(c->win);
+    else
+        wm_invalidate_all();
     if (g_ctl_invoke_hook && c->win && c->win->dyn_state)
         g_ctl_invoke_hook(c, ev);
     else /* built-in apps run guarded too (os.h) */
@@ -114,6 +122,7 @@ void ctl_invoke(control *c, int ev) {
 }
 
 static void set_text_raw(control *c, const char *t) {
+    c->rev++;
     int n = t ? (int)strlen(t) : 0;
     if (c->max_len > 0 && n > c->max_len)
         n = c->max_len;
@@ -1878,7 +1887,7 @@ static void tip_track(control *c) {
 
 void ctl_draw_tooltip(void) {
     control *c = s_tip_ctl;
-    if (!c || !c->tip || s_tip_gone || !c->visible)
+    if (!c || !c->tip || s_tip_gone || !c->visible || g_cfg.no_tooltips)
         return;
     uint32_t t = time_millis() - s_tip_since;
     if (t < TIP_DELAY_MS || t > TIP_SHOW_MS)
@@ -2223,4 +2232,96 @@ window *app_window(void *state, const char *title, int x, int y, int w, int h,
     win->userdata = state;
     win->fit_pending = true;
     return win;
+}
+
+/* ── lazy redraw (ui/window.h) ─────────────────────────────────────────── */
+
+#define MIX(v) (h = h * 33u ^ (uint32_t)(v))
+
+static uint32_t sig_str(uint32_t h, const char *p) {
+    if (p)
+        for (; *p; p++)
+            MIX((uint8_t)*p);
+    return h * 33u;
+}
+
+/* Everything the window's controls would draw, as a checksum: when it is
+ * the same as last frame's, the window need not be drawn again. */
+uint32_t ctl_window_sig(window *w, bool *custom) {
+    uint32_t h = 5381;
+    *custom = false;
+    for (const control *c = w->controls; c; c = c->next) {
+        MIX(c->type);
+        MIX(c->visible | c->enabled << 1 | c->pressed << 2 | c->focused << 3 |
+            c->open << 4);
+        if (!c->visible)
+            continue;
+        MIX(c->style);
+        MIX(c->x);
+        MIX(c->y);
+        MIX(c->w);
+        MIX(c->h);
+        MIX(c->fg << 8 | c->bg);
+        MIX(c->value);
+        MIX(c->min);
+        MIX(c->max);
+        MIX(c->page);
+        MIX(c->tab_page);
+        switch (c->type) {
+        case CTL_EDIT:
+            MIX(c->rev);
+            MIX(c->text_len);
+            MIX(c->cursor);
+            MIX(c->anchor);
+            MIX(c->scroll_x);
+            MIX(c->scroll_y);
+            MIX(edit_caret_on(c));
+            if (c->text_len <= 128) /* short: the text itself too */
+                h = sig_str(h, c->text);
+            break;
+        case CTL_LIST: {
+            MIX(c->count);
+            MIX(c->sel);
+            MIX(c->top);
+            MIX(c->ncols);
+            for (int k = 0; k < c->ncols; k++)
+                MIX(c->cols[k]);
+            if ((c->style & LBS_HEADER) && c->count > 0)
+                h = sig_str(h, c->items[0]);
+            int rows = c->ah / TH_LINE_H + 2; /* the rows on show */
+            for (int i = c->top < 0 ? 0 : c->top;
+                 i < c->count && i < c->top + rows; i++)
+                h = sig_str(h, c->items[i]);
+            break;
+        }
+        case CTL_COMBO:
+            MIX(c->count);
+            MIX(c->sel);
+            h = sig_str(h, c->text);
+            break;
+        case CTL_TREE:
+            MIX(c->sel);
+            MIX(c->top);
+            MIX(tree_sig(c));
+            break;
+        case CTL_CUSTOM:
+            *custom = true;
+            break;
+        default:
+            h = sig_str(h, c->text);
+            break;
+        }
+    }
+    return h;
+}
+
+/* things drawn on top of the windows, outside any window's own area */
+bool ctl_overlay_active(void) {
+    if (s_popup)
+        return true;
+    const control *c = s_tip_ctl;
+    if (!c || !c->tip || s_tip_gone || !c->visible || g_cfg.no_tooltips)
+        return false;
+    uint32_t t = time_millis() - s_tip_since;
+    return t >= TIP_DELAY_MS && t <= TIP_SHOW_MS;
 }

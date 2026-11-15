@@ -177,7 +177,19 @@ void alloc_init(void) {
     alloc_set_range((uint32_t)&_heap_start, (uint32_t)&_heap_start + 0x100000);
 }
 
-void *kmalloc(uint32_t size) { return heap_alloc(&g_kheap, size); }
+heap_t g_kheap_low;
+
+void alloc_add_low(uint32_t start, uint32_t end) {
+    if (end > start + 0x1000)
+        heap_init(&g_kheap_low, start, end);
+}
+
+void *kmalloc(uint32_t size) {
+    void *p = heap_alloc(&g_kheap, size);
+    if (!p && g_kheap_low.first)
+        p = heap_alloc(&g_kheap_low, size);
+    return p;
+}
 
 void *kzalloc(uint32_t size) {
     void *p = kmalloc(size);
@@ -193,7 +205,8 @@ void *krealloc(void *ptr, uint32_t new_size) {
         kfree(ptr);
         return NULL;
     }
-    if (!heap_owns(&g_kheap, ptr))
+    if (!heap_owns(&g_kheap, ptr) &&
+        !(g_kheap_low.first && heap_owns(&g_kheap_low, ptr)))
         return NULL;
     block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
     if (hdr->magic != BLOCK_MAGIC_USED)
@@ -225,10 +238,21 @@ void *kmalloc_aligned(uint32_t size, uint32_t align) {
 }
 
 /* Ignores pointers outside the kernel heap (app heaps, static data). */
-void kfree(void *ptr) { heap_free(&g_kheap, ptr); }
+void kfree(void *ptr) {
+    if (g_kheap_low.first && heap_owns(&g_kheap_low, ptr))
+        heap_free(&g_kheap_low, ptr);
+    else
+        heap_free(&g_kheap, ptr);
+}
 
-uint32_t heap_used(void) { return heap_used_in(&g_kheap); }
-uint32_t heap_remaining(void) { return heap_free_in(&g_kheap); }
+uint32_t heap_used(void) {
+    return heap_used_in(&g_kheap) +
+           (g_kheap_low.first ? heap_used_in(&g_kheap_low) : 0);
+}
+uint32_t heap_remaining(void) {
+    return heap_free_in(&g_kheap) +
+           (g_kheap_low.first ? heap_free_in(&g_kheap_low) : 0);
+}
 
 // ── Pool allocator ─────────────────────────────────────────
 bool pool_init(pool_t *pool, void *slab, uint32_t capacity,

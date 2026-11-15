@@ -23,6 +23,10 @@ uint32_t heap_free_in(const heap_t *h);
 bool heap_check(const heap_t *h); /* false if a block header is broken */
 
 extern heap_t g_kheap; /* the kernel heap behind kmalloc/kfree */
+/* Second kernel heap: the free memory below 640 KB between the kernel and
+ * its stack. kmalloc uses it when the main heap is full. */
+extern heap_t g_kheap_low;
+void alloc_add_low(uint32_t start, uint32_t end);
 
 void alloc_set_range(uint32_t start, uint32_t end);
 void alloc_init(void);

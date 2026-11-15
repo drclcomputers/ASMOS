@@ -404,6 +404,25 @@ static void draw_folder(int x, int y, bool open) {
     draw_rect(x, y + 2, 8, 5, BLACK);
 }
 
+/* checksum of what tree_draw would show */
+uint32_t tree_sig(const control *c) {
+    tree_t *t = T(c);
+    if (!t)
+        return 0;
+    rebuild(t);
+    uint32_t h = (uint32_t)t->nvis * 33u + (uint32_t)t->used;
+    int rows = rows_of(c);
+    for (int r = 0; r < rows && c->top + r < t->nvis; r++) {
+        int i = t->vis[c->top + r];
+        const tnode_t *n = &t->n[i];
+        h = h * 33u ^ (uint32_t)i;
+        h = h * 33u ^ ((uint32_t)n->depth << 8 | n->flags);
+        for (const char *p = n->text; *p; p++)
+            h = h * 33u ^ (uint8_t)*p;
+    }
+    return h;
+}
+
 void tree_draw(control *c) {
     tree_t *t = T(c);
     th_sunken(c->ax, c->ay, c->aw, c->ah, bgc_or(c, TH_FIELD));

@@ -1,4 +1,6 @@
 #include "os/scheduler.h"
+#include "config/runtime_config.h"
+#include "drivers/gpu.h"
 #include "os/error.h"
 #include "os/os.h"
 #include "os/watchdog.h"
@@ -238,6 +240,7 @@ static void handle_global_shortcuts(void) {
 
 // Kernel main loop
 void scheduler_kernel_task(void) {
+    wm_invalidate_all(); /* the screen may hold anything (text shell) */
     while (!gui_should_exit) {
         uint32_t frame_start = time_millis();
 
@@ -256,10 +259,11 @@ void scheduler_kernel_task(void) {
             blit();
             do {
                 task_yield();
-            } while ((time_millis() - frame_start) < FRAME_TIME_MS);
+            } while ((time_millis() - frame_start) < (uint32_t)cfg_frame_ms());
             continue;
         }
 
+        wm_frame_begin();
         handle_global_shortcuts();
 
         wm_sync_menubar(&g_menubar);
@@ -275,23 +279,25 @@ void scheduler_kernel_task(void) {
 
         desktop_on_frame();
         wd_heartbeat();
-        wm_draw_all();
-        menubar_draw(&g_menubar);
-        popup_draw();
-        ctl_draw_tooltip();
-
-        draw_cursor(mouse.x, mouse.y);
-
+        /* draw what changed (ui/window.h, lazy redraw) and send only
+         * those rows; an idle desktop draws and sends nothing */
+        int y0, y1;
+        int drawn = wm_compose(&g_menubar, &y0, &y1);
         wd_heartbeat();
-        blit();
+        if (drawn == WM_FRAME_FULL)
+            blit();
+        else if (drawn == WM_FRAME_PART)
+            gpu_blit_rows(y0, y1);
+        else
+            gpu_blit_skip();
 
         /* Background tasks (gopher, `run`) get a turn every frame, then
          * the rest of the frame's time if any is left. (Only the leftover
-         * used to be given: when a frame took longer than FRAME_TIME_MS,
+         * used to be given: when a frame took longer than cfg_frame_ms(),
          * as on a 386, tasks never ran at all.) */
         do {
             task_yield();
-        } while ((time_millis() - frame_start) < FRAME_TIME_MS);
+        } while ((time_millis() - frame_start) < (uint32_t)cfg_frame_ms());
     }
     wd_stop();
 }

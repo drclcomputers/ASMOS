@@ -91,6 +91,17 @@ struct window {
      * zx.. is the size to go back to (no title-bar button) */
     bool zoomed;
     int zx, zy, zw, zh;
+
+    /* lazy redraw (see wm_compose): */
+    bool dirty;       /* wm_invalidate(): draw it on the next frame        */
+    bool lazy_custom; /* custom-drawn content only changes in handlers or
+                         with wm_invalidate(); else it is drawn every frame */
+    uint32_t sig;     /* what was last drawn (title, controls)             */
+
+    /* outline move/resize (Settings > Performance): the window stays put
+     * and a frame shows where it will go; applied on release */
+    bool band;
+    int bx, by, bw, bh;
 };
 
 /* height the window takes on screen: just the title bar when shaded */
@@ -112,6 +123,26 @@ void wm_focus(window *win);
 window *wm_focused_window(void);
 void wm_sync_menubar(menubar *mb);
 void wm_draw_all(void);
+
+/* ── lazy redraw ────────────────────────────────────────────────────────
+ * The back buffer is kept between frames. A frame redraws everything only
+ * when the scene changed (a window opened/moved/closed, a click, a key, a
+ * menu...). Otherwise only windows whose content changed are drawn, plus
+ * any window on top of them; an idle desktop draws nothing at all.
+ *
+ * Toolkit controls are tracked automatically. A window with custom-drawn
+ * content (ctl_custom, on_draw) is drawn every frame unless it sets
+ * lazy_custom and calls wm_invalidate() when that content changes outside
+ * a control handler (timers, background tasks). */
+void wm_invalidate(window *win);     /* redraw this window next frame */
+void wm_invalidate_all(void);        /* redraw the whole screen next frame */
+void wm_invalidate_app(window *win); /* all windows of win's app */
+void wm_frame_begin(void);           /* main loop, right after input is read */
+/* Draw the frame. Returns WM_FRAME_*; for PART, rows *y0..*y1 changed. */
+enum { WM_FRAME_NONE, WM_FRAME_PART, WM_FRAME_FULL };
+int wm_compose(menubar *mb, int *y0, int *y1);
+bool wm_debug_reference(menubar *mb); /* tests: plain full redraw */
+extern uint32_t g_wm_frames[3];       /* frames of each WM_FRAME_* kind */
 void wm_update_all(void);
 
 bool wm_is_registered(const window *win);

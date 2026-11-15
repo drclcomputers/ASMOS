@@ -363,6 +363,7 @@ static bool item_is_app(const ff_item_t *it) {
 }
 
 static void ff_reload(ff_inst_t *s) {
+    wm_invalidate(s->win); /* the icons change (lazy redraw) */
     s->item_count = 0;
     if (s->at_vroot) {
         for (int i = 0; i < VDRIVE_COUNT; i++) {
@@ -737,8 +738,10 @@ static void ff_sync(ff_inst_t *s) {
     int ms = s->content_h_total - content_view_h(s);
     if (ms < 0)
         ms = 0;
-    if (s->scroll_y > ms)
+    if (s->scroll_y > ms) {
         s->scroll_y = ms;
+        wm_invalidate(s->win);
+    }
     ctl_set_range(s->sb, 0, ms, content_view_h(s));
     ctl_set_value(s->sb, s->scroll_y);
     ctl_enable(s->back, s->history_index > 0);
@@ -1503,6 +1506,7 @@ static void ff_init(void *state) {
                         AW_RESIZABLE);
     if (!s->win)
         return;
+    s->win->lazy_custom = true; /* icons change in handlers and ff_reload */
     window *w = s->win;
     int wx, wy, cw, ch;
     win_client_rect(w, &wx, &wy, &cw, &ch);

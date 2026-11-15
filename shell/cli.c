@@ -1,8 +1,10 @@
 #include "shell/cli.h"
+#include "config/runtime_config.h"
 #include "shell/asm.h"
 #include "shell/binrun.h"
 #include "shell/cmds.h"
 #include "shell/term_buf.h"
+#include "ui/uifont.h"
 
 #include "lib/graphics.h"
 #include "lib/memory.h"
@@ -23,7 +25,7 @@
 #define CMD_OUTPUT_MAX 2048
 #define HISTORY_DEPTH 32
 
-#define CHAR_W 5
+#define CHAR_W UI_TERM_CW /* terminal font (ui/uifont.h) */
 #define LINE_H 8
 #define MARGIN_X 4
 #define SCROLL_W 6
@@ -109,7 +111,7 @@ static void draw_output(void) {
         }
         buf[ci] = '\0';
 
-        draw_string(MARGIN_X, row * LINE_H, buf, WHITE, 2);
+        draw_string(MARGIN_X, row * LINE_H, buf, WHITE, UI_FONT_TERM);
     }
 }
 
@@ -122,7 +124,7 @@ static void draw_input(void) {
     if (g_asmterm_active) {
         draw_string(MARGIN_X, iy + 2,
                     "[task]> j/k=scroll  Enter=open  b=back  q=quit", YELLOW,
-                    2);
+                    UI_FONT_TERM);
         return;
     }
 
@@ -133,7 +135,7 @@ static void draw_input(void) {
     else
         snprintf(prompt, sizeof(prompt), "%s%s> ", drv, dir_context.path);
 
-    draw_string(MARGIN_X, iy + 2, prompt, CYAN, 2);
+    draw_string(MARGIN_X, iy + 2, prompt, CYAN, UI_FONT_TERM);
 
     int prompt_w = (int)strlen(prompt) * CHAR_W;
     int tax = MARGIN_X + prompt_w;
@@ -156,12 +158,12 @@ static void draw_input(void) {
         iv[i] = s.input[s.input_scroll + i];
     iv[tc] = '\0';
 
-    draw_string(tax, iy + 2, iv, WHITE, 2);
+    draw_string(tax, iy + 2, iv, WHITE, UI_FONT_TERM);
 
-    if ((pit_ticks / 500) % 2 == 0) {
+    if (g_cfg.caret_no_blink || (pit_ticks / 500) % 2 == 0) {
         int cx = tax + tc * CHAR_W;
         if (cx < SCREEN_WIDTH - SCROLL_W - 2)
-            draw_string(cx, iy + 2, "|", CYAN, 2);
+            draw_line(cx, iy + 2, cx, iy + 8, CYAN); /* caret */
     }
 }
 
@@ -171,6 +173,9 @@ static void redraw(void) {
     draw_input();
     blit();
 }
+
+/* tests (the simulator): draw the text shell as it stands */
+void cli_debug_redraw(void) { redraw(); }
 
 /* ── history ──────────────────────────────────────────────── */
 static void hist_push(const char *cmd) {

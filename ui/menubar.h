@@ -53,4 +53,6 @@ void menubar_draw(menubar *mb);
 void menubar_update(menubar *mb);
 void menubar_close_all(menubar *mb);
 
+void menubar_clock_text(char *out); /* 9 bytes */
+
 #endif

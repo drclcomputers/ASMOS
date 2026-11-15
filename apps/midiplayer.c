@@ -52,11 +52,14 @@ static void mp_set_status(midiplayer_state_t *s, const char *msg) {
 static void mp_update_vu(midiplayer_state_t *s) {
     if (s->state != MIDI_STATE_PLAYING) {
         for (int i = 0; i < VU_BARS; i++) {
-            if (s->vu_peaks[i] > 0)
+            if (s->vu_peaks[i] > 0) {
                 s->vu_peaks[i] = s->vu_peaks[i] > 3 ? s->vu_peaks[i] - 3 : 0;
+                wm_invalidate(s->win); /* bars falling */
+            }
         }
         return;
     }
+    wm_invalidate(s->win); /* bars moving: draw every frame */
 
     s->vu_frame++;
 
@@ -378,6 +381,7 @@ static void midiplayer_init(void *state) {
     s->win = app_window(s, "MIDI Player", 20, 20, 262, 146, DARK_GRAY, 0);
     if (!s->win)
         return;
+    s->win->lazy_custom = true; /* VU bars: mp_update_vu invalidates */
     window *w = s->win;
     s->path = ctl_edit(w, 4, 4, 160, 12, "/MUSIC.MID", MAX_PATH_LEN,
                        ES_FILENAME, on_path);

@@ -37,8 +37,8 @@ void gpu_init(void) {
         s_spread[c] = (uint32_t)(c & 1) | ((uint32_t)((c >> 1) & 1) << 8) |
                       ((uint32_t)((c >> 2) & 1) << 16) |
                       ((uint32_t)((c >> 3) & 1) << 24);
-    if (!s_shadow)
-        s_shadow = (uint8_t *)kmalloc(640 * 400);
+    if (!s_shadow) /* only as big as this screen mode needs */
+        s_shadow = (uint8_t *)kmalloc((uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT));
     s_full = true;
 }
 
@@ -59,6 +59,8 @@ static inline bool same32(const uint8_t *a, const uint8_t *b) {
            x[4] == y[4] && x[5] == y[5] && x[6] == y[6] && x[7] == y[7];
 }
 
+static int s_y0, s_y1 = 399; /* rows to look at in this blit */
+
 static void blit_planar(void) {
     const int w = SCREEN_WIDTH, h = SCREEN_HEIGHT;
     const int blocks = w / 32; /* 32 pixels = 1 dword/plane */
@@ -68,7 +70,8 @@ static void blit_planar(void) {
     uint8_t dirty[20];
     uint32_t sent = 0;
 
-    for (int y = 0; y < h; y++) {
+    (void)h;
+    for (int y = s_y0; y <= s_y1; y++) {
         const uint8_t *row = BACKBUF + y * w;
         uint8_t *shadow = s_shadow ? s_shadow + y * w : NULL;
         int n = 0;
@@ -112,7 +115,7 @@ static void blit_planar(void) {
  * an unchanged run in one instruction (the old C loop compared dword by
  * dword); each changed run then goes out with rep movsd. */
 static void blit_linear(void) {
-    const uint32_t n = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) / 4;
+    uint32_t n = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) / 4;
     const uint32_t *src = (const uint32_t *)BACKBUF;
     uint32_t *fb = (uint32_t *)MODEX_FB;
     uint32_t *sh = (uint32_t *)s_shadow;
@@ -124,7 +127,8 @@ static void blit_linear(void) {
         s_last_blocks = n / 8;
         return;
     }
-    uint32_t i = 0;
+    uint32_t i = (uint32_t)(s_y0 * SCREEN_WIDTH) / 4;
+    n = (uint32_t)((s_y1 + 1) * SCREEN_WIDTH) / 4;
     while (i < n) {
         i += mem_same_run(src + i, sh + i, n - i);
         if (i >= n)
@@ -138,12 +142,41 @@ static void blit_linear(void) {
     s_last_blocks = sent / 8; /* report in 32-pixel units like planar */
 }
 
-void gpu_blit(void) {
+static void count_frame(void);
+
+void gpu_blit(void) { gpu_blit_rows(0, SCREEN_HEIGHT - 1); }
+
+/* Nothing was drawn this frame: the screen is already right. */
+void gpu_blit_skip(void) {
+    if (s_full) { /* someone asked for a full refresh meanwhile */
+        gpu_blit();
+        return;
+    }
+    s_last_blocks = 0;
+    count_frame();
+}
+
+/* Only rows y0..y1 of the back buffer changed since the last blit. */
+void gpu_blit_rows(int y0, int y1) {
+    if (s_full || !s_shadow || y0 < 0)
+        y0 = 0;
+    if (s_full || !s_shadow || y1 >= SCREEN_HEIGHT)
+        y1 = SCREEN_HEIGHT - 1;
+    if (y0 > y1) {
+        gpu_blit_skip();
+        return;
+    }
+    s_y0 = y0;
+    s_y1 = y1;
     if (g_video_mode == 0)
         blit_linear();
     else
         blit_planar();
     s_full = false;
+    count_frame();
+}
+
+static void count_frame(void) {
 
     s_frames++;
     uint32_t now = time_millis();

@@ -93,6 +93,7 @@ typedef enum {
 #define ES_PASSWORD (1u << 16) /* show '*'                            */
 #define ES_FILENAME (1u << 17) /* 8.3 file name characters (+ '/')    */
 #define ES_DECIMAL (1u << 18)  /* digits, '.', '-'                    */
+#define ES_TERMFONT (1u << 19) /* terminal font (6 px cells), as ASMTerm */
 /* Lists */
 #define LBS_HEADER (1u << 12) /* first row is a header (see list_*) */
 #define TS_FOLDERS (1u << 12) /* tree: folder icon before each node      */
@@ -146,6 +147,7 @@ struct control {
     ctl_handler handler;
     void *user; /* defaults to the window's userdata */
     bool pressed, focused;
+    uint32_t rev; /* bumped when an edit's text changes (lazy redraw) */
 };
 
 /* ── top-level app windows ─────────────────────────────────────────────── */
@@ -280,6 +282,12 @@ bool edit_has_sel(const control *c);
 /* ── called by the system ──────────────────────────────────────────────── */
 void ctl_dispatch(void);      /* before apps run, every frame */
 void ctl_draw_all(window *w); /* from window_draw            */
+/* lazy redraw (window.h): a checksum of everything the window's controls
+ * show; *custom = it has custom-drawn controls */
+uint32_t ctl_window_sig(window *w, bool *custom);
+bool ctl_overlay_active(void); /* an open combo list or a tooltip */
+uint32_t tree_sig(const control *c);
+bool edit_caret_on(const control *c);
 void ctl_window_destroyed(window *w);
 bool ctl_mouse_captured(void);
 /* Invoke a handler; dynamic (.APP) windows route this through the fault

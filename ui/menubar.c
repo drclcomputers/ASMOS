@@ -1,4 +1,5 @@
 #include "ui/menubar.h"
+#include "config/runtime_config.h"
 #include "ui/uifont.h"
 
 #include "lib/graphics.h"
@@ -88,6 +89,7 @@ static void call_item(void *item, void *unused) {
 
 /* .APP items through their hook; built-in ones guarded (os.h) */
 void menu_item_run(const menu_item *item) {
+    wm_invalidate_all();  /* a command can change anything on screen */
     menu_item it = *item; /* the command may rebuild its menu */
     if (it.dyn_state && g_menu_call_hook)
         g_menu_call_hook(it.dyn_state, it.action_ud, it.userdata);
@@ -123,11 +125,15 @@ static void write_2digit(char *buf, uint8_t val) {
     buf[1] = '0' + (val % 10);
 }
 
-static void build_clock_str(char *out) {
+/* "HH:MM:SS", or "HH:MM" (Settings > Performance: one redraw a minute) */
+void menubar_clock_text(char *out) {
     time_full_t t = time_rtc_local();
     write_2digit(out + 0, t.hours);
     out[2] = ':';
     write_2digit(out + 3, t.minutes);
+    out[5] = '\0';
+    if (g_cfg.clock_no_secs)
+        return;
     out[5] = ':';
     write_2digit(out + 6, t.seconds);
     out[8] = '\0';
@@ -139,7 +145,7 @@ void menubar_draw(menubar *mb) {
     int cursor_x = 2;
 
     char clock_str[9];
-    build_clock_str(clock_str);
+    menubar_clock_text(clock_str);
     draw_string(cursor_x, 2, clock_str, BAR_FG, 2);
     cursor_x += CLOCK_W;
 

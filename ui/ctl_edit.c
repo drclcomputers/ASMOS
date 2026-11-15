@@ -2,7 +2,9 @@
  * Cursor movement (arrows, Home/End, PgUp/PgDn, Ctrl = by word / document),
  * Shift+move selects, Ctrl+A/C/X/V, mouse click / drag / double-click,
  * horizontal and vertical scrolling. */
+#include "config/runtime_config.h"
 #include "ui/ctl_internal.h"
+#include "ui/uifont.h"
 
 #include "config/config.h"
 #include "drivers/keyboard.h"
@@ -68,6 +70,14 @@ static int pos_of(const control *c, int line, int col) {
     return p + col > e ? e : p + col;
 }
 
+/* character cell and font: the 4x6 font, or the terminal one */
+static int cw_of(const control *c) {
+    return (c->style & ES_TERMFONT) ? UI_TERM_CW : TH_CHAR_W;
+}
+static int font_of(const control *c) {
+    return (c->style & ES_TERMFONT) ? UI_FONT_TERM : FONT_MONO;
+}
+
 static int rows_of(const control *c) {
     int r = (c->ah - 4) / TH_LINE_H;
     return r < 1 ? 1 : r;
@@ -77,7 +87,7 @@ static bool has_vsb(const control *c) {
 }
 static int cols_of(const control *c) {
     int w = c->aw - 2 * PAD - (has_vsb(c) ? SB_W : 0);
-    int n = w / TH_CHAR_W;
+    int n = w / cw_of(c);
     return n < 1 ? 1 : n;
 }
 
@@ -121,6 +131,7 @@ static bool del_range(control *c, int a, int b) {
         return false;
     memmove(c->text + a, c->text + b, c->text_len - b + 1);
     c->text_len -= b - a;
+    c->rev++;
     c->cursor = c->anchor = a;
     return true;
 }
@@ -160,6 +171,7 @@ static bool insert_raw(control *c, const char *s, int n) {
             c->text_len - c->cursor + 1);
     memcpy(c->text + c->cursor, s, n);
     c->text_len += n;
+    c->rev++;
     c->cursor += n;
     c->anchor = c->cursor;
     return true;
@@ -501,7 +513,7 @@ void edit_mouse(control *c, int mx, int my, bool down, bool dbl) {
     if (down)
         s_sb_part = 0;
     int p;
-    int col = c->scroll_x + (mx - PAD + 2) / TH_CHAR_W;
+    int col = c->scroll_x + (mx - PAD + 2) / cw_of(c);
     if (multi(c)) {
         int line = c->scroll_y + (my - 2) / TH_LINE_H;
         if (line < 0)
@@ -530,6 +542,14 @@ void edit_mouse(control *c, int mx, int my, bool down, bool dbl) {
     edit_fix_scroll(c);
 }
 
+/* caret shown right now (blinks; solid just after typing) */
+bool edit_caret_on(const control *c) {
+    if (g_cfg.caret_no_blink) /* Settings > Performance */
+        return c->focused;
+    return c->focused && (((time_millis() / 500) & 1) == 0 ||
+                          time_millis() - s_last_activity < 600);
+}
+
 /* ── drawing ───────────────────────────────────────────────────────────── */
 
 void edit_draw(control *c) {
@@ -548,8 +568,7 @@ void edit_draw(control *c) {
     int rows = multi(c) ? rows_of(c) : 1;
     int a, b;
     sel_range(c, &a, &b);
-    bool caret_on = c->focused && (((time_millis() / 500) & 1) == 0 ||
-                                   time_millis() - s_last_activity < 600);
+    bool caret_on = edit_caret_on(c);
 
     int ty0 = multi(c) ? c->ay + 2 : c->ay + (c->ah - TH_LINE_H) / 2;
     clip_push(c->ax + 2, c->ay + 2, iw + 2 * PAD - 4, c->ah - 4);
@@ -569,7 +588,7 @@ void edit_draw(control *c) {
         int y = ty0 + r * TH_LINE_H;
         int x0 = c->ax + PAD;
         for (int i = ls + c->scroll_x; i <= le; i++) {
-            int x = x0 + (i - ls - c->scroll_x) * TH_CHAR_W;
+            int x = x0 + (i - ls - c->scroll_x) * cw_of(c);
             if (x > c->ax + PAD + iw)
                 break;
             bool in_sel = c->focused && i >= a && i < b;
@@ -578,10 +597,10 @@ void edit_draw(control *c) {
                 if (ch == '\t' || ch == '\r')
                     ch = ' ';
                 if (in_sel) {
-                    fill_rect(x - 1, y, TH_CHAR_W, TH_LINE_H, TH_SEL_BG);
-                    draw_char(x, y + 1, ch, TH_SEL_FG, 2);
+                    fill_rect(x - 1, y, cw_of(c), TH_LINE_H, TH_SEL_BG);
+                    draw_char(x, y + 1, ch, TH_SEL_FG, font_of(c));
                 } else {
-                    draw_char(x, y + 1, ch, fg, 2);
+                    draw_char(x, y + 1, ch, fg, font_of(c));
                 }
             } else if (in_sel && multi(c) && i < b) {
                 fill_rect(x - 1, y, 3, TH_LINE_H, TH_SEL_BG); /* newline */

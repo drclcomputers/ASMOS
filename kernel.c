@@ -34,7 +34,7 @@
 
 #include "ui/ui.h"
 
-extern uint8_t _heap_start;
+extern uint8_t _heap_start, _low_heap_start, _kstack_bottom;
 int g_screen_width = 640;
 int g_screen_height = 400;
 int g_video_mode = 1;
@@ -156,6 +156,9 @@ static void detect_heap_range(void) {
 
     alloc_set_range(heap_bot, heap_top);
 
+    /* what is left below 640 KB between the kernel and its stack */
+    alloc_add_low((uint32_t)&_low_heap_start, (uint32_t)&_kstack_bottom);
+
     dbg_bar(6, 7);
 }
 
@@ -204,9 +207,7 @@ void kmain(void) {
 
     gpu_init();
 
-    sleep_s(1);
     boot_banner();
-    sleep_s(1);
 
     boot_check_heap();
     pci_init(); /* before disks/NIC: they look for their controllers here */
@@ -220,7 +221,9 @@ void kmain(void) {
     boot_check_fat();
 
     cfg_init_defaults();
-    if (!cfg_load()) {
+    if (!cfg_load()) { /* first boot: light settings on a 386 */
+        if (cpu_family() <= 3)
+            cfg_set_low_end(true);
         cfg_save();
     }
 
@@ -253,8 +256,6 @@ void kmain(void) {
     }
 
     boot_check_network();
-
-    sleep_s(2);
 
     if (!g_cfg.start_in_gui)
         cli_run();

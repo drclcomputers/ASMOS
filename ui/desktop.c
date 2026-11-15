@@ -91,6 +91,8 @@ static uint32_t s_last_click_tick = 0;
 #define STEPS 40
 
 void power_anim_run(bool is_restart) {
+    if (g_cfg.no_power_anim) /* Settings > Performance */
+        return;
     const char *msg = is_restart ? "Restarting..." : "Shutting down...";
     uint8_t bar_col = is_restart ? LIGHT_GREEN : LIGHT_CYAN;
     uint8_t glow_col = is_restart ? GREEN : CYAN;
@@ -526,9 +528,40 @@ static void select_only(int hit) {
         items[i].selected = (i == hit);
 }
 
-void desktop_on_frame(void) {
-    draw_wallpaper_pattern();
+/* what desktop_draw() would show, as a checksum (lazy redraw, window.h) */
+uint32_t desktop_sig(void) {
+    uint32_t h = 5381;
+#define DMIX(v) (h = h * 33u ^ (uint32_t)(v))
+    DMIX(g_cfg.wallpaper_pattern);
+    DMIX(g_cfg.wallpaper_main_color << 8 | g_cfg.wallpaper_secondary_color);
+    DMIX(s_drag_idx);
+    DMIX(clipboard_has_file() << 1 | g_clipboard.is_cut);
+    for (const char *p = g_clipboard.name; *p; p++)
+        DMIX((uint8_t)*p);
+    desktop_item_t *items = desktop_fs_items();
+    int count = desktop_fs_count();
+    DMIX(count);
+    for (int i = 0; i < count; i++) {
+        const desktop_item_t *it = &items[i];
+        DMIX(it->used | it->selected << 1 | it->full << 2 | it->kind << 8);
+        if (!it->used)
+            continue;
+        DMIX(it->x);
+        DMIX(it->y);
+        for (const char *p = it->name; *p; p++)
+            DMIX((uint8_t)*p);
+    }
+    return h;
+#undef DMIX
+}
 
+/* wallpaper and icons; the frame's logic is desktop_on_frame() */
+void desktop_draw(void) {
+    draw_wallpaper_pattern();
+    draw_items(desktop_fs_count(), desktop_fs_items());
+}
+
+void desktop_on_frame(void) {
     if (desktop_fs_is_dirty())
         desktop_fs_reload();
 
@@ -659,8 +692,6 @@ void desktop_on_frame(void) {
             menu_delete();
         }
     }
-
-    draw_items(count, items);
 
     if (g_alarm.set && !g_alarm.fired) {
         time_full_t t = time_rtc_local();

@@ -264,6 +264,7 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
 static void paint_canvas(control *c, int x, int y, int w, int h) {
     asmdraw_state_t *s = c->user;
     update_canvas_size(s);
+    /* a row at a time: draw_dot per pixel made a 486 crawl (5 fps) */
     draw_pixels(x, y, s->canvas_w < w ? s->canvas_w : w,
                 s->canvas_h < h ? s->canvas_h : h, s->canvas, s->canvas_w);
     if (s->drawing && (s->tool == TOOL_LINE || s->tool == TOOL_RECT)) {
@@ -454,6 +455,7 @@ static void asmdraw_init(void *state) {
     s->win = app_window(s, "ASMDraw", 20, 15, ww, wh, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
+    s->win->lazy_custom = true; /* the canvas only changes in handlers */
     window *w = s->win;
     static const char *TL[NUM_TOOLS] = {"P", "E", "L", "R", "F"};
     static const char *BL[BRUSH_SIZES] = {"1", "3", "5"};

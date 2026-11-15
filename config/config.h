@@ -16,7 +16,9 @@ extern int g_video_mode;
 #define DOUBLE_CLICK_SPEED 500
 #define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 3)
 
-#define BACKBUF ((uint8_t *)0x100000)
+/* the back buffer: after the kernel's zeroed data, above 1 MB (linker.ld) */
+extern unsigned char _backbuf[];
+#define BACKBUF ((uint8_t *)_backbuf)
 #define BACKBUF_SIZE g_backbuf_size
 #define HEAP_MIN_START (0x100000)
 #define HEAP_END_MAX 0x4000000

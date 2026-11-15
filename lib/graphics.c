@@ -144,9 +144,9 @@ void draw_pixels(int x, int y, int w, int h, const uint8_t *src, int stride) {
 }
 
 static const pfont_t *pfont(int size) {
-    return size == FONT_SYSTEM  ? &font_system
-           : size == FONT_SMALL ? &font_small
-                                : NULL;
+    return size == FONT_SYSTEM                       ? &font_system
+           : size == FONT_SMALL || size == FONT_TERM ? &font_small
+                                                     : NULL;
 }
 
 static int glyph_index(char c) {
@@ -156,9 +156,11 @@ static int glyph_index(char c) {
 
 /* one proportional glyph; returns its advance */
 static int draw_pglyph(int x, int y, char c, unsigned char color,
-                       const pfont_t *f) {
+                       const pfont_t *f, int size) {
     int g = glyph_index(c);
     int w = f->width[g], h = f->h;
+    if (size == FONT_TERM) /* centred in its fixed cell */
+        x += (FONT_TERM_W - 1 - w) / 2;
     const uint8_t *rows = f->bits + g * h;
     bool inside = x >= clip_x0 && y >= clip_y0 && x + w <= clip_x1 &&
                   y + h <= clip_y1 && x >= 0 && y >= 0 &&
@@ -183,6 +185,8 @@ static int draw_pglyph(int x, int y, char c, unsigned char color,
 
 /* advance of one character in a font */
 static int char_advance(char c, int size) {
+    if (size == FONT_TERM)
+        return FONT_TERM_W;
     const pfont_t *f = pfont(size);
     if (f)
         return f->width[glyph_index(c)] + 1;
@@ -196,7 +200,7 @@ int font_height(int size) {
 
 void draw_char(int x, int y, char c, unsigned char color, int size) {
     if (pfont(size)) {
-        draw_pglyph(x, y, c, color, pfont(size));
+        draw_pglyph(x, y, c, color, pfont(size), size);
         return;
     }
     if (y < 0 || y >= SCREEN_HEIGHT)
@@ -250,7 +254,7 @@ void draw_string(int x, int y, const char *str, unsigned char color, int size) {
         int adv = char_advance(str[i], size);
         if (cx + adv > 0) {
             if (f)
-                draw_pglyph(cx, y, str[i], color, f);
+                draw_pglyph(cx, y, str[i], color, f, size);
             else
                 draw_char(cx, y, str[i], color, size);
         }
@@ -268,7 +272,7 @@ void draw_text_n(int x, int y, const char *str, int n, unsigned char color,
 }
 
 int text_width(const char *str, int size) {
-    if (!pfont(size))
+    if (!pfont(size) || size == FONT_TERM)
         return (int)strlen(str) * char_advance('x', size);
     int w = 0;
     for (; *str; str++)

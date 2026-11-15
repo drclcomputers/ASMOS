@@ -265,6 +265,7 @@ static void hexview_init(void *state) {
     s->win = app_window(s, "HexView", 10, 10, w, h, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
+    s->win->lazy_custom = true; /* the view only changes in handlers */
     s->win->min_w = 236;
     s->win->min_h = 100;
     int cw = w - 2, ch = h - 17;

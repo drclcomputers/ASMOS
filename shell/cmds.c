@@ -472,7 +472,11 @@ void cmd_df(char *out, size_t max) {
 void cmd_mem(char *out, size_t max) {
     char buf[128];
     sprintf(buf, "Kernel heap used: %u KB  free: %u KB%s\n", heap_used() / 1024,
-            heap_remaining() / 1024, heap_check(&g_kheap) ? "" : "  (CORRUPT)");
+            heap_remaining() / 1024,
+            heap_check(&g_kheap) &&
+                    (!g_kheap_low.first || heap_check(&g_kheap_low))
+                ? ""
+                : "  (CORRUPT)");
     append(out, max, buf);
     sprintf(buf, "App pool: %u KB free of %u KB\n", pmm_free_count() * 4,
             pmm_total() * 4);
