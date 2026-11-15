@@ -3,7 +3,7 @@
 
 #define KEY_RELEASE 0x80
 
-keyboardvar kb = {0, 0, 0, 0, 0, 0, 0};
+keyboardvar kb;
 
 static const char lower[128] = {
     0,   0,   '1', '2', '3', '4', '5', '6', '7', '8', '9',  '0', '-', '=',  0,
@@ -78,6 +78,10 @@ void kb_process_byte(uint8_t raw) {
     }
     if (sc == LALT) {
         kb.alt = !released;
+        return;
+    }
+    if (ext && (sc == LWIN_KEY || sc == RWIN_KEY)) {
+        kb.win = !released;
         return;
     }
 

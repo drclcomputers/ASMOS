@@ -18,7 +18,7 @@ vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT] = {
 };
 
 const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
-    "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1",
+    "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1", "TRASH", "/TRASH",
 };
 
 const char *g_drive_paths[DRIVE_COUNT] = {

@@ -2,14 +2,18 @@ ENTRY(_start)
 SECTIONS {
     . = 0x10000;
 
+    /* code + constants first: app contexts map them read-only (lib/vmm.c) */
+    _ro_start = .;
     .text : {
         build/boot/loader.o(.text)
         build/interrupts/interrupt.o(.text)
         *(.text .text.*)
     }
+    .rodata : { *(.rodata .rodata.*) }
+    . = ALIGN(4096);
+    _ro_end = .;
 
     .data   : { *(.data .data.*)     }
-    .rodata : { *(.rodata .rodata.*) }
 
     .bss : {
         _bss_start = .;

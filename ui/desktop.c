@@ -222,6 +222,9 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     case DESKTOP_ITEM_FDD:
         draw_floppy_icon(ax, ay, it->selected);
         break;
+    case DESKTOP_ITEM_TRASH:
+        draw_trash_icon(ax, ay, it->selected, it->full);
+        break;
     default:
         draw_file_icon(ax, ay, it->selected);
         break;
@@ -467,6 +470,8 @@ static void ctx_paste_into(void) {
         fo_report(NULL, "Paste", fo_paste(p));
 }
 
+static void ctx_empty_trash(void) { fo_ask_empty_trash(NULL, NULL, NULL); }
+
 static void context_menu(int hit, int x, int y) {
     desktop_item_t *items = desktop_fs_items();
     s_ctx_idx = hit;
@@ -480,6 +485,11 @@ static void context_menu(int hit, int x, int y) {
         menu_add_separator(m);
         menu_add_item(m, "Reload", menu_reload);
         menu_add_item(m, "About OS", menu_about_os);
+    } else if (items[hit].kind == DESKTOP_ITEM_TRASH) {
+        menu_add_item(m, "Open", ctx_open);
+        menu_add_separator(m);
+        menu_add_item(m, "Empty Trash...", ctx_empty_trash);
+        menu_enable_last(m, items[hit].full);
     } else if (items[hit].kind == DESKTOP_ITEM_FDD) {
         menu_add_item(m, "Open", ctx_open);
         if (items[hit].drive_id == DRIVE_FDD0) {
@@ -550,9 +560,10 @@ void desktop_on_frame(void) {
                 if (ff_folder_at(mouse.x, mouse.y, dst, sizeof(dst)))
                     into = true;
                 else if (target >= 0 && target != idx &&
-                         items[target].kind == DESKTOP_ITEM_DIR &&
+                         (items[target].kind == DESKTOP_ITEM_DIR ||
+                          items[target].kind == DESKTOP_ITEM_TRASH) &&
                          desktop_fs_item_path(target, dst, sizeof(dst)))
-                    into = true;
+                    into = true; /* onto the Trash: fo_move throws it out */
             }
             if (into)
                 fo_report(NULL, "Move", fo_move(src, dst));

@@ -1,6 +1,7 @@
 #include "os/scheduler.h"
 #include "os/error.h"
 #include "os/os.h"
+#include "os/watchdog.h"
 #include "ui/popup.h"
 
 #include "drivers/serial.h"
@@ -87,6 +88,7 @@ int scheduler_add_task(void (*entry)(void *), void *arg, vmm_ctx_t *vmm) {
     tasks[slot].arg = arg;
     tasks[slot].stack_base = stack;
     tasks[slot].vmm = vmm;
+    tasks[slot].cr3 = 0;
 
     *(uint32_t *)stack = STACK_CANARY;
 
@@ -126,16 +128,20 @@ void task_yield(void) {
     if (next == old)
         return;
 
+    /* Each task resumes in the address space it left in (task 0 may be
+     * inside an app's context). Paging off: CR3 is never touched. */
     uint32_t new_cr3 = 0;
-    if (tasks[next].vmm && tasks[next].vmm->pd_phys)
-        new_cr3 = tasks[next].vmm->pd_phys;
-    else
-        new_cr3 = g_kernel_pd_phys;
-
-    uint32_t cur_cr3 = 0;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
-    if (new_cr3 == cur_cr3)
-        new_cr3 = 0;
+    if (vmm_enabled()) {
+        uint32_t cur_cr3 = vmm_current();
+        tasks[old].cr3 = cur_cr3;
+        new_cr3 = tasks[next].cr3;
+        if (!new_cr3)
+            new_cr3 = (tasks[next].vmm && tasks[next].vmm->pd_phys)
+                          ? tasks[next].vmm->pd_phys
+                          : g_kernel_pd_phys;
+        if (new_cr3 == cur_cr3)
+            new_cr3 = 0;
+    }
 
     current_task = next;
     task_switch(&tasks[old].esp, tasks[next].esp, new_cr3);
@@ -184,16 +190,38 @@ void scheduler_exit_current(void) {
 // Global shortcut handler
 extern app_descriptor monitor_app;
 
+static void open_monitor(void) {
+    app_instance_t *m = os_launch_app(&monitor_app);
+    window *w = os_instance_window(m);
+    if (w) {
+        w->minimized = false;
+        w->visible = true;
+        wm_focus(w);
+    }
+}
+
 static void handle_global_shortcuts(void) {
-    /* Ctrl+Shift+Esc: open / bring Monitor to front */
-    if (kb.key_pressed && kb.ctrl && kb.shift && kb.last_scancode == ESC) {
+    uint8_t sc = kb.last_scancode;
+    /* Monitor: Ctrl+Shift+Esc, Ctrl+Alt+Win, Ctrl+Alt+Del (also asked for
+     * by the watchdog when an app was stuck: os/watchdog.h) */
+    bool monitor = kb.key_pressed &&
+                   ((kb.ctrl && kb.shift && sc == ESC) ||
+                    (kb.ctrl && kb.alt &&
+                     (sc == LWIN_KEY || sc == RWIN_KEY || sc == DELETE)));
+    if (wd_take_monitor_request() || monitor) {
         kb.key_pressed = false;
-        app_instance_t *m = os_launch_app(&monitor_app);
-        window *w = os_instance_window(m);
-        if (w) {
-            w->minimized = false;
-            w->visible = true;
-            wm_focus(w);
+        open_monitor();
+        return;
+    }
+
+    /* End the focused app at once: Win+Shift+Q or Ctrl+Shift+Q (no "save
+     * changes?"; Ctrl+Q below closes politely) */
+    if (kb.key_pressed && (kb.win || kb.ctrl) && kb.shift && sc == Q_KEY) {
+        kb.key_pressed = false;
+        app_instance_t *a = os_instance_of_window(wm_focused_window());
+        if (a && a->desc != &monitor_app) {
+            a->suspended = true; /* skip its destroy: it may be the problem */
+            os_quit_app(a);
         }
         return;
     }
@@ -212,6 +240,7 @@ void scheduler_kernel_task(void) {
     while (!gui_should_exit) {
         uint32_t frame_start = time_millis();
 
+        wd_heartbeat(); /* before reading input: os/watchdog.h */
         g_menubar_click_consumed = false;
         ps2_update();
         net_poll();
@@ -232,6 +261,7 @@ void scheduler_kernel_task(void) {
         os_reap_dead_apps();
 
         desktop_on_frame();
+        wd_heartbeat();
         wm_draw_all();
         menubar_draw(&g_menubar);
         popup_draw();
@@ -239,10 +269,16 @@ void scheduler_kernel_task(void) {
 
         draw_cursor(mouse.x, mouse.y);
 
+        wd_heartbeat();
         blit();
 
-        while ((time_millis() - frame_start) < FRAME_TIME_MS) {
+        /* Background tasks (gopher, `run`) get a turn every frame, then
+         * the rest of the frame's time if any is left. (Only the leftover
+         * used to be given: when a frame took longer than FRAME_TIME_MS,
+         * as on a 386, tasks never ran at all.) */
+        do {
             task_yield();
-        }
+        } while ((time_millis() - frame_start) < FRAME_TIME_MS);
     }
+    wd_stop();
 }

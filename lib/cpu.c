@@ -109,6 +109,19 @@ void cpu_init(void) {
 }
 
 bool cpu_has_fpu(void) { return s_has_fpu; }
+
+static bool s_forced;
+bool cpu_fpu_emulated(void) { return !s_has_fpu || s_forced; }
+
+void cpu_emulate_fpu(void) {
+    if (!s_has_fpu || s_forced)
+        return;
+    s_forced = true;
+    uint32_t cr0;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+    cr0 = (cr0 | (1u << 2)) & ~(1u << 1); /* EM on, MP off: x87 traps */
+    __asm__ volatile("mov %0, %%cr0" ::"r"(cr0));
+}
 int cpu_family(void) { return s_family; }
 
 void cpu_model_init(void) {

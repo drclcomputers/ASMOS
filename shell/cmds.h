@@ -8,6 +8,7 @@ void cmd_help(char *out, size_t max);
 void cmd_pwd(char *out, size_t max);
 void cmd_ls(const char *path, char *out, size_t max);
 void cmd_cat(const char *filename, char *out, size_t max);
+void cmd_find(const char *args, char *out, size_t max);
 void cmd_touch(const char *filename, char *out, size_t max);
 void cmd_rm(const char *args, char *out, size_t max);
 void cmd_mkdir(const char *dirname, char *out, size_t max);

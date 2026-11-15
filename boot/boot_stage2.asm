@@ -7,6 +7,14 @@ KERNEL_ENTRY    equ 0x10000
     call _io_delay_impl
 %endmacro
 
+    jmp  short entry
+; ── Video mode setting, at a fixed place: "VM" + mode at bytes 2-4 of the
+; first stage-2 sector (disk LBA 1). Settings > System rewrites the mode
+; byte (config/video_cfg.c), so it must stay here.
+;   0 = 320x200x256 (mode 13h), 1 = 640x400x16 (mode 12h, 400 lines)
+    db 'V', 'M'
+video_mode db 0
+
 entry:
     cli
     xor  ax, ax
@@ -56,7 +64,7 @@ entry:
 ; 0x01 = Mode X (640x480 unchained planar)
     xor  ax, ax
     mov  ds, ax
-    mov  al, [0x0602]
+    mov  al, [video_mode]
     cmp  al, 0x01
     je   .setup_mode_x
 

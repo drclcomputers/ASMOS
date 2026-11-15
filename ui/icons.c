@@ -119,7 +119,8 @@ void draw_floppy_icon(int ax, int ay, bool sel) {
     fill_rect(ax + 1, ay, ICON_W - 2, ICON_H, bg);
     draw_rect(ax + 1, ay, ICON_W - 2, ICON_H, BLACK);
     // shutter slot
-    fill_rect(ax + 3, ay + ICON_H - 6, ICON_W - 6, 5, sel ? LIGHT_GRAY : DARK_GRAY);
+    fill_rect(ax + 3, ay + ICON_H - 6, ICON_W - 6, 5,
+              sel ? LIGHT_GRAY : DARK_GRAY);
     draw_rect(ax + 3, ay + ICON_H - 6, ICON_W - 6, 5, BLACK);
     // label area
     fill_rect(ax + 3, ay + 2, ICON_W - 10, 6, sel ? DARK_GRAY : WHITE);
@@ -134,4 +135,23 @@ void draw_unknown_icon(int ax, int ay, bool sel) {
     draw_line(ax + ICON_W - 5, ay, ax + ICON_W - 1, ay + 4, BLACK);
     fill_rect(ax + ICON_W - 4, ay, 3, 4, bg);
     draw_string(ax + 5, ay + 7, "?", sel ? WHITE : DARK_GRAY, 2);
+}
+
+/* a dustbin with a lid; full: paper sticking out */
+void draw_trash_icon(int ax, int ay, bool sel, bool full) {
+    uint8_t body = sel ? DARK_GRAY : LIGHT_GRAY;
+    uint8_t rib = sel ? LIGHT_GRAY : DARK_GRAY;
+    if (full) { /* crumpled paper above the rim */
+        fill_rect(ax + 5, ay, 5, 4, WHITE);
+        draw_rect(ax + 5, ay, 5, 4, BLACK);
+        fill_rect(ax + 10, ay + 1, 5, 3, WHITE);
+        draw_rect(ax + 10, ay + 1, 5, 3, BLACK);
+    }
+    fill_rect(ax + 2, ay + 4, ICON_W - 4, 3, body); /* lid */
+    draw_rect(ax + 2, ay + 4, ICON_W - 4, 3, BLACK);
+    fill_rect(ax + 8, ay + 2 + (full ? 0 : 1), 4, 2, BLACK); /* handle */
+    fill_rect(ax + 4, ay + 7, ICON_W - 8, ICON_H - 7, body); /* can */
+    draw_rect(ax + 4, ay + 7, ICON_W - 8, ICON_H - 7, BLACK);
+    for (int x = ax + 7; x < ax + ICON_W - 6; x += 3)
+        draw_line(x, ay + 9, x, ay + ICON_H - 3, rib);
 }

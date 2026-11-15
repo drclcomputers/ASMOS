@@ -12,6 +12,7 @@
 #define DESKTOP_ITEM_APP 2
 #define DESKTOP_ITEM_FDD 3
 #define DESKTOP_ITEM_HDD DESKTOP_ITEM_FDD
+#define DESKTOP_ITEM_TRASH 4 /* the Trash (bottom right; /TRASH) */
 
 #define DESKTOP_MAX_ITEMS 256
 #define DESKTOP_NAME_MAX 13
@@ -25,6 +26,7 @@ typedef struct {
 
     int x, y;
     bool selected;
+    bool full; /* the Trash: has something in it */
     bool dragging;
     int drag_off_x, drag_off_y;
 } desktop_item_t;

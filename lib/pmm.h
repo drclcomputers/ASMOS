@@ -3,15 +3,22 @@
 
 #include "lib/core.h"
 
-#define PMM_PAGE_SIZE  4096u
-#define PMM_MAX_FRAMES 1024          // 4MB of physical page pool
+/* Page-frame pool: a page-aligned region set aside at boot (top of the
+ * heap range) for app images, app heaps and page tables. 4 KB frames. */
 
-bool pmm_init(void);
+#define PMM_PAGE_SIZE 4096u
+#define PMM_MAX_FRAMES 2048 /* 8 MB at most */
 
-uint32_t pmm_alloc_frame(void);
+bool pmm_init(uint32_t base, uint32_t frames);
+
+uint32_t pmm_alloc_frame(void);        /* 0 = none */
+uint32_t pmm_alloc_frames(uint32_t n); /* contiguous; 0 = none */
 void pmm_free_frame(uint32_t phys_addr);
-uint32_t pmm_alloc_frames(uint32_t n);
-uint32_t pmm_free_count(void);
 void pmm_free_frames(uint32_t phys_addr, uint32_t n);
+uint32_t pmm_free_count(void);
+uint32_t pmm_total(void);
+uint32_t pmm_base(void); /* region [pmm_base, pmm_end) */
+uint32_t pmm_end(void);
+bool pmm_owns(uint32_t addr);
 
 #endif // PMM_H

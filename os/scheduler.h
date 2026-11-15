@@ -4,25 +4,26 @@
 #include "lib/core.h"
 #include "lib/vmm.h"
 
-#define MAX_TASKS        128
-#define TASK_STACK_SIZE  (16 * 1024)
-#define STACK_CANARY     0xDEADBEEFU
+#define MAX_TASKS 128
+#define TASK_STACK_SIZE (16 * 1024)
+#define STACK_CANARY 0xDEADBEEFU
 
 typedef struct {
-    uint32_t    esp;
-    uint8_t    *stack_base;
-    bool        alive;
-    void      (*entry)(void *);
-    void       *arg;
-    vmm_ctx_t  *vmm;
+    uint32_t esp;
+    uint8_t *stack_base;
+    bool alive;
+    void (*entry)(void *);
+    void *arg;
+    vmm_ctx_t *vmm;
+    uint32_t cr3; /* address space when switched out (0 = default) */
 } task_t;
 
 extern task_t tasks[MAX_TASKS];
-extern int    current_task;
-extern int    task_count;
+extern int current_task;
+extern int task_count;
 
 void scheduler_init(void);
-int  scheduler_add_task(void (*entry)(void *), void *arg, vmm_ctx_t *vmm);
+int scheduler_add_task(void (*entry)(void *), void *arg, vmm_ctx_t *vmm);
 void task_yield(void);
 void scheduler_kill_task(int slot);
 void scheduler_exit_current(void);

@@ -212,10 +212,14 @@ static void fault_kill_task(uint32_t vec, uint32_t eip, uint32_t err,
 }
 
 static gjmp_t *s_jmp = NULL;
+static int s_jmp_task; /* task that set s_jmp (its stack holds it) */
 static appfault_t s_fault;
 
 void exc_handler_c(uint32_t vec, uint32_t err, uint32_t eip, uint32_t cr2) {
-    if (s_jmp) {
+    /* only the task that set the guard can be sent back to it: a fault in
+     * a background task while task 0 waits inside a guarded call (ping
+     * yields) must not jump onto task 0's stack */
+    if (s_jmp && s_jmp_task == current_task) {
         gjmp_t *j = s_jmp;
         s_jmp = NULL;
         s_fault.vector = vec;
@@ -244,17 +248,39 @@ bool appguard_call2(void (*fn)(void *, void *), void *a, void *b,
     gjmp_t *prev = s_jmp;
     volatile bool ok = true;
 
+    int prev_task = s_jmp_task;
     if (guard_setjmp(&jb) == 0) {
         s_jmp = &jb;
+        s_jmp_task = current_task;
         fn(a, b);
         s_jmp = prev;
+        s_jmp_task = prev_task;
     } else {
+        s_jmp_task = prev_task;
         s_jmp = prev; /* fault: handler already cleared s_jmp */
         ok = false;
         if (out)
             *out = s_fault;
     }
     return ok;
+}
+
+bool appguard_active(void) { return s_jmp && s_jmp_task == current_task; }
+
+/* From the timer IRQ: end the innermost guarded call as if it had faulted
+ * with `vector` (APPFAULT_*). The interrupt frame is dropped with the
+ * stack (the PIC gets its EOI first); guard_longjmp re-enables IRQs. */
+bool appguard_abort(uint32_t vector) {
+    if (!appguard_active())
+        return false;
+    gjmp_t *j = s_jmp;
+    s_jmp = NULL;
+    s_fault.vector = vector;
+    s_fault.error = 0;
+    s_fault.eip = 0;
+    s_fault.cr2 = 0;
+    outb(0x20, 0x20);
+    guard_longjmp(j, 1);
 }
 
 void appguard_install_gates(void (*set_gate)(uint8_t, uint32_t)) {

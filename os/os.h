@@ -13,7 +13,7 @@ typedef void (*app_init_fn)(void *state);
 typedef void (*app_frame_fn)(void *state);
 typedef void (*app_destroy_fn)(void *state);
 
-typedef struct {
+typedef struct app_descriptor_s {
     const char *name;
     uint32_t state_size;
     app_init_fn init;
@@ -21,6 +21,9 @@ typedef struct {
     app_destroy_fn destroy;
     bool single_instance;
     bool opaque_state; /* true: state does NOT start with a window* */
+    /* optional: where the state lives (dynamic apps: their own heap) */
+    void *(*state_alloc)(struct app_descriptor_s *d, uint32_t size);
+    void (*state_free)(struct app_descriptor_s *d, void *state);
 } app_descriptor;
 
 typedef struct {
@@ -29,6 +32,8 @@ typedef struct {
     bool running;
     bool wants_quit;
     int task_slot;
+    bool suspended; /* stopped while not responding: its code is not called
+                       again (Monitor: Switch To resumes, End Task ends) */
 } app_instance_t;
 
 void os_install_app(app_descriptor *desc);
@@ -45,6 +50,16 @@ bool window_is_focused(window *win);
 bool os_close_own_instance(window *win);
 
 void os_tick_apps(void);
+
+/* Built-in app code (on_frame, control handlers, menu commands) runs
+ * guarded like .APP code: a crash, or the watchdog's "end it" key, ends
+ * that app instead of the OS. culprit = the instance the code belongs to
+ * (NULL if unknown: then only a message). */
+app_instance_t *os_instance_of_window(window *w);
+void os_guard_call(app_instance_t *culprit, void (*fn)(void *, void *), void *a,
+                   void *b, const char *what);
+/* An instance stopped/ended by the watchdog: for Monitor to select. */
+extern int g_os_stopped_app; /* index into running_apps, -1 none */
 void os_reap_dead_apps(void);
 
 extern app_descriptor *installed_apps[MAX_INSTALLED_APPS];

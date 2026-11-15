@@ -4,6 +4,7 @@
 #include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "ui/fileops.h"
 #include "ui/icons.h"
 
 static desktop_item_t s_items[DESKTOP_MAX_ITEMS];
@@ -156,6 +157,19 @@ void desktop_fs_reload(void) {
         s_count++;
     }
 
+    if (s_count < DESKTOP_MAX_ITEMS) { /* the Trash, bottom right */
+        desktop_item_t *it = &s_items[s_count];
+        memset(it, 0, sizeof(desktop_item_t));
+        strcpy(it->name, "Trash");
+        it->kind = DESKTOP_ITEM_TRASH;
+        it->full = fo_trash_count() > 0;
+        it->used = true;
+        it->x = SCREEN_WIDTH - ICON_SPACING_X + (ICON_SPACING_X - ICON_W) / 2 -
+                ICON_START_X / 2;
+        it->y = SCREEN_HEIGHT - MENUBAR_H - TASKBAR_H - ICON_SPACING_Y;
+        s_count++;
+    }
+
     if (fs_drive_mounted(DRIVE_HDB) && s_count < DESKTOP_MAX_ITEMS) {
         desktop_item_t *it = &s_items[s_count];
         memset(it, 0, sizeof(desktop_item_t));
@@ -224,6 +238,10 @@ bool desktop_fs_item_path(int idx, char *out, int sz) {
     desktop_item_t *it = &s_items[idx];
     if (it->kind == DESKTOP_ITEM_FDD || it->kind == DESKTOP_ITEM_HDD)
         return false;
+    if (it->kind == DESKTOP_ITEM_TRASH) {
+        snprintf(out, sz, "%s", FO_TRASH);
+        return true;
+    }
     snprintf(out, sz, "%s/%s%s", DESKTOP_PATH, it->name,
              it->kind == DESKTOP_ITEM_APP ? ".APP" : "");
     return true;

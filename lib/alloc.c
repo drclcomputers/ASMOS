@@ -16,70 +16,74 @@ typedef struct block_header {
 
 extern uint8_t _heap_start;
 
-static block_header_t *heap_start_ptr = NULL;
-static uint32_t heap_end_addr = 0;
-static uint32_t heap_start_addr = 0;
+/* The kernel heap. Dynamic apps get heaps of their own (os/appload.c), so
+ * an app overrunning a block breaks only its own heap. */
+heap_t g_kheap;
 
-// ── One‑time setup at boot ────────────────────────────────────────────
-void alloc_set_range(uint32_t start, uint32_t end) {
-    if (end <= start)
-        return;
+#define FIRST(h) ((block_header_t *)(h)->first)
 
-    if (start < (uint32_t)&_heap_start)
-        start = (uint32_t)&_heap_start;
-
-    /* Re-check after clamping: need room for at least one header plus one
-       usable word; without this the size field would wrap to ~4 GB. */
-    if (end <= start || (end - start) <= HEADER_SIZE + 4)
-        return;
-
-    heap_start_addr = start;
-    heap_end_addr = end;
-    heap_start_ptr = (block_header_t *)start;
-    heap_start_ptr->magic = BLOCK_MAGIC_FREE;
-    heap_start_ptr->size = end - start - HEADER_SIZE;
-    heap_start_ptr->free = true;
-    heap_start_ptr->next = NULL;
+// ── Heaps ─────────────────────────────────────────────────────────────
+bool heap_init(heap_t *h, uint32_t start, uint32_t end) {
+    if (!h)
+        return false;
+    start = (start + 3) & ~3u;
+    /* need room for one header plus one usable word, or size wraps */
+    if (end <= start || (end - start) <= HEADER_SIZE + 4) {
+        h->first = NULL;
+        h->start = h->end = 0;
+        return false;
+    }
+    h->start = start;
+    h->end = end;
+    block_header_t *b = (block_header_t *)(uintptr_t)start;
+    b->magic = BLOCK_MAGIC_FREE;
+    b->size = end - start - HEADER_SIZE;
+    b->free = true;
+    b->next = NULL;
+    h->first = b;
+    return true;
 }
 
-void alloc_set_end(uint32_t end) {
-    alloc_set_range((uint32_t)&_heap_start, end);
+bool heap_owns(const heap_t *h, const void *p) {
+    uint32_t a = (uint32_t)(uintptr_t)p;
+    return h && h->first && a >= h->start + HEADER_SIZE && a < h->end;
 }
 
-void alloc_init(void) { alloc_set_range((uint32_t)&_heap_start, (uint32_t)&_heap_start + 0x100000); }
+/* A header is believable if it is inside the heap with a known magic. */
+static bool sane(const heap_t *h, const block_header_t *b) {
+    uint32_t a = (uint32_t)(uintptr_t)b;
+    return a >= h->start && a + HEADER_SIZE <= h->end &&
+           (b->magic == BLOCK_MAGIC_FREE || b->magic == BLOCK_MAGIC_USED) &&
+           b->size <= h->end - a - HEADER_SIZE;
+}
 
-// ── Coalescing and trimming ────────────────────────────────────────────
-static void coalesce_from(block_header_t *cur) {
-    // Merge consecutive free blocks starting at cur.
-    // Only merges FREE+FREE pairs; a USED next block stops the walk.
-    // Corrupt magic on either side stops immediately to avoid heap corruption.
+static void coalesce_from(const heap_t *h, block_header_t *cur) {
+    // Merge consecutive free blocks starting at cur; a used or corrupt
+    // block stops the walk.
     while (cur) {
         if (cur->magic != BLOCK_MAGIC_FREE)
-            return; // cur is corrupt or still USED — stop
+            return;
         block_header_t *nx = cur->next;
         if (!nx)
             break;
-        if (nx->magic != BLOCK_MAGIC_FREE && nx->magic != BLOCK_MAGIC_USED)
-            return; // nx has corrupt magic — stop
+        if (!sane(h, nx))
+            return;
         if (!nx->free)
-            break; // next block is in use — nothing to merge here
-        // Absorb nx into cur
+            break;
         cur->size += HEADER_SIZE + nx->size;
         cur->next = nx->next;
-        // Loop again from cur: the block now at cur->next may also be free
     }
 }
 
-// ── Allocation ─────────────────────────────────────────────────────────
-void *kmalloc(uint32_t size) {
-    if (size == 0)
+void *heap_alloc(heap_t *h, uint32_t size) {
+    if (!h || !h->first || size == 0 || size > h->end - h->start)
         return NULL;
     size = (size + 3) & ~3u;
 
-    block_header_t *cur = heap_start_ptr;
+    block_header_t *cur = FIRST(h);
     while (cur) {
-        if (cur->magic != BLOCK_MAGIC_FREE && cur->magic != BLOCK_MAGIC_USED)
-            return NULL;
+        if (!sane(h, cur))
+            return NULL; /* corrupted: refuse rather than spread it */
         if (cur->free && cur->size >= size) {
             if (cur->size >= size + HEADER_SIZE + 4) {
                 block_header_t *nb =
@@ -100,6 +104,81 @@ void *kmalloc(uint32_t size) {
     return NULL;
 }
 
+/* Pointers this heap did not hand out are ignored. */
+void heap_free(heap_t *h, void *ptr) {
+    if (!ptr || !heap_owns(h, ptr))
+        return;
+    block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
+    if (hdr->magic != BLOCK_MAGIC_USED)
+        return;
+
+    // Find the predecessor (also proves hdr is a real block of this heap).
+    block_header_t *prev = NULL;
+    block_header_t *cur = FIRST(h);
+    while (cur && cur != hdr) {
+        if (!sane(h, cur))
+            return;
+        prev = cur;
+        cur = cur->next;
+    }
+    if (cur != hdr)
+        return;
+
+    hdr->free = true;
+    hdr->magic = BLOCK_MAGIC_FREE;
+    coalesce_from(h, hdr); // forward merge
+    if (prev && prev->magic == BLOCK_MAGIC_FREE && prev->free)
+        coalesce_from(h, prev); // backward merge
+}
+
+static uint32_t heap_sum(const heap_t *h, bool want_free) {
+    uint32_t n = 0;
+    if (!h)
+        return 0;
+    for (block_header_t *cur = FIRST(h); cur; cur = cur->next) {
+        if (!sane(h, cur))
+            break;
+        if (cur->free == want_free)
+            n += want_free ? cur->size : HEADER_SIZE + cur->size;
+    }
+    return n;
+}
+
+uint32_t heap_used_in(const heap_t *h) { return heap_sum(h, false); }
+uint32_t heap_free_in(const heap_t *h) { return heap_sum(h, true); }
+
+/* Walks the whole heap: false if any header is broken. */
+bool heap_check(const heap_t *h) {
+    if (!h || !h->first)
+        return false;
+    int guard = 0;
+    for (block_header_t *cur = FIRST(h); cur; cur = cur->next) {
+        if (!sane(h, cur) || ++guard > 1000000)
+            return false;
+        if (cur->next &&
+            (uint8_t *)cur->next != (uint8_t *)cur + HEADER_SIZE + cur->size)
+            return false;
+    }
+    return true;
+}
+
+// ── Kernel heap ───────────────────────────────────────────────────────
+void alloc_set_range(uint32_t start, uint32_t end) {
+    if (start < (uint32_t)&_heap_start)
+        start = (uint32_t)&_heap_start;
+    heap_init(&g_kheap, start, end);
+}
+
+void alloc_set_end(uint32_t end) {
+    alloc_set_range((uint32_t)&_heap_start, end);
+}
+
+void alloc_init(void) {
+    alloc_set_range((uint32_t)&_heap_start, (uint32_t)&_heap_start + 0x100000);
+}
+
+void *kmalloc(uint32_t size) { return heap_alloc(&g_kheap, size); }
+
 void *kzalloc(uint32_t size) {
     void *p = kmalloc(size);
     if (p)
@@ -114,7 +193,8 @@ void *krealloc(void *ptr, uint32_t new_size) {
         kfree(ptr);
         return NULL;
     }
-
+    if (!heap_owns(&g_kheap, ptr))
+        return NULL;
     block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
     if (hdr->magic != BLOCK_MAGIC_USED)
         return NULL;
@@ -134,82 +214,21 @@ void *kmalloc_aligned(uint32_t size, uint32_t align) {
         return NULL;
     if (align <= 4)
         return kmalloc(size);
-
-    // Allocate enough extra space so that, regardless of where kmalloc places
-    // the payload, we can find an aligned address inside it.
-    // We need: size + (align - 1) extra bytes of payload room.
-    // The returned pointer is the aligned address within that payload; the
-    // original kmalloc block is intentionally leaked (no way to kfree it via
-    // the aligned pointer without a separate header).  Callers that need
-    // freeable aligned memory should manage their own aligned slabs.
-    uint32_t over = size + (align - 1);
-    uint8_t *raw = (uint8_t *)kmalloc(over);
+    // The block is over-allocated and the aligned address inside it is
+    // returned; it cannot be kfree'd (kfree ignores it). For permanent
+    // buffers only.
+    uint8_t *raw = (uint8_t *)kmalloc(size + (align - 1));
     if (!raw)
         return NULL;
-
     uintptr_t addr = (uintptr_t)raw;
-    uintptr_t aligned = (addr + align - 1) & ~((uintptr_t)align - 1);
-    return (void *)aligned;
+    return (void *)((addr + align - 1) & ~((uintptr_t)align - 1));
 }
 
-// ── Free / coalesce / trim ─────────────────────────────────────────────
-void kfree(void *ptr) {
-    if (!ptr)
-        return;
-    block_header_t *hdr = (block_header_t *)((uint8_t *)ptr - HEADER_SIZE);
+/* Ignores pointers outside the kernel heap (app heaps, static data). */
+void kfree(void *ptr) { heap_free(&g_kheap, ptr); }
 
-    if (hdr->magic != BLOCK_MAGIC_USED)
-        return;
-
-    hdr->free = true;
-    hdr->magic = BLOCK_MAGIC_FREE;
-
-    // Walk the list to find the block that precedes hdr so we can attempt a
-    // backward merge (prev + hdr) after the forward merge (hdr + hdr->next).
-    block_header_t *prev = NULL;
-    block_header_t *cur = heap_start_ptr;
-    while (cur && cur != hdr) {
-        prev = cur;
-        cur = cur->next;
-    }
-
-    // Forward merge: absorb any free blocks that follow hdr.
-    coalesce_from(hdr);
-
-    // Backward merge: if the predecessor is also free, absorb hdr into it.
-    // We must re-read prev->free here because coalesce_from(prev) from a
-    // previous kfree call may have already changed things; the magic check
-    // inside coalesce_from protects against stale state.
-    if (prev && prev->magic == BLOCK_MAGIC_FREE && prev->free)
-        coalesce_from(prev);
-}
-
-// ── Statistics ─────────────────────────────────────────────────────────
-uint32_t heap_used(void) {
-    uint32_t used = 0;
-    block_header_t *cur = heap_start_ptr;
-    while (cur) {
-        if (cur->magic != BLOCK_MAGIC_FREE && cur->magic != BLOCK_MAGIC_USED)
-            break;
-        if (!cur->free)
-            used += HEADER_SIZE + cur->size;
-        cur = cur->next;
-    }
-    return used;
-}
-
-uint32_t heap_remaining(void) {
-    uint32_t free_bytes = 0;
-    block_header_t *cur = heap_start_ptr;
-    while (cur) {
-        if (cur->magic != BLOCK_MAGIC_FREE && cur->magic != BLOCK_MAGIC_USED)
-            break;
-        if (cur->free)
-            free_bytes += cur->size;
-        cur = cur->next;
-    }
-    return free_bytes;
-}
+uint32_t heap_used(void) { return heap_used_in(&g_kheap); }
+uint32_t heap_remaining(void) { return heap_free_in(&g_kheap); }
 
 // ── Pool allocator ─────────────────────────────────────────
 bool pool_init(pool_t *pool, void *slab, uint32_t capacity,

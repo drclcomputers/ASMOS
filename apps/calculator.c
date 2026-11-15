@@ -303,15 +303,8 @@ static void calc_init(void *state) {
     menu_add_item(f, "Close", on_close);
     menu_add_separator(f);
     menu_add_item(f, "About Calculator", on_about);
-    if (!cpu_has_fpu()) {
-        /* the maths is double precision; on a 386/486SX without a
-         * coprocessor x87 instructions fault, so don't run any */
-        ctl_set_text(s->lcd, "No FPU");
-        for (control *c = s->win->controls; c; c = c->next)
-            if (c->type == CTL_BUTTON)
-                ctl_enable(c, false);
-        return;
-    }
+    /* without a coprocessor the x87 maths runs on the emulator
+     * (lib/fpu_emu.c): slower, same results */
     calc_reset(s);
     show(s);
 }
@@ -319,8 +312,7 @@ static void calc_init(void *state) {
 /* keyboard: digits, + - * / . %, Enter (=), Backspace, Esc (clear) */
 static void calc_on_frame(void *state) {
     calc_state_t *s = state;
-    if (!s->win || !kb.key_pressed || !window_is_focused(s->win) ||
-        !cpu_has_fpu())
+    if (!s->win || !kb.key_pressed || !window_is_focused(s->win))
         return;
     char c = kb.last_char;
     char tmp[2] = {c, 0};

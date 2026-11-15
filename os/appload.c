@@ -12,6 +12,8 @@
 #include "os/appguard.h"
 #include "os/error.h"
 #include "os/os.h"
+#include "os/prefs.h"
+#include "os/watchdog.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
 #include "ui/popup.h"
@@ -83,8 +85,153 @@ static app_instance_t *instance_from_state(void *state) {
 static struct {
     window *win;
     void *state;
+    char title[40]; /* kernel copy: the app's string is in its memory */
 } s_owned[MAX_DYN_WINDOWS];
 static void *s_calling_state; /* state of the app whose code is running */
+
+/* ── per-instance memory ───────────────────────────────────────────────
+ * Each running instance of a dynamic app gets its own heap (its state is
+ * the first block): api->kmalloc/kfree work there, so an overrun breaks
+ * only that app, and everything is freed when it ends. The heap comes
+ * from the frame pool when it can; with paging on, the instance then
+ * runs in a context (lib/vmm.h) where only its own image and heap are
+ * mapped from the pool: other apps' memory faults. */
+
+#define APP_HEAP_DEFAULT (64u * 1024u)
+#define APP_HEAP_MIN (16u * 1024u)
+
+typedef struct {
+    bool used;
+    void *state;
+    loaded_app_t *la;
+    heap_t heap;
+    uint8_t *mem;   /* the heap's block */
+    uint32_t pages; /* in the frame pool, else 0 (kernel heap block) */
+    vmm_ctx_t *ctx; /* NULL: no paging / no frames */
+} dyn_inst_t;
+
+static dyn_inst_t s_inst[MAX_RUNNING_APPS];
+
+static dyn_inst_t *inst_of(const void *state) {
+    if (!state)
+        return NULL;
+    for (int i = 0; i < MAX_RUNNING_APPS; i++)
+        if (s_inst[i].used && s_inst[i].state == state)
+            return &s_inst[i];
+    return NULL;
+}
+
+static void *state_alloc(app_descriptor *d, uint32_t size);
+
+/* pool frames are mapped in the kernel space only: allocate there */
+static void *dyn_state_alloc(app_descriptor *d, uint32_t size) {
+    uint32_t cr3 = vmm_current();
+    vmm_load_kernel();
+    void *st = state_alloc(d, size);
+    vmm_switch(cr3);
+    return st;
+}
+
+static void *state_alloc(app_descriptor *d, uint32_t size) {
+    loaded_app_t *la = find_by_desc(d);
+    dyn_inst_t *di = NULL;
+    for (int i = 0; i < MAX_RUNNING_APPS && !di; i++)
+        if (!s_inst[i].used)
+            di = &s_inst[i];
+    if (!la || !di)
+        return NULL;
+    memset(di, 0, sizeof(*di));
+    uint32_t want =
+        (size + APP_HEAP_DEFAULT + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uint32_t least = (size + APP_HEAP_MIN + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uint32_t bytes = want;
+    uint32_t mem = pmm_alloc_frames(want / PAGE_SIZE);
+    if (!mem && (mem = pmm_alloc_frames(least / PAGE_SIZE)) != 0)
+        bytes = least;
+    if (mem) {
+        di->mem = (uint8_t *)(uintptr_t)mem;
+        di->pages = bytes / PAGE_SIZE;
+    } else { /* no frames: a block of the kernel heap, still its own heap */
+        bytes = least;
+        di->mem = (uint8_t *)kmalloc(bytes);
+        if (!di->mem)
+            return NULL;
+    }
+    heap_init(&di->heap, (uint32_t)(uintptr_t)di->mem,
+              (uint32_t)(uintptr_t)di->mem + bytes);
+    void *state = heap_alloc(&di->heap, size);
+    if (!state) {
+        if (di->pages)
+            pmm_free_frames((uint32_t)(uintptr_t)di->mem, di->pages);
+        else
+            kfree(di->mem);
+        return NULL;
+    }
+    if (di->pages && vmm_enabled()) {
+        di->ctx = vmm_create_context(0);
+        if (di->ctx && !(vmm_grant(di->ctx, (uint32_t)(uintptr_t)di->mem,
+                                   di->pages, true) &&
+                         (!la->img_pages ||
+                          vmm_grant(di->ctx, (uint32_t)(uintptr_t)la->raw,
+                                    la->img_pages, true)))) {
+            vmm_destroy_context(di->ctx);
+            di->ctx = NULL; /* runs unprotected rather than not at all */
+        }
+    }
+    di->state = state;
+    di->la = la;
+    di->used = true;
+    return state;
+}
+
+static void dyn_state_free(app_descriptor *d, void *state) {
+    (void)d;
+    dyn_inst_t *di = inst_of(state);
+    if (!di)
+        return;
+    uint32_t cr3 = vmm_current();
+    if (di->ctx && cr3 == di->ctx->pd_phys)
+        cr3 = g_kernel_pd_phys;
+    vmm_load_kernel();
+    if (di->ctx)
+        vmm_destroy_context(di->ctx);
+    if (di->pages)
+        pmm_free_frames((uint32_t)(uintptr_t)di->mem, di->pages);
+    else
+        kfree(di->mem);
+    memset(di, 0, sizeof(*di));
+    vmm_switch(cr3);
+}
+
+/* the app's memory calls: its own heap */
+static void *api_kmalloc(uint32_t n) {
+    dyn_inst_t *di = inst_of(s_calling_state);
+    return di ? heap_alloc(&di->heap, n) : NULL;
+}
+
+static void api_kfree(void *p) {
+    dyn_inst_t *di = inst_of(s_calling_state);
+    if (di && p != di->state) /* the state belongs to the OS */
+        heap_free(&di->heap, p);
+}
+
+/* Run app code: its state is "calling", its context loaded. */
+static bool app_call(void *state, void (*fn)(void *, void *), void *a, void *b,
+                     appfault_t *f) {
+    app_instance_t *inst = instance_from_state(state);
+    if (inst && inst->suspended)
+        return true; /* not responding: its code is not called */
+    void *prev = s_calling_state;
+    uint32_t prev_cr3 = vmm_current();
+    dyn_inst_t *di = inst_of(state);
+    s_calling_state = state;
+    if (di && di->ctx)
+        vmm_load_context(di->ctx);
+    bool ok = appguard_call2(fn, a, b, f);
+    vmm_switch(prev_cr3);
+    s_calling_state = prev;
+    return ok;
+}
 
 static void *owner_of(window *w) {
     for (int i = 0; i < MAX_DYN_WINDOWS; i++)
@@ -127,6 +274,10 @@ static window *adopt(window *w, bool set_close) {
         if (!s_owned[i].win) {
             s_owned[i].win = w;
             s_owned[i].state = s_calling_state;
+            strncpy(s_owned[i].title, w->title ? w->title : "",
+                    sizeof(s_owned[i].title) - 1);
+            s_owned[i].title[sizeof(s_owned[i].title) - 1] = 0;
+            w->title = s_owned[i].title;
             break;
         }
     return w;
@@ -162,18 +313,19 @@ static void guarded(void *state, void (*fn)(void *, void *), void *a, void *b,
     loaded_app_t *la = inst ? find_by_desc(inst->desc) : NULL;
     if (!la || la->faulted)
         return;
-    void *prev = s_calling_state;
-    s_calling_state = state;
     appfault_t f;
-    bool ok = appguard_call2(fn, a, b, &f);
-    s_calling_state = prev;
-    if (!ok)
+    if (!app_call(state, fn, a, b, &f))
         on_fault(la, state, what, &f);
 }
 
 static void hook_ctl(control *c, int ev) {
     guarded(c->win->dyn_state, call_handler, c, (void *)(uintptr_t)ev,
             "a control handler");
+}
+
+static void hook_call(window *w, void (*fn)(void *, void *), void *a, void *b,
+                      const char *what) {
+    guarded(w->dyn_state, fn, a, b, what);
 }
 
 static void hook_dlg(window *owner, void (*fn)(void *, void *), void *user,
@@ -339,9 +491,32 @@ static const ui_api_t s_ui = {
     .tree_path = tree_path,
     .tree_find_path = tree_find_path,
     .edit_select_all = edit_select_all,
+    .status = ctl_status,
 };
 
 /* ── API table given to v2 apps ─────────────────────────────────────── */
+
+/* prefs of the calling app, by its name */
+static const char *calling_name(void) {
+    app_instance_t *a = instance_from_state(s_calling_state);
+    return a && a->desc ? a->desc->name : NULL;
+}
+static bool api_prefs_get(const char *k, char *out, int sz) {
+    const char *n = calling_name();
+    return n && app_prefs_get(n, k, out, sz);
+}
+static int api_prefs_get_int(const char *k, int def) {
+    const char *n = calling_name();
+    return n ? app_prefs_get_int(n, k, def) : def;
+}
+static bool api_prefs_set(const char *k, const char *v) {
+    const char *n = calling_name();
+    return n && app_prefs_set(n, k, v);
+}
+static bool api_prefs_set_int(const char *k, int v) {
+    const char *n = calling_name();
+    return n && app_prefs_set_int(n, k, v);
+}
 
 static void api_quit_self(void *state) {
     app_instance_t *a = instance_from_state(state);
@@ -352,8 +527,8 @@ static void api_quit_self(void *state) {
 static const os_api_t s_api = {
     .version = OS_API_VERSION,
     .size = sizeof(os_api_t),
-    .kmalloc = kmalloc,
-    .kfree = kfree,
+    .kmalloc = api_kmalloc,
+    .kfree = api_kfree,
     .time_millis = time_millis,
     .wm_register = api_wm_register,
     .wm_unregister = api_wm_unregister,
@@ -372,6 +547,10 @@ static const os_api_t s_api = {
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,
+    .prefs_get = api_prefs_get,
+    .prefs_get_int = api_prefs_get_int,
+    .prefs_set = api_prefs_set,
+    .prefs_set_int = api_prefs_set_int,
 };
 
 /* ── guarded trampolines ────────────────────────────────────────────── */
@@ -393,24 +572,52 @@ static void hex8(char *o, uint32_t v) {
 
 static void on_fault(loaded_app_t *la, void *state, const char *what,
                      const appfault_t *f) {
+    if (f->vector == APPFAULT_STOPPED) { /* watchdog: hold it for Monitor */
+        app_instance_t *si = instance_from_state(state);
+        if (si) {
+            si->suspended = true;
+            g_os_stopped_app = (int)(si - running_apps);
+        }
+        return;
+    }
     static const char *names[] = {[0] = "divide error",
                                   [6] = "invalid opcode",
                                   [13] = "general protection",
                                   [14] = "page fault"};
-    const char *kind =
-        (f->vector < 15 && names[f->vector]) ? names[f->vector] : "exception";
+    const char *kind = f->vector == APPFAULT_KILLED
+                           ? "ended by the user (not responding)"
+                       : (f->vector < 15 && names[f->vector]) ? names[f->vector]
+                                                              : "exception";
     char eip[9], cr2[9], off[9];
     hex8(eip, f->eip);
     hex8(cr2, f->cr2);
     hex8(off, f->eip - (uint32_t)la->code_base);
 
+    if (f->vector == 14) { /* say what the memory protection caught */
+        if (f->cr2 < 0x1000)
+            kind = "NULL pointer";
+        else if (pmm_owns(f->cr2))
+            kind = "touched memory that is not its own";
+        else if (f->error & 2)
+            kind = "wrote to read-only kernel code";
+    }
     char msg[200];
-    snprintf(msg, sizeof(msg), "%s crashed in %s: %s\nEIP %s (+%s) CR2 %s",
-             la->desc.name, what, kind, eip, off, cr2);
+    if (f->vector == APPFAULT_KILLED)
+        snprintf(msg, sizeof(msg), "%s was not responding\nand has been ended.",
+                 la->desc.name);
+    else
+        snprintf(msg, sizeof(msg), "%s crashed in %s: %s\nEIP %s (+%s) CR2 %s",
+                 la->desc.name, what, kind, eip, off, cr2);
 
-    la->faulted = true;
+    bool killed = f->vector == APPFAULT_KILLED;
+    if (!killed)
+        la->faulted = true;       /* a crash disables the image; a hang just the
+                                     instance */
+    uint32_t cr3 = vmm_current(); /* may be another app's context (nested) */
+    vmm_load_kernel();
     app_instance_t *inst = instance_from_state(state);
     if (inst) {
+        inst->suspended = true; /* its destroy is not run */
         window *w = os_instance_window(inst);
         if (w) {
             forget_window(w);
@@ -421,7 +628,8 @@ static void on_fault(loaded_app_t *la, void *state, const char *what,
             *(window **)inst->state = NULL;
         os_quit_app(inst);
     }
-    dlg_post_message("App Crashed", msg);
+    vmm_switch(cr3);
+    dlg_post_message(killed ? "App Ended" : "App Crashed", msg);
 }
 
 static void run_entry(app_descriptor *d, uint32_t off, void *state,
@@ -433,13 +641,11 @@ static void run_entry(app_descriptor *d, uint32_t off, void *state,
         return;
     appfault_t f;
     void *fn = la->code_base + off;
-    void *prev = s_calling_state;
-    s_calling_state = state;
-    bool ok = appguard_call2(la->hdr.version >= ASMA_VERSION_2
-                                 ? (void (*)(void *, void *))call_v2
-                                 : (void (*)(void *, void *))call_v1,
-                             fn, state, &f);
-    s_calling_state = prev;
+    bool ok = app_call(state,
+                       la->hdr.version >= ASMA_VERSION_2
+                           ? (void (*)(void *, void *))call_v2
+                           : (void (*)(void *, void *))call_v1,
+                       fn, state, &f);
     if (!ok)
         on_fault(la, state, what, &f);
 }
@@ -477,7 +683,9 @@ static void tramp_destroy(void *state) {
 
 static void free_slot(loaded_app_t *la) {
     os_uninstall_app(&la->desc);
-    if (la->raw)
+    if (la->raw && la->img_pages)
+        pmm_free_frames((uint32_t)(uintptr_t)la->raw, la->img_pages);
+    else if (la->raw)
         kfree(la->raw);
     memset(la, 0, sizeof(*la));
 }
@@ -564,7 +772,9 @@ static bool read_exact(fat_file_t *f, void *buf, uint32_t n) {
 }
 
 app_descriptor *appload_load(const char *path) {
+    wd_busy(); /* reading (maybe from floppy) and relocating */
     g_ctl_invoke_hook = hook_ctl;
+    g_app_call_hook = hook_call;
     g_dlg_call_hook = hook_dlg;
     g_menu_call_hook = hook_menu;
     s_err[0] = 0;
@@ -642,7 +852,14 @@ app_descriptor *appload_load(const char *path) {
     }
 
     uint32_t image = h.code_size + h.bss_size;
-    uint8_t *raw = (uint8_t *)kmalloc(image + 16);
+    /* the image goes to the frame pool (whole pages an app context can
+     * map), else to the kernel heap */
+    uint32_t img_pages = (image + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint8_t *raw = (uint8_t *)(uintptr_t)pmm_alloc_frames(img_pages);
+    if (!raw) {
+        img_pages = 0;
+        raw = (uint8_t *)kmalloc(image + 16);
+    }
     if (!raw) {
         fs_close(&f);
         set_err("Out of memory for app image.");
@@ -679,7 +896,10 @@ app_descriptor *appload_load(const char *path) {
     }
     fs_close(&f);
     if (!ok) {
-        kfree(raw);
+        if (img_pages)
+            pmm_free_frames((uint32_t)(uintptr_t)raw, img_pages);
+        else
+            kfree(raw);
         if (!s_err[0])
             set_err("Could not read .APP contents.");
         return NULL;
@@ -690,6 +910,7 @@ app_descriptor *appload_load(const char *path) {
     slot->raw = raw;
     slot->code_base = base;
     slot->image_size = image;
+    slot->img_pages = img_pages;
     slot->file_size = fsize;
     slot->mod_date = mdate;
     slot->mod_time = mtime;
@@ -700,6 +921,8 @@ app_descriptor *appload_load(const char *path) {
     slot->desc.init = tramp_init;
     slot->desc.on_frame = tramp_frame;
     slot->desc.destroy = tramp_destroy;
+    slot->desc.state_alloc = dyn_state_alloc;
+    slot->desc.state_free = dyn_state_free;
     slot->desc.single_instance = (h.flags & ASMA_FLAG_SINGLE) != 0;
     slot->desc.opaque_state = (h.flags & ASMA_FLAG_WINDOW_FIRST) == 0;
     slot->loaded = true;

@@ -4,6 +4,7 @@
 #include "lib/wav.h"
 #include "os/api.h"
 #include "os/clipboard.h"
+#include "os/prefs.h"
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 #include "ui/fileops.h"
@@ -80,6 +81,8 @@ typedef struct {
     int item_count;
     int sort;
     bool show_hidden;
+    char filter[16]; /* typed in the view: only names matching it */
+    int unfiltered;  /* items before the filter */
 
     bool newname_is_dir;
     bool newname_hidden; /* "Hidden" box of the New File/Folder dialog */
@@ -400,6 +403,7 @@ static void ff_reload(ff_inst_t *s) {
 
     dir_entry_t raw[MAX_ENTRIES];
     int count = 0;
+    s->unfiltered = 0;
     fs_list_dir(s->drive_id, s->dir_cluster, raw, MAX_ENTRIES, &count);
     for (int i = 0; i < count && s->item_count < MAX_ENTRIES; i++) {
         if (raw[i].name[0] == '.')
@@ -407,6 +411,13 @@ static void ff_reload(ff_inst_t *s) {
         bool is_hidden = (raw[i].attr & ATTR_HIDDEN) != 0;
         if (is_hidden && !s->show_hidden)
             continue;
+        s->unfiltered++;
+        if (s->filter[0]) {
+            char nm[13];
+            entry_to_name(&raw[i], nm);
+            if (!fo_match(nm, s->filter))
+                continue;
+        }
         ff_item_t *it = &s->items[s->item_count++];
         memset(it, 0, sizeof(ff_item_t));
         it->entry = raw[i];
@@ -456,6 +467,7 @@ void ff_dir_changed_pub(const char *dir) {
 
 /* ── Navigation (internal) ──────────────────────────────────────── */
 static void ff_go_vroot_internal(ff_inst_t *s) {
+    s->filter[0] = 0;
     s->at_vroot = true;
     s->dir_cluster = 0;
     s->drive_id = DRIVE_HDA;
@@ -467,12 +479,13 @@ static void ff_go_vroot_internal(ff_inst_t *s) {
 
 static void ff_navigate_internal(ff_inst_t *s, uint16_t cluster,
                                  const char *path, uint8_t drive_id) {
+    s->filter[0] = 0;
     s->at_vroot = false;
     s->dir_cluster = cluster;
     s->drive_id = drive_id;
     strncpy(s->path, path, 255);
     s->path[255] = '\0';
-    s->win->title = s->path;
+    s->win->title = fo_is_trash(s->path) ? "Trash" : s->path;
     s->scroll_y = 0;
     ff_reload(s);
 }
@@ -739,8 +752,13 @@ static void ff_sync(ff_inst_t *s) {
         int real = s->item_count;
         if (!s->at_vroot && real && s->items[0].is_dotdot)
             real--;
-        snprintf(stat, sizeof(stat), "%d item%s%s", real, real == 1 ? "" : "s",
-                 s->show_hidden ? " (hidden shown)" : "");
+        if (s->filter[0])
+            snprintf(stat, sizeof(stat), "%d of %d match \"%s\"\tEsc: all",
+                     real, s->unfiltered, s->filter);
+        else
+            snprintf(stat, sizeof(stat), "%d item%s%s", real,
+                     real == 1 ? "" : "s",
+                     s->show_hidden ? " (hidden shown)" : "");
     }
     if (strcmp(ctl_text(s->status_lbl), stat))
         ctl_set_text(s->status_lbl, stat);
@@ -851,6 +869,7 @@ static void menu_show_hidden_toggle(void) {
     if (!s)
         return;
     s->show_hidden = !s->show_hidden;
+    app_prefs_set_int("FILEF", "hidden", s->show_hidden);
     ff_reload(s);
 }
 
@@ -1070,10 +1089,52 @@ static void view_drop(ff_inst_t *s) {
     ff_layout(s);
 }
 
+/* Typing filters the icons: letters add, Backspace removes, Esc clears. */
+static void set_filter(ff_inst_t *s, const char *f) {
+    strncpy(s->filter, f, sizeof(s->filter) - 1);
+    s->filter[sizeof(s->filter) - 1] = 0;
+    ff_reload(s);
+    int first = (s->item_count > 0 && s->items[0].is_dotdot) ? 1 : 0;
+    ff_select(s, s->item_count > first ? first : -1);
+}
+
+static bool filter_key(ff_inst_t *s) {
+    uint8_t sc = kb.last_scancode;
+    char c = kb.last_char;
+    int n = (int)strlen(s->filter);
+    if (s->at_vroot || kb.ctrl)
+        return false;
+    if (sc == ESC && n) {
+        set_filter(s, "");
+        return true;
+    }
+    if (sc == BACKSPACE && n) {
+        char f[16];
+        strcpy(f, s->filter);
+        f[n - 1] = 0;
+        set_filter(s, f);
+        return true;
+    }
+    bool name_char = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                     (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+                     c == '-' || c == '*' || c == '?' || c == '~';
+    if (name_char && n < (int)sizeof(s->filter) - 1 && sc != ENTER) {
+        char f[16];
+        strcpy(f, s->filter);
+        f[n] = (char)toupper((unsigned char)c);
+        f[n + 1] = 0;
+        set_filter(s, f);
+        return true;
+    }
+    return false;
+}
+
 static void view_key(ff_inst_t *s) {
     uint8_t sc = kb.last_scancode;
     int sel = ff_selected(s), n = s->item_count, cols = ff_cols(s);
     int vh = content_view_h(s);
+    if (filter_key(s))
+        return;
     if (kb.ctrl_c)
         menu_copy();
     else if (kb.ctrl_x)
@@ -1131,6 +1192,23 @@ static void ctx_paste_into(void) {
         strcpy(s->status, "Pasted.");
 }
 
+/* ── Trash ── */
+static void ctx_put_back(void) {
+    ff_inst_t *s = active_finder();
+    char p[270];
+    if (s && sel_path(s, p, sizeof(p))) {
+        const char *err = fo_put_back(p);
+        fo_report(s->win, "Put Back", err);
+        if (!err)
+            strcpy(s->status, "Put back.");
+    }
+}
+
+static void ctx_empty_trash(void) {
+    ff_inst_t *s = active_finder();
+    fo_ask_empty_trash(s ? s->win : NULL, NULL, NULL);
+}
+
 static void view_context_menu(ff_inst_t *s, control *c) {
     int hit;
     if (ctl_menu_from_key()) {
@@ -1145,6 +1223,19 @@ static void view_context_menu(ff_inst_t *s, control *c) {
     }
     menu *m = popup_menu();
     ff_item_t *it = hit >= 0 ? &s->items[hit] : NULL;
+    if (fo_is_trash(s->path) && !(it && it->is_dotdot)) { /* in the Trash */
+        if (it) {
+            menu_add_item(m, "Put Back", ctx_put_back);
+            menu_add_item(m, "Delete Now...", menu_delete);
+            menu_add_separator(m);
+            menu_add_item(m, "Get Info", menu_get_info);
+        } else {
+            menu_add_item(m, "Empty Trash...", ctx_empty_trash);
+            menu_enable_last(m, s->item_count > 1);
+        }
+        popup_show_for(c);
+        return;
+    }
     if (it && (it->is_dotdot || it->is_vdrive)) {
         menu_add_item(m, "Open", ctx_open);
         if (it->is_vdrive) {
@@ -1378,7 +1469,9 @@ static void set_tree_shown(ff_inst_t *s, bool on) {
     s->tree_shown = on;
     ctl_show(s->tree, on);
     int vx = on ? 2 + TREE_W + 2 : 2;
-    ctl_move(s->view, vx, s->view->y, cw - 12 - vx + 2, s->view->h);
+    /* current place and height (y/h from creation are relative to the
+     * window's size back then) */
+    ctl_move(s->view, vx, s->view->ay - wy, cw - 12 - vx + 2, s->view->ah);
     if (on) {
         tree_fill_roots(s);
         tree_sync(s);
@@ -1390,8 +1483,10 @@ static void set_tree_shown(ff_inst_t *s, bool on) {
 
 static void menu_toggle_tree(void) {
     ff_inst_t *s = active_finder();
-    if (s)
+    if (s) {
         set_tree_shown(s, !s->tree_shown);
+        app_prefs_set_int("FILEF", "tree", s->tree_shown);
+    }
 }
 
 /* ── Init / frame / destroy ───────────────────────────────────────── */
@@ -1430,8 +1525,7 @@ static void ff_init(void *state) {
                    CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
     s->sb = ctl_vscroll(w, cw - 10, 16, ch - 29, on_sb);
     ctl_style_add(s->sb, CS_ANCHOR_RIGHT | CS_STRETCH_H | CS_NOFOCUS);
-    s->status_lbl = ctl_label(w, 2, ch - 12, cw - 4, 10, "",
-                              CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    s->status_lbl = ctl_status(w, "");
 
     menu *m = window_add_menu(w, "File");
     menu_add_item(m, "New File", menu_new_file);
@@ -1473,7 +1567,9 @@ static void ff_init(void *state) {
     strcpy(s->history[0], "/");
     s->history_index = 0;
     s->history_count = 1;
-    set_tree_shown(s, true);
+    /* saved view options (os/prefs.h) */
+    s->show_hidden = app_prefs_get_int("FILEF", "hidden", 0) != 0;
+    set_tree_shown(s, app_prefs_get_int("FILEF", "tree", 1) != 0);
     ff_reload(s);
     ctl_focus(s->view);
     s_last_active = s;

@@ -8,6 +8,22 @@
 #define BLOCK_MAGIC_FREE 0xF4EEB10C
 #define BLOCK_MAGIC_USED 0xA110CA7E
 
+/* A heap: a block list inside [start, end). */
+typedef struct heap {
+    void *first;
+    uint32_t start, end;
+} heap_t;
+
+bool heap_init(heap_t *h, uint32_t start, uint32_t end);
+void *heap_alloc(heap_t *h, uint32_t size);
+void heap_free(heap_t *h, void *p); /* ignores pointers it doesn't own */
+bool heap_owns(const heap_t *h, const void *p);
+uint32_t heap_used_in(const heap_t *h);
+uint32_t heap_free_in(const heap_t *h);
+bool heap_check(const heap_t *h); /* false if a block header is broken */
+
+extern heap_t g_kheap; /* the kernel heap behind kmalloc/kfree */
+
 void alloc_set_range(uint32_t start, uint32_t end);
 void alloc_init(void);
 void alloc_set_end(uint32_t end);

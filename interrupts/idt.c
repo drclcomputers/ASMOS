@@ -1,7 +1,10 @@
 #include "interrupts/idt.h"
 #include "lib/core.h"
+#include "lib/cpu.h"
+#include "lib/fpu_emu.h"
 #include "lib/memory.h"
 #include "os/appguard.h"
+#include "os/watchdog.h"
 
 typedef struct __attribute__((packed)) {
     uint16_t offset_lo;
@@ -60,6 +63,7 @@ void pit_tick_handler(void) {
     if (pit_ticks % 1000 == 0) {
         pit_seconds++;
     }
+    wd_tick(); /* last: it may abort a stuck app and not return */
 }
 
 static void pit_init(void) {
@@ -95,6 +99,8 @@ void idt_mask_irq(int irq) {
         outb(PIC2_DATA, inb(PIC2_DATA) | (1 << (irq - 8)));
 }
 
+void idt_emulate_fpu(void) { fpu_emu_install(idt_set_gate); }
+
 void idt_init(void) {
     memset(idt, 0, sizeof(idt));
 
@@ -103,6 +109,8 @@ void idt_init(void) {
         idt_set_gate(i, spurious_addr);
 
     appguard_install_gates(idt_set_gate);
+    if (!cpu_has_fpu()) /* 386/486SX: x87 code runs on the emulator */
+        fpu_emu_install(idt_set_gate);
     idt_set_gate(IRQ0_VECTOR, (uint32_t)isr_timer);
 
     idt_ptr.limit = sizeof(idt) - 1;

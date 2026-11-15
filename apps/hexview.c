@@ -50,7 +50,7 @@ static void update(hexview_state_t *s) {
                  s->path[0] ? "Empty file." : "No file. File > Open...");
     else {
         uint8_t v = s->data[s->sel];
-        snprintf(b, sizeof(b), "%04X: %02X %3d '%c'  %d bytes  %s", s->sel, v,
+        snprintf(b, sizeof(b), "%04X: %02X %3d '%c'\t%d bytes  %s", s->sel, v,
                  v, (v >= 32 && v < 127) ? v : '.', s->len, name);
     }
     ctl_set_text(s->status, b);
@@ -274,8 +274,7 @@ static void hexview_init(void *state) {
     ctl_set_colors(s->view, 0xFF, BLACK);
     s->vsb = ctl_vscroll(s->win, cw - 10, 2, ch - 18, on_scroll);
     ctl_style_add(s->vsb, CS_ANCHOR_RIGHT | CS_STRETCH_H);
-    s->status = ctl_label(s->win, 2, ch - 14, cw - 14, 12, "",
-                          CS_BORDER | CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    s->status = ctl_status(s->win, "");
     s->rows_vis = 18;
     menu *f = window_add_menu(s->win, "File");
     menu_add_item(f, "Open...", menu_open);

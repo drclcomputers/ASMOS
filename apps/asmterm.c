@@ -484,7 +484,10 @@ static void asmterm_on_frame(void *state) {
         ctl_set_colors(s->prompt, s->binary_waiting ? GREEN : BLUE, 0xFF);
         int wx, wy, cw, ch;
         win_client_rect(s->win, &wx, &wy, &cw, &ch);
-        ctl_move(s->input, 2 + pw, s->input->y, cw - 4 - pw, s->input->h);
+        /* where the box is now (its y from creation is relative to the
+         * window's size back then, wrong once it has been resized) */
+        ctl_move(s->input, 2 + pw, s->input->ay - wy, cw - 4 - pw,
+                 s->input->ah);
         ctl_enable(s->input, !s->binary_waiting);
         ctl_focus(s->binary_waiting ? s->out : s->input);
     }

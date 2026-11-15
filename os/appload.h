@@ -72,6 +72,7 @@ typedef struct {
     uint8_t *raw;
     uint8_t *code_base;
     uint32_t image_size;
+    uint32_t img_pages; /* image in the frame pool (0: in the kernel heap) */
     app_descriptor desc;
     bool loaded;
     bool faulted;

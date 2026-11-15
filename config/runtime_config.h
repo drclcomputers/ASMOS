@@ -26,7 +26,9 @@ typedef struct __attribute__((packed)) {
     uint8_t gateway[4];
     uint8_t netmask[4];
     uint8_t dns_server[4];
-    uint8_t _reserved[36];
+    uint8_t no_paging;   /* 1 = run without memory protection */
+    uint8_t fpu_emulate; /* 1 = use the x87 emulator even with an FPU */
+    uint8_t _reserved[34];
 } os_config_t;
 
 extern os_config_t g_cfg;

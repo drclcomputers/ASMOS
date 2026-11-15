@@ -300,10 +300,15 @@ double str_to_double(const char *s, char **end) {
 int vsnprintf(char *str, size_t size, const char *format, va_list args) {
     size_t total = 0;
 
+/* c is evaluated exactly once, also when the buffer is full: callers pass
+ * expressions with side effects (PUTC(*format++)). It used to be evaluated
+ * only when there was room, so a truncated literal never advanced and the
+ * loop spun ~4 billion times. */
 #define PUTC(c)                                                                \
     do {                                                                       \
+        char _ch = (char)(c);                                                  \
         if (size > 0 && total < size - 1 && str) {                             \
-            str[total] = (char)(c);                                            \
+            str[total] = _ch;                                                  \
         }                                                                      \
         total++;                                                               \
     } while (0)

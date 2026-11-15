@@ -26,5 +26,6 @@ void draw_pic_icon(int ax, int ay, bool sel);
 void draw_txt_icon(int ax, int ay, bool sel);
 void draw_cfg_icon(int ax, int ay, bool sel);
 void draw_unknown_icon(int ax, int ay, bool sel);
+void draw_trash_icon(int ax, int ay, bool sel, bool full);
 
 #endif

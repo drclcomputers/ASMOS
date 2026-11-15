@@ -53,6 +53,9 @@ $(BUILD_DIR)/%.o: %.asm
 	@mkdir -p $(dir $@)
 	$(AS) -f elf32 $< -o $@
 
+# the FPU emulator is big; below 640 KB size matters more than its speed
+$(BUILD_DIR)/lib/fpu_emu.o: CFLAGS += -Os
+
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< -o $@

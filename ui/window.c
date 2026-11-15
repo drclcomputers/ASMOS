@@ -459,6 +459,12 @@ static void fit_to_screen(window *win) {
         win->y = 0;
 }
 
+static void call_on_draw(void *w, void *unused) {
+    (void)unused;
+    window *win = (window *)w;
+    win->on_draw(win, win->on_draw_userdata);
+}
+
 void window_draw(window *win) {
     if (!win || !win->visible || win->minimized)
         return;
@@ -511,8 +517,8 @@ void window_draw(window *win) {
 
     /* app painting and controls stay inside the window */
     gfx_set_clip(win->x, wy, win->w, win->h);
-    if (win->on_draw)
-        win->on_draw(win, win->on_draw_userdata);
+    if (win->on_draw) /* app code: guarded (controls.h) */
+        ui_guard(win, call_on_draw, win, NULL, "drawing");
     if (win->controls)
         ctl_draw_all(win);
     gfx_reset_clip();

@@ -11,6 +11,7 @@
 #include "config/runtime_config.h"
 #include "drivers/ne2000.h"
 #include "lib/cpu.h"
+#include "lib/fpu_emu.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -19,6 +20,7 @@
 #include "network/net.h"
 #include "os/appload.h"
 #include "os/scheduler.h"
+#include "ui/fileops.h"
 
 static void append(char *buf, size_t max, const char *text) {
     size_t cl = strlen(buf), tl = strlen(text);
@@ -40,6 +42,7 @@ void cmd_help(char *out, size_t max) {
     append(out, max, "  rmdir <d>     - Remove empty dir\n\n");
 
     append(out, max, "  cat <f>       - Print file\n");
+    append(out, max, "  find <p> [d]  - Find names (TXT, *.PIC) in d\n");
     append(out, max, "  touch <f>     - Create empty file\n");
     append(out, max, "  write <f> <t> - Write text to file\n");
     append(out, max, "  cp <s> <d>    - Copy file/dir\n");
@@ -150,6 +153,61 @@ void cmd_ls(const char *path, char *out, size_t max) {
         }
     }
     append(out, max, "\n");
+}
+
+/* ── find ── */
+
+typedef struct {
+    char *out;
+    size_t max;
+    int shown;
+} find_out_t;
+
+static bool find_line(const char *path, bool is_dir, uint32_t size, void *u) {
+    find_out_t *f = (find_out_t *)u;
+    char line[300];
+    if (is_dir)
+        snprintf(line, sizeof(line), "  %s/\n", path);
+    else
+        snprintf(line, sizeof(line), "  %s (%ub)\n", path, size);
+    if (strlen(f->out) + strlen(line) + 40 >= f->max)
+        return false; /* output full */
+    append(f->out, f->max, line);
+    f->shown++;
+    return true;
+}
+
+void cmd_find(const char *args, char *out, size_t max) {
+    char pat[64] = "", dir[200] = "";
+    const char *p = args ? args : "";
+    while (*p == ' ')
+        p++;
+    int k = 0;
+    while (*p && *p != ' ' && k < (int)sizeof(pat) - 1)
+        pat[k++] = *p++;
+    pat[k] = 0;
+    while (*p == ' ')
+        p++;
+    strncpy(dir, p, sizeof(dir) - 1);
+    if (!pat[0]) {
+        append(out, max,
+               "Usage: find <pattern> [dir]\n"
+               "  TXT   names containing TXT\n"
+               "  *.PIC  ? = one char, * = any\n"
+               "  dir: default the current one; / = all of HDA\n\n");
+        return;
+    }
+    if (!dir[0])
+        fs_pwd(dir, sizeof(dir));
+    find_out_t f = {out, max, 0};
+    int n = fo_find(dir, pat, true, find_line, &f);
+    char tail[64];
+    if (n > f.shown)
+        snprintf(tail, sizeof(tail), "  ... output full (%d shown)\n\n",
+                 f.shown);
+    else
+        snprintf(tail, sizeof(tail), "%d found.\n\n", n);
+    append(out, max, tail);
 }
 
 void cmd_cat(const char *filename, char *out, size_t max) {
@@ -413,8 +471,18 @@ void cmd_df(char *out, size_t max) {
 
 void cmd_mem(char *out, size_t max) {
     char buf[128];
-    sprintf(buf, "Heap used: %u KB  free: %u KB\n\n", heap_used() / 1024,
-            heap_remaining() / 1024);
+    sprintf(buf, "Kernel heap used: %u KB  free: %u KB%s\n", heap_used() / 1024,
+            heap_remaining() / 1024, heap_check(&g_kheap) ? "" : "  (CORRUPT)");
+    append(out, max, buf);
+    sprintf(buf, "App pool: %u KB free of %u KB\n", pmm_free_count() * 4,
+            pmm_total() * 4);
+    append(out, max, buf);
+    sprintf(buf, "Paging: %s\n\n",
+            vmm_enabled() ? (cpu_family() >= 4
+                                 ? "on (apps isolated, kernel code read-only)"
+                                 : "on (apps isolated; 386: no write protect)")
+            : g_cfg.no_paging ? "off (Settings > System)"
+                              : "off");
     append(out, max, buf);
 }
 
@@ -566,7 +634,14 @@ void cmd_sysinfo(char *out, size_t max) {
     cpu_model_init();
     append(out, max, "CPU:    ");
     append(out, max, cpu_model_str());
-    append(out, max, cpu_has_fpu() ? " + FPU\n" : " (no FPU)\n");
+    if (cpu_fpu_emulated()) {
+        char e[64];
+        sprintf(e, "%s, x87 emulated (%u instructions so far)\n",
+                cpu_has_fpu() ? " + FPU" : " (no FPU)", fpu_emu_count());
+        append(out, max, e);
+    } else {
+        append(out, max, " + FPU\n");
+    }
     time_hms_t u = uptime_hms();
     sprintf(buf, "Uptime: %02u:%02u:%02u\nFrames: %u fps\n\n", u.hours,
             u.minutes, u.seconds, gpu_fps());

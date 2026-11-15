@@ -133,6 +133,9 @@ typedef struct ui_api {
     int (*tree_find_path)(control *, const char *);
 
     void (*edit_select_all)(control *);
+
+    /* ── appended in ui size 3 ── */
+    control *(*status)(window *, const char *); /* status bar, see ctl_status */
 } ui_api_t;
 
 #define OS_API_VERSION 1
@@ -169,6 +172,14 @@ typedef struct os_api {
     int (*file_read)(const char *path, void *buf, int max);
     bool (*file_write)(const char *path, const void *buf, int len);
     int (*snprintf)(char *dst, size_t n, const char *fmt, ...);
+
+    /* ── appended in API size 3 ── */
+    /* Saved settings of this app (os/prefs.h; file /PREFS/<NAME>.INI).
+     * Read in init, write when they change or in destroy. */
+    bool (*prefs_get)(const char *key, char *out, int sz);
+    int (*prefs_get_int)(const char *key, int def);
+    bool (*prefs_set)(const char *key, const char *value);
+    bool (*prefs_set_int)(const char *key, int value);
 } os_api_t;
 
 #endif

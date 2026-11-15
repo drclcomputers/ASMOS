@@ -1,5 +1,6 @@
 /* ASMDraw - small paint program. .PIC = 2x u16 (w, h) + w*h colour bytes */
 #include "os/api.h"
+#include "os/prefs.h"
 
 #define TOOL_PENCIL 0
 #define TOOL_ERASER 1
@@ -29,8 +30,20 @@ typedef struct {
     bool drawing;
     int start_x, start_y, cur_x, cur_y, last_cx, last_cy;
     char path[128];
+    char title[48];
+    char dir[96]; /* folder of the last open/save (remembered) */
     uint32_t status_until;
 } asmdraw_state_t;
+
+/* "NAME.PIC - ASMDraw" once a file is open or saved */
+static void set_title(asmdraw_state_t *s) {
+    const char *base = strrchr(s->path, '/');
+    base = base ? base + 1 : s->path;
+    if (!base[0])
+        return;
+    snprintf(s->title, sizeof(s->title), "%s - ASMDraw", base);
+    s->win->title = s->title;
+}
 
 app_descriptor asmdraw_app;
 
@@ -365,12 +378,22 @@ static void on_tool(control *c, int ev) {
 
 /* ── files ─────────────────────────────────────────────────────────────── */
 
+/* remember the folder for the next file dialog */
+static void note_dir(asmdraw_state_t *s) {
+    strncpy(s->dir, s->path, sizeof(s->dir) - 1);
+    char *slash = strrchr(s->dir, '/');
+    if (slash)
+        *(slash == s->dir ? slash + 1 : slash) = 0;
+}
+
 static void saved_as(void *user, const char *path) {
     asmdraw_state_t *s = user;
     if (!path)
         return;
     strncpy(s->path, path, sizeof(s->path) - 1);
     asmdraw_save(s, s->path);
+    set_title(s);
+    note_dir(s);
 }
 
 static void opened(void *user, const char *path) {
@@ -379,6 +402,8 @@ static void opened(void *user, const char *path) {
         return;
     strncpy(s->path, path, sizeof(s->path) - 1);
     asmdraw_load(s, s->path);
+    set_title(s);
+    note_dir(s);
 }
 
 static void menu_new(void) {
@@ -392,13 +417,13 @@ static void menu_new(void) {
 static void menu_open(void) {
     asmdraw_state_t *s = ui_active_state();
     if (s)
-        dlg_open_file(s->win, "Open picture", "/", "PIC", opened, s);
+        dlg_open_file(s->win, "Open picture", s->dir, "PIC", opened, s);
 }
 static void menu_save_as(void) {
     asmdraw_state_t *s = ui_active_state();
     if (s)
-        dlg_save_file(s->win, "Save picture", "/", "UNTITLED", "PIC", saved_as,
-                      s);
+        dlg_save_file(s->win, "Save picture", s->dir, "UNTITLED", "PIC",
+                      saved_as, s);
 }
 static void menu_save(void) {
     asmdraw_state_t *s = ui_active_state();
@@ -420,8 +445,14 @@ static void menu_about(void) {
 
 static void asmdraw_init(void *state) {
     asmdraw_state_t *s = state;
-    s->win =
-        app_window(s, "ASMDraw", 20, 15, 270, 180, DARK_GRAY, AW_RESIZABLE);
+    /* saved settings (os/prefs.h): last size, colours, tool, folder */
+    int ww = app_prefs_get_int("ASMDRAW", "w", 270);
+    int wh = app_prefs_get_int("ASMDRAW", "h", 180);
+    if (ww < 270 || ww > g_screen_width)
+        ww = 270;
+    if (wh < 180 || wh > g_screen_height - MENUBAR_H)
+        wh = 180;
+    s->win = app_window(s, "ASMDraw", 20, 15, ww, wh, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
     window *w = s->win;
@@ -447,8 +478,7 @@ static void asmdraw_init(void *state) {
     s->palette = ctl_custom(w, 20, 138, 246, 12, paint_palette, on_palette,
                             CS_STRETCH_W | CS_ANCHOR_BOTTOM);
     ctl_set_tooltip(s->palette, "Click: pen colour, Shift+click: background");
-    s->status =
-        ctl_label(w, 20, 151, 246, 10, "", CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    s->status = ctl_status(w, "");
 
     menu *f = window_add_menu(w, "File");
     menu_add_item(f, "New", menu_new);
@@ -459,9 +489,14 @@ static void asmdraw_init(void *state) {
     menu_add_item(f, "Close", menu_close);
     menu_add_item(f, "About", menu_about);
 
-    s->fg_color = BLACK;
-    s->bg_color = WHITE;
-    select_tool(s, TOOL_PENCIL, 0);
+    s->fg_color = (uint8_t)(app_prefs_get_int("ASMDRAW", "pen", BLACK) & 15);
+    s->bg_color = (uint8_t)(app_prefs_get_int("ASMDRAW", "paper", WHITE) & 15);
+    int tool = app_prefs_get_int("ASMDRAW", "tool", TOOL_PENCIL);
+    int brush = app_prefs_get_int("ASMDRAW", "brush", 0);
+    select_tool(s, tool >= 0 && tool < NUM_TOOLS ? tool : TOOL_PENCIL,
+                brush >= 0 && brush < BRUSH_SIZES ? brush : 0);
+    if (!app_prefs_get("ASMDRAW", "dir", s->dir, sizeof(s->dir)))
+        strcpy(s->dir, "/");
     update_canvas_size(s);
 }
 
@@ -481,6 +516,17 @@ static void asmdraw_on_frame(void *state) {
 
 static void asmdraw_destroy(void *state) {
     asmdraw_state_t *s = state;
+    if (s->win) {
+        app_prefs_begin("ASMDRAW");
+        app_prefs_set_int("ASMDRAW", "pen", s->fg_color);
+        app_prefs_set_int("ASMDRAW", "paper", s->bg_color);
+        app_prefs_set_int("ASMDRAW", "tool", s->tool);
+        app_prefs_set_int("ASMDRAW", "brush", s->brush_size);
+        app_prefs_set_int("ASMDRAW", "w", s->win->w);
+        app_prefs_set_int("ASMDRAW", "h", s->win->h);
+        app_prefs_set("ASMDRAW", "dir", s->dir);
+        app_prefs_end();
+    }
     if (s->canvas)
         kfree(s->canvas);
     s->canvas = NULL;
@@ -494,6 +540,8 @@ void asmdraw_open_file(const char *path) {
         return;
     strncpy(s->path, path, sizeof(s->path) - 1);
     asmdraw_load(s, s->path);
+    set_title(s);
+    note_dir(s);
 }
 
 app_descriptor asmdraw_app = {

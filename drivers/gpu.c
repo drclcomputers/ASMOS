@@ -144,3 +144,69 @@ uint32_t gpu_fps(void) { return s_fps; }
 uint32_t gpu_last_blocks(void) { return s_last_blocks; }
 
 gpu_backend_t gpu_backend(void) { return GPU_BACKEND_MODEX; }
+
+/* ── overlay (busy cursor) ─────────────────────────────────────────────── */
+
+#define VGA_SEQ_ADDR_R 0x03C4
+
+/* rows y0..y1, x0..x1 of the last frame (shadow), with pix on top when
+ * given, sent to the screen. Planar: whole 32-pixel blocks are rebuilt. */
+static void overlay_put(int x, int y, int w, int h, const uint8_t *pix) {
+    if (!s_shadow)
+        return;
+    const int sw = SCREEN_WIDTH, shh = SCREEN_HEIGHT;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > sw ? sw : x + w, y1 = y + h > shh ? shh : y + h;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+    uint8_t old_idx = inb(VGA_SEQ_ADDR_R); /* an interrupted blit may be */
+    outb(VGA_SEQ_ADDR, SEQ_MAP_MASK);      /* half way through a plane   */
+    uint8_t old_mask = inb(VGA_SEQ_DATA);
+
+    if (g_video_mode == 0) { /* linear 256-colour */
+        uint8_t *fb = (uint8_t *)MODEX_FB;
+        for (int yy = y0; yy < y1; yy++)
+            for (int xx = x0; xx < x1; xx++) {
+                uint8_t c = s_shadow[yy * sw + xx];
+                if (pix && pix[(yy - y) * w + (xx - x)] != 0xFF)
+                    c = pix[(yy - y) * w + (xx - x)];
+                fb[yy * sw + xx] = c;
+            }
+    } else {
+        uint32_t *fb = (uint32_t *)MODEX_FB;
+        const int blocks = sw / 32;
+        for (int yy = y0; yy < y1; yy++) {
+            for (int b = x0 / 32; b <= (x1 - 1) / 32; b++) {
+                uint8_t px[32];
+                memcpy(px, s_shadow + yy * sw + b * 32, 32);
+                if (pix)
+                    for (int i = 0; i < 32; i++) {
+                        int xx = b * 32 + i;
+                        if (xx >= x0 && xx < x1 &&
+                            pix[(yy - y) * w + (xx - x)] != 0xFF)
+                            px[i] = pix[(yy - y) * w + (xx - x)];
+                    }
+                uint32_t g0 = pack8(px), g1 = pack8(px + 8),
+                         g2 = pack8(px + 16), g3 = pack8(px + 24);
+                for (int p = 0; p < 4; p++) {
+                    int sh = p * 8;
+                    outb(VGA_SEQ_DATA, (uint8_t)(1u << p));
+                    fb[yy * blocks + b] = ((g0 >> sh) & 0xFF) |
+                                          (((g1 >> sh) & 0xFF) << 8) |
+                                          (((g2 >> sh) & 0xFF) << 16) |
+                                          (((g3 >> sh) & 0xFF) << 24);
+                }
+            }
+        }
+    }
+    outb(VGA_SEQ_DATA, old_mask);
+    outb(VGA_SEQ_ADDR, old_idx);
+}
+
+void gpu_overlay(int x, int y, int w, int h, const uint8_t *pix) {
+    overlay_put(x, y, w, h, pix);
+}
+
+void gpu_overlay_clear(int x, int y, int w, int h) {
+    overlay_put(x, y, w, h, NULL);
+}

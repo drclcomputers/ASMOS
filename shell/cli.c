@@ -417,6 +417,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_cd(argument, out_buffer, max_len);
     else if (!strcmp(command, "ls"))
         cmd_ls(argument, out_buffer, max_len);
+    else if (!strcmp(command, "find"))
+        cmd_find(argument, out_buffer, max_len);
     else if (!strcmp(command, "cat"))
         cmd_cat(argument, out_buffer, max_len);
     else if (!strcmp(command, "touch"))

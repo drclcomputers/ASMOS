@@ -1,6 +1,7 @@
 /* Settings - edits g_cfg; wallpaper/sound changes apply at once, Save writes
  * ASMOS.CFG. */
 #include "config/runtime_config.h"
+#include "config/video_cfg.h"
 #include "drivers/sb16.h"
 #include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
@@ -10,7 +11,8 @@ enum { P_WALL, P_SOUND, P_SYSTEM, P_NET };
 typedef struct {
     window *win; /* must stay first */
     control *tabs, *status, *save;
-    control *pattern, *col_a, *col_b;
+    control *pattern, *col_a, *col_b, *screen;
+    int screen_saved; /* mode on the boot disk (config/video_cfg.h) */
     control *vol, *vol_lbl;
     control *ip[4]; /* ip, gateway, netmask, dns */
     bool dirty;
@@ -110,6 +112,11 @@ static void on_ffmode(control *c, int ev) {
     set_dirty(c->user, true);
 }
 
+static void on_screen(control *c, int ev) {
+    if (ev == EV_CHANGE)
+        set_dirty(c->user, true);
+}
+
 static void on_edit(control *c, int ev) {
     if (ev == EV_CHANGE)
         set_dirty(c->user, true);
@@ -134,9 +141,23 @@ static void on_save(control *c, int ev) {
         }
     for (int i = 0; i < 4; i++)
         memcpy(dst[i], tmp[i], 4);
+    int vm = ctl_value(s->screen);
+    bool screen_changed = vm != s->screen_saved;
+    if (screen_changed) {
+        const char *err = video_cfg_set(vm);
+        if (err) {
+            char m[96];
+            snprintf(m, sizeof(m), "Screen mode not saved:\n%s.", err);
+            dlg_message(s->win, "Settings", m);
+            return;
+        }
+        s->screen_saved = vm;
+    }
     if (cfg_save()) {
         set_dirty(s, false);
-        ctl_set_text(s->status, "Saved. Network: applies on restart.");
+        ctl_set_text(s->status, screen_changed
+                                    ? "Saved. Restart for the new screen."
+                                    : "Saved. Network: applies on restart.");
     } else {
         dlg_message(s->win, "Settings", "Could not write ASMOS.CFG.");
     }
@@ -159,17 +180,28 @@ static control *flag(settings_state_t *s, int page, int x, int y,
 
 static void build(settings_state_t *s) {
     window *w = s->win;
-    s->tabs = ctl_tabs(w, 4, 3, 250, "Wallpaper|Sound|System|Network", NULL);
+    s->tabs = ctl_tabs(w, 4, 3, 250, "Display|Sound|System|Network", NULL);
 
-    /* Wallpaper */
-    on_page(s, ctl_label(w, 10, 24, 60, 12, "Pattern:", 0), P_WALL);
-    s->pattern = on_page(s, ctl_combo(w, 76, 24, 110, on_wall), P_WALL);
+    /* Display: screen mode (kept on the boot disk), wallpaper */
+    on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
+    s->screen = on_page(s, ctl_combo(w, 76, 24, 130, on_screen), P_WALL);
+    list_add(s->screen, "320x200, 256 colours");
+    list_add(s->screen, "640x400, 16 colours");
+    int vm = video_cfg_get();
+    s->screen_saved = vm >= 0 ? vm : (g_video_mode ? VIDEO_640 : VIDEO_320);
+    list_set_sel(s->screen, s->screen_saved);
+    ctl_enable(s->screen, vm >= 0);
+    ctl_set_tooltip(s->screen, vm >= 0 ? "Takes effect when you restart"
+                                       : "This boot disk can't store it: "
+                                         "rebuild the image");
+    on_page(s, ctl_label(w, 10, 40, 60, 12, "Pattern:", 0), P_WALL);
+    s->pattern = on_page(s, ctl_combo(w, 76, 40, 110, on_wall), P_WALL);
     for (int i = 0; i < 5; i++)
         list_add(s->pattern, PATTERNS[i]);
-    on_page(s, ctl_label(w, 10, 40, 60, 12, "Color A:", 0), P_WALL);
-    s->col_a = on_page(s, ctl_combo(w, 76, 40, 110, on_wall), P_WALL);
-    on_page(s, ctl_label(w, 10, 56, 60, 12, "Color B:", 0), P_WALL);
-    s->col_b = on_page(s, ctl_combo(w, 76, 56, 110, on_wall), P_WALL);
+    on_page(s, ctl_label(w, 10, 56, 60, 12, "Color A:", 0), P_WALL);
+    s->col_a = on_page(s, ctl_combo(w, 76, 56, 110, on_wall), P_WALL);
+    on_page(s, ctl_label(w, 10, 72, 60, 12, "Color B:", 0), P_WALL);
+    s->col_b = on_page(s, ctl_combo(w, 76, 72, 110, on_wall), P_WALL);
     for (int i = 0; i < 16; i++) {
         list_add(s->col_a, COLORS[i]);
         list_add(s->col_b, COLORS[i]);
@@ -177,8 +209,8 @@ static void build(settings_state_t *s) {
     list_set_sel(s->pattern, g_cfg.wallpaper_pattern % 5);
     list_set_sel(s->col_a, g_cfg.wallpaper_main_color & 15);
     list_set_sel(s->col_b, g_cfg.wallpaper_secondary_color & 15);
-    on_page(s, ctl_label(w, 10, 76, 60, 8, "Preview:", 0), P_WALL);
-    on_page(s, ctl_custom(w, 10, 86, 238, 44, paint_preview, NULL, CS_BORDER),
+    on_page(s, ctl_label(w, 10, 90, 60, 8, "Preview:", 0), P_WALL);
+    on_page(s, ctl_custom(w, 10, 100, 238, 32, paint_preview, NULL, CS_BORDER),
             P_WALL);
 
     /* Sound */
@@ -231,6 +263,12 @@ static void build(settings_state_t *s) {
                           P_SYSTEM);
     r1->id = 0;
     r2->id = 1;
+    control *np = flag(s, P_SYSTEM, 10, 118,
+                       "No app memory protection (restart)", &g_cfg.no_paging);
+    control *fe = flag(s, P_SYSTEM, 10, 130, "Emulate the maths chip (restart)",
+                       &g_cfg.fpu_emulate);
+    ctl_set_tooltip(fe, "Test the FPU emulator on a machine that has an FPU");
+    ctl_set_tooltip(np, "Paging keeps apps out of each other's memory");
 
     /* Network */
     flag(s, P_NET, 10, 24, "Networking enabled", &g_cfg.networking_enabled);

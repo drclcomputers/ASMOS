@@ -35,8 +35,8 @@ static void update_status(teditor_state_t *s, bool force) {
     s->last_col = col;
     s->last_dirty = s->dirty;
     char b[64];
-    snprintf(b, sizeof(b), "Ln %d  Col %d   %d lines   %s", line, col,
-             edit_line_count(s->edit), s->dirty ? "modified" : "");
+    snprintf(b, sizeof(b), "%d lines  %s\tLn %d  Col %d",
+             edit_line_count(s->edit), s->dirty ? "modified" : "", line, col);
     ctl_set_text(s->status, b);
     set_title(s);
 }
@@ -245,8 +245,7 @@ static void teditor_init(void *state) {
     s->win->on_close = on_close;
     s->edit = ctl_edit(s->win, 2, 2, 254, 144, "", TEXT_MAX,
                        ES_MULTILINE | CS_STRETCH_W | CS_STRETCH_H, on_edit);
-    s->status = ctl_label(s->win, 2, 147, 246, 11, "",
-                          CS_BORDER | CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    s->status = ctl_status(s->win, "");
     menu *f = window_add_menu(s->win, "File");
     menu_add_item(f, "New", menu_new);
     menu_add_item(f, "Open...", menu_open);

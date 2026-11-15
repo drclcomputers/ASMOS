@@ -101,12 +101,7 @@ static int item_at(int mx, int my) {
 static void run(int i) {
     menu_item it = s_menu.items[i]; /* the action may build a new popup */
     s_open = false;
-    if (it.dyn_state && g_menu_call_hook)
-        g_menu_call_hook(it.dyn_state, it.action_ud, it.userdata);
-    else if (it.action_ud)
-        it.action_ud(it.userdata);
-    else if (it.action)
-        it.action();
+    menu_item_run(&it);
 }
 
 static void step(int dir) {

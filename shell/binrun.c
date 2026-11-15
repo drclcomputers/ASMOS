@@ -5,7 +5,7 @@
 #include "lib/string.h"
 #include "os/scheduler.h"
 
-#define BINRUN_PRIVATE_PAGES 128u
+#define BINRUN_PRIVATE_PAGES 32u /* 128 KB at PROC_PRIVATE_VADDR_BASE */
 #define BINRUN_MAX_SIZE 65536
 
 static term_context_t *s_active_ctx = NULL;

@@ -4,7 +4,6 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 
-
 os_config_t g_cfg;
 
 void cfg_init_defaults(void) {
@@ -21,10 +20,22 @@ void cfg_init_defaults(void) {
     g_cfg.filef_single_window = 0;
     g_cfg.reduce_motion = 0;
     g_cfg.networking_enabled = 1;
-    g_cfg.ip[0] = 10; g_cfg.ip[1] = 0; g_cfg.ip[2] = 2; g_cfg.ip[3] = 15;
-    g_cfg.gateway[0] = 10; g_cfg.gateway[1] = 0; g_cfg.gateway[2] = 2; g_cfg.gateway[3] = 2;
-    g_cfg.netmask[0] = 255; g_cfg.netmask[1] = 255; g_cfg.netmask[2] = 255; g_cfg.netmask[3] = 0;
-    g_cfg.dns_server[0] = 8; g_cfg.dns_server[1] = 8; g_cfg.dns_server[2] = 8; g_cfg.dns_server[3] = 8;
+    g_cfg.ip[0] = 10;
+    g_cfg.ip[1] = 0;
+    g_cfg.ip[2] = 2;
+    g_cfg.ip[3] = 15;
+    g_cfg.gateway[0] = 10;
+    g_cfg.gateway[1] = 0;
+    g_cfg.gateway[2] = 2;
+    g_cfg.gateway[3] = 2;
+    g_cfg.netmask[0] = 255;
+    g_cfg.netmask[1] = 255;
+    g_cfg.netmask[2] = 255;
+    g_cfg.netmask[3] = 0;
+    g_cfg.dns_server[0] = 8;
+    g_cfg.dns_server[1] = 8;
+    g_cfg.dns_server[2] = 8;
+    g_cfg.dns_server[3] = 8;
 }
 
 bool cfg_load(void) {
@@ -62,8 +73,8 @@ bool cfg_save(void) {
 
     int written = fs_write(&f, &g_cfg, sizeof(os_config_t));
     fs_close(&f);
-    
+
     *(volatile uint8_t *)0x0602 = (uint8_t)g_video_mode;
-    
+
     return written == sizeof(os_config_t);
 }

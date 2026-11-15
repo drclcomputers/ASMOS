@@ -1,5 +1,6 @@
 #include "os/os.h"
 #include "os/app_registry.h"
+#include "os/appguard.h"
 #include "os/appload.h"
 #include "os/error.h"
 #include "os/scheduler.h"
@@ -60,7 +61,13 @@ void os_uninstall_app(app_descriptor *desc) {
 window *os_instance_window(const app_instance_t *a) {
     if (!a || !a->state || !a->desc || a->desc->opaque_state)
         return NULL;
-    return *(window **)a->state;
+    /* the state may be in another app's memory: read it as the kernel */
+    uint32_t cr3 = vmm_current();
+    if (cr3 != g_kernel_pd_phys)
+        vmm_load_kernel();
+    window *w = *(window **)a->state;
+    vmm_switch(cr3);
+    return w;
 }
 
 app_instance_t *os_launch_app(app_descriptor *desc) {
@@ -102,9 +109,12 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
     app->desc = desc;
     app->task_slot = -1;
     app->wants_quit = false;
+    app->suspended = false;
 
     if (desc->state_size > 0) {
-        app->state = kmalloc(desc->state_size);
+        app->state = desc->state_alloc
+                         ? desc->state_alloc(desc, desc->state_size)
+                         : kmalloc(desc->state_size);
         if (!app->state) {
             ERR_WARN_REPORT(ERR_APP_ALLOC, desc->name ? desc->name : "?");
             return NULL;
@@ -191,14 +201,82 @@ bool os_close_own_instance(window *win) {
 }
 
 /* Run one on_frame for every live app (scheduler drives the frame rate). */
+int g_os_stopped_app = -1;
+
+app_instance_t *os_instance_of_window(window *w) {
+    while (w && w->modal_owner) /* a dialog belongs to its owner's app */
+        w = w->modal_owner;
+    if (!w)
+        return NULL;
+    for (int i = 0; i < MAX_RUNNING_APPS; i++) {
+        app_instance_t *a = &running_apps[i];
+        if (a->running && os_instance_window(a) == w)
+            return a;
+    }
+    return NULL;
+}
+
+static const char *fault_text(const appfault_t *f) {
+    switch (f->vector) {
+    case APPFAULT_KILLED:
+        return "it was ended (not responding)";
+    case 0:
+        return "divide error";
+    case 6:
+        return "invalid opcode";
+    case 7:
+        return "no maths coprocessor";
+    case 13:
+        return "general protection fault";
+    case 14:
+        return f->cr2 < 0x1000 ? "NULL pointer" : "page fault";
+    default:
+        return "CPU exception";
+    }
+}
+
+void os_guard_call(app_instance_t *culprit, void (*fn)(void *, void *), void *a,
+                   void *b, const char *what) {
+    if (culprit && culprit->suspended)
+        return; /* not responding: leave it alone */
+    appfault_t f;
+    if (appguard_call2(fn, a, b, &f))
+        return;
+    vmm_load_kernel();
+    if (f.vector == APPFAULT_STOPPED) {
+        if (culprit) {
+            culprit->suspended = true;
+            g_os_stopped_app = (int)(culprit - running_apps);
+        }
+        return; /* the watchdog opens Monitor */
+    }
+    char msg[160];
+    const char *name = culprit && culprit->desc && culprit->desc->name
+                           ? culprit->desc->name
+                           : "The system";
+    if (f.vector == APPFAULT_KILLED)
+        snprintf(msg, sizeof(msg), "%s was not responding\nand has been ended.",
+                 name);
+    else
+        snprintf(msg, sizeof(msg), "%s stopped in %s:\n%s (EIP %08X)", name,
+                 what, fault_text(&f), f.eip);
+    if (culprit) {
+        culprit->suspended = true; /* don't run its destroy either */
+        os_quit_app(culprit);
+    }
+    dlg_post_message(f.vector == APPFAULT_KILLED ? "App Ended" : "App Crashed",
+                     msg);
+}
+
+static void call_frame(void *fn, void *state) { ((app_frame_fn)fn)(state); }
+
 void os_tick_apps(void) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *app = &running_apps[i];
-        if (app->running && !app->wants_quit) {
-            if (app->desc && app->desc->on_frame) {
-                app->desc->on_frame(app->state);
-            }
-        }
+        if (app->running && !app->wants_quit && !app->suspended && app->desc &&
+            app->desc->on_frame)
+            os_guard_call(app, call_frame, (void *)app->desc->on_frame,
+                          app->state, "on_frame");
     }
 }
 
@@ -209,13 +287,16 @@ void os_reap_dead_apps(void) {
             continue;
 
         window *own = os_instance_window(app);
-        if (app->desc && app->desc->destroy)
+        if (app->desc && app->desc->destroy && !app->suspended)
             app->desc->destroy(app->state);
         if (own && wm_is_registered(own)) /* app didn't clean up: we do */
             wm_unregister(own);
 
         if (app->state) {
-            kfree(app->state);
+            if (app->desc && app->desc->state_free)
+                app->desc->state_free(app->desc, app->state);
+            else
+                kfree(app->state);
             app->state = NULL;
         }
 
@@ -223,6 +304,9 @@ void os_reap_dead_apps(void) {
             scheduler_kill_task(app->task_slot);
 
         app->running = false;
+        app->suspended = false;
+        if (g_os_stopped_app == i)
+            g_os_stopped_app = -1;
         app->wants_quit = false;
         app->desc = NULL;
         app->task_slot = -1;

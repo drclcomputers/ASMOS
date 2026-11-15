@@ -21,7 +21,7 @@ static void fill_tasks(monitor_state_t *s) {
     int n = 0;
     for (int i = 0; i < MAX_RUNNING_APPS && n < 63; i++)
         sig[n++] = (running_apps[i].running && !running_apps[i].wants_quit)
-                       ? 'A' + (i % 26)
+                       ? (running_apps[i].suspended ? 'a' : 'A') + (i % 26)
                        : '.';
     sig[n] = 0;
     if (strcmp(sig, s->sig) == 0)
@@ -29,6 +29,10 @@ static void fill_tasks(monitor_state_t *s) {
     strcpy(s->sig, sig);
 
     uint32_t keep = list_data(s->list, list_sel(s->list));
+    if (g_os_stopped_app >= 0) { /* just stopped by the watchdog: show it */
+        keep = (uint32_t)g_os_stopped_app;
+        g_os_stopped_app = -1;
+    }
     list_clear(s->list);
     list_add(s->list, "App\tKind\tWindow");
     int pick = 1;
@@ -40,7 +44,8 @@ static void fill_tasks(monitor_state_t *s) {
         char row[80];
         snprintf(row, sizeof(row), "%s\t%s\t%s", a->desc->name,
                  appload_find(a->desc->name) ? ".APP" : "built-in",
-                 !w             ? "-"
+                 a->suspended   ? "NOT RESPONDING"
+                 : !w           ? "-"
                  : w->minimized ? "minimized"
                                 : "open");
         int idx = list_add_data(s->list, row, (uint32_t)i);
@@ -96,6 +101,8 @@ static app_instance_t *selected_app(monitor_state_t *s) {
 
 static void do_switch(monitor_state_t *s) {
     app_instance_t *a = selected_app(s);
+    if (a)
+        a->suspended = false; /* give a stopped app another go */
     window *w = a ? os_instance_window(a) : NULL;
     if (!w)
         return;
@@ -109,10 +116,10 @@ static void do_end(monitor_state_t *s) {
     if (!a || a->desc == &monitor_app)
         return;
     window *w = os_instance_window(a);
-    if (w)
+    if (w && !a->suspended)
         wm_close(w); /* lets the app ask "save changes?" etc. */
     else
-        os_quit_app(a);
+        os_quit_app(a); /* not responding: none of its code runs */
 }
 
 static void on_button(control *c, int ev) {

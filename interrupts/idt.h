@@ -18,6 +18,7 @@
 extern volatile uint32_t pit_seconds;
 
 void idt_init(void);
+void idt_emulate_fpu(void); /* #NM -> lib/fpu_emu.c */
 /* Point IRQ `irq` (0-15) at `stub` and unmask it (and the cascade). The
  * handler must send EOI to the slave PIC (0xA0) too when irq >= 8. */
 void idt_set_irq(int irq, void (*stub)(void));

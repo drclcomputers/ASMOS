@@ -65,6 +65,7 @@ typedef enum {
     CTL_TABS,
     CTL_CUSTOM,
     CTL_TREE,
+    CTL_STATUS,
 } ctl_type;
 
 /* ── styles ──────────────────────────────────────────────────────────────
@@ -181,6 +182,11 @@ control *ctl_radio(window *w, int x, int y, int cw, const char *text, int group,
                    bool selected, ctl_handler h);
 control *ctl_edit(window *w, int x, int y, int cw, int ch, const char *text,
                   int max_len, uint32_t style, ctl_handler h);
+/* Status bar along the bottom of the client area (stretches with it). It
+ * keeps clear of the resize grip of resizable windows by itself. Text
+ * "left\tright": the part after a tab is right-aligned. */
+control *ctl_status(window *w, const char *text);
+
 /* Tree view (see "tree_*"). style: TS_FOLDERS, CS_* layout. */
 control *ctl_tree(window *w, int x, int y, int cw, int ch, uint32_t style,
                   ctl_handler h);
@@ -279,6 +285,13 @@ bool ctl_mouse_captured(void);
 /* Invoke a handler; dynamic (.APP) windows route this through the fault
  * guard so a crash kills only that app. */
 extern void (*g_ctl_invoke_hook)(control *c, int ev);
+/* Run app code that belongs to window w (paint, on_draw) guarded: .APP
+ * windows through g_app_call_hook (os/appload.c), built-in ones through
+ * os_guard_call. */
+extern void (*g_app_call_hook)(window *w, void (*fn)(void *, void *), void *a,
+                               void *b, const char *what);
+void ui_guard(window *w, void (*fn)(void *, void *), void *a, void *b,
+              const char *what);
 void ctl_invoke(control *c, int ev);
 
 /* theme */

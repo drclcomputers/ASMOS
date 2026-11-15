@@ -4,6 +4,8 @@
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
+#include "os/os.h"
+#include "ui/window.h"
 
 #include "config/config.h"
 #include "drivers/mouse.h"
@@ -72,6 +74,25 @@ void menu_add_separator(menu *m) {
     it->action_ud = NULL;
     it->dyn_state = NULL;
     it->disabled = true;
+}
+
+static void call_item(void *item, void *unused) {
+    const menu_item *it = (const menu_item *)item;
+    (void)unused;
+    if (it->action_ud)
+        it->action_ud(it->userdata);
+    else if (it->action)
+        it->action();
+}
+
+/* .APP items through their hook; built-in ones guarded (os.h) */
+void menu_item_run(const menu_item *item) {
+    menu_item it = *item; /* the command may rebuild its menu */
+    if (it.dyn_state && g_menu_call_hook)
+        g_menu_call_hook(it.dyn_state, it.action_ud, it.userdata);
+    else if (it.action_ud || it.action)
+        os_guard_call(os_instance_of_window(wm_focused_window()), call_item,
+                      &it, NULL, "a menu command");
 }
 
 void menu_enable_last(menu *m, bool on) {
@@ -222,15 +243,8 @@ void menubar_update(menubar *mb) {
             int idx = (mouse.y - dy) / MENU_ITEM_H;
             if (idx >= 0 && idx < m->item_count) {
                 menu_item *it = &m->items[idx];
-                if (it->label && !it->disabled) {
-                    if (it->dyn_state && g_menu_call_hook)
-                        g_menu_call_hook(it->dyn_state, it->action_ud,
-                                         it->userdata);
-                    else if (it->action_ud)
-                        it->action_ud(it->userdata);
-                    else if (it->action)
-                        it->action();
-                }
+                if (it->label && !it->disabled)
+                    menu_item_run(it);
             }
             menubar_close_all(mb);
         } else {

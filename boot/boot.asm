@@ -119,7 +119,7 @@ start:
     call read_sectors
 
     ; ── Hand-off ─────────────────────────────────────────────────────────────
-    mov  byte [0x0602], 0x00    ; video mode flag for stage 2 (see stage 2)
+    ; (the video mode is kept in stage 2 itself: boot_stage2.asm)
     mov  al, [boot_drive]
     mov  [BOOTINFO_DRIVE], al
     mov  al, [use_lba]

@@ -85,10 +85,14 @@
 #define Y_KEY 0x15
 #define Z_KEY 0x2C
 
+#define LWIN_KEY 0x5B /* E0 5B / E0 5C: Windows keys (101-key boards lack) */
+#define RWIN_KEY 0x5C
+
 typedef struct {
     bool shift;
     bool ctrl;
     bool alt;
+    bool win; /* a Windows key is held */
     bool capslock;
     char last_char;
     uint8_t last_scancode;

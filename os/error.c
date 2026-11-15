@@ -241,7 +241,10 @@ void boot_check_fat(void) {
 
 void boot_check_pci(void) {
     boot_puts("CPU / Bus\n", LIGHT_GRAY);
-    boot_check_line(cpu_model_str(), true, cpu_has_fpu() ? "FPU" : "no FPU");
+    boot_check_line(cpu_model_str(), true,
+                    !cpu_has_fpu()       ? "FPU emulated"
+                    : cpu_fpu_emulated() ? "FPU (emulated)"
+                                         : "FPU");
     char d[40];
     if (pci_mechanism())
         snprintf(d, sizeof(d), "mech #%d, %d devices", pci_mechanism(),

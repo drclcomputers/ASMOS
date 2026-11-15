@@ -63,4 +63,32 @@ void fo_show_info(window *owner, const char *path);
 /* Message for a failed operation (does nothing when err is NULL). */
 void fo_report(window *owner, const char *title, const char *err);
 
+/* ── Trash ──
+ * /TRASH on HDA (hidden, protected). Deleting on HDA moves things there;
+ * each item's original folder is kept (/PREFS/TRASH.INI) for Put Back.
+ * Items on other drives, or already in the Trash, are deleted for good. */
+#define FO_TRASH "/TRASH"
+bool fo_in_trash(const char *path);     /* inside /TRASH (not /TRASH) */
+bool fo_trashable(const char *path);    /* on HDA, outside the Trash */
+const char *fo_trash(const char *path); /* move it to the Trash */
+const char *fo_put_back(const char *trash_path);
+const char *fo_empty_trash(void);
+int fo_trash_count(void);
+bool fo_is_trash(const char *path); /* /TRASH itself */
+/* Empty the Trash after asking */
+void fo_ask_empty_trash(window *owner, fo_done_cb done, void *user);
+
+/* ── search ── */
+
+/* Name test: with * or ? a whole-name pattern (case ignored), else
+ * "contains". */
+bool fo_match(const char *name, const char *pattern);
+
+/* Walks root and its subfolders (depth <= 8) calling cb for each match;
+ * cb returns false to stop. Returns the number of matches. */
+typedef bool (*fo_find_cb)(const char *path, bool is_dir, uint32_t size,
+                           void *user);
+int fo_find(const char *root, const char *pattern, bool hidden, fo_find_cb cb,
+            void *user);
+
 #endif

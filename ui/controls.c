@@ -83,6 +83,7 @@ static bool focusable(const control *c) {
         return false;
     switch (c->type) {
     case CTL_LABEL:
+    case CTL_STATUS:
     case CTL_GROUP:
     case CTL_PROGRESS:
         return false;
@@ -97,13 +98,18 @@ static bool inside(int px, int py, int x, int y, int w, int h) {
     return px >= x && py >= y && px < x + w && py < y + h;
 }
 
+static void call_handler(void *c, void *ev) {
+    ((control *)c)->handler((control *)c, (int)(uintptr_t)ev);
+}
+
 void ctl_invoke(control *c, int ev) {
     if (!c || !c->handler)
         return;
     if (g_ctl_invoke_hook && c->win && c->win->dyn_state)
         g_ctl_invoke_hook(c, ev);
-    else
-        c->handler(c, ev);
+    else /* built-in apps run guarded too (os.h) */
+        os_guard_call(os_instance_of_window(c->win), call_handler, c,
+                      (void *)(uintptr_t)ev, "a control handler");
 }
 
 static void set_text_raw(control *c, const char *t) {
@@ -373,6 +379,17 @@ control *ctl_create(window *w, ctl_type type, int x, int y, int cw, int ch,
 control *ctl_label(window *w, int x, int y, int cw, int ch, const char *text,
                    uint32_t style) {
     return ctl_create(w, CTL_LABEL, x, y, cw, ch, text, style, NULL);
+}
+
+#define STATUS_H 11
+
+control *ctl_status(window *w, const char *text) {
+    int x, y, cw, ch;
+    if (!w)
+        return NULL;
+    win_client_rect(w, &x, &y, &cw, &ch);
+    return ctl_create(w, CTL_STATUS, 0, ch - STATUS_H, cw, STATUS_H, text,
+                      CS_STRETCH_W | CS_ANCHOR_BOTTOM, NULL);
 }
 
 control *ctl_button(window *w, int x, int y, int cw, int ch, const char *text,
@@ -925,6 +942,30 @@ static void draw_label(control *c) {
     }
 }
 
+/* Sunken text field; the resize grip's corner is left free. */
+static void draw_status(control *c) {
+    int grip = (c->win && c->win->resizable) ? RESIZE_BUTTON + 2 : 0;
+    int fw = c->aw - grip;
+    fill_rect(c->ax, c->ay, c->aw, c->ah, TH_FACE);
+    th_sunken(c->ax + 1, c->ay + 1, fw - 1, c->ah - 1,
+              c->bg != 0xFF ? c->bg : TH_FACE);
+    const char *tab = strchr(c->text, '\t');
+    int n = tab ? (int)(tab - c->text) : (int)strlen(c->text);
+    int y = c->ay + (c->ah - 6) / 2 + 1;
+    int room = (fw - 8) / 5;
+    uint8_t col = fgc(c, TH_TEXT);
+    if (tab) { /* right part first: the left part gets what is left */
+        int rn = (int)strlen(tab + 1);
+        if (rn > room)
+            rn = room;
+        draw_text_n(c->ax + fw - 3 - rn * 5, y, tab + 1, rn, col, 2);
+        room -= rn + 1;
+    }
+    if (n > room)
+        n = room > 0 ? room : 0;
+    draw_text_n(c->ax + 4, y, c->text, n, col, 2);
+}
+
 static void draw_button(control *c) {
     bool down = c->pressed || ((c->style & CS_TOGGLE) && c->value);
     uint8_t face = bgc(c, TH_FACE);
@@ -1153,18 +1194,39 @@ static void draw_tabs(control *c) {
     }
 }
 
+void (*g_app_call_hook)(window *w, void (*fn)(void *, void *), void *a, void *b,
+                        const char *what);
+
+void ui_guard(window *w, void (*fn)(void *, void *), void *a, void *b,
+              const char *what) {
+    if (w && w->dyn_state && g_app_call_hook)
+        g_app_call_hook(w, fn, a, b, what);
+    else
+        os_guard_call(os_instance_of_window(w), fn, a, b, what);
+}
+
+static void call_paint(void *ctl, void *rect) {
+    control *c = (control *)ctl;
+    const int *r = (const int *)rect;
+    c->paint(c, r[0], r[1], r[2], r[3]);
+}
+
+static void paint(control *c, int x, int y, int w, int h) {
+    int r[4] = {x, y, w, h};
+    if (c->paint)
+        ui_guard(c->win, call_paint, c, r, "painting");
+}
+
 static void draw_custom(control *c) {
     if (c->style & CS_BORDER) {
         th_sunken(c->ax, c->ay, c->aw, c->ah, bgc(c, TH_FIELD));
         clip_push(c->ax + 2, c->ay + 2, c->aw - 4, c->ah - 4);
-        if (c->paint)
-            c->paint(c, c->ax + 2, c->ay + 2, c->aw - 4, c->ah - 4);
+        paint(c, c->ax + 2, c->ay + 2, c->aw - 4, c->ah - 4);
         clip_pop();
     } else {
         if (c->bg != 0xFF)
             fill_rect(c->ax, c->ay, c->aw, c->ah, c->bg);
-        if (c->paint)
-            c->paint(c, c->ax, c->ay, c->aw, c->ah);
+        paint(c, c->ax, c->ay, c->aw, c->ah);
     }
     if (c->focused && (c->style & CS_FOCUSABLE) && (c->style & CS_BORDER))
         draw_rect(c->ax + 1, c->ay + 1, c->aw - 2, c->ah - 2, TH_SEL_BG);
@@ -1183,6 +1245,9 @@ void ctl_draw_all(window *w) {
         switch (c->type) {
         case CTL_LABEL:
             draw_label(c);
+            break;
+        case CTL_STATUS:
+            draw_status(c);
             break;
         case CTL_BUTTON:
             draw_button(c);

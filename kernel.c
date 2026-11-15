@@ -1,3 +1,4 @@
+#include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/lpt.h"
 #include "drivers/pci.h"
@@ -93,6 +94,8 @@ static void dbg_bar(int col, uint8_t color) {
     }
 }
 
+static uint32_t s_ram_top; /* end of RAM (or of what we use of it) */
+
 static void detect_heap_range(void) {
     dbg_bar(0, 4);
 
@@ -133,6 +136,22 @@ static void detect_heap_range(void) {
     }
 
     dbg_bar(5, 3);
+
+    /* Frame pool for apps (their code, heaps, page tables) at the top:
+     * a quarter of the heap range, 128 KB .. 8 MB, page aligned. */
+    uint32_t pool = (heap_top - heap_bot) / 4;
+    if (heap_top - heap_bot < 0x100000) /* small machine: the minimum */
+        pool = 0x20000;
+    if (pool < 0x20000)
+        pool = 0x20000;
+    if (pool > PMM_MAX_FRAMES * PMM_PAGE_SIZE)
+        pool = PMM_MAX_FRAMES * PMM_PAGE_SIZE;
+    uint32_t pool_base = (heap_top - pool) & ~(PMM_PAGE_SIZE - 1);
+    if (pool_base > heap_bot + 0x40000) { /* keep >= 256 KB kernel heap */
+        pmm_init(pool_base, (heap_top - pool_base) / PMM_PAGE_SIZE);
+        heap_top = pool_base;
+    }
+    s_ram_top = total_ram > heap_top ? total_ram : heap_top;
 
     alloc_set_range(heap_bot, heap_top);
 
@@ -192,6 +211,7 @@ void kmain(void) {
     lpt_init();
     boot_check_input();
     ata_init(*(volatile uint8_t *)0x0608); /* BIOS boot drive from stage 1 */
+    video_cfg_init(*(volatile uint8_t *)0x0608); /* where the mode is kept */
     fs_mount();
     boot_check_ata();
     boot_check_fat();
@@ -199,6 +219,15 @@ void kmain(void) {
     cfg_init_defaults();
     if (!cfg_load()) {
         cfg_save();
+    }
+
+    /* Paging: app memory protection (lib/vmm.h). Settings > System can
+     * turn it off (no_paging) should a machine misbehave with it. */
+    if (!g_cfg.no_paging)
+        vmm_init(s_ram_top);
+    if (g_cfg.fpu_emulate && cpu_has_fpu()) { /* Settings: test the emulator */
+        cpu_emulate_fpu();
+        idt_emulate_fpu();
     }
 
     if (g_cfg.sound_enabled) {

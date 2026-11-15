@@ -113,7 +113,7 @@ extern const char *g_drive_paths[DRIVE_COUNT];
 #define VFS_MOUNT_COUNT 3
 extern vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT];
 
-#define PROTECTED_PATH_COUNT 5
+#define PROTECTED_PATH_COUNT 7
 extern const char *g_protected_paths[PROTECTED_PATH_COUNT];
 
 extern fat_vol_t g_drives[DRIVE_COUNT];
