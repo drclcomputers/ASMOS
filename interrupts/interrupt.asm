@@ -8,6 +8,7 @@ extern sermouse_irq_handler
 global isr_timer
 isr_timer:
     pusha                       ; save registers
+    cld
 
     call pit_tick_handler
 
@@ -20,6 +21,7 @@ isr_timer:
 global isr_spurious
 isr_spurious:
     pusha
+    cld
     mov al, 0x20
     out 0x20, al
     popa
@@ -28,6 +30,7 @@ isr_spurious:
 global isr_sb16
 isr_sb16:
     pusha
+    cld
     call sb16_irq_handler
     popa
     iret
@@ -35,6 +38,7 @@ isr_sb16:
 global isr_ne2000
 isr_ne2000:
     pusha
+    cld
     call ne2000_irq_handler
     popa
     iret
@@ -42,6 +46,7 @@ isr_ne2000:
 global isr_sermouse
 isr_sermouse:
     pusha
+    cld
     call sermouse_irq_handler
     popa
     iret

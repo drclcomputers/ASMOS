@@ -11,6 +11,8 @@ void draw_dot(int x, int y, unsigned char color);
 void draw_line(int x0, int y0, int x1, int y1, unsigned char color);
 void draw_rect(int x, int y, int w, int h, unsigned char color);
 void fill_rect(int x, int y, int w, int h, unsigned char color);
+/* copy a block of pixels (row pitch `stride`), clipped */
+void draw_pixels(int x, int y, int w, int h, const uint8_t *src, int stride);
 void draw_char(int x, int y, char c, unsigned char color, int size);
 void draw_string(int x, int y, const char *str, unsigned char color, int size);
 void draw_text_n(int x, int y, const char *str, int n, unsigned char color,

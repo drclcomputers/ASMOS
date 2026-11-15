@@ -264,9 +264,8 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
 static void paint_canvas(control *c, int x, int y, int w, int h) {
     asmdraw_state_t *s = c->user;
     update_canvas_size(s);
-    for (int yy = 0; yy < s->canvas_h && yy < h; yy++)
-        for (int xx = 0; xx < s->canvas_w && xx < w; xx++)
-            draw_dot(x + xx, y + yy, s->canvas[yy * s->canvas_w + xx]);
+    draw_pixels(x, y, s->canvas_w < w ? s->canvas_w : w,
+                s->canvas_h < h ? s->canvas_h : h, s->canvas, s->canvas_w);
     if (s->drawing && (s->tool == TOOL_LINE || s->tool == TOOL_RECT)) {
         int x0 = x + s->start_x, y0 = y + s->start_y;
         int x1 = x + s->cur_x, y1 = y + s->cur_y;

@@ -37,7 +37,41 @@ void draw_dot(int x, int y, unsigned char color) {
     BACKBUF[y * SCREEN_WIDTH + x] = color;
 }
 
+/* vertical run, clipped once */
+static void vline(int x, int y0, int y1, unsigned char color) {
+    if (y0 > y1) {
+        int t = y0;
+        y0 = y1;
+        y1 = t;
+    }
+    if (x < clip_x0 || x >= clip_x1 || x >= SCREEN_WIDTH)
+        return;
+    if (y0 < clip_y0)
+        y0 = clip_y0;
+    if (y1 >= clip_y1)
+        y1 = clip_y1 - 1;
+    if (y1 >= SCREEN_HEIGHT)
+        y1 = SCREEN_HEIGHT - 1;
+    unsigned char *p = BACKBUF + y0 * SCREEN_WIDTH + x;
+    for (int y = y0; y <= y1; y++, p += SCREEN_WIDTH)
+        *p = color;
+}
+
 void draw_line(int x0, int y0, int x1, int y1, unsigned char color) {
+    /* bevels and borders are nearly all straight: no per-dot Bresenham */
+    if (y0 == y1) {
+        if (x0 > x1) {
+            int t = x0;
+            x0 = x1;
+            x1 = t;
+        }
+        fill_rect(x0, y0, x1 - x0 + 1, 1, color);
+        return;
+    }
+    if (x0 == x1) {
+        vline(x0, y0, y1, color);
+        return;
+    }
     int dx = abs(x1 - x0);
     int dy = -abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -85,6 +119,30 @@ void fill_rect(int x, int y, int w, int h, unsigned char color) {
         memset(buf + row * SCREEN_WIDTH + x0, color, x1 - x0);
 }
 
+/* A w x h block of pixels (row pitch `stride`) put at x, y: clipped once,
+ * then copied a row at a time. Much faster than draw_dot per pixel. */
+void draw_pixels(int x, int y, int w, int h, const uint8_t *src, int stride) {
+    if (w <= 0 || h <= 0 || !src)
+        return;
+    int x0 = x < clip_x0 ? clip_x0 : x;
+    int y0 = y < clip_y0 ? clip_y0 : y;
+    int x1 = x + w > clip_x1 ? clip_x1 : x + w;
+    int y1 = y + h > clip_y1 ? clip_y1 : y + h;
+    if (x1 > SCREEN_WIDTH)
+        x1 = SCREEN_WIDTH;
+    if (y1 > SCREEN_HEIGHT)
+        y1 = SCREEN_HEIGHT;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+    const uint8_t *in = src + (y0 - y) * stride + (x0 - x);
+    unsigned char *out = BACKBUF + y0 * SCREEN_WIDTH + x0;
+    for (int row = y0; row < y1; row++) {
+        memcpy(out, in, (uint32_t)(x1 - x0));
+        in += stride;
+        out += SCREEN_WIDTH;
+    }
+}
+
 void draw_char(int x, int y, char c, unsigned char color, int size) {
     if (y < 0 || y >= SCREEN_HEIGHT)
         return;
@@ -102,6 +160,20 @@ void draw_char(int x, int y, char c, unsigned char color, int size) {
         maxrow = 6;
         maxcol = 4;
         startbit = 0x08;
+    }
+    const unsigned char *font = (size == 1) ? font1_data : font2_data;
+    /* fast path: the whole glyph is inside the clip, so no per-dot checks */
+    if (x >= clip_x0 && y >= clip_y0 && x + maxcol <= clip_x1 &&
+        y + maxrow <= clip_y1 && x + maxcol <= SCREEN_WIDTH &&
+        y + maxrow <= SCREEN_HEIGHT) {
+        unsigned char *out = BACKBUF + y * SCREEN_WIDTH + x;
+        for (int row = 0; row < maxrow; row++, out += SCREEN_WIDTH) {
+            unsigned char bits = font[offset + row];
+            for (int col = 0; bits && col < maxcol; col++)
+                if (bits & (startbit >> col))
+                    out[col] = color;
+        }
+        return;
     }
     for (int row = 0; row < maxrow; row++) {
         if (y + row < 0 || y + row >= SCREEN_HEIGHT)
@@ -139,10 +211,6 @@ int text_width(const char *str, int size) {
 void blit(void) { gpu_blit(); }
 
 void clear_screen(unsigned char color) {
-    uint32_t *buf = (uint32_t *)BACKBUF;
-    uint32_t val = (uint32_t)color | ((uint32_t)color << 8) |
-                   ((uint32_t)color << 16) | ((uint32_t)color << 24);
-    uint32_t cnt = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) / 4;
-    for (uint32_t i = 0; i < cnt; i++)
-        buf[i] = val;
+    memset(BACKBUF, color,
+           (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT)); /* rep stosd */
 }

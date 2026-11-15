@@ -88,6 +88,7 @@ __asm__(
     "EXC_NOERR 31\n"
     "exc_common:\n"
     "  pusha\n"
+    "  cld\n"
     "  movl %cr2, %eax\n"
     "  pushl %eax\n"
     "  pushl 44(%esp)\n" /* eip */

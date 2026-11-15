@@ -52,16 +52,19 @@ void draw_wallpaper_pattern(void) {
                       (y / 5) % 2 == 0 ? main_col : sec_col);
         break;
     case WALLPAPER_VERTICAL_STRIPES:
+    case WALLPAPER_DOTS: {
+        /* build one row, then copy it: whole rows at memcpy speed */
+        static uint8_t row[640];
+        bool dots = g_cfg.wallpaper_pattern == WALLPAPER_DOTS;
         for (int x = 0; x < SCREEN_WIDTH; x++)
-            draw_line(x, 0, x, SCREEN_HEIGHT - 1,
-                      (x / 5) % 2 == 0 ? main_col : sec_col);
+            row[x] = dots ? ((x % 10) == 5 ? sec_col : main_col)
+                          : ((x / 5) % 2 == 0 ? main_col : sec_col);
+        if (dots)
+            clear_screen(main_col);
+        for (int y = dots ? 5 : 0; y < SCREEN_HEIGHT; y += dots ? 10 : 1)
+            draw_pixels(0, y, SCREEN_WIDTH, 1, row, SCREEN_WIDTH);
         break;
-    case WALLPAPER_DOTS:
-        clear_screen(main_col);
-        for (int y = 5; y < SCREEN_HEIGHT; y += 10)
-            for (int x = 5; x < SCREEN_WIDTH; x += 10)
-                draw_dot(x, y, sec_col);
-        break;
+    }
     default:
         clear_screen(main_col);
         break;
