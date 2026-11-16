@@ -7,6 +7,7 @@
 #include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
 #include "ui/saver.h"
+#include "ui/uifont.h"
 
 enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER, P_PERF, P_CLOCK };
 
@@ -239,6 +240,17 @@ static const int SAVER_DELAY[] = {0, 1, 2, 3, 5, 10, 15, 30};
 #define SAVER_DELAYS ((int)(sizeof(SAVER_DELAY) / sizeof(SAVER_DELAY[0])))
 
 static void paint_saver(control *c, int x, int y, int w, int h) {
+    if (g_cfg.reduce_motion) { /* Speed > Window animations off: still */
+        static const char *const L[2] = {"Preview is turned off",
+                                         "to improve performance."};
+        fill_rect(x, y, w, h, BLACK);
+        int f = UI_FONT_SMALL, lh = font_height(f) + 3;
+        int ty = y + (h - 2 * lh) / 2;
+        for (int i = 0; i < 2; i++)
+            draw_string(x + (w - text_width(L[i], f)) / 2, ty + i * lh, L[i],
+                        LIGHT_GRAY, f);
+        return; /* drawn once: no animation frames */
+    }
     saver_paint(x, y, w, h, g_cfg.saver_effect);
     wm_invalidate(c->win); /* animated: draw again next frame */
 }
