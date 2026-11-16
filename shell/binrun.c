@@ -1,4 +1,5 @@
 #include "shell/binrun.h"
+#include "shell/cli.h"
 
 #include "fs/fs.h"
 #include "lib/memory.h"
@@ -14,7 +15,9 @@ static void bsc_print(const char *str) {
     if (!str || !s_active_ctx)
         return;
     term_ctx_print(s_active_ctx, str);
-    term_buf_push_text(str);
+    /* the text shell's context already writes to the shared buffer */
+    if (s_active_ctx != cli_asmterm_context())
+        term_buf_push_text(str);
 }
 
 static void bsc_putchar(char c) {
@@ -136,7 +139,7 @@ static void do_run(term_context_t *tctx, const char *path, char *out,
     if (!vmm)
         sprintf(
             out,
-            "run: WARNING — VMM context failed, running without isolation\n");
+            "run: WARNING - VMM context failed, running without isolation\n");
 
     bin_task_ctx_t *bctx = (bin_task_ctx_t *)kmalloc(sizeof(bin_task_ctx_t));
     if (!bctx) {

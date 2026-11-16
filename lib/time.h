@@ -43,4 +43,21 @@ uint16_t time_from_rtc(void);
 uint16_t date_from_rtc(void);
 time_full_t time_rtc_local(void);
 
+/* Set the clock from a local date and time (the Settings time zone is
+ * taken off; the RTC keeps UTC). 1980..2099. false = invalid. */
+bool time_set_local(const time_full_t *local);
+bool time_rtc_set(const time_full_t *utc);
+
+/* Calendar arithmetic, proleptic Gregorian, years 1..9999 */
+bool time_is_leap(int y);
+int time_days_in_month(int m, int y); /* m 1..12 */
+bool time_date_valid(int y, int m, int d);
+int32_t time_days_from_civil(int y, int m, int d); /* days since 1970-01-01 */
+void time_civil_from_days(int32_t z, int *y, int *m, int *d);
+int time_weekday(int y, int m, int d);     /* 0 = Monday .. 6 = Sunday */
+int time_day_of_year(int y, int m, int d); /* 1..366 */
+int time_iso_week(int y, int m, int d);    /* 1..53 */
+const char *time_month_name(int m);        /* "January" */
+const char *time_weekday_name(int wd);     /* "Monday" */
+
 #endif

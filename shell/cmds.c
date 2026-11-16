@@ -28,50 +28,89 @@ static void append(char *buf, size_t max, const char *text) {
         strcpy(buf + cl, text);
 }
 
-void cmd_help(char *out, size_t max) {
-    append(out, max, "Available commands:\n\n");
+/* help: a short index; "help <topic>" for each group */
+typedef struct {
+    const char *name, *title, *text;
+} help_topic_t;
 
-    append(out, max, "  help          - This message\n");
-    append(out, max, "  clear         - Clear screen\n");
-    append(out, max, "  exit          - Exit CLI/ASMTerm\n\n");
+static const help_topic_t HELP[] = {
+    {"files", "Files and folders",
+     "  pwd              Working directory\n"
+     "  cd <dir>         Change directory (/HDA, /HDB, /FDD0...)\n"
+     "  ls [dir]         List a directory\n"
+     "  mkdir <d>        Create a directory\n"
+     "  rmdir <d>        Remove an empty directory\n"
+     "  cat <f>          Print a file\n"
+     "  find <p> [dir]   Find names (TXT, *.PIC)\n"
+     "  touch <f>        Create an empty file\n"
+     "  write <f> <text> Write text to a file\n"
+     "  cp <src> <dst>   Copy a file or directory\n"
+     "  mv <src> <dst>   Move or rename\n"
+     "  rm [-r] <f>      Delete a file or directory\n"},
+    {"time", "Date, time and calendar",
+     "  date             Show the date and time\n"
+     "  date <date>      Set the date: 2026-11-16 or 16.11.2026\n"
+     "  time             Show the time\n"
+     "  time <hh:mm[:ss]> Set the time (local, 24-hour)\n"
+     "  cal [m] [y]      Calendar of a month: cal, cal 2 2028\n"
+     "  Time zone: Settings > Clock. The Calendar app shows months\n"
+     "  and keeps notes.\n"},
+    {"info", "System information",
+     "  sysinfo          CPU, FPU and uptime\n"
+     "  mem              Memory use\n"
+     "  df               Disk use\n"
+     "  lspci            PCI devices\n"},
+    {"network", "Network",
+     "  ping <host> [n]  Echo requests (n = 1..10, default 4)\n"
+     "  gopher <host> [port] [selector]\n"
+     "                   Browse Gopher; also gopher://host/1/sel\n"
+     "  netconf          Network card and settings\n"
+     "  Address, gateway and DNS are in Settings > Network.\n"},
+    {"devices", "Sound, printer and ports",
+     "  play <f.wav>     Play a WAV (play stop, ... loop)\n"
+     "  lpt              Parallel and serial ports\n"
+     "  print <f> [n]    Print a text file on LPTn\n"},
+    {"programs", "Programs",
+     "  asm <f> [out]    Assemble .ASM into a .BIN\n"
+     "  run <f.bin>      Run a flat .BIN (Ctrl+C stops it)\n"
+     "  app run|scan|list|unload  External .APP packages\n"},
+    {"shell", "The shell",
+     "  help [topic]     This help\n"
+     "  clear            Clear the screen\n"
+     "  echo <text>      Print text\n"
+     "  history          Recent output\n"
+     "  tee <f>          Save the output to a file\n"
+     "  F5 / F6          Scroll; Up / Down: earlier commands\n"
+     "  gui              Start the desktop\n"
+     "  exit             Leave the shell\n"
+     "  shutdown [s] / reboot [s]  (optional delay)\n"},
+};
+#define HELP_N ((int)(sizeof(HELP) / sizeof(HELP[0])))
 
-    append(out, max, "  pwd           - Working directory\n");
-    append(out, max, "  cd <d>        - Change directory\n");
-    append(out, max, "  ls            - List directory\n");
-    append(out, max, "  mkdir <d>     - Create directory\n");
-    append(out, max, "  rmdir <d>     - Remove empty dir\n\n");
-
-    append(out, max, "  cat <f>       - Print file\n");
-    append(out, max, "  find <p> [d]  - Find names (TXT, *.PIC) in d\n");
-    append(out, max, "  touch <f>     - Create empty file\n");
-    append(out, max, "  write <f> <t> - Write text to file\n");
-    append(out, max, "  cp <s> <d>    - Copy file/dir\n");
-    append(out, max, "  mv <s> <d>    - Move/rename\n");
-    append(out, max, "  rm [-r] <f>   - Delete file/dir\n\n");
-
-    append(out, max, "  echo <t>      - Print text\n");
-    append(out, max, "  tee <f>       - Save terminal buffer to file\n");
-    append(out, max, "  history       - Recent terminal output\n\n");
-
-    append(out, max, "  clock         - System time\n");
-    append(out, max, "  df            - Disk usage\n");
-    append(out, max, "  mem           - Memory usage\n");
-    append(out, max, "  sysinfo       - CPU model and uptime\n");
-    append(out, max, "  lspci         - List PCI devices\n");
-    append(out, max, "  play <f.wav>  - Play WAV (stop / loop)\n");
-    append(out, max, "  lpt           - Parallel/serial ports\n");
-    append(out, max, "  print <f> [n] - Print text file on LPTn\n\n");
-
-    append(out, max, "  shutdown [s]  - Shut down (optional delay)\n");
-    append(out, max, "  reboot [s]    - Reboot (optional delay)\n\n");
-
-    append(out, max, "  asm <f> [out] - Assemble .ASM -> .BIN\n");
-    append(out, max, "  run <f>       - Execute flat .BIN binary\n\n");
-
-    append(out, max, "  gopher <ip> [port] [sel] - Browse Gopher\n");
-    append(out, max, "  ping <host>   - ICMP echo request\n");
-    append(out, max, "  app <cmd>     - run|scan|list|unload external .APP\n");
-    append(out, max, "  gui           - Start GUI\n\n");
+void cmd_help(const char *args, char *out, size_t max) {
+    while (args && *args == ' ')
+        args++;
+    if (args && *args) {
+        for (int i = 0; i < HELP_N; i++)
+            if (!strcmp(args, HELP[i].name)) {
+                append(out, max, HELP[i].title);
+                append(out, max, ":\n");
+                append(out, max, HELP[i].text);
+                append(out, max, "\n");
+                return;
+            }
+        append(out, max, "No help topic '");
+        append(out, max, args);
+        append(out, max, "'.\n");
+    }
+    append(out, max, "Type 'help <topic>':\n");
+    for (int i = 0; i < HELP_N; i++) {
+        char line[64];
+        snprintf(line, sizeof(line), "  %-10s%s\n", HELP[i].name,
+                 HELP[i].title);
+        append(out, max, line);
+    }
+    append(out, max, "\n");
 }
 
 void cmd_pwd(char *out, size_t max) {
@@ -499,12 +538,190 @@ void cmd_echo(const char *text, char *out, size_t max) {
     append(out, max, "\n\n");
 }
 
+/* ── date, time, cal ─────────────────────────────────────────────── */
+
+static void show_now(char *out, size_t max) {
+    time_full_t t = time_rtc_local();
+    int wd = time_weekday((int)t.year, t.month, t.day);
+    char b[96];
+    int tz = (int8_t)g_cfg.timezone_offset;
+    snprintf(b, sizeof(b), "%s, %d %s %u  %02u:%02u:%02u  (UTC%+d)\n",
+             time_weekday_name(wd), t.day, time_month_name(t.month), t.year,
+             t.hours, t.minutes, t.seconds, tz);
+    append(out, max, b);
+}
+
+/* reads up to `n` digits; returns the number, -1 if none */
+static int read_num(const char **p, int n) {
+    int v = 0, k = 0;
+    while (k < n && **p >= '0' && **p <= '9') {
+        v = v * 10 + (**p - '0');
+        (*p)++;
+        k++;
+    }
+    return k ? v : -1;
+}
+
 void cmd_clock(char *out, size_t max) {
-    time_full_t t = time_rtc();
-    char buf[64];
-    sprintf(buf, "%04d-%02d-%02d  %02d:%02d:%02d\n\n", t.year, t.month, t.day,
-            t.hours, t.minutes, t.seconds);
-    append(out, max, buf);
+    show_now(out, max);
+    append(out, max, "\n");
+}
+
+/* date                  show
+ * date 2026-11-16       set (ISO)
+ * date 16.11.2026       set (day first; also 16/11/2026) */
+void cmd_date(const char *args, char *out, size_t max) {
+    while (args && *args == ' ')
+        args++;
+    if (!args || !*args) {
+        cmd_clock(out, max);
+        return;
+    }
+    const char *p = args;
+    int a = read_num(&p, 4), b = -1, c = -1;
+    char sep = *p;
+    if (sep == '-' || sep == '.' || sep == '/') {
+        p++;
+        b = read_num(&p, 2);
+        if (*p == sep) {
+            p++;
+            c = read_num(&p, 4);
+        }
+    }
+    int y, m, d;
+    if (sep == '-')
+        y = a, m = b, d = c;
+    else
+        d = a, m = b, y = c;
+    while (*p == ' ')
+        p++;
+    if (a < 0 || b < 0 || c < 0 || *p || !time_date_valid(y, m, d)) {
+        append(out, max,
+               "Usage: date 2026-11-16  or  date 16.11.2026\n"
+               "(no such date, or not a date)\n\n");
+        return;
+    }
+    if (y < 1980 || y > 2099) {
+        append(out, max, "The clock chip holds 1980 to 2099.\n\n");
+        return;
+    }
+    time_full_t t = time_rtc_local();
+    t.year = (uint32_t)y;
+    t.month = (uint8_t)m;
+    t.day = (uint8_t)d;
+    if (!time_set_local(&t)) {
+        append(out, max, "Could not set the clock.\n\n");
+        return;
+    }
+    append(out, max, "Date set: ");
+    show_now(out, max);
+    append(out, max, "\n");
+}
+
+/* time            show
+ * time 14:05      set (seconds 0)
+ * time 14:05:30   set */
+void cmd_time(const char *args, char *out, size_t max) {
+    while (args && *args == ' ')
+        args++;
+    if (!args || !*args) {
+        cmd_clock(out, max);
+        return;
+    }
+    const char *p = args;
+    int h = read_num(&p, 2), mi = -1, sec = 0;
+    if (*p == ':') {
+        p++;
+        mi = read_num(&p, 2);
+        if (*p == ':') {
+            p++;
+            sec = read_num(&p, 2);
+        }
+    }
+    while (*p == ' ')
+        p++;
+    if (h < 0 || h > 23 || mi < 0 || mi > 59 || sec < 0 || sec > 59 || *p) {
+        append(out, max, "Usage: time 14:05  or  time 14:05:30 (24-hour)\n\n");
+        return;
+    }
+    time_full_t t = time_rtc_local();
+    t.hours = (uint8_t)h;
+    t.minutes = (uint8_t)mi;
+    t.seconds = (uint8_t)sec;
+    if (!time_set_local(&t)) {
+        append(out, max, "Could not set the clock.\n\n");
+        return;
+    }
+    append(out, max, "Time set: ");
+    show_now(out, max);
+    append(out, max, "\n");
+}
+
+/* cal             this month
+ * cal 2           February of this year
+ * cal 2 2028      February 2028
+ * cal 2028        (a 4-digit number alone is a year: its January) */
+void cmd_cal(const char *args, char *out, size_t max) {
+    time_full_t now = time_rtc_local();
+    int m = now.month, y = (int)now.year;
+    const char *p = args ? args : "";
+    while (*p == ' ')
+        p++;
+    int a = read_num(&p, 4);
+    while (*p == ' ')
+        p++;
+    int b = read_num(&p, 4);
+    while (*p == ' ')
+        p++;
+    if (*p || (a >= 0 && a > 12 && b >= 0)) {
+        append(out, max, "Usage: cal [month] [year]   e.g. cal 2 2028\n\n");
+        return;
+    }
+    if (a >= 1 && a <= 12) {
+        m = a;
+        if (b >= 0)
+            y = b;
+    } else if (a > 12) {
+        m = 1, y = a;
+    } else if (a == 0) {
+        append(out, max, "Months are 1 to 12.\n\n");
+        return;
+    }
+    if (y < 1 || y > 9999) {
+        append(out, max, "Years are 1 to 9999.\n\n");
+        return;
+    }
+
+    char line[40];
+    char title[32];
+    snprintf(title, sizeof(title), "%s %d", time_month_name(m), y);
+    int pad = (20 - (int)strlen(title)) / 2;
+    int k = 0;
+    while (k < pad && k < 20)
+        line[k++] = ' ';
+    snprintf(line + k, sizeof(line) - k, "%s\n", title);
+    append(out, max, line);
+    append(out, max, "Mo Tu We Th Fr Sa Su\n");
+    int first = time_weekday(y, m, 1), days = time_days_in_month(m, y);
+    int col = 0, pos = 0;
+    for (int i = 0; i < first; i++, col++)
+        pos += snprintf(line + pos, sizeof(line) - pos, "   ");
+    for (int d = 1; d <= days; d++) {
+        bool today = y == (int)now.year && m == now.month && d == now.day;
+        /* today in brackets-less form: a '*' after the number */
+        pos += snprintf(line + pos, sizeof(line) - pos, today ? "%2d*" : "%2d ",
+                        d);
+        if (++col == 7 || d == days) {
+            line[pos - 1] = '\n'; /* the last column's space */
+            line[pos] = 0;
+            append(out, max, line);
+            col = 0;
+            pos = 0;
+        }
+    }
+    if (y == (int)now.year && m == now.month)
+        append(out, max, "* today\n");
+    append(out, max, "\n");
 }
 
 void cmd_play(const char *args, char *out, size_t max) {
@@ -809,12 +1026,18 @@ void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max) {
 
 void cmd_ping(const char *args, char *out, size_t max) {
     if (!args || args[0] == '\0') {
-        append(out, max, "Usage: ping <host|ip>\n\n");
+        append(out, max,
+               "Usage: ping <host|ip> [count]   (count 1-10, "
+               "default 4)\n\n");
         return;
     }
 
     if (!g_cfg.networking_enabled) {
         append(out, max, "Error: networking is disabled\n\n");
+        return;
+    }
+    if (!ne2000_detected()) {
+        append(out, max, "Error: no network card detected\n\n");
         return;
     }
 
@@ -830,6 +1053,16 @@ void cmd_ping(const char *args, char *out, size_t max) {
         len = 63;
     memcpy(host, args + s, len);
     host[len] = '\0';
+    while (args[i] == ' ')
+        i++;
+    int count = 4;
+    if (args[i] >= '1' && args[i] <= '9') {
+        count = 0;
+        while (args[i] >= '0' && args[i] <= '9')
+            count = count * 10 + (args[i++] - '0');
+        if (count > 10)
+            count = 10;
+    }
 
     uint8_t ip[4];
     if (!dns_resolve(host, ip)) {
@@ -839,23 +1072,43 @@ void cmd_ping(const char *args, char *out, size_t max) {
         return;
     }
 
-    char ip_str[20];
+    char ip_str[20], line[80];
     sprintf(ip_str, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-    append(out, max, "Pinging ");
-    append(out, max, ip_str);
-    append(out, max, " ...\n");
+    sprintf(line, "Pinging %s with 32 bytes:\n", ip_str);
+    append(out, max, line);
 
-    uint32_t start = time_millis();
-    bool ok = icmp_ping(ip, 0x1234, 0, 2000);
-    uint32_t elapsed = time_millis() - start;
-
-    if (ok) {
-        char result[64];
-        sprintf(result, "Reply from %s: time=%u ms\n\n", ip_str, elapsed);
-        append(out, max, result);
-    } else {
-        append(out, max, "Request timed out.\n\n");
+    static uint16_t s_seq;
+    int got = 0;
+    uint32_t tmin = 0xFFFFFFFFu, tmax = 0, tsum = 0;
+    for (int n = 0; n < count; n++) {
+        uint32_t start = time_millis();
+        bool ok = icmp_ping(ip, 0x1234, ++s_seq, 1000);
+        uint32_t t = time_millis() - start;
+        if (ok) {
+            sprintf(line, "Reply from %s: seq=%d time=%u ms\n", ip_str, n + 1,
+                    t);
+            got++;
+            tsum += t;
+            if (t < tmin)
+                tmin = t;
+            if (t > tmax)
+                tmax = t;
+        } else {
+            sprintf(line, "Request timed out (seq=%d).\n", n + 1);
+        }
+        append(out, max, line);
+        while (n + 1 < count && time_millis() - start < 1000) /* 1 a second */
+            net_poll();
     }
+    sprintf(line, "Sent %d, received %d, lost %d (%d%%)\n", count, got,
+            count - got, (count - got) * 100 / count);
+    append(out, max, line);
+    if (got) {
+        sprintf(line, "Times: min %u ms, max %u ms, average %u ms\n", tmin,
+                tmax, tsum / (uint32_t)got);
+        append(out, max, line);
+    }
+    append(out, max, "\n");
 }
 
 void cmd_netconf(const char *args, char *out, size_t max) {

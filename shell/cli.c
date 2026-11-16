@@ -55,9 +55,21 @@ static cli_state_t s;
 bool shouldexit = 0;
 bool g_asmterm_active = false;
 
+/* Output of programs run from the text shell (gopher, run): written a
+ * character at a time into a pending line, so a prompt, the echo of what
+ * is typed and putchar() output share a line as on a real terminal. */
+static char s_pend[TERM_BUF_LINE_W];
+static int s_pend_len;
+static bool s_dirty; /* the pending line changed: redraw */
+
+static bool tasks_running(void) { return task_count > 1; }
+static void pend_putc(char c);
+static void aterm_input_reset(void);
+static int total_lines(void) { return term_buf_count() + (s_pend_len > 0); }
+
 /* ── helpers ───────────────────────────────────────── */
 static void scroll_to_bottom(void) {
-    int ms = term_buf_count() - VISIBLE_ROWS;
+    int ms = total_lines() - VISIBLE_ROWS;
     s.scroll_top = ms > 0 ? ms : 0;
 }
 static void scroll_up(int n) {
@@ -66,7 +78,7 @@ static void scroll_up(int n) {
         s.scroll_top = 0;
 }
 static void scroll_down(int n) {
-    int ms = term_buf_count() - VISIBLE_ROWS;
+    int ms = total_lines() - VISIBLE_ROWS;
     s.scroll_top += n;
     if (s.scroll_top > ms)
         s.scroll_top = ms > 0 ? ms : 0;
@@ -78,7 +90,7 @@ static void draw_scrollbar(void) {
     fill_rect(sb_x, 0, SCROLL_W, OUTPUT_H, DARK_GRAY);
     draw_rect(sb_x, 0, SCROLL_W, OUTPUT_H, BLACK);
 
-    int total = term_buf_count();
+    int total = total_lines();
     if (total > VISIBLE_ROWS) {
         int thumb_h = (VISIBLE_ROWS * OUTPUT_H) / total;
         if (thumb_h < 4)
@@ -95,10 +107,18 @@ static void draw_output(void) {
 
     for (int row = 0; row < VISIBLE_ROWS; row++) {
         int logical = s.scroll_top + row;
-        if (logical >= term_buf_count())
+        if (logical >= total_lines())
             break;
 
-        const char *line = term_buf_get(logical);
+        char pend[TERM_BUF_LINE_W + 1];
+        const char *line;
+        if (logical < term_buf_count()) {
+            line = term_buf_get(logical);
+        } else {
+            memcpy(pend, s_pend, s_pend_len);
+            pend[s_pend_len] = 0;
+            line = pend;
+        }
         if (!line)
             continue;
 
@@ -122,8 +142,15 @@ static void draw_input(void) {
     draw_line(0, OUTPUT_H, SCREEN_WIDTH - 1, OUTPUT_H, DARK_GRAY);
 
     if (g_asmterm_active) {
+        draw_string(
+            MARGIN_X, iy + 2,
+            "gopher: arrows move  Enter open  b back  q quit  Ctrl+C stop",
+            YELLOW, UI_FONT_TERM);
+        return;
+    }
+    if (tasks_running()) {
         draw_string(MARGIN_X, iy + 2,
-                    "[task]> j/k=scroll  Enter=open  b=back  q=quit", YELLOW,
+                    "program running: keys go to it, Ctrl+C stops it", YELLOW,
                     UI_FONT_TERM);
         return;
     }
@@ -210,6 +237,14 @@ static void execute(void) {
         s.hist_draft[0] = '\0';
     }
 
+    if (tasks_running() &&
+        (!strcmp(s.input, "exit") || !strcmp(s.input, "gui"))) {
+        term_buf_push("A program is still running: let it finish first.");
+        s.input[0] = '\0';
+        s.input_len = 0;
+        scroll_to_bottom();
+        return;
+    }
     if (strcmp(s.input, "exit") == 0) {
         term_buf_push("Exiting CLI...");
         scroll_to_bottom();
@@ -259,21 +294,26 @@ void cli_run(void) {
     scroll_to_bottom();
     redraw();
 
-    int last_buf_count = 0;
+    int last_buf_count = 0, last_blink = -1;
 
     while (1) {
         if (shouldexit)
             return;
         ps2_update();
         net_poll();
+        task_yield(); /* gopher and run execute as tasks */
+        scheduler_reap();
 
         if (!kb.key_pressed) {
             int cur_count = term_buf_count();
-            if (cur_count != last_buf_count) {
+            int blink = (int)(pit_ticks / 500) & 1;
+            if (cur_count != last_buf_count || s_dirty) {
                 last_buf_count = cur_count;
+                s_dirty = false;
                 scroll_to_bottom();
                 redraw();
-            } else {
+            } else if (blink != last_blink) { /* caret only */
+                last_blink = blink;
                 draw_input();
                 blit();
             }
@@ -284,18 +324,41 @@ void cli_run(void) {
         uint8_t sc = kb.last_scancode;
         char ch = kb.last_char;
 
-        if (g_asmterm_active) {
+        if (g_asmterm_active || tasks_running()) { /* keys go to the task */
+            if (kb.ctrl_c) {                       /* Ctrl+C: stop it */
+                kb.ctrl_c = false;
+                for (int t = 1; t < MAX_TASKS; t++)
+                    if (tasks[t].alive)
+                        scheduler_kill_task(t);
+                g_asmterm_active = false;
+                if (s_pend_len)
+                    pend_putc('\n');
+                term_buf_push("^C (program stopped)");
+                aterm_input_reset();
+                scroll_to_bottom();
+                redraw();
+                continue;
+            }
             if (sc == ENTER) {
                 asmterm_input_push_enter();
             } else if (sc == BACKSPACE) {
                 asmterm_input_push('\b');
+            } else if (sc == UP_ARROW || sc == DOWN_ARROW || sc == LEFT_ARROW ||
+                       sc == RIGHT_ARROW || sc == PAGE_UP || sc == PAGE_DOWN ||
+                       sc == ESC || sc == HOME || sc == END) {
+                asmterm_input_push((char)(sc == UP_ARROW      ? TERM_KEY_UP
+                                          : sc == DOWN_ARROW  ? TERM_KEY_DOWN
+                                          : sc == LEFT_ARROW  ? TERM_KEY_LEFT
+                                          : sc == RIGHT_ARROW ? TERM_KEY_RIGHT
+                                          : sc == PAGE_UP     ? TERM_KEY_PGUP
+                                          : sc == PAGE_DOWN   ? TERM_KEY_PGDN
+                                          : sc == HOME        ? TERM_KEY_HOME
+                                          : sc == END         ? TERM_KEY_END
+                                                              : TERM_KEY_ESC));
             } else if (ch >= 32 && ch < 127) {
                 asmterm_input_push(ch);
             }
-
-            scroll_to_bottom();
-            redraw();
-            continue;
+            continue; /* the task echoes and redraws */
         }
 
         /* scroll */
@@ -412,7 +475,7 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
     term_buf_push(el);
 
     if (!strcmp(command, "help"))
-        cmd_help(out_buffer, max_len);
+        cmd_help(argument, out_buffer, max_len);
     else if (!strcmp(command, "clear")) {
         term_buf_clear();
         return CMD_STATUS_CLEAR;
@@ -436,6 +499,12 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_echo(argument, out_buffer, max_len);
     else if (!strcmp(command, "clock"))
         cmd_clock(out_buffer, max_len);
+    else if (!strcmp(command, "date"))
+        cmd_date(argument, out_buffer, max_len);
+    else if (!strcmp(command, "time"))
+        cmd_time(argument, out_buffer, max_len);
+    else if (!strcmp(command, "cal"))
+        cmd_cal(argument, out_buffer, max_len);
     else if (!strcmp(command, "shutdown"))
         cmd_shutdown(argument, out_buffer, max_len);
     else if (!strcmp(command, "reboot"))
@@ -468,10 +537,9 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_history(out_buffer, max_len);
     else if (!strcmp(command, "asm"))
         cmd_asmasm(argument, out_buffer, max_len);
-    else if (!strcmp(command, "run")) {
-        static term_context_t dummy_ctx = {0};
-        cmd_run(&dummy_ctx, argument, out_buffer, max_len);
-    } else if (!strcmp(command, "gopher"))
+    else if (!strcmp(command, "run"))
+        cmd_run(cli_asmterm_context(), argument, out_buffer, max_len);
+    else if (!strcmp(command, "gopher"))
         cmd_gopher(cli_asmterm_context(), argument, out_buffer, max_len);
     else if (!strcmp(command, "ping"))
         cmd_ping(argument, out_buffer, max_len);
@@ -495,6 +563,10 @@ typedef struct {
     bool enter_pending;
 } asmterm_input_t;
 static asmterm_input_t s_aterm_input;
+static void aterm_input_reset(void) {
+    s_aterm_input.head = s_aterm_input.tail = 0;
+    s_aterm_input.enter_pending = false;
+}
 
 void asmterm_input_push(char c) {
     int next = (s_aterm_input.tail + 1) % ASMTERM_INPUT_CAP;
@@ -539,17 +611,50 @@ int asmterm_output_read(char *dst, int max) {
     return n;
 }
 
+/* one character of task output into the pending line */
+static void pend_putc(char c) {
+    if (c == '\n') {
+        s_pend[s_pend_len] = 0;
+        term_buf_push(s_pend);
+        s_pend_len = 0;
+    } else if (c == '\b') {
+        if (s_pend_len > 0)
+            s_pend_len--;
+    } else if (c == '\r') {
+        s_pend_len = 0;
+    } else if ((unsigned char)c >= 32) {
+        if (s_pend_len >= COLS || s_pend_len >= TERM_BUF_LINE_W - 1)
+            pend_putc('\n'); /* wrap */
+        s_pend[s_pend_len++] = c;
+    }
+    s_dirty = true;
+}
+
 static void aterm_ctx_print(term_context_t *ctx, const char *str) {
     (void)ctx;
     if (!str)
         return;
     aterm_output_push_str(str);
-    term_buf_push_text(str);
+    while (*str)
+        pend_putc(*str++);
 }
 static void aterm_ctx_putchar(term_context_t *ctx, char c) {
     (void)ctx;
     char tmp[2] = {c, '\0'};
     aterm_output_push_str(tmp);
+    pend_putc(c);
+}
+static void aterm_ctx_clear(term_context_t *ctx) {
+    (void)ctx;
+    term_buf_clear();
+    s_pend_len = 0;
+    s.scroll_top = 0;
+    s_dirty = true;
+}
+static void aterm_ctx_size(term_context_t *ctx, int *cols, int *rows) {
+    (void)ctx;
+    *cols = COLS;
+    *rows = VISIBLE_ROWS;
 }
 static int aterm_ctx_readline(term_context_t *ctx, char *buf, int maxchars) {
     (void)ctx;
@@ -566,17 +671,20 @@ static int aterm_ctx_readline(term_context_t *ctx, char *buf, int maxchars) {
                 if (len > 0) {
                     buf[--len] = '\0';
                     aterm_output_push_str("\b \b");
+                    pend_putc('\b');
                 }
             } else if (c >= 32 && c < 127 && len < maxchars - 1) {
                 buf[len++] = (char)c;
                 buf[len] = '\0';
                 char echo[2] = {(char)c, '\0'};
                 aterm_output_push_str(echo);
+                pend_putc((char)c);
             }
         }
         if (s_aterm_input.enter_pending) {
             s_aterm_input.enter_pending = false;
             aterm_output_push_str("\n");
+            pend_putc('\n');
             break;
         }
     }
@@ -602,6 +710,8 @@ static term_context_t s_aterm_ctx = {
     .readline = aterm_ctx_readline,
     .getchar = aterm_ctx_getchar,
     .userdata = NULL,
+    .clear = aterm_ctx_clear,
+    .size = aterm_ctx_size,
 };
 
 term_context_t *cli_asmterm_context(void) { return &s_aterm_ctx; }

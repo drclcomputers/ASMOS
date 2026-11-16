@@ -259,8 +259,10 @@ void kmain(void) {
 
     boot_check_network();
 
-    if (!g_cfg.start_in_gui)
+    if (!g_cfg.start_in_gui) {
+        scheduler_init(); /* gopher and run are tasks in the text shell too */
         cli_run();
+    }
 
     desktop_fs_init();
 

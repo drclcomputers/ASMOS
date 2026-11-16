@@ -4,7 +4,7 @@
 #include "lib/core.h"
 #include "shell/term_buf.h"
 
-void cmd_help(char *out, size_t max);
+void cmd_help(const char *args, char *out, size_t max);
 void cmd_pwd(char *out, size_t max);
 void cmd_ls(const char *path, char *out, size_t max);
 void cmd_cat(const char *filename, char *out, size_t max);
@@ -20,6 +20,9 @@ void cmd_cp(const char *args, char *out, size_t max);
 void cmd_write(const char *args, char *out, size_t max);
 void cmd_echo(const char *text, char *out, size_t max);
 void cmd_clock(char *out, size_t max);
+void cmd_date(const char *args, char *out, size_t max);
+void cmd_time(const char *args, char *out, size_t max);
+void cmd_cal(const char *args, char *out, size_t max);
 void cmd_sysinfo(char *out, size_t max);
 void cmd_lspci(char *out, size_t max);
 void cmd_lpt(char *out, size_t max);

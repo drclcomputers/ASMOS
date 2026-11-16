@@ -3,11 +3,12 @@
 #include "config/runtime_config.h"
 #include "config/video_cfg.h"
 #include "drivers/sb16.h"
+#include "lib/time.h"
 #include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
 #include "ui/saver.h"
 
-enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER, P_PERF };
+enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER, P_PERF, P_CLOCK };
 
 #define PERF_FLAGS 6
 
@@ -19,6 +20,10 @@ typedef struct {
     control *vol, *vol_lbl;
     control *ip[4]; /* ip, gateway, netmask, dns */
     control *perf[PERF_FLAGS], *fps;
+    /* Clock tab: the fields follow the clock until edited */
+    control *c_day, *c_mon, *c_year, *c_h, *c_m, *c_s, *c_wd, *c_now;
+    bool clock_edited;
+    uint32_t clock_shown; /* second last shown */
     bool dirty;
 } settings_state_t;
 
@@ -102,11 +107,16 @@ static void on_volume(control *c, int ev) {
     set_dirty(s, true);
 }
 
+static void clock_fill(settings_state_t *s, bool fields);
+
 static void on_tz(control *c, int ev) {
+    settings_state_t *s = c->user;
     if (ev != EV_CHANGE)
         return;
     g_cfg.timezone_offset = (uint8_t)(int8_t)(ctl_value(c) - 12);
-    set_dirty(c->user, true);
+    set_dirty(s, true);
+    if (s->c_now) /* the local time moved */
+        clock_fill(s, !s->clock_edited);
 }
 
 static void on_ffmode(control *c, int ev) {
@@ -254,10 +264,121 @@ static void on_saver_test(control *c, int ev) {
         saver_start();
 }
 
+/* ── Clock tab ─────────────────────────────────────────────────────── */
+
+static int field_num(control *c) {
+    const char *t = ctl_text(c);
+    int v = 0, n = 0;
+    for (; *t; t++) {
+        if (*t < '0' || *t > '9')
+            return -1;
+        v = v * 10 + (*t - '0');
+        n++;
+    }
+    return n ? v : -1;
+}
+
+/* weekday under the date fields, or why it isn't a date */
+static void clock_weekday(settings_state_t *s) {
+    int d = field_num(s->c_day), m = ctl_value(s->c_mon) + 1,
+        y = field_num(s->c_year);
+    char b[48];
+    if (time_date_valid(y, m, d))
+        snprintf(b, sizeof(b), "%s, day %d of the year",
+                 time_weekday_name(time_weekday(y, m, d)),
+                 time_day_of_year(y, m, d));
+    else
+        snprintf(b, sizeof(b), "Not a date");
+    ctl_set_text(s->c_wd, b);
+}
+
+/* the live line; with `fields`, the edit fields too */
+static void clock_fill(settings_state_t *s, bool fields) {
+    time_full_t t = time_rtc_local();
+    char b[64];
+    snprintf(b, sizeof(b), "Clock: %s %d %s %u, %02u:%02u:%02u",
+             time_weekday_name(time_weekday((int)t.year, t.month, t.day)),
+             t.day, time_month_name(t.month), t.year, t.hours, t.minutes,
+             t.seconds);
+    ctl_set_text(s->c_now, b);
+    s->clock_shown = (uint32_t)t.hours * 3600 + t.minutes * 60 + t.seconds;
+    if (!fields)
+        return;
+    snprintf(b, sizeof(b), "%u", t.day);
+    ctl_set_text(s->c_day, b);
+    list_set_sel(s->c_mon, t.month - 1);
+    snprintf(b, sizeof(b), "%u", t.year);
+    ctl_set_text(s->c_year, b);
+    snprintf(b, sizeof(b), "%02u", t.hours);
+    ctl_set_text(s->c_h, b);
+    snprintf(b, sizeof(b), "%02u", t.minutes);
+    ctl_set_text(s->c_m, b);
+    snprintf(b, sizeof(b), "%02u", t.seconds);
+    ctl_set_text(s->c_s, b);
+    clock_weekday(s);
+}
+
+static void on_clock_edit(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CHANGE || !s->c_wd)
+        return;
+    s->clock_edited = true; /* stop following the clock */
+    clock_weekday(s);
+}
+
+static void on_clock_now(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    s->clock_edited = false;
+    clock_fill(s, true);
+}
+
+static void on_clock_set(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    int d = field_num(s->c_day), m = ctl_value(s->c_mon) + 1,
+        y = field_num(s->c_year), h = field_num(s->c_h), mi = field_num(s->c_m),
+        sec = field_num(s->c_s);
+    const char *err = NULL;
+    if (!time_date_valid(y, m, d))
+        err = "That is not a date.";
+    else if (y < 1980 || y > 2099)
+        err = "The clock chip holds 1980 to 2099.";
+    else if (h < 0 || h > 23 || mi < 0 || mi > 59 || sec < 0 || sec > 59)
+        err = "The time is hours 0-23, minutes and seconds 0-59.";
+    if (err) {
+        dlg_message(s->win, "Clock", err);
+        return;
+    }
+    time_full_t t = {(uint32_t)y, (uint8_t)m,  (uint8_t)d,
+                     (uint8_t)h,  (uint8_t)mi, (uint8_t)sec};
+    if (!time_set_local(&t)) {
+        dlg_message(s->win, "Clock", "Could not set the clock.");
+        return;
+    }
+    s->clock_edited = false;
+    clock_fill(s, true);
+    ctl_set_text(s->status, "Clock set");
+    ctl_set_colors(s->status, DARK_GRAY, 0xFF);
+}
+
+/* once a second: the live line, and the fields unless being edited */
+static void settings_frame(void *state) {
+    settings_state_t *s = state;
+    if (!s->win || !s->c_now || ctl_value(s->tabs) != P_CLOCK)
+        return;
+    time_full_t t = time_rtc_local();
+    uint32_t now = (uint32_t)t.hours * 3600 + t.minutes * 60 + t.seconds;
+    if (now != s->clock_shown)
+        clock_fill(s, !s->clock_edited);
+}
+
 static void build(settings_state_t *s) {
     window *w = s->win;
-    s->tabs = ctl_tabs(w, 4, 3, 250, "Display|Sound|System|Network|Saver|Speed",
-                       NULL);
+    s->tabs = ctl_tabs(w, 4, 3, 250,
+                       "Display|Sound|System|Network|Saver|Speed|Clock", NULL);
 
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
@@ -350,28 +471,20 @@ static void build(settings_state_t *s) {
     /* System */
     flag(s, P_SYSTEM, 10, 24, "Start in the GUI (else the text shell)",
          &g_cfg.start_in_gui);
-    on_page(s, ctl_label(w, 10, 54, 60, 12, "Time zone:", 0), P_SYSTEM);
-    control *tz = on_page(s, ctl_combo(w, 76, 54, 80, on_tz), P_SYSTEM);
-    for (int h = -12; h <= 14; h++) {
-        char t[12];
-        snprintf(t, sizeof(t), "UTC%+d", h);
-        list_add(tz, t);
-    }
-    list_set_sel(tz, (int)(int8_t)g_cfg.timezone_offset + 12);
-    on_page(s, ctl_group(w, 6, 72, 244, 40, "File manager"), P_SYSTEM);
+    on_page(s, ctl_group(w, 6, 46, 244, 40, "File manager"), P_SYSTEM);
     control *r1 = on_page(s,
-                          ctl_radio(w, 14, 84, 220, "One window per folder", 1,
+                          ctl_radio(w, 14, 58, 220, "One window per folder", 1,
                                     !g_cfg.filef_single_window, on_ffmode),
                           P_SYSTEM);
     control *r2 = on_page(s,
-                          ctl_radio(w, 14, 96, 220, "Reuse a single window", 1,
+                          ctl_radio(w, 14, 70, 220, "Reuse a single window", 1,
                                     g_cfg.filef_single_window, on_ffmode),
                           P_SYSTEM);
     r1->id = 0;
     r2->id = 1;
-    control *np = flag(s, P_SYSTEM, 10, 118,
+    control *np = flag(s, P_SYSTEM, 10, 96,
                        "No app memory protection (restart)", &g_cfg.no_paging);
-    control *fe = flag(s, P_SYSTEM, 10, 130, "Emulate the maths chip (restart)",
+    control *fe = flag(s, P_SYSTEM, 10, 108, "Emulate the maths chip (restart)",
                        &g_cfg.fpu_emulate);
     ctl_set_tooltip(fe, "Test the FPU emulator on a machine that has an FPU");
     ctl_set_tooltip(np, "Paging keeps apps out of each other's memory");
@@ -424,6 +537,50 @@ static void build(settings_state_t *s) {
                 P_PERF);
     hi->id = 0;
 
+    /* Clock: date, time, time zone. Set Clock writes the clock chip at
+     * once; the time zone is a setting (Save). */
+    on_page(s, ctl_label(w, 10, 24, 60, 12, "Date:", 0), P_CLOCK);
+    s->c_day = on_page(
+        s, ctl_edit(w, 76, 24, 26, 12, "", 2, ES_DECIMAL, on_clock_edit),
+        P_CLOCK);
+    s->c_mon = on_page(s, ctl_combo(w, 106, 24, 84, on_clock_edit), P_CLOCK);
+    for (int m = 1; m <= 12; m++)
+        list_add(s->c_mon, time_month_name(m));
+    s->c_year = on_page(
+        s, ctl_edit(w, 194, 24, 36, 12, "", 4, ES_DECIMAL, on_clock_edit),
+        P_CLOCK);
+    s->c_wd = on_page(s, ctl_label(w, 76, 38, 170, 9, "", 0), P_CLOCK);
+    on_page(s, ctl_label(w, 10, 50, 60, 12, "Time:", 0), P_CLOCK);
+    s->c_h = on_page(
+        s, ctl_edit(w, 76, 50, 26, 12, "", 2, ES_DECIMAL, on_clock_edit),
+        P_CLOCK);
+    on_page(s, ctl_label(w, 103, 50, 4, 12, ":", 0), P_CLOCK);
+    s->c_m = on_page(
+        s, ctl_edit(w, 108, 50, 26, 12, "", 2, ES_DECIMAL, on_clock_edit),
+        P_CLOCK);
+    on_page(s, ctl_label(w, 135, 50, 4, 12, ":", 0), P_CLOCK);
+    s->c_s = on_page(
+        s, ctl_edit(w, 140, 50, 26, 12, "", 2, ES_DECIMAL, on_clock_edit),
+        P_CLOCK);
+    on_page(s, ctl_label(w, 172, 50, 70, 12, "24-hour", 0), P_CLOCK);
+    control *set =
+        on_page(s, ctl_button(w, 76, 68, 60, 13, "Set Clock", 0, on_clock_set),
+                P_CLOCK);
+    ctl_set_tooltip(set, "Write this date and time to the clock chip now");
+    control *now = on_page(
+        s, ctl_button(w, 142, 68, 50, 13, "Now", 0, on_clock_now), P_CLOCK);
+    ctl_set_tooltip(now, "Show the clock's time again");
+    on_page(s, ctl_label(w, 10, 92, 60, 12, "Time zone:", 0), P_CLOCK);
+    control *tz = on_page(s, ctl_combo(w, 76, 92, 80, on_tz), P_CLOCK);
+    for (int h = -12; h <= 14; h++) {
+        char t[12];
+        snprintf(t, sizeof(t), "UTC%+d", h);
+        list_add(tz, t);
+    }
+    list_set_sel(tz, (int)(int8_t)g_cfg.timezone_offset + 12);
+    s->c_now = on_page(s, ctl_label(w, 10, 112, 240, 9, "", 0), P_CLOCK);
+    clock_fill(s, true);
+
     /* bottom bar */
     s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
     s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
@@ -451,5 +608,6 @@ app_descriptor settings_app = {
     .name = "Settings",
     .state_size = sizeof(settings_state_t),
     .init = settings_init,
+    .on_frame = settings_frame,
     .single_instance = true,
 };
