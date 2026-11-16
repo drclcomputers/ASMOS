@@ -17,6 +17,7 @@
 #include "os/watchdog.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
+#include "ui/fileops.h"
 #include "ui/popup.h"
 
 static loaded_app_t s_loaded[MAX_LOADED_APPS];
@@ -409,7 +410,84 @@ static bool api_file_write(const char *path, const void *buf, int len) {
         return false;
     int n = len ? fs_write(&f, buf, len) : 0;
     fs_close(&f);
+    char dir[FS_PATH_SZ]; /* open views of that folder show it */
+    fo_parent(path, dir, sizeof(dir));
+    fo_changed(dir);
     return n == len;
+}
+
+/* ── files and folders (API size 6) ── */
+
+static void to_dirent(const dir_entry_t *e, const char *name, app_dirent_t *o) {
+    memset(o, 0, sizeof(*o));
+    snprintf(o->name, sizeof(o->name), "%s", name);
+    fs_entry_name(e, o->dos_name);
+    o->attr = e->attr & (ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM |
+                         ATTR_DIRECTORY | ATTR_ARCHIVE);
+    o->size = (e->attr & ATTR_DIRECTORY) ? 0 : e->file_size;
+    o->date = e->modify_date;
+    o->time = e->modify_time;
+}
+
+typedef struct {
+    app_dirent_t *out;
+    int max, n;
+} api_list_t;
+
+static bool api_list_cb(const dir_entry_t *e, const char *name, void *user) {
+    api_list_t *l = user;
+    if (l->out && l->n < l->max)
+        to_dirent(e, name, &l->out[l->n]);
+    else if (l->out)
+        return false; /* full */
+    l->n++;
+    return true;
+}
+
+static int api_list_dir(const char *dir, app_dirent_t *out, int max) {
+    uint8_t drive;
+    uint16_t cluster;
+    if (!dir || max < 0 || !fs_resolve_dir(dir, &drive, &cluster))
+        return -1;
+    api_list_t l = {max ? out : NULL, max, 0};
+    if (!fs_walk_dir(drive, cluster, api_list_cb, &l) && !l.out)
+        return -1;
+    return l.n;
+}
+
+static bool api_file_info(const char *path, app_dirent_t *out) {
+    dir_entry_t e;
+    char name[FS_NAME_SZ];
+    if (!path || !out || !fs_find(path, &e) || !fs_name_of(path, name))
+        return false;
+    to_dirent(&e, name, out);
+    return true;
+}
+
+static bool api_make_dir(const char *path) {
+    char dir[FS_PATH_SZ];
+    if (!path || !path[0])
+        return false;
+    fo_parent(path, dir, sizeof(dir));
+    return fo_create(dir, fo_base(path), true, false) == NULL;
+}
+
+static bool api_remove(const char *path) {
+    dir_entry_t e;
+    if (!path || fo_protected(path) || !fs_find(path, &e))
+        return false;
+    bool ok = (e.attr & ATTR_DIRECTORY) ? fs_rmdir(path) : fs_delete(path);
+    if (ok) {
+        char dir[FS_PATH_SZ];
+        fo_parent(path, dir, sizeof(dir));
+        fo_changed(dir);
+    }
+    return ok;
+}
+
+static bool api_rename(const char *path, const char *new_name) {
+    return path && new_name && !strchr(new_name, '/') &&
+           fo_rename(path, new_name) == NULL;
 }
 
 static const ui_api_t s_ui = {
@@ -590,6 +668,11 @@ static const os_api_t s_api = {
     .speed_flags = api_speed_flags,
     .frame_ms = cfg_frame_ms,
     .submenu = api_submenu,
+    .list_dir = api_list_dir,
+    .file_info = api_file_info,
+    .make_dir = api_make_dir,
+    .remove = api_remove,
+    .rename = api_rename,
 };
 
 /* ── guarded trampolines ────────────────────────────────────────────── */
@@ -1053,7 +1136,7 @@ int appload_scan_dir(const char *dir_path) {
         nm[n++] = 'P';
         nm[n] = 0;
 
-        char full[128];
+        char full[FS_PATH_SZ];
         size_t dl = strlen(dir_path);
         snprintf(full, sizeof(full), "%s%s%s", dir_path,
                  (dl && dir_path[dl - 1] == '/') ? "" : "/", nm);
@@ -1073,7 +1156,7 @@ bool appload_try_open(const char *p) {
     static const char *const dirs[] = {"",       "/apps/",    "/FDD0/",
                                        "/FDD1/", "/DESKTOP/", NULL};
     bool ext = ends_with_app(p);
-    char t[160];
+    char t[FS_PATH_SZ];
     char first_err[sizeof(s_err)] = {0};
 
     for (int i = 0; dirs[i]; i++) {

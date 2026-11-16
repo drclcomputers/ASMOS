@@ -140,6 +140,16 @@ typedef struct ui_api {
 
 #define OS_API_VERSION 1
 
+/* a file or folder, from api->list_dir / api->file_info (API size 6) */
+typedef struct {
+    char name[64];     /* its long name, if it has one: "My Game.sav" */
+    char dos_name[13]; /* the 8.3 name DOS sees: "MYGAME~1.SAV" */
+    uint8_t attr;      /* APP_ATTR_* */
+    uint32_t size;     /* bytes (0 for a folder) */
+    uint16_t date;     /* FAT: (year-1980)<<9 | month<<5 | day */
+    uint16_t time;     /* FAT: hour<<11 | min<<5 | sec/2 */
+} app_dirent_t;
+
 typedef struct os_api {
     uint32_t version;
     uint32_t size; /* sizeof(os_api_t) – check before using newer members */
@@ -209,7 +219,25 @@ typedef struct os_api {
      * ui->menu_item / ui->menu_separator. One level: NULL for a submenu
      * inside a submenu, in a context menu, or when `m` is full (16). */
     menu *(*submenu)(menu *m, const char *label);
+
+    /* ── appended in API size 6: files and folders (long names) ── */
+    /* Entries of a folder ("/FDD0/My Games"), not . and .., in disk order;
+     * returns how many were put in out (up to max), -1 if no such folder.
+     * Pass max 0 (out NULL) to just count them. */
+    int (*list_dir)(const char *dir, app_dirent_t *out, int max);
+    bool (*file_info)(const char *path, app_dirent_t *out);
+    bool (*make_dir)(const char *path); /* new folder */
+    bool (*remove)(const char *path);   /* a file, or an empty folder */
+    bool (*rename)(const char *path, const char *new_name); /* name only */
 } os_api_t;
+
+/* api->list_dir / file_info (API size 6) */
+#define APP_NAME_MAX 63  /* longest file name */
+#define APP_PATH_MAX 511 /* longest path: char path[APP_PATH_MAX + 1] */
+#define APP_ATTR_READONLY 0x01
+#define APP_ATTR_HIDDEN 0x02
+#define APP_ATTR_SYSTEM 0x04
+#define APP_ATTR_DIR 0x10
 
 /* api->speed_flags() */
 #define SPEED_LOW_END (1u << 0)  /* the "Low-end machine" preset is on   */

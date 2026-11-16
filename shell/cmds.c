@@ -32,6 +32,52 @@ static void append(char *buf, size_t max, const char *text) {
         strcpy(buf + cl, text);
 }
 
+/* One argument: "in quotes" (may hold spaces) or up to the next space.
+ * Gives where the next one starts. */
+static const char *next_arg(const char *p, char *out, int sz) {
+    while (*p == ' ')
+        p++;
+    int n = 0;
+    if (*p == '"') {
+        p++;
+        while (*p && *p != '"') {
+            if (n < sz - 1)
+                out[n++] = *p;
+            p++;
+        }
+        if (*p == '"')
+            p++;
+    } else {
+        while (*p && *p != ' ') {
+            if (n < sz - 1)
+                out[n++] = *p;
+            p++;
+        }
+    }
+    out[n] = '\0';
+    while (*p == ' ')
+        p++;
+    return p;
+}
+
+/* the whole rest as one path; quotes optional: cd My Documents works too */
+static const char *whole_path(const char *in, char *buf, int sz) {
+    if (!in)
+        in = "";
+    while (*in == ' ')
+        in++;
+    if (*in == '"') {
+        next_arg(in, buf, sz);
+        return buf;
+    }
+    strncpy(buf, in, sz - 1);
+    buf[sz - 1] = '\0';
+    int n = (int)strlen(buf);
+    while (n > 0 && buf[n - 1] == ' ')
+        buf[--n] = '\0';
+    return buf;
+}
+
 /* help: a short index; "help <topic>" for each group */
 typedef struct {
     const char *name, *title, *text;
@@ -51,7 +97,9 @@ static const help_topic_t HELP[] = {
      "  cp <src> <dst>   Copy a file or directory\n"
      "  mv <src> <dst>   Move or rename\n"
      "  rm [-r] <f>      Delete a file or directory\n"
-     "  format a: [720|1440] [/q] [label]  Format a floppy\n"},
+     "  format a: [720|1440] [/q] [label]  Format a floppy\n"
+     "Names: up to 63 characters, spaces allowed. Quote them\n"
+     "where two names follow: cp \"My File.txt\" \"Copy.txt\"\n"},
     {"time", "Date, time and calendar",
      "  date             Show the date and time\n"
      "  date <date>      Set the date: 2026-11-16 or 16.11.2026\n"
@@ -129,8 +177,10 @@ void cmd_pwd(char *out, size_t max) {
         snprintf(out, max, "%s%s\n\n", drv, dir_context.path);
 }
 
-void cmd_cd(const char *path, char *out, size_t max) {
-    if (!path || path[0] == '\0') {
+void cmd_cd(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *path = whole_path(arg, pb, sizeof pb);
+    if (path[0] == '\0') {
         append(out, max, "Usage: cd <path>\n\n");
         return;
     }
@@ -159,43 +209,34 @@ void cmd_cd(const char *path, char *out, size_t max) {
         append(out, max, "Error: directory not found\n\n");
 }
 
-void cmd_ls(const char *path, char *out, size_t max) {
+void cmd_ls(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *path = whole_path(arg, pb, sizeof pb);
     uint8_t drive = dir_context.drive_id;
     uint16_t cluster = dir_context.current_cluster;
-    if (path && path[0] != '\0') {
+    if (path[0] != '\0') {
         if (!fs_resolve_dir(path, &drive, &cluster)) {
             append(out, max, "Error: path not found\n\n");
             return;
         }
     }
-    dir_entry_t entries[32];
+    static dir_entry_t entries[64];
+    static char names[64][FS_NAME_SZ];
     int count = 0;
-    if (!fs_list_dir(drive, cluster, entries, 32, &count)) {
+    if (!fs_list_dir_names(drive, cluster, entries, names, 64, &count)) {
         append(out, max, "Error listing files\n\n");
         return;
     }
 
     append(out, max, "Files:\n");
     for (int i = 0; i < count; i++) {
-        char nb[16];
-        int j = 0;
-        for (int k = 0; k < 8 && entries[i].name[k] != ' '; k++)
-            nb[j++] = entries[i].name[k];
-        if (entries[i].ext[0] != ' ') {
-            nb[j++] = '.';
-            for (int k = 0; k < 3 && entries[i].ext[k] != ' '; k++)
-                nb[j++] = entries[i].ext[k];
-        }
-        nb[j] = '\0';
-        append(out, max, "  ");
-        append(out, max, nb);
+        char ss[FS_NAME_SZ + 32];
         if (entries[i].attr & ATTR_DIRECTORY)
-            append(out, max, " [DIR]\n");
-        else {
-            char ss[32];
-            sprintf(ss, " (%ub)\n", entries[i].file_size);
-            append(out, max, ss);
-        }
+            snprintf(ss, sizeof ss, "  %s [DIR]\n", names[i]);
+        else
+            snprintf(ss, sizeof ss, "  %s (%ub)\n", names[i],
+                     entries[i].file_size);
+        append(out, max, ss);
     }
     append(out, max, "\n");
 }
@@ -210,7 +251,7 @@ typedef struct {
 
 static bool find_line(const char *path, bool is_dir, uint32_t size, void *u) {
     find_out_t *f = (find_out_t *)u;
-    char line[300];
+    char line[FS_PATH_SZ + 32];
     if (is_dir)
         snprintf(line, sizeof(line), "  %s/\n", path);
     else
@@ -223,17 +264,9 @@ static bool find_line(const char *path, bool is_dir, uint32_t size, void *u) {
 }
 
 void cmd_find(const char *args, char *out, size_t max) {
-    char pat[64] = "", dir[200] = "";
-    const char *p = args ? args : "";
-    while (*p == ' ')
-        p++;
-    int k = 0;
-    while (*p && *p != ' ' && k < (int)sizeof(pat) - 1)
-        pat[k++] = *p++;
-    pat[k] = 0;
-    while (*p == ' ')
-        p++;
-    strncpy(dir, p, sizeof(dir) - 1);
+    char pat[64] = "", dir[FS_PATH_SZ] = "";
+    const char *p = next_arg(args ? args : "", pat, sizeof pat);
+    whole_path(p, dir, sizeof dir);
     if (!pat[0]) {
         append(out, max,
                "Usage: find <pattern> [dir]\n"
@@ -255,8 +288,10 @@ void cmd_find(const char *args, char *out, size_t max) {
     append(out, max, tail);
 }
 
-void cmd_cat(const char *filename, char *out, size_t max) {
-    if (!filename || filename[0] == '\0') {
+void cmd_cat(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *filename = whole_path(arg, pb, sizeof pb);
+    if (filename[0] == '\0') {
         append(out, max, "Usage: cat <filename>\n\n");
         return;
     }
@@ -285,25 +320,10 @@ void cmd_write(const char *args, char *out, size_t max) {
         append(out, max, "Usage: write <file> <text>\n\n");
         return;
     }
-    int i = 0;
-    while (args[i] == ' ')
-        i++;
-    int fs = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    if (i == fs) {
-        append(out, max, "Usage: write <file> <text>\n\n");
-        return;
-    }
-    char fn[64];
-    int fl = i - fs;
-    if (fl >= 64)
-        fl = 63;
-    memcpy(fn, &args[fs], fl);
-    fn[fl] = '\0';
-    while (args[i] == ' ')
-        i++;
-    if (args[i] == '\0') {
+    char fn[FS_PATH_SZ];
+    const char *text = next_arg(args, fn, sizeof fn);
+    int i = (int)(text - args);
+    if (!fn[0] || args[i] == '\0') {
         append(out, max, "Usage: write <file> <text>\n\n");
         return;
     }
@@ -329,8 +349,10 @@ void cmd_write(const char *args, char *out, size_t max) {
     append(out, max, tmp);
 }
 
-void cmd_touch(const char *filename, char *out, size_t max) {
-    if (!filename || filename[0] == '\0') {
+void cmd_touch(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *filename = whole_path(arg, pb, sizeof pb);
+    if (filename[0] == '\0') {
         append(out, max, "Usage: touch <filename>\n\n");
         return;
     }
@@ -350,13 +372,19 @@ void cmd_rm(const char *args, char *out, size_t max) {
         append(out, max, "Usage: rm [-r] <filename>\n\n");
         return;
     }
-    if (strncmp(args, "-r ", 3) == 0) {
-        if (!fs_rm_rf(args + 3)) {
+    char pb[FS_PATH_SZ];
+    while (*args == ' ')
+        args++;
+    bool rec = strncmp(args, "-r ", 3) == 0;
+    whole_path(rec ? args + 3 : args, pb, sizeof pb);
+    args = pb;
+    if (rec) {
+        if (!fs_rm_rf(args)) {
             append(out, max, "Error: delete failed\n\n");
             return;
         }
         append(out, max, "Deleted (recursive): ");
-        append(out, max, args + 3);
+        append(out, max, args);
         append(out, max, "\n\n");
     } else {
         if (!fs_delete(args)) {
@@ -369,8 +397,10 @@ void cmd_rm(const char *args, char *out, size_t max) {
     }
 }
 
-void cmd_mkdir(const char *dirname, char *out, size_t max) {
-    if (!dirname || dirname[0] == '\0') {
+void cmd_mkdir(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *dirname = whole_path(arg, pb, sizeof pb);
+    if (dirname[0] == '\0') {
         append(out, max, "Usage: mkdir <dirname>\n\n");
         return;
     }
@@ -385,8 +415,10 @@ void cmd_mkdir(const char *dirname, char *out, size_t max) {
     append(out, max, "\n\n");
 }
 
-void cmd_rmdir(const char *dirname, char *out, size_t max) {
-    if (!dirname || dirname[0] == '\0') {
+void cmd_rmdir(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *dirname = whole_path(arg, pb, sizeof pb);
+    if (dirname[0] == '\0') {
         append(out, max, "Usage: rmdir <dirname>\n\n");
         return;
     }
@@ -403,35 +435,17 @@ void cmd_rmdir(const char *dirname, char *out, size_t max) {
 
 void cmd_cp(const char *args, char *out, size_t max) {
     if (!args || args[0] == '\0') {
-        append(out, max, "Usage: cp <src> <dest>\n\n");
+        append(out, max,
+               "Usage: cp <src> <dest>  (\"quote names with spaces\")\n\n");
         return;
     }
-    int i = 0;
-    while (args[i] == ' ')
-        i++;
-    int ss = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int sl = i - ss;
-    while (args[i] == ' ')
-        i++;
-    int ds = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int dl = i - ds;
-    if (!sl || !dl) {
-        append(out, max, "Usage: cp <src> <dest>\n\n");
+    static char src[FS_PATH_SZ], dst[FS_PATH_SZ];
+    next_arg(next_arg(args, src, sizeof src), dst, sizeof dst);
+    if (!src[0] || !dst[0]) {
+        append(out, max,
+               "Usage: cp <src> <dest>  (\"quote names with spaces\")\n\n");
         return;
     }
-    char src[64], dst[64];
-    if (sl >= 64)
-        sl = 63;
-    if (dl >= 64)
-        dl = 63;
-    memcpy(src, &args[ss], sl);
-    src[sl] = '\0';
-    memcpy(dst, &args[ds], dl);
-    dst[dl] = '\0';
     dir_entry_t e;
     if (!fs_find(src, &e)) {
         append(out, max, "Error: source not found\n\n");
@@ -440,9 +454,11 @@ void cmd_cp(const char *args, char *out, size_t max) {
     bool ok = (e.attr & ATTR_DIRECTORY) ? fs_copy_dir(src, dst)
                                         : fs_copy_file(src, dst);
     if (ok) {
-        char tmp[150];
-        sprintf(tmp, "Copied: %s -> %s\n\n", src, dst);
-        append(out, max, tmp);
+        append(out, max, "Copied: ");
+        append(out, max, src);
+        append(out, max, " -> ");
+        append(out, max, dst);
+        append(out, max, "\n\n");
     } else {
         append(out, max, "Error: copy failed\n\n");
     }
@@ -450,35 +466,17 @@ void cmd_cp(const char *args, char *out, size_t max) {
 
 void cmd_mv(const char *args, char *out, size_t max) {
     if (!args || args[0] == '\0') {
-        append(out, max, "Usage: mv <src> <dest>\n\n");
+        append(out, max,
+               "Usage: mv <src> <dest>  (\"quote names with spaces\")\n\n");
         return;
     }
-    int i = 0;
-    while (args[i] == ' ')
-        i++;
-    int ss = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int sl = i - ss;
-    while (args[i] == ' ')
-        i++;
-    int ds = i;
-    while (args[i] != ' ' && args[i] != '\0')
-        i++;
-    int dl = i - ds;
-    if (!sl || !dl) {
-        append(out, max, "Usage: mv <src> <dest>\n\n");
+    static char src[FS_PATH_SZ], dst[FS_PATH_SZ];
+    next_arg(next_arg(args, src, sizeof src), dst, sizeof dst);
+    if (!src[0] || !dst[0]) {
+        append(out, max,
+               "Usage: mv <src> <dest>  (\"quote names with spaces\")\n\n");
         return;
     }
-    char src[64], dst[64];
-    if (sl >= 64)
-        sl = 63;
-    if (dl >= 64)
-        dl = 63;
-    memcpy(src, &args[ss], sl);
-    src[sl] = '\0';
-    memcpy(dst, &args[ds], dl);
-    dst[dl] = '\0';
     dir_entry_t e;
     if (!fs_find(src, &e)) {
         append(out, max, "Error: source not found\n\n");
@@ -487,9 +485,11 @@ void cmd_mv(const char *args, char *out, size_t max) {
     bool ok = (e.attr & ATTR_DIRECTORY) ? fs_move_dir(src, dst)
                                         : fs_move_file(src, dst);
     if (ok) {
-        char tmp[150];
-        sprintf(tmp, "Moved: %s -> %s\n\n", src, dst);
-        append(out, max, tmp);
+        append(out, max, "Moved: ");
+        append(out, max, src);
+        append(out, max, " -> ");
+        append(out, max, dst);
+        append(out, max, "\n\n");
     } else {
         append(out, max, "Error: move failed\n\n");
     }
@@ -740,25 +740,21 @@ void cmd_play(const char *args, char *out, size_t max) {
                      : "usage: play <file.wav|file.mid> [loop] | play stop\n");
         return;
     }
-    char path[128];
-    int n = 0;
-    while (args[n] && args[n] != ' ' && n < 127) {
-        path[n] = args[n];
-        n++;
-    }
-    path[n] = 0;
-    bool loop = strstr(args + n, "loop") != NULL;
+    char path[FS_PATH_SZ];
+    const char *rest = next_arg(args, path, sizeof path);
+    bool loop = strstr(rest, "loop") != NULL;
     const char *err = audio_open(path);
-    char buf[160];
+    char buf[FS_PATH_SZ + 64];
     if (err) {
-        sprintf(buf, "play: %s\n", err);
+        snprintf(buf, sizeof buf, "play: %s\n", err);
     } else {
         audio_set_loop(loop);
         audio_play();
         uint32_t sec = audio_len_ms() / 1000;
-        sprintf(buf, "Playing %s (%s, %s, %u:%02u)%s. 'play stop' stops.\n",
-                path, audio_codec_name(), audio_info(), sec / 60, sec % 60,
-                loop ? ", repeating" : "");
+        snprintf(buf, sizeof buf,
+                 "Playing %s (%s, %s, %u:%02u)%s. 'play stop' stops.\n", path,
+                 audio_codec_name(), audio_info(), sec / 60, sec % 60,
+                 loop ? ", repeating" : "");
     }
     append(out, max, buf);
 }
@@ -782,18 +778,9 @@ void cmd_lpt(char *out, size_t max) {
 
 /* print <file> [1|2|3] : text file to a parallel port */
 void cmd_print(const char *args, char *out, size_t max) {
-    char path[128], buf[128];
-    int n = 0, port = 0;
-    while (*args == ' ')
-        args++;
-    while (args[n] && args[n] != ' ' && n < 127) {
-        path[n] = args[n];
-        n++;
-    }
-    path[n] = 0;
-    const char *p = args + n;
-    while (*p == ' ')
-        p++;
+    char path[FS_PATH_SZ], buf[128];
+    int port = 0;
+    const char *p = next_arg(args, path, sizeof path);
     if (*p >= '1' && *p <= '3')
         port = *p - '1';
     if (!path[0]) {
@@ -1002,14 +989,17 @@ void cmd_reboot(const char *args, char *out, size_t max) {
     cpu_reset();
 }
 
-void cmd_tee(const char *filename, char *out, size_t max) {
-    if (!filename || filename[0] == '\0') {
+void cmd_tee(const char *arg, char *out, size_t max) {
+    char pb[FS_PATH_SZ];
+    const char *filename = whole_path(arg, pb, sizeof pb);
+    if (filename[0] == '\0') {
         append(out, max, "Usage: tee <filename>\n\n");
         return;
     }
     if (term_buf_save(filename)) {
-        char tmp[128];
-        sprintf(tmp, "Saved %d lines to %s\n\n", term_buf_count(), filename);
+        char tmp[FS_PATH_SZ + 32];
+        snprintf(tmp, sizeof tmp, "Saved %d lines to %s\n\n", term_buf_count(),
+                 filename);
         append(out, max, tmp);
     } else {
         append(out, max, "Error: could not save buffer\n\n");
@@ -1256,8 +1246,9 @@ void cmd_app(const char *args, char *out, size_t max) {
             append(out, max, "app run: need a name or path\n");
             return;
         }
-        if (!appload_try_open(arg))
-            snprintf(out, max, "app: '%s' not found\n", arg);
+        char pb[FS_PATH_SZ];
+        if (!appload_try_open(whole_path(arg, pb, sizeof pb)))
+            snprintf(out, max, "app: '%s' not found\n", pb);
     } else if (cl == 4 && !strncmp(args, "scan", 4)) {
         int n = appload_scan_dir(*arg ? arg : "/apps");
         snprintf(out, max, "Loaded %d package(s)\n", n);

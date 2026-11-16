@@ -90,7 +90,7 @@ qemu: all
 	qemu-system-i386 $(QEMU_FLAGS)
 
 qemu-fdd: all
-	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=floppy.img,if=floppy
+	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=floppy_35.img,if=floppy,index=0 -drive format=raw,file=floppy_525.img,if=floppy,index=1
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q

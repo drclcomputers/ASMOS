@@ -152,10 +152,10 @@ static char filter(const control *c, char ch) {
         return (ch >= '0' && ch <= '9') ? ch : 0;
     if (st & ES_DECIMAL)
         return ((ch >= '0' && ch <= '9') || ch == '.' || ch == '-') ? ch : 0;
-    if ((st & (ES_UPPER | ES_FILENAME)) && ch >= 'a' && ch <= 'z')
+    if ((st & ES_UPPER) && ch >= 'a' && ch <= 'z')
         ch -= 32;
-    if (st & ES_FILENAME)
-        return (fs_name_char_ok(ch) || ch == '.' || ch == '/') ? ch : 0;
+    if (st & ES_FILENAME) /* long names: case kept, spaces allowed */
+        return (fs_long_char_ok(ch) || ch == '/') ? ch : 0;
     return ch;
 }
 

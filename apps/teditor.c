@@ -8,7 +8,7 @@ typedef struct {
     window *win; /* must stay first */
     control *edit, *status;
     bool dirty;
-    char path[128];
+    char path[FS_PATH_SZ];
     char title[48];
     char find[64];
     int last_line, last_col;
@@ -115,7 +115,7 @@ static void dir_of(const char *path, char *out, int n) {
 }
 
 static void do_save_as(teditor_state_t *s) {
-    char dir[128];
+    char dir[FS_PATH_SZ];
     dir_of(s->path, dir, sizeof(dir));
     const char *base = strrchr(s->path, '/');
     dlg_save_file(s->win, "Save As", dir, base ? base + 1 : "UNTITLED.TXT",
@@ -130,7 +130,7 @@ static void do_save(teditor_state_t *s) {
 }
 
 static void do_open(teditor_state_t *s) {
-    char dir[128];
+    char dir[FS_PATH_SZ];
     dir_of(s->path, dir, sizeof(dir));
     dlg_open_file(s->win, "Open", dir, NULL, opened, s);
 }

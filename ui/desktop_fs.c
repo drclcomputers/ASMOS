@@ -14,18 +14,6 @@ static uint16_t s_cluster = 0;
 static bool s_inited = false;
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
-static void entry_display_name(const dir_entry_t *e, char *out) {
-    int j = 0;
-    for (int k = 0; k < 8 && e->name[k] != ' '; k++)
-        out[j++] = e->name[k];
-    if (!(e->attr & ATTR_DIRECTORY) && e->ext[0] != ' ') {
-        out[j++] = '.';
-        for (int k = 0; k < 3 && e->ext[k] != ' '; k++)
-            out[j++] = e->ext[k];
-    }
-    out[j] = '\0';
-}
-
 static bool entry_is_app(const dir_entry_t *e) {
     if (e->attr & ATTR_DIRECTORY)
         return false;
@@ -44,7 +32,7 @@ static void grid_slot(int n, int *out_x, int *out_y) {
 }
 
 static void create_default_shortcuts(void) {
-    static const char *defaults[] = {"FILEF", NULL};
+    static const char *defaults[] = {"FILEF", "ASMDRAW", NULL};
 
     uint8_t saved_drive = dir_context.drive_id;
     uint16_t saved_cluster = dir_context.current_cluster;
@@ -110,9 +98,11 @@ void desktop_fs_reload(void) {
     s_count = 0;
     memset(s_items, 0, sizeof(s_items));
 
-    dir_entry_t raw[DESKTOP_MAX_ITEMS];
+    static dir_entry_t raw[DESKTOP_MAX_ITEMS];
+    static char names[DESKTOP_MAX_ITEMS][FS_NAME_SZ];
     int raw_count = 0;
-    fs_list_dir(DRIVE_HDA, s_cluster, raw, DESKTOP_MAX_ITEMS, &raw_count);
+    fs_list_dir_names(DRIVE_HDA, s_cluster, raw, names, DESKTOP_MAX_ITEMS,
+                      &raw_count);
 
     int slot = 0;
     for (int i = 0; i < raw_count && s_count < DESKTOP_MAX_ITEMS; i++) {
@@ -125,14 +115,14 @@ void desktop_fs_reload(void) {
 
         desktop_item_t *it = &s_items[s_count];
         memset(it, 0, sizeof(desktop_item_t));
-        entry_display_name(&raw[i], it->name);
+        strcpy(it->name, names[i]);
 
         if (raw[i].attr & ATTR_DIRECTORY) {
             it->kind = DESKTOP_ITEM_DIR;
         } else if (entry_is_app(&raw[i])) {
-            it->kind = DESKTOP_ITEM_APP;
-            char *dot = strchr(it->name, '.');
-            if (dot)
+            it->kind = DESKTOP_ITEM_APP; /* shown without ".APP" */
+            char *dot = strrchr(it->name, '.');
+            if (dot && !strcasecmp(dot, ".APP"))
                 *dot = '\0';
         } else {
             it->kind = DESKTOP_ITEM_FILE;

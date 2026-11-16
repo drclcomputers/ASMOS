@@ -32,6 +32,8 @@ const fdd_format_t FDD_FORMATS[FDD_MEDIA_COUNT] = {
 /* the disk in each drive: its format and geometry (spt/heads from the
  * boot sector, which may differ from the table for odd disks); dstep: a
  * 40-track disk in an 80-track drive (two steps a track, 300 kbps) */
+static uint8_t s_motors;       /* FDD_DOR_MOTOR_A/B bits that are on */
+static uint32_t s_last_use[2]; /* pit_ticks of each drive's last access */
 static int s_media[2];
 static uint8_t s_spt[2], s_heads[2], s_tracks[2], s_dstep[2];
 
@@ -194,6 +196,7 @@ static void fdc_reset(void) {
     fdc_send_byte(FDD_CMD_SPECIFY);
     fdc_send_byte(0x8F);
     fdc_send_byte(0x02);
+    s_motors = 0; /* the reset stopped both motors */
     for (int d = 0; d < 2; d++) {
         s_motor_on[d] = false;
         s_current_track[d] = -1;
@@ -216,25 +219,49 @@ static bool fdc_wait_seek(uint8_t drive_id, uint8_t *st0, uint8_t *cyl) {
     return false;
 }
 
-/* ── motor control ──────────────────────────────────────────────────────── */
+/* ── motor control ──────────────────────────────────────────────────────
+ * The DOR holds both drives' motor bits and selects one drive. Writing it
+ * for one drive must keep the other's motor bit, or using B: stops A:'s
+ * motor behind the driver's back (and A: then never reads). A motor stays
+ * on between accesses (no 0.5 s spin-up per sector) and stops after 2 s
+ * idle: fdd_poll(), from the main loop. */
+#define MOTOR_IDLE_MS 2000
+
+static uint8_t motor_bit(uint8_t d) {
+    return d ? FDD_DOR_MOTOR_B : FDD_DOR_MOTOR_A;
+}
+
+static void write_dor(uint8_t sel) {
+    outb(FDD_DOR, (uint8_t)(FDD_DOR_RESET | FDD_DOR_IRQ_DMA | s_motors |
+                            (sel ? FDD_DOR_SEL_B : FDD_DOR_SEL_A)));
+}
+
 static void fdd_motor_start(uint8_t drive_id) {
-    if (s_motor_on[drive_id])
+    s_last_use[drive_id] = pit_ticks;
+    if (s_motor_on[drive_id] && (s_motors & motor_bit(drive_id))) {
+        write_dor(drive_id); /* just select it */
         return;
-    uint8_t dor = FDD_DOR_RESET | FDD_DOR_IRQ_DMA;
-    dor |= (drive_id == 0) ? (FDD_DOR_SEL_A | FDD_DOR_MOTOR_A)
-                           : (FDD_DOR_SEL_B | FDD_DOR_MOTOR_B);
-    outb(FDD_DOR, dor);
+    }
+    s_motors |= motor_bit(drive_id);
+    write_dor(drive_id);
     s_motor_on[drive_id] = true;
     fdd_wait_ms(500); /* spin-up */
 }
 
 void fdd_motor_off(uint8_t drive_id) {
-    if (!s_motor_on[drive_id])
+    if (drive_id > 1 || !s_motor_on[drive_id])
         return;
-    uint8_t dor = FDD_DOR_RESET | FDD_DOR_IRQ_DMA;
-    dor |= (drive_id == 0) ? FDD_DOR_SEL_A : FDD_DOR_SEL_B;
-    outb(FDD_DOR, dor);
+    s_motors &= (uint8_t)~motor_bit(drive_id);
     s_motor_on[drive_id] = false;
+    write_dor(drive_id);
+}
+
+/* main loop: stop motors that have been idle a while */
+void fdd_poll(void) {
+    for (uint8_t d = 0; d < 2; d++)
+        if (s_motor_on[d] &&
+            (int32_t)(pit_ticks - s_last_use[d]) >= MOTOR_IDLE_MS)
+            fdd_motor_off(d);
 }
 
 /* ── recalibrate (seek to track 0) ─────────────────────────────────────── */
@@ -399,6 +426,7 @@ static bool read_raw(uint8_t drive_id, uint32_t lba, void *buf, int tries) {
 
         if ((st0 & 0xC0) == 0 && st1 == 0 && st2 == 0) {
             memcpy(buf, s_dma_buf, FDD_SECTOR_SIZE);
+            s_last_use[drive_id] = pit_ticks; /* the motor stays on a bit */
             return true;
         }
 
@@ -457,8 +485,10 @@ bool fdd_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
         (void)fdc_recv_byte();
         (void)fdc_recv_byte();
 
-        if ((st0 & 0xC0) == 0 && st1 == 0 && st2 == 0)
+        if ((st0 & 0xC0) == 0 && st1 == 0 && st2 == 0) {
+            s_last_use[drive_id] = pit_ticks;
             return true;
+        }
 
         fdd_recalibrate(drive_id);
         fdd_seek(drive_id, cyl);

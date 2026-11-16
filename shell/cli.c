@@ -1,5 +1,6 @@
 #include "shell/cli.h"
 #include "config/runtime_config.h"
+#include "drivers/fdd.h"
 #include "shell/asm.h"
 #include "shell/binrun.h"
 #include "shell/cmds.h"
@@ -157,12 +158,18 @@ static void draw_input(void) {
         return;
     }
 
-    char prompt[40];
+    char prompt[48];
     const char *drv = g_drive_paths[dir_context.drive_id];
-    if (strcmp(dir_context.path, "/") == 0)
+    const char *dp = dir_context.path;
+    if (strcmp(dp, "/") == 0)
         snprintf(prompt, sizeof(prompt), "%s> ", drv);
-    else
-        snprintf(prompt, sizeof(prompt), "%s%s> ", drv, dir_context.path);
+    else if (strlen(drv) + strlen(dp) <= 32)
+        snprintf(prompt, sizeof(prompt), "%s%s> ", drv, dp);
+    else { /* a long path: the drive, "...", the end */
+        const char *tail = dp + strlen(dp) - 26;
+        const char *sl = strchr(tail, '/');
+        snprintf(prompt, sizeof(prompt), "%s/...%s> ", drv, sl ? sl : tail);
+    }
 
     draw_string(MARGIN_X, iy + 2, prompt, CYAN, UI_FONT_TERM);
 
@@ -305,6 +312,7 @@ void cli_run(void) {
         net_poll();
         task_yield(); /* gopher and run execute as tasks */
         print_pump();
+        fdd_poll();
         audio_update();
         scheduler_reap();
 

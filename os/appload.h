@@ -28,6 +28,7 @@
  * builds the relocation table from the ELF.
  */
 
+#include "fs/fs.h"
 #include "lib/core.h"
 #include "os/os.h"
 
@@ -79,7 +80,7 @@ typedef struct {
     bool was_run;
     uint32_t file_size;
     uint16_t mod_date, mod_time;
-    char path[128];
+    char path[FS_PATH_SZ];
 } loaded_app_t;
 
 /* Load (or reuse / hot-reload if the file changed) and register. */

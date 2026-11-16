@@ -348,6 +348,14 @@ int vsnprintf(char *str, size_t size, const char *format, va_list args) {
         }
 
         int width = 0;
+        if (*format == '*') { /* width from the arguments */
+            width = va_arg(args, int);
+            if (width < 0) {
+                left_align = true;
+                width = -width;
+            }
+            format++;
+        }
         while (isdigit(*format)) {
             width = width * 10 + (*format - '0');
             format++;
@@ -357,6 +365,12 @@ int vsnprintf(char *str, size_t size, const char *format, va_list args) {
         if (*format == '.') {
             format++;
             precision = 0;
+            if (*format == '*') { /* "%.*s": precision from the arguments */
+                precision = va_arg(args, int);
+                if (precision < 0)
+                    precision = -1;
+                format++;
+            }
             while (isdigit(*format)) {
                 precision = precision * 10 + (*format - '0');
                 format++;

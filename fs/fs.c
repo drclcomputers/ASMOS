@@ -43,15 +43,63 @@ bool path_is_protected(const char *name_or_path) {
     return false;
 }
 
+/* Floppies: a small write-through cache of recent sectors. The FAT and the
+ * folders are read again and again (each cluster of a file looks up the
+ * FAT), and a floppy read costs a seek and up to a turn of the disk.
+ * Emptied when a floppy is mounted or unmounted. */
+#define FCACHE_N 16
+static struct {
+    uint32_t lba, used;
+    uint8_t drive; /* DRIVE_FDD0/1; 0 = empty slot */
+    uint8_t data[512];
+} s_fcache[FCACHE_N];
+static uint32_t s_fcache_clock;
+
+static int fcache_find(uint8_t drive_id, uint32_t lba) {
+    for (int i = 0; i < FCACHE_N; i++)
+        if (s_fcache[i].drive == drive_id && s_fcache[i].lba == lba)
+            return i;
+    return -1;
+}
+
+static void fcache_put(uint8_t drive_id, uint32_t lba, const void *buf) {
+    int k = fcache_find(drive_id, lba);
+    if (k < 0) { /* the empty or least recently used slot */
+        k = 0;
+        for (int i = 1; i < FCACHE_N && s_fcache[k].drive; i++)
+            if (!s_fcache[i].drive || s_fcache[i].used < s_fcache[k].used)
+                k = i;
+    }
+    s_fcache[k].drive = drive_id;
+    s_fcache[k].lba = lba;
+    s_fcache[k].used = ++s_fcache_clock;
+    memcpy(s_fcache[k].data, buf, 512);
+}
+
+static void fcache_drop(uint8_t drive_id) {
+    for (int i = 0; i < FCACHE_N; i++)
+        if (s_fcache[i].drive == drive_id)
+            s_fcache[i].drive = 0;
+}
+
 bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
     switch (drive_id) {
     case DRIVE_HDA:
     case DRIVE_HDB:
         return ata_read_sector(drive_id, lba, buf);
     case DRIVE_FDD0:
-        return fdd_read_sector(0, lba, buf);
-    case DRIVE_FDD1:
-        return fdd_read_sector(1, lba, buf);
+    case DRIVE_FDD1: {
+        int k = fcache_find(drive_id, lba);
+        if (k >= 0) {
+            memcpy(buf, s_fcache[k].data, 512);
+            s_fcache[k].used = ++s_fcache_clock;
+            return true;
+        }
+        if (!fdd_read_sector(drive_id == DRIVE_FDD0 ? 0 : 1, lba, buf))
+            return false;
+        fcache_put(drive_id, lba, buf);
+        return true;
+    }
     default:
         return false;
     }
@@ -63,9 +111,17 @@ bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
     case DRIVE_HDB:
         return ata_write_sector(drive_id, lba, buf);
     case DRIVE_FDD0:
-        return fdd_write_sector(0, lba, buf);
-    case DRIVE_FDD1:
-        return fdd_write_sector(1, lba, buf);
+    case DRIVE_FDD1: {
+        bool ok = fdd_write_sector(drive_id == DRIVE_FDD0 ? 0 : 1, lba, buf);
+        if (ok)
+            fcache_put(drive_id, lba, buf);
+        else { /* what's on the disk is unknown now */
+            int k = fcache_find(drive_id, lba);
+            if (k >= 0)
+                s_fcache[k].drive = 0;
+        }
+        return ok;
+    }
     default:
         return false;
     }
@@ -94,76 +150,165 @@ static void zero_cluster(uint8_t drive_id, uint16_t cluster) {
         fs_write_sector(drive_id, lba + s, zero);
 }
 
-typedef bool (*dir_cb)(uint8_t drive_id, dir_entry_t *entry, uint32_t lba,
-                       int idx, void *user);
-
-static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
-                        void *user) {
-    fat_vol_t *v = vol(drive_id);
-    uint32_t lba;
-    uint8_t sector_buf[512];
-
-    if (dir_cluster == 0) {
-        uint32_t root_sectors = (v->bpb.root_entry_count * 32 + 511) / 512;
-        for (uint32_t s = 0; s < root_sectors; s++) {
-            lba = v->root_lba + s;
-            if (!fs_read_sector(drive_id, lba, sector_buf))
-                return false;
-            dir_entry_t *entries = (dir_entry_t *)sector_buf;
-            if (entries[0].name[0] == DIR_ENTRY_END)
-                return true;
-            for (int i = 0; i < 16; i++) {
-                if (entries[i].name[0] == DIR_ENTRY_END)
-                    return true;
-                if (entries[i].name[0] == DIR_ENTRY_FREE)
-                    continue;
-                if (entries[i].attr & ATTR_VOLUME_ID)
-                    continue;
-                if (!cb(drive_id, &entries[i], lba, i, user))
-                    return false;
-            }
-        }
-    } else {
-        uint16_t cluster = dir_cluster;
-        int safety = 0;
-        while (vol_cluster_active(v, cluster) && safety++ < v->cluster_count) {
-            uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
-            for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
-                lba = start_lba + s;
-                if (!fs_read_sector(drive_id, lba, sector_buf))
-                    return false;
-                dir_entry_t *entries = (dir_entry_t *)sector_buf;
-                for (int i = 0; i < 16; i++) {
-                    if (entries[i].name[0] == DIR_ENTRY_END)
-                        return true;
-                    if (entries[i].name[0] == DIR_ENTRY_FREE)
-                        continue;
-                    if (entries[i].attr & ATTR_VOLUME_ID)
-                        continue;
-                    if (!cb(drive_id, &entries[i], lba, i, user))
-                        return false;
-                }
-            }
-            cluster = fat_get(drive_id, cluster);
-        }
-    }
-    return true;
-}
-
-/* ── long file names (Windows 95 and later) ─────────────────────────────
+/* ── directory walking, with long file names (Windows 95 and later) ──────
  * Before its 8.3 entry, a file with a long name has entries with attr 0x0F
- * holding the name, each with a checksum of the 8.3 name (byte 13). They
- * are skipped when listing, like DOS does; but deleting, renaming or
- * removing the file must take them away too, or Windows' ScanDisk reports
- * them as lost. Only entries right before the file, with its checksum,
- * are touched: never another file's. */
+ * holding the name in 13-character pieces, last piece first, each with a
+ * checksum of the 8.3 name. DOS skips them and sees only the 8.3 name (the
+ * "alias", like LONGFI~1.TXT); we read them, find files by either name, and
+ * write them for names that don't fit 8.3. Names are kept up to FS_NAME_MAX
+ * characters: a longer one on a disk from elsewhere shows as its alias.
+ * Characters outside ASCII show as '_'. */
 #define ATTR_LFN 0x0F
+#define LFN_MAX 20 /* 20 x 13 = 260 characters: the longest name on disk */
+#define CASE_LOWER_BASE 0x08 /* Windows NT: the 8.3 name is lower case */
+#define CASE_LOWER_EXT 0x10
+
+static bool is_lfn(const dir_entry_t *e) {
+    return (e->attr & 0x3F) == ATTR_LFN && e->name[0] != DIR_ENTRY_FREE;
+}
 
 static uint8_t lfn_checksum(const uint8_t name11[11]) {
     uint8_t sum = 0;
     for (int i = 0; i < 11; i++)
         sum = (uint8_t)(((sum & 1) << 7) + (sum >> 1) + name11[i]);
     return sum;
+}
+
+/* where the 13 UCS-2 characters sit in a long-name entry */
+static const uint8_t k_lfn_off[13] = {1,  3,  5,  7,  9,  14, 16,
+                                      18, 20, 22, 24, 28, 30};
+
+typedef struct {
+    char name[FS_NAME_SZ];
+    uint8_t sum;
+    uint8_t expect; /* the next piece expected (counts down to 1); 0: none */
+    bool done;      /* all pieces seen, down to piece 1 */
+    bool too_long;
+} lfn_acc;
+
+static void lfn_reset(lfn_acc *a) {
+    a->expect = 0;
+    a->done = false;
+}
+
+static void lfn_feed(lfn_acc *a, const dir_entry_t *e) {
+    const uint8_t *r = (const uint8_t *)e;
+    uint8_t ord = r[0];
+    if (ord & 0x40) { /* the last piece: comes first */
+        int n = ord & 0x3F;
+        if (n == 0 || n > LFN_MAX) {
+            lfn_reset(a);
+            return;
+        }
+        memset(a->name, 0, sizeof(a->name));
+        a->sum = r[13];
+        a->expect = (uint8_t)n;
+        a->too_long = false;
+        a->done = false;
+    } else if (!a->expect || ord != a->expect || r[13] != a->sum) {
+        lfn_reset(a); /* out of order: not a name */
+        return;
+    }
+    int base = (a->expect - 1) * 13;
+    for (int k = 0; k < 13; k++) {
+        uint16_t c = (uint16_t)(r[k_lfn_off[k]] | (r[k_lfn_off[k] + 1] << 8));
+        if (c == 0x0000 || c == 0xFFFF)
+            break;
+        int pos = base + k;
+        if (pos >= FS_NAME_MAX) {
+            a->too_long = true;
+            continue;
+        }
+        a->name[pos] = (c >= 0x20 && c < 0x7F) ? (char)c : '_';
+    }
+    a->expect--;
+    a->done = a->expect == 0;
+}
+
+/* the long name of the 8.3 entry e, if the pieces before it were its own */
+static const char *lfn_take(lfn_acc *a, const dir_entry_t *e) {
+    bool ok = a->done && !a->too_long && a->name[0] &&
+              a->sum == lfn_checksum((const uint8_t *)e);
+    lfn_reset(a);
+    return ok ? a->name : NULL;
+}
+
+/* the 8.3 name as text: "README.TXT" (lower case if Windows NT said so) */
+void fs_entry_name(const dir_entry_t *e, char out[13]) {
+    int j = 0;
+    bool lb = e->reserved & CASE_LOWER_BASE, le = e->reserved & CASE_LOWER_EXT;
+    for (int i = 0; i < 8 && e->name[i] != ' '; i++) {
+        char c = (char)(i == 0 && e->name[0] == 0x05 ? 0xE5 : e->name[i]);
+        out[j++] = lb ? (char)tolower(c) : c;
+    }
+    if (e->ext[0] != ' ') {
+        out[j++] = '.';
+        for (int i = 0; i < 3 && e->ext[i] != ' '; i++)
+            out[j++] = le ? (char)tolower(e->ext[i]) : (char)e->ext[i];
+    }
+    out[j] = '\0';
+}
+
+/* Called for every file and folder (not '.'-skipping; not the volume label)
+ * with its long name, or NULL. Return false to stop. */
+typedef bool (*dir_cb)(uint8_t drive_id, dir_entry_t *entry, const char *lname,
+                       uint32_t lba, int idx, void *user);
+
+/* 1: go on; 0: the end of the folder; -1: stopped or a read failed */
+static int scan_sector(uint8_t drive_id, uint32_t lba, lfn_acc *a, dir_cb cb,
+                       void *user) {
+    uint8_t buf[512];
+    if (!fs_read_sector(drive_id, lba, buf))
+        return -1;
+    dir_entry_t *e = (dir_entry_t *)buf;
+    for (int i = 0; i < 16; i++) {
+        if (e[i].name[0] == DIR_ENTRY_END)
+            return 0;
+        if (e[i].name[0] == DIR_ENTRY_FREE) {
+            lfn_reset(a);
+            continue;
+        }
+        if (is_lfn(&e[i])) {
+            lfn_feed(a, &e[i]);
+            continue;
+        }
+        if (e[i].attr & ATTR_VOLUME_ID) {
+            lfn_reset(a);
+            continue;
+        }
+        const char *ln = lfn_take(a, &e[i]);
+        if (!cb(drive_id, &e[i], ln, lba, i, user))
+            return -1;
+    }
+    return 1;
+}
+
+static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
+                        void *user) {
+    fat_vol_t *v = vol(drive_id);
+    lfn_acc a;
+    lfn_reset(&a);
+    if (dir_cluster == 0) {
+        uint32_t root_sectors = (v->bpb.root_entry_count * 32 + 511) / 512;
+        for (uint32_t s = 0; s < root_sectors; s++) {
+            int r = scan_sector(drive_id, v->root_lba + s, &a, cb, user);
+            if (r <= 0)
+                return r == 0;
+        }
+        return true;
+    }
+    uint16_t cluster = dir_cluster;
+    int safety = 0;
+    while (vol_cluster_active(v, cluster) && safety++ < (int)v->cluster_count) {
+        uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
+        for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
+            int r = scan_sector(drive_id, start_lba + s, &a, cb, user);
+            if (r <= 0)
+                return r == 0;
+        }
+        cluster = fat_get(drive_id, cluster);
+    }
+    return true;
 }
 
 /* the n-th sector of a directory (cluster 0: the root); false past its end */
@@ -190,8 +335,8 @@ static bool dir_sector(uint8_t drive_id, uint16_t dir_cluster, uint32_t n,
     return true;
 }
 
-#define LFN_MAX 20 /* 20 x 13 = 260 characters: the longest name */
-
+/* Free a file's long-name entries: only those right before it, with its
+ * checksum, are touched, never another file's. */
 static void lfn_clear(uint8_t drive_id, uint16_t dir_cluster,
                       const char name11[11]) {
     struct {
@@ -248,172 +393,427 @@ static void lfn_clear(uint8_t drive_id, uint16_t dir_cluster,
     }
 }
 
-typedef bool (*cluster_cb)(uint8_t drive_id, dir_entry_t *e, uint16_t cluster,
-                           int idx, void *user);
+/* ── names ───────────────────────────────────────────────────────────── */
 
-static bool cluster_iterate(uint8_t drive_id, uint16_t cluster, cluster_cb cb,
-                            void *user) {
-    fat_vol_t *v = vol(drive_id);
-    uint8_t sector_buf[512];
-    int safety = 0;
-    while (vol_cluster_active(v, cluster) && safety++ < v->cluster_count) {
-        uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
-        for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
-            if (!fs_read_sector(drive_id, start_lba + s, sector_buf))
-                return false;
-            dir_entry_t *entries = (dir_entry_t *)sector_buf;
-            for (int i = 0; i < 16; i++) {
-                uint8_t first = entries[i].name[0];
-                if (first == DIR_ENTRY_END)
-                    return true;
-                if (first == DIR_ENTRY_FREE || first == '.')
-                    continue;
-                if (entries[i].attr & ATTR_VOLUME_ID)
-                    continue;
-                if (!cb(drive_id, &entries[i], cluster, i, user))
-                    return false;
-            }
-        }
-        cluster = fat_get(drive_id, cluster);
+/* a long name may hold anything but these (and control characters) */
+bool fs_long_char_ok(char c) {
+    if ((unsigned char)c < 0x20 || (unsigned char)c >= 0x7F)
+        return false;
+    return !strchr("\\/:*?\"<>|", c);
+}
+
+/* Copy name without leading spaces and trailing spaces and dots (Windows
+ * drops those); false if it's empty or too long for FS_NAME_MAX. */
+static bool name_trim(const char *in, char out[FS_NAME_SZ]) {
+    while (*in == ' ')
+        in++;
+    if (strcmp(in, ".") == 0 || strcmp(in, "..") == 0) {
+        strcpy(out, in);
+        return true;
     }
+    int n = (int)strlen(in);
+    while (n > 0 && (in[n - 1] == ' ' || in[n - 1] == '.'))
+        n--;
+    if (n == 0 || n > FS_NAME_MAX)
+        return false;
+    memcpy(out, in, n);
+    out[n] = '\0';
     return true;
 }
 
-static bool alloc_dir_entry(uint8_t drive_id, uint16_t dir_cluster,
-                            uint32_t *out_lba, int *out_idx) {
-    fat_vol_t *v = vol(drive_id);
-    uint32_t lba;
-    uint8_t sector_buf[512];
-
-    if (dir_cluster == 0) {
-        uint32_t root_sectors = (v->bpb.root_entry_count * 32 + 511) / 512;
-        for (uint32_t s = 0; s < root_sectors; s++) {
-            lba = v->root_lba + s;
-            if (!fs_read_sector(drive_id, lba, sector_buf))
-                return false;
-            dir_entry_t *entries = (dir_entry_t *)sector_buf;
-            for (int i = 0; i < 16; i++) {
-                if (entries[i].name[0] == DIR_ENTRY_FREE ||
-                    entries[i].name[0] == DIR_ENTRY_END) {
-                    *out_lba = lba;
-                    *out_idx = i;
-                    return true;
-                }
-            }
-        }
+/* fits 8.3 as it is (any case): no long name needed, except for case */
+bool fs_name_is_83(const char *n) {
+    if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
+        return true;
+    const char *dot = strchr(n, '.');
+    int bl = dot ? (int)(dot - n) : (int)strlen(n);
+    int el = dot ? (int)strlen(dot + 1) : 0;
+    if (bl < 1 || bl > 8 || el > 3 || (dot && el == 0))
         return false;
-    }
-
-    uint16_t cluster = dir_cluster, prev = 0;
-    while (vol_cluster_active(v, cluster)) {
-        uint32_t start_lba = fat_cluster_to_lba(drive_id, cluster);
-        for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++) {
-            lba = start_lba + s;
-            if (!fs_read_sector(drive_id, lba, sector_buf))
-                return false;
-            dir_entry_t *entries = (dir_entry_t *)sector_buf;
-            for (int i = 0; i < 16; i++) {
-                if (entries[i].name[0] == DIR_ENTRY_FREE ||
-                    entries[i].name[0] == DIR_ENTRY_END) {
-                    *out_lba = lba;
-                    *out_idx = i;
-                    return true;
-                }
-            }
-        }
-        prev = cluster;
-        cluster = fat_get(drive_id, cluster);
-    }
-
-    uint16_t new_cluster = fat_alloc(drive_id);
-    if (new_cluster == 0)
-        return false;
-    if (prev)
-        fat_set(drive_id, prev, new_cluster);
-    uint32_t new_lba = fat_cluster_to_lba(drive_id, new_cluster);
-    uint8_t zero[512];
-    memset(zero, 0, 512);
-    for (uint32_t s = 0; s < v->bpb.sectors_per_cluster; s++)
-        fs_write_sector(drive_id, new_lba + s, zero);
-    *out_lba = new_lba;
-    *out_idx = 0;
+    for (int i = 0; i < bl; i++)
+        if (!fs_name_char_ok(n[i]))
+            return false;
+    for (int i = 0; i < el; i++)
+        if (!fs_name_char_ok(dot[1 + i]))
+            return false;
     return true;
+}
+
+/* 0: all upper (or no letters), 1: all lower, 2: mixed */
+static int part_case(const char *s, int len) {
+    bool up = false, lo = false;
+    for (int i = 0; i < len; i++) {
+        if (s[i] >= 'A' && s[i] <= 'Z')
+            up = true;
+        if (s[i] >= 'a' && s[i] <= 'z')
+            lo = true;
+    }
+    return up && lo ? 2 : lo ? 1 : 0;
+}
+
+/* an 8.3 name keeps all-lower parts in its case flags (like Windows NT);
+ * only mixed case ("ReadMe.txt") needs a long name */
+static bool needs_lfn(const char *n, uint8_t *case_flags) {
+    *case_flags = 0;
+    if (!fs_name_is_83(n))
+        return true;
+    if (n[0] == '.')
+        return false;
+    const char *dot = strchr(n, '.');
+    int bl = dot ? (int)(dot - n) : (int)strlen(n);
+    int cb = part_case(n, bl),
+        ce = dot ? part_case(dot + 1, (int)strlen(dot + 1)) : 0;
+    if (cb == 2 || ce == 2)
+        return true;
+    if (cb == 1)
+        *case_flags |= CASE_LOWER_BASE;
+    if (ce == 1)
+        *case_flags |= CASE_LOWER_EXT;
+    return false;
 }
 
 typedef struct {
-    const char *name;
+    const char *name; /* trimmed */
+    char n83[12];
+    bool is83;
     dir_entry_t *out;
-    bool found;
-} find_ctx;
-typedef struct {
-    dir_entry_t *buf;
-    int max;
-    int count;
-} list_ctx;
-typedef struct {
-    const char *name;
-    bool done;
-    const char *new_name;
-    int action;
-} modify_ctx;
-typedef struct {
-    const char *name83;
+    char *lname_out; /* FS_NAME_SZ, may be NULL */
     uint32_t lba;
     int idx;
     bool found;
-} locate_ctx;
+} lookup_ctx;
 
-static bool find_cb(uint8_t drive_id, dir_entry_t *e, uint32_t lba, int idx,
-                    void *user) {
+static bool lookup_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                      uint32_t lba, int idx, void *user) {
+    (void)drive_id;
+    lookup_ctx *c = user;
+    if ((lname && strcasecmp(lname, c->name) == 0) ||
+        (c->is83 && name83_eq(e->name, c->n83))) {
+        if (c->out)
+            *c->out = *e;
+        if (c->lname_out) {
+            if (lname)
+                strcpy(c->lname_out, lname);
+            else
+                fs_entry_name(e, c->lname_out);
+        }
+        c->lba = lba;
+        c->idx = idx;
+        c->found = true;
+        return false;
+    }
+    return true;
+}
+
+/* find a file or folder by its long or its 8.3 name (any case) */
+static bool lookup(uint8_t drive_id, uint16_t dir_cluster, const char *name,
+                   dir_entry_t *out, char *lname_out, uint32_t *lba, int *idx) {
+    char t[FS_NAME_SZ];
+    if (!name_trim(name, t))
+        return false;
+    lookup_ctx c = {t, {0}, fs_name_is_83(t), out, lname_out, 0, 0, false};
+    if (c.is83)
+        fs_make_83(t, c.n83);
+    dir_iterate(drive_id, dir_cluster, lookup_cb, &c);
+    if (c.found) {
+        if (lba)
+            *lba = c.lba;
+        if (idx)
+            *idx = c.idx;
+    }
+    return c.found;
+}
+
+bool fs_find_name(uint8_t drive_id, uint16_t dir_cluster, const char *name,
+                  dir_entry_t *out) {
+    dir_entry_t tmp;
+    return lookup(drive_id, dir_cluster, name, out ? out : &tmp, NULL, NULL,
+                  NULL);
+}
+
+/* The 8.3 alias of a long name, as Windows makes it: upper case, without
+ * spaces and inner dots, other unfit characters as '_', the base cut to fit
+ * "~N" for the first N not taken: "My Long File.txt" -> MYLONG~1.TXT */
+static bool make_alias(uint8_t drive_id, uint16_t dir_cluster, const char *n,
+                       char out83[12]) {
+    char base[FS_NAME_SZ], ext[4];
+    int bl = 0, el = 0;
+    while (*n == '.')
+        n++;
+    const char *dot = strrchr(n, '.');
+    for (const char *p = n; *p && p != dot; p++) {
+        char c = *p;
+        if (c == ' ' || c == '.')
+            continue;
+        c = (char)toupper(c);
+        base[bl++] = fs_name_char_ok(c) ? c : '_';
+    }
+    if (dot)
+        for (const char *p = dot + 1; *p && el < 3; p++) {
+            char c = *p;
+            if (c == ' ' || c == '.')
+                continue;
+            c = (char)toupper(c);
+            ext[el++] = fs_name_char_ok(c) ? c : '_';
+        }
+    if (bl == 0)
+        base[bl++] = '_';
+    for (int k = 1; k < 100000; k++) {
+        char tail[8];
+        int tl = snprintf(tail, sizeof(tail), "~%d", k);
+        int keep = bl < 8 - tl ? bl : 8 - tl;
+        memset(out83, ' ', 11);
+        out83[11] = '\0';
+        memcpy(out83, base, keep);
+        memcpy(out83 + keep, tail, tl);
+        memcpy(out83 + 8, ext, el);
+        dir_entry_t tmp;
+        if (!fs_find_in_dir(drive_id, dir_cluster, out83, &tmp))
+            return true;
+    }
+    return false;
+}
+
+/* ── adding entries ──────────────────────────────────────────────────── */
+
+/* Put e (and, if lname, its long-name pieces before it) into a run of free
+ * slots, growing the folder when it's full (not the root: it has a fixed
+ * size). Gives where the 8.3 entry went. */
+static bool dir_put(uint8_t drive_id, uint16_t dir_cluster, const char *lname,
+                    const dir_entry_t *e, uint32_t *out_lba, int *out_idx) {
+    fat_vol_t *v = vol(drive_id);
+    int len = lname ? (int)strlen(lname) : 0;
+    int nl = (len + 12) / 13, total = nl + 1;
+    uint8_t buf[512];
+    uint32_t lba, start = 0;
+    int run = 0;
+    bool end = false; /* past the folder's end marker: all free */
+
+    for (int pass = 0; pass < 2 && run < total; pass++) {
+        run = 0;
+        end = false;
+        for (uint32_t n = 0;
+             run < total && dir_sector(drive_id, dir_cluster, n, &lba); n++) {
+            if (!fs_read_sector(drive_id, lba, buf))
+                return false;
+            dir_entry_t *d = (dir_entry_t *)buf;
+            for (int i = 0; i < 16 && run < total; i++) {
+                if (d[i].name[0] == DIR_ENTRY_END)
+                    end = true;
+                if (end || d[i].name[0] == DIR_ENTRY_FREE) {
+                    if (run++ == 0)
+                        start = n * 16 + i;
+                } else {
+                    run = 0;
+                }
+            }
+        }
+        if (run >= total)
+            break;
+        if (dir_cluster == 0)
+            return false; /* the root is full */
+        /* add a cluster to the folder; the run may begin at the old end */
+        uint16_t last = dir_cluster, nx;
+        while (vol_cluster_active(v, nx = fat_get(drive_id, last)))
+            last = nx;
+        uint16_t nc = fat_alloc(drive_id);
+        if (nc == 0)
+            return false;
+        zero_cluster(drive_id, nc);
+        fat_set(drive_id, last, nc);
+    }
+    if (run < total)
+        return false;
+
+    uint8_t sum = lfn_checksum((const uint8_t *)e);
+    uint32_t have = 0xFFFFFFFF;
+    for (int k = 0; k <= total; k++) {
+        uint32_t slot = start + k;
+        if (!dir_sector(drive_id, dir_cluster, slot / 16, &lba))
+            break; /* the folder ends right after the run */
+        if (lba != have) {
+            if (have != 0xFFFFFFFF && !fs_write_sector(drive_id, have, buf))
+                return false;
+            if (!fs_read_sector(drive_id, lba, buf))
+                return false;
+            have = lba;
+        }
+        uint8_t *r = buf + (slot % 16) * 32;
+        if (k == total) { /* after the run: keep the end marker */
+            if (end)
+                r[0] = DIR_ENTRY_END;
+            break;
+        }
+        if (k < nl) {
+            int ord = nl - k; /* the last piece first */
+            memset(r, 0, 32);
+            r[0] = (uint8_t)(ord | (k == 0 ? 0x40 : 0));
+            r[11] = ATTR_LFN;
+            r[13] = sum;
+            for (int j = 0; j < 13; j++) {
+                int pos = (ord - 1) * 13 + j;
+                uint16_t c = pos < len    ? (uint8_t)lname[pos]
+                             : pos == len ? 0x0000
+                                          : 0xFFFF;
+                r[k_lfn_off[j]] = (uint8_t)c;
+                r[k_lfn_off[j] + 1] = (uint8_t)(c >> 8);
+            }
+        } else {
+            memcpy(r, e, 32);
+            *out_lba = lba;
+            *out_idx = (int)(slot % 16);
+        }
+    }
+    if (have != 0xFFFFFFFF && !fs_write_sector(drive_id, have, buf))
+        return false;
+    return true;
+}
+
+/* Name e for name (8.3 if it fits, else a long name and its alias) and put
+ * it in the folder; false if the name is taken or bad. */
+static bool make_entry(uint8_t drive_id, uint16_t dir_cluster, const char *name,
+                       dir_entry_t *e, uint32_t *lba, int *idx) {
+    char t[FS_NAME_SZ];
+    if (!name_trim(name, t) || strcmp(t, ".") == 0 || strcmp(t, "..") == 0)
+        return false;
+    for (int i = 0; t[i]; i++)
+        if (!fs_long_char_ok(t[i]))
+            return false;
+    dir_entry_t tmp;
+    if (lookup(drive_id, dir_cluster, t, &tmp, NULL, NULL, NULL))
+        return false;
+    uint8_t cf;
+    bool lfn = needs_lfn(t, &cf);
+    char n83[12];
+    if (lfn) {
+        if (!make_alias(drive_id, dir_cluster, t, n83))
+            return false;
+    } else {
+        fs_make_83(t, n83);
+    }
+    memcpy(e->name, n83, 11);
+    e->reserved =
+        (uint8_t)((e->reserved & ~(CASE_LOWER_BASE | CASE_LOWER_EXT)) | cf);
+    return dir_put(drive_id, dir_cluster, lfn ? t : NULL, e, lba, idx);
+}
+
+static void stamp_new(dir_entry_t *e, uint8_t attr, uint16_t cluster) {
+    memset(e, 0, sizeof(*e));
+    e->attr = attr;
+    e->cluster_lo = cluster;
+    e->create_time = now_fat_time();
+    e->create_date = now_fat_date();
+    e->modify_time = e->create_time;
+    e->modify_date = e->create_date;
+}
+
+/* mark the 8.3 entry at lba/idx free (after lfn_clear for its long name) */
+static bool free_slot(uint8_t drive_id, uint32_t lba, int idx) {
+    uint8_t buf[512];
+    if (!fs_read_sector(drive_id, lba, buf))
+        return false;
+    ((dir_entry_t *)buf)[idx].name[0] = DIR_ENTRY_FREE;
+    return fs_write_sector(drive_id, lba, buf);
+}
+
+/* '.'-less walk for copying folders */
+typedef struct {
+    dir_cb cb;
+    void *user;
+} skipdot_ctx;
+
+static bool skipdot_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                       uint32_t lba, int idx, void *user) {
+    skipdot_ctx *c = user;
+    if (e->name[0] == '.')
+        return true;
+    return c->cb(drive_id, e, lname, lba, idx, c->user);
+}
+
+typedef struct {
+    dir_entry_t *buf;
+    char (*names)[FS_NAME_SZ];
+    int max;
+    int count;
+} list_ctx;
+
+static bool list_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                    uint32_t lba, int idx, void *user) {
     (void)drive_id;
     (void)lba;
     (void)idx;
+    list_ctx *ctx = user;
+    if (ctx->count < ctx->max) {
+        if (ctx->buf)
+            ctx->buf[ctx->count] = *e;
+        if (ctx->names) {
+            if (lname)
+                strcpy(ctx->names[ctx->count], lname);
+            else
+                fs_entry_name(e, ctx->names[ctx->count]);
+        }
+        ctx->count++;
+    }
+    return true;
+}
+
+/* exact 8.3 match, with where the entry sits */
+typedef struct {
+    const char *name83;
+    dir_entry_t *out;
+    uint32_t lba;
+    int idx;
+    bool found;
+} find_ctx;
+
+static bool find_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                    uint32_t lba, int idx, void *user) {
+    (void)drive_id;
+    (void)lname;
     find_ctx *ctx = user;
-    if (name83_eq(e->name, ctx->name)) {
-        *ctx->out = *e;
+    if (name83_eq(e->name, ctx->name83)) {
+        if (ctx->out)
+            *ctx->out = *e;
+        ctx->lba = lba;
+        ctx->idx = idx;
         ctx->found = true;
         return false;
     }
     return true;
 }
-static bool list_cb(uint8_t drive_id, dir_entry_t *e, uint32_t lba, int idx,
-                    void *user) {
-    (void)drive_id;
-    (void)lba;
-    (void)idx;
-    list_ctx *ctx = user;
-    if (ctx->count < ctx->max)
-        ctx->buf[ctx->count++] = *e;
-    return true;
+
+static bool find83(uint8_t drive_id, uint16_t dir_cluster, const char *name83,
+                   dir_entry_t *out, uint32_t *lba, int *idx) {
+    find_ctx ctx = {name83, out, 0, 0, false};
+    dir_iterate(drive_id, dir_cluster, find_cb, &ctx);
+    if (ctx.found) {
+        if (lba)
+            *lba = ctx.lba;
+        if (idx)
+            *idx = ctx.idx;
+    }
+    return ctx.found;
 }
-static bool modify_cb(uint8_t drive_id, dir_entry_t *e, uint32_t lba, int idx,
-                      void *user) {
+
+typedef struct {
+    const char *name;
+    bool done;
+    int action; /* 0: delete a file, 2: a folder (its clusters go too) */
+} modify_ctx;
+
+static bool modify_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                      uint32_t lba, int idx, void *user) {
+    (void)lname;
     modify_ctx *ctx = user;
     if (name83_eq(e->name, ctx->name)) {
         uint8_t sector_buf[512];
         if (!fs_read_sector(drive_id, lba, sector_buf))
             return false;
         dir_entry_t *entries = (dir_entry_t *)sector_buf;
-        if (ctx->action == 0 || ctx->action == 2) {
-            fat_free_chain(drive_id, entries[idx].cluster_lo);
-            entries[idx].name[0] = DIR_ENTRY_FREE;
-        } else if (ctx->action == 1) {
-            memcpy(entries[idx].name, ctx->new_name, 11);
-        }
+        fat_free_chain(drive_id, entries[idx].cluster_lo);
+        entries[idx].name[0] = DIR_ENTRY_FREE;
         fs_write_sector(drive_id, lba, sector_buf);
         ctx->done = true;
-        return false;
-    }
-    return true;
-}
-static bool locate_cb(uint8_t drive_id, dir_entry_t *e, uint32_t lba, int idx,
-                      void *user) {
-    (void)drive_id;
-    locate_ctx *ctx = user;
-    if (name83_eq(e->name, ctx->name83)) {
-        ctx->lba = lba;
-        ctx->idx = idx;
-        ctx->found = true;
         return false;
     }
     return true;
@@ -436,7 +836,8 @@ static void extract_volume_label(fat_vol_t *v) {
             for (int i = 0; i < 16; i++) {
                 if (entries[i].name[0] == DIR_ENTRY_END)
                     break;
-                if (entries[i].attr & ATTR_VOLUME_ID) {
+                if ((entries[i].attr & ATTR_VOLUME_ID) &&
+                    (entries[i].attr & 0x3F) != 0x0F) { /* not a long name */
                     int k = 0;
                     for (int m = 0; m < 8 && entries[i].name[m] != ' '; m++)
                         v->label[k++] = entries[i].name[m];
@@ -462,6 +863,7 @@ bool fs_mount_drive(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return false;
+    fcache_drop(drive_id); /* maybe another disk now */
     fat_vol_t *v = vol(drive_id);
     v->drive_id = drive_id;
     v->mounted = false;
@@ -552,7 +954,7 @@ bool fs_mount(void) {
     s_current_drive = DRIVE_HDA;
     dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = 0;
-    strncpy(dir_context.path, "/", 255);
+    strcpy(dir_context.path, "/");
     fs_mount_drive(DRIVE_HDB);
     if (fdd_init(0))
         fs_mount_drive(DRIVE_FDD0);
@@ -565,8 +967,21 @@ void fs_unmount(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return;
+    fcache_drop(drive_id);
     g_drives[drive_id].mounted = false;
     fs_usage_invalidate(drive_id);
+}
+/* copy the next path component (up to '/'); one longer than any name is
+ * cut so it can't match */
+static const char *next_component(const char *p, char out[FS_NAME_SZ + 2]) {
+    int i = 0;
+    while (*p && *p != '/') {
+        if (i < FS_NAME_SZ + 1)
+            out[i++] = *p;
+        p++;
+    }
+    out[i] = '\0';
+    return p;
 }
 
 bool fs_resolve_dir(const char *path, uint8_t *out_drive,
@@ -588,16 +1003,13 @@ bool fs_resolve_dir(const char *path, uint8_t *out_drive,
         cluster = dir_context.current_cluster;
     }
 
-    char component[256];
+    char component[FS_NAME_SZ + 2];
     while (*path) {
         while (*path == '/')
             path++;
         if (!*path)
             break;
-        int ci = 0;
-        while (*path && *path != '/' && ci < 255)
-            component[ci++] = *path++;
-        component[ci] = '\0';
+        path = next_component(path, component);
 
         if (cluster == 0 && drive == DRIVE_HDA && strcmp(component, "HDA") == 0)
             continue;
@@ -617,10 +1029,8 @@ bool fs_resolve_dir(const char *path, uint8_t *out_drive,
         if (crossed)
             continue;
 
-        char name83[12];
-        fs_make_83(component, name83);
         dir_entry_t de;
-        if (!fs_find_in_dir(drive, cluster, name83, &de))
+        if (!lookup(drive, cluster, component, &de, NULL, NULL, NULL))
             return false;
         if (!(de.attr & ATTR_DIRECTORY))
             return false;
@@ -707,7 +1117,6 @@ bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes,
                   v->bpb.sectors_per_cluster;
     return true;
 }
-
 void fs_make_83(const char *filename, char *out83) {
     memset(out83, ' ', 11);
     out83[11] = '\0';
@@ -743,8 +1152,12 @@ void fs_make_83(const char *filename, char *out83) {
     }
 }
 
-bool fs_resolve(const char *path, uint8_t *out_drive,
-                uint16_t *out_parent_cluster, char out_name83[12]) {
+/* Walk path to its last part. out_name83 is that file's 8.3 name if it
+ * exists, else the one it would get (its alias, for a long name); leaf is
+ * the last part as typed (trimmed). */
+static bool resolve_ex(const char *path, uint8_t *out_drive,
+                       uint16_t *out_parent_cluster, char out_name83[12],
+                       char leaf[FS_NAME_SZ], bool *exists) {
     if (!path || !*path)
         return false;
 
@@ -761,25 +1174,38 @@ bool fs_resolve(const char *path, uint8_t *out_drive,
             *out_parent_cluster = 0;
             memset(out_name83, ' ', 11);
             out_name83[11] = '\0';
+            leaf[0] = '\0';
+            *exists = true;
             return true;
         }
     }
 
-    char component[256];
+    char component[FS_NAME_SZ + 2];
     while (true) {
-        int i = 0;
-        while (*ptr && *ptr != '/' && i < 255)
-            component[i++] = *ptr++;
-        component[i] = '\0';
+        ptr = next_component(ptr, component);
         while (*ptr == '/')
             ptr++;
 
         bool is_leaf = (*ptr == '\0');
         if (is_leaf) {
-            fs_make_83(component, out_name83);
+            if (!name_trim(component, leaf))
+                return false;
             *out_drive = cur_drive;
             *out_parent_cluster = cur_cluster;
-            return true;
+            dir_entry_t e;
+            if (lookup(cur_drive, cur_cluster, leaf, &e, NULL, NULL, NULL)) {
+                memcpy(out_name83, e.name, 11);
+                out_name83[11] = '\0';
+                *exists = true;
+                return true;
+            }
+            *exists = false;
+            uint8_t cf;
+            if (!needs_lfn(leaf, &cf)) {
+                fs_make_83(leaf, out_name83);
+                return true;
+            }
+            return make_alias(cur_drive, cur_cluster, leaf, out_name83);
         }
 
         // ── Handle drive‑prefix components ─────────────────────
@@ -804,15 +1230,22 @@ bool fs_resolve(const char *path, uint8_t *out_drive,
                 continue;
         }
 
-        char name83[12];
-        fs_make_83(component, name83);
         dir_entry_t entry;
-        if (!fs_find_in_dir(cur_drive, cur_cluster, name83, &entry))
+        if (!lookup(cur_drive, cur_cluster, component, &entry, NULL, NULL,
+                    NULL))
             return false;
         if (!(entry.attr & ATTR_DIRECTORY))
             return false;
         cur_cluster = entry.cluster_lo;
     }
+}
+
+bool fs_resolve(const char *path, uint8_t *out_drive,
+                uint16_t *out_parent_cluster, char out_name83[12]) {
+    char leaf[FS_NAME_SZ];
+    bool ex;
+    return resolve_ex(path, out_drive, out_parent_cluster, out_name83, leaf,
+                      &ex);
 }
 
 bool fs_chdir(const char *path) {
@@ -837,22 +1270,20 @@ bool fs_chdir(const char *path) {
     if (!(entry.attr & ATTR_DIRECTORY))
         return false;
 
-    dir_context.drive_id = target_drive;
-    dir_context.current_cluster = entry.cluster_lo;
-
-    char new_path[256];
+    char new_path[FS_PATH_SZ];
     if (path[0] == '/') {
-        strncpy(new_path, path, 255);
+        strncpy(new_path, path, FS_PATH_MAX);
     } else {
-        strncpy(new_path, dir_context.path, 255);
+        strncpy(new_path, dir_context.path, FS_PATH_MAX);
+        new_path[FS_PATH_MAX] = '\0';
         if (strcmp(new_path, "/") != 0)
-            strncat(new_path, "/", 255 - strlen(new_path));
-        strncat(new_path, path, 255 - strlen(new_path));
+            strncat(new_path, "/", FS_PATH_MAX - strlen(new_path));
+        strncat(new_path, path, FS_PATH_MAX - strlen(new_path));
     }
-    new_path[255] = '\0';
+    new_path[FS_PATH_MAX] = '\0';
 
-    char *comps[32];
-    int comp_len[32];
+    char *comps[64];
+    int comp_len[64];
     int top = 0;
     char *p = new_path;
     while (*p) {
@@ -871,18 +1302,23 @@ bool fs_chdir(const char *path) {
         else if (len == 2 && start[0] == '.' && start[1] == '.') {
             if (top > 0)
                 top--;
-        } else if (top < 32) {
+        } else if (top < 64) {
             comps[top] = start;
             comp_len[top] = len;
             top++;
         }
     }
 
+    /* the path that went in is checked; only now change the context */
+    dir_context.drive_id = target_drive;
+    dir_context.current_cluster = entry.cluster_lo;
     if (top == 0) {
         strcpy(dir_context.path, "/");
     } else {
         int out_idx = 0;
         for (int i = 0; i < top; i++) {
+            if (out_idx + 1 + comp_len[i] > FS_PATH_MAX)
+                break;
             dir_context.path[out_idx++] = '/';
             for (int j = 0; j < comp_len[i]; j++)
                 dir_context.path[out_idx++] = comps[i][j];
@@ -902,23 +1338,72 @@ bool fs_pwd(char *buf, int buflen) {
 
 bool fs_find_in_dir(uint8_t drive_id, uint16_t dir_cluster, const char *name83,
                     dir_entry_t *out) {
-    find_ctx ctx = {name83, out, false};
-    dir_iterate(drive_id, dir_cluster, find_cb, &ctx);
-    return ctx.found;
+    dir_entry_t tmp;
+    return find83(drive_id, dir_cluster, name83, out ? out : &tmp, NULL, NULL);
 }
 
 bool fs_find(const char *path, dir_entry_t *out) {
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
     return fs_find_in_dir(drive_id, dir_cluster, name83, out);
 }
 
+bool fs_name_of(const char *path, char out[FS_NAME_SZ]) {
+    uint8_t drive_id;
+    uint16_t dir_cluster;
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
+        return false;
+    if (!leaf[0]) {
+        strcpy(out, "/");
+        return true;
+    }
+    return lookup(drive_id, dir_cluster, leaf, NULL, out, NULL, NULL);
+}
+
 bool fs_list_dir(uint8_t drive_id, uint16_t dir_cluster, dir_entry_t *buf,
                  int max, int *count) {
-    list_ctx ctx = {buf, max, 0};
+    list_ctx ctx = {buf, NULL, max, 0};
+    bool ok = dir_iterate(drive_id, dir_cluster, list_cb, &ctx);
+    *count = ctx.count;
+    return ok;
+}
+
+typedef struct {
+    fs_walk_cb cb;
+    void *user;
+} walk_ctx;
+
+static bool walk_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                    uint32_t lba, int idx, void *user) {
+    (void)drive_id;
+    (void)lba;
+    (void)idx;
+    walk_ctx *w = user;
+    if (e->name[0] == '.')
+        return true;
+    char nm[FS_NAME_SZ];
+    if (lname)
+        strcpy(nm, lname);
+    else
+        fs_entry_name(e, nm);
+    return w->cb(e, nm, w->user);
+}
+
+bool fs_walk_dir(uint8_t drive_id, uint16_t dir_cluster, fs_walk_cb cb,
+                 void *user) {
+    walk_ctx w = {cb, user};
+    return cb && dir_iterate(drive_id, dir_cluster, walk_cb, &w);
+}
+
+bool fs_list_dir_names(uint8_t drive_id, uint16_t dir_cluster, dir_entry_t *buf,
+                       char (*names)[FS_NAME_SZ], int max, int *count) {
+    list_ctx ctx = {buf, names, max, 0};
     bool ok = dir_iterate(drive_id, dir_cluster, list_cb, &ctx);
     *count = ctx.count;
     return ok;
@@ -943,6 +1428,8 @@ bool fs_is_dir_empty(uint8_t drive_id, uint16_t cluster) {
                     return true;
                 if (first == DIR_ENTRY_FREE || first == '.')
                     continue;
+                if ((entries[i].attr & 0x3F) == ATTR_LFN)
+                    continue; /* a stray long name: no file */
                 return false;
             }
         }
@@ -974,6 +1461,8 @@ void fs_wipe_cluster(uint8_t drive_id, uint16_t cluster) {
                 }
                 if (first == DIR_ENTRY_FREE || first == '.')
                     continue;
+                if ((entries[i].attr & 0x3F) == ATTR_LFN)
+                    continue;
                 if (entries[i].attr & ATTR_DIRECTORY)
                     fs_wipe_cluster(drive_id, entries[i].cluster_lo);
                 else
@@ -982,27 +1471,27 @@ void fs_wipe_cluster(uint8_t drive_id, uint16_t cluster) {
         }
         cur = fat_get(drive_id, cur);
     }
+    fat_free_chain(drive_id, cluster);
 }
 
 bool fs_open(const char *path, fat_file_t *f) {
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
     dir_entry_t entry;
-    if (!fs_find_in_dir(drive_id, dir_cluster, name83, &entry))
-        return false;
-    locate_ctx loc = {name83, 0, 0, false};
-    dir_iterate(drive_id, dir_cluster, locate_cb, &loc);
-    if (!loc.found)
+    uint32_t lba;
+    int idx;
+    if (!find83(drive_id, dir_cluster, name83, &entry, &lba, &idx))
         return false;
     memset(f, 0, sizeof(fat_file_t));
     f->entry = entry;
     f->cur_cluster = entry.cluster_lo;
     f->dir_cluster = dir_cluster;
-    f->dir_entry_lba = loc.lba;
-    f->dir_entry_idx = loc.idx;
+    f->dir_entry_lba = lba;
+    f->dir_entry_idx = idx;
     f->open = true;
     f->drive_id = drive_id;
     return true;
@@ -1012,44 +1501,25 @@ bool fs_create(const char *path, fat_file_t *f) {
     g_fs_rev++;
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    uint8_t sector_buf[512];
-
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
-        return false;
-    dir_entry_t existing;
-    if (fs_find_in_dir(drive_id, dir_cluster, name83, &existing))
-        return false;
-
-    uint32_t lba;
-    int idx;
-    if (!alloc_dir_entry(drive_id, dir_cluster, &lba, &idx))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || ex)
         return false;
 
     uint16_t cluster = fat_alloc(drive_id);
     if (cluster == 0)
         return false;
-
-    if (!fs_read_sector(drive_id, lba, sector_buf))
+    dir_entry_t e;
+    stamp_new(&e, ATTR_ARCHIVE, cluster);
+    uint32_t lba;
+    int idx;
+    if (!make_entry(drive_id, dir_cluster, leaf, &e, &lba, &idx)) {
+        fat_free_chain(drive_id, cluster);
         return false;
-    dir_entry_t *entries = (dir_entry_t *)sector_buf;
-    uint8_t first = entries[idx].name[0];
-    memset(&entries[idx], 0, sizeof(dir_entry_t));
-    memcpy(entries[idx].name, name83, 11);
-    entries[idx].attr = ATTR_ARCHIVE;
-    entries[idx].cluster_lo = cluster;
-    entries[idx].file_size = 0;
-    entries[idx].create_time = now_fat_time();
-    entries[idx].create_date = now_fat_date();
-    entries[idx].modify_time = entries[idx].create_time;
-    entries[idx].modify_date = entries[idx].create_date;
-    if (first == DIR_ENTRY_END && idx + 1 < 16)
-        entries[idx + 1].name[0] = DIR_ENTRY_END;
-    if (!fs_write_sector(drive_id, lba, sector_buf))
-        return false;
+    }
 
     memset(f, 0, sizeof(fat_file_t));
-    f->entry = entries[idx];
+    f->entry = e;
     f->dir_entry_lba = lba;
     f->dir_entry_idx = idx;
     f->cur_cluster = cluster;
@@ -1232,57 +1702,106 @@ bool fs_close(fat_file_t *f) {
     f->open = false;
     return true;
 }
+/* a new, empty folder called name in dir_cluster */
+static bool mkdir_in(uint8_t drive_id, uint16_t dir_cluster, const char *name,
+                     uint16_t *out_cluster) {
+    uint16_t cluster = fat_alloc(drive_id);
+    if (cluster == 0)
+        return false;
+    zero_cluster(drive_id, cluster);
+    dir_entry_t e;
+    stamp_new(&e, ATTR_DIRECTORY, cluster);
+
+    uint8_t dir_block[512];
+    memset(dir_block, 0, 512);
+    dir_entry_t *dot = (dir_entry_t *)dir_block;
+    dot[0] = e;
+    memcpy(dot[0].name, ".          ", 11);
+    dot[1] = e;
+    memcpy(dot[1].name, "..         ", 11);
+    dot[1].cluster_lo = dir_cluster;
+    if (!fs_write_sector(drive_id, fat_cluster_to_lba(drive_id, cluster),
+                         dir_block)) {
+        fat_free_chain(drive_id, cluster);
+        return false;
+    }
+
+    uint32_t lba;
+    int idx;
+    if (!make_entry(drive_id, dir_cluster, name, &e, &lba, &idx)) {
+        fat_free_chain(drive_id, cluster);
+        return false;
+    }
+    if (out_cluster)
+        *out_cluster = cluster;
+    return true;
+}
 
 bool fs_mkdir(const char *path) {
     g_fs_rev++;
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    uint8_t sector_buf[512];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || ex)
         return false;
-    dir_entry_t existing;
-    if (fs_find_in_dir(drive_id, dir_cluster, name83, &existing))
-        return false;
+    return mkdir_in(drive_id, dir_cluster, leaf, NULL);
+}
 
-    uint32_t lba;
-    int idx;
-    if (!alloc_dir_entry(drive_id, dir_cluster, &lba, &idx))
+/* Rename the entry name83 in a folder to new_name. The 8.3 entry stays put
+ * when the new name fits 8.3; a long name needs free slots before it, so
+ * the entry moves (to a new run of slots) then. */
+static bool rename_in(uint8_t drive_id, uint16_t dir_cluster,
+                      const char *name83, const char *new_name) {
+    char t[FS_NAME_SZ];
+    if (!name_trim(new_name, t) || strcmp(t, ".") == 0 || strcmp(t, "..") == 0)
         return false;
+    for (int i = 0; t[i]; i++)
+        if (!fs_long_char_ok(t[i]))
+            return false;
 
-    uint16_t cluster = fat_alloc(drive_id);
-    if (cluster == 0)
+    dir_entry_t e;
+    uint32_t lba, olba;
+    int idx, oidx;
+    if (!find83(drive_id, dir_cluster, name83, &e, &lba, &idx))
         return false;
+    dir_entry_t other;
+    if (lookup(drive_id, dir_cluster, t, &other, NULL, &olba, &oidx) &&
+        !(olba == lba && oidx == idx))
+        return false; /* another file has that name */
 
-    if (!fs_read_sector(drive_id, lba, sector_buf))
-        return false;
-    dir_entry_t *entries = (dir_entry_t *)sector_buf;
-    uint8_t first = entries[idx].name[0];
-    memset(&entries[idx], 0, sizeof(dir_entry_t));
-    memcpy(entries[idx].name, name83, 11);
-    entries[idx].attr = ATTR_DIRECTORY;
-    entries[idx].create_time = now_fat_time();
-    entries[idx].create_date = now_fat_date();
-    entries[idx].modify_time = entries[idx].create_time;
-    entries[idx].modify_date = entries[idx].create_date;
-    entries[idx].cluster_lo = cluster;
-    if (first == DIR_ENTRY_END && idx + 1 < 16)
-        entries[idx + 1].name[0] = DIR_ENTRY_END;
-    if (!fs_write_sector(drive_id, lba, sector_buf))
-        return false;
+    g_fs_rev++;
+    uint8_t cf;
+    bool lfn = needs_lfn(t, &cf);
+    lfn_clear(drive_id, dir_cluster, name83); /* the old long name goes */
 
-    uint8_t dir_block[512];
-    memset(dir_block, 0, 512);
-    dir_entry_t *dot = (dir_entry_t *)dir_block;
-    memcpy(dot[0].name, ".          ", 11);
-    dot[0].attr = ATTR_DIRECTORY;
-    dot[0].cluster_lo = cluster;
-    memcpy(dot[1].name, "..         ", 11);
-    dot[1].attr = ATTR_DIRECTORY;
-    dot[1].cluster_lo = dir_cluster;
-    dot[2].name[0] = DIR_ENTRY_END;
-    return fs_write_sector(drive_id, fat_cluster_to_lba(drive_id, cluster),
-                           dir_block);
+    if (!lfn) {
+        uint8_t buf[512];
+        if (!fs_read_sector(drive_id, lba, buf))
+            return false;
+        dir_entry_t *d = &((dir_entry_t *)buf)[idx];
+        fs_make_83(t, (char *)d->name); /* writes 11 + a 0 into attr... */
+        d->attr = e.attr;               /* ...so put attr back */
+        d->reserved =
+            (uint8_t)((d->reserved & ~(CASE_LOWER_BASE | CASE_LOWER_EXT)) | cf);
+        return fs_write_sector(drive_id, lba, buf);
+    }
+
+    /* free the old slot first so the new run may use it; if there's no
+     * room, put the entry back (without its long name) */
+    if (!free_slot(drive_id, lba, idx))
+        return false;
+    dir_entry_t ne = e;
+    uint32_t nlba;
+    int nidx;
+    if (make_entry(drive_id, dir_cluster, t, &ne, &nlba, &nidx))
+        return true;
+    uint8_t buf[512];
+    if (fs_read_sector(drive_id, lba, buf)) {
+        ((dir_entry_t *)buf)[idx] = e;
+        fs_write_sector(drive_id, lba, buf);
+    }
+    return false;
 }
 
 bool fs_rename(const char *path, const char *new_name) {
@@ -1291,8 +1810,9 @@ bool fs_rename(const char *path, const char *new_name) {
         return false;
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
 
     char tmp_name[13];
@@ -1302,17 +1822,7 @@ bool fs_rename(const char *path, const char *new_name) {
     tmp_name[ni] = '\0';
     if (path_is_protected(tmp_name))
         return false;
-
-    char new83[12];
-    fs_make_83(new_name, new83);
-    dir_entry_t tmp2;
-    if (fs_find_in_dir(drive_id, dir_cluster, new83, &tmp2))
-        return false;
-
-    lfn_clear(drive_id, dir_cluster, name83); /* the long name goes too */
-    modify_ctx ctx = {name83, false, new83, 1};
-    dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
-    return ctx.done;
+    return rename_in(drive_id, dir_cluster, name83, new_name);
 }
 
 bool fs_delete(const char *path) {
@@ -1321,11 +1831,12 @@ bool fs_delete(const char *path) {
         return false;
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
     lfn_clear(drive_id, dir_cluster, name83);
-    modify_ctx ctx = {name83, false, NULL, 0};
+    modify_ctx ctx = {name83, false, 0};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
     return ctx.done;
 }
@@ -1336,8 +1847,9 @@ bool fs_rmdir(const char *path) {
         return false;
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
     dir_entry_t entry;
     if (!fs_find_in_dir(drive_id, dir_cluster, name83, &entry))
@@ -1347,7 +1859,7 @@ bool fs_rmdir(const char *path) {
     if (!fs_is_dir_empty(drive_id, entry.cluster_lo))
         return false;
     lfn_clear(drive_id, dir_cluster, name83);
-    modify_ctx ctx = {name83, false, NULL, 2};
+    modify_ctx ctx = {name83, false, 2};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
     return ctx.done;
 }
@@ -1358,61 +1870,44 @@ bool fs_rm_rf(const char *path) {
         return false;
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
     dir_entry_t entry;
     if (!fs_find_in_dir(drive_id, dir_cluster, name83, &entry))
         return false;
     if (!(entry.attr & ATTR_DIRECTORY))
         return false;
+    /* frees the folder's own clusters too: the slot then just goes */
     fs_wipe_cluster(drive_id, entry.cluster_lo);
     lfn_clear(drive_id, dir_cluster, name83);
-    modify_ctx ctx = {name83, false, NULL, 2};
-    dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
-    return ctx.done;
-}
-
-static bool _copy_open_file_to(fat_file_t *src, uint8_t dst_drive,
-                               uint16_t dst_dir_cluster,
-                               const char *dst_name83) {
-    fs_seek(src, 0);
-
     uint32_t lba;
     int idx;
-    if (!alloc_dir_entry(dst_drive, dst_dir_cluster, &lba, &idx))
+    if (!find83(drive_id, dir_cluster, name83, NULL, &lba, &idx))
         return false;
+    return free_slot(drive_id, lba, idx);
+}
 
+/* a new file called name in dst_dir_cluster, with src's contents */
+static bool copy_file_to(fat_file_t *src, uint8_t dst_drive,
+                         uint16_t dst_dir_cluster, const char *name) {
+    fs_seek(src, 0);
     uint16_t cluster = fat_alloc(dst_drive);
     if (cluster == 0)
         return false;
-
-    uint8_t dbuf[512];
-    if (!fs_read_sector(dst_drive, lba, dbuf)) {
-        fat_set(dst_drive, cluster, FAT16_FREE);
-        return false;
-    }
-    dir_entry_t *entries = (dir_entry_t *)dbuf;
-    uint8_t first = entries[idx].name[0];
-    memset(&entries[idx], 0, sizeof(dir_entry_t));
-    memcpy(entries[idx].name, dst_name83, 11);
-    entries[idx].attr = ATTR_ARCHIVE;
-    entries[idx].cluster_lo = cluster;
-    entries[idx].file_size = 0;
-    entries[idx].create_time = now_fat_time();
-    entries[idx].create_date = now_fat_date();
-    entries[idx].modify_time = entries[idx].create_time;
-    entries[idx].modify_date = entries[idx].create_date;
-    if (first == DIR_ENTRY_END && idx + 1 < 16)
-        entries[idx + 1].name[0] = DIR_ENTRY_END;
-    if (!fs_write_sector(dst_drive, lba, dbuf)) {
-        fat_set(dst_drive, cluster, FAT16_FREE);
+    dir_entry_t e;
+    stamp_new(&e, ATTR_ARCHIVE, cluster);
+    uint32_t lba;
+    int idx;
+    if (!make_entry(dst_drive, dst_dir_cluster, name, &e, &lba, &idx)) {
+        fat_free_chain(dst_drive, cluster);
         return false;
     }
 
     fat_file_t dst;
     memset(&dst, 0, sizeof(fat_file_t));
-    dst.entry = entries[idx];
+    dst.entry = e;
     dst.dir_entry_lba = lba;
     dst.dir_entry_idx = idx;
     dst.cur_cluster = cluster;
@@ -1432,76 +1927,56 @@ static bool _copy_open_file_to(fat_file_t *src, uint8_t dst_drive,
     return true;
 }
 
-static bool _copy_dir_cluster(uint8_t src_drive, uint16_t src_cluster,
-                              uint8_t dst_drive, uint16_t dst_dir_cluster);
+static bool copy_dir_cluster(uint8_t src_drive, uint16_t src_cluster,
+                             uint8_t dst_drive, uint16_t dst_dir_cluster);
 
 typedef struct {
     uint8_t src_drive;
     uint8_t dst_drive;
     uint16_t dst_dir_cluster;
+    bool ok;
 } copy_dir_ctx;
 
-static bool _copy_entry_cb(uint8_t drive_id, dir_entry_t *e, uint16_t cluster,
-                           int idx, void *user) {
-    (void)cluster;
-    (void)idx;
+static bool copy_entry_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                          uint32_t lba, int idx, void *user) {
     copy_dir_ctx *ctx = user;
-    char child83[12];
-    memcpy(child83, e->name, 11); /* name[8] + ext[3] are contiguous */
-    child83[11] = '\0';
+    char name[FS_NAME_SZ];
+    if (lname)
+        strcpy(name, lname);
+    else
+        fs_entry_name(e, name);
 
     if (e->attr & ATTR_DIRECTORY) {
-        uint8_t saved_drive = dir_context.drive_id;
-        uint16_t saved_cluster = dir_context.current_cluster;
-        dir_context.drive_id = ctx->dst_drive;
-        dir_context.current_cluster = ctx->dst_dir_cluster;
-        bool ok = fs_mkdir(child83);
-        dir_context.drive_id = saved_drive;
-        dir_context.current_cluster = saved_cluster;
-        if (!ok)
+        uint16_t nc;
+        if (!mkdir_in(ctx->dst_drive, ctx->dst_dir_cluster, name, &nc) ||
+            !copy_dir_cluster(ctx->src_drive, e->cluster_lo, ctx->dst_drive,
+                              nc)) {
+            ctx->ok = false;
             return false;
-
-        dir_entry_t new_de;
-        if (!fs_find_in_dir(ctx->dst_drive, ctx->dst_dir_cluster, child83,
-                            &new_de))
-            return false;
-
-        return _copy_dir_cluster(ctx->src_drive, e->cluster_lo, ctx->dst_drive,
-                                 new_de.cluster_lo);
-    } else {
-        fat_file_t src;
-        uint8_t saved_drive = dir_context.drive_id;
-        uint16_t saved_cluster = dir_context.current_cluster;
-        dir_context.drive_id = ctx->src_drive;
-        dir_context.current_cluster = e->cluster_lo;
-
-        locate_ctx loc = {child83, 0, 0, false};
-        dir_iterate(ctx->src_drive, cluster, locate_cb, &loc);
-        dir_context.drive_id = saved_drive;
-        dir_context.current_cluster = saved_cluster;
-        if (!loc.found)
-            return false;
-
-        memset(&src, 0, sizeof(src));
-        src.entry = *e;
-        src.cur_cluster = e->cluster_lo;
-        src.dir_cluster = cluster;
-        src.dir_entry_lba = loc.lba;
-        src.dir_entry_idx = loc.idx;
-        src.open = true;
-        src.drive_id = ctx->src_drive;
-
-        bool ok = _copy_open_file_to(&src, ctx->dst_drive, ctx->dst_dir_cluster,
-                                     child83);
-        fs_close(&src);
-        return ok;
+        }
+        return true;
     }
+    fat_file_t src;
+    memset(&src, 0, sizeof(src));
+    src.entry = *e;
+    src.cur_cluster = e->cluster_lo;
+    src.dir_entry_lba = lba;
+    src.dir_entry_idx = idx;
+    src.open = true;
+    src.drive_id = drive_id;
+    if (!copy_file_to(&src, ctx->dst_drive, ctx->dst_dir_cluster, name)) {
+        ctx->ok = false;
+        return false;
+    }
+    return true;
 }
 
-static bool _copy_dir_cluster(uint8_t src_drive, uint16_t src_cluster,
-                              uint8_t dst_drive, uint16_t dst_dir_cluster) {
-    copy_dir_ctx ctx = {src_drive, dst_drive, dst_dir_cluster};
-    return cluster_iterate(src_drive, src_cluster, _copy_entry_cb, &ctx);
+static bool copy_dir_cluster(uint8_t src_drive, uint16_t src_cluster,
+                             uint8_t dst_drive, uint16_t dst_dir_cluster) {
+    copy_dir_ctx ctx = {src_drive, dst_drive, dst_dir_cluster, true};
+    skipdot_ctx sk = {copy_entry_cb, &ctx};
+    bool ok = dir_iterate(src_drive, src_cluster, skipdot_cb, &sk);
+    return ok && ctx.ok;
 }
 
 bool fs_copy_file(const char *src_path, const char *dst_path) {
@@ -1510,14 +1985,33 @@ bool fs_copy_file(const char *src_path, const char *dst_path) {
         return false;
     uint8_t dst_drive;
     uint16_t dst_dir;
-    char dst83[12];
-    if (!fs_resolve(dst_path, &dst_drive, &dst_dir, dst83)) {
-        fs_close(&src);
-        return false;
-    }
-    bool ok = _copy_open_file_to(&src, dst_drive, dst_dir, dst83);
-    fs_close(&src);
+    char dst83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    bool ok = resolve_ex(dst_path, &dst_drive, &dst_dir, dst83, leaf, &ex) &&
+              !ex && copy_file_to(&src, dst_drive, dst_dir, leaf);
+    src.open = false; /* read only: nothing to write back */
     return ok;
+}
+
+/* the same-disk part of a move: the entry goes to the other folder under
+ * its new name; the data stays where it is */
+static bool move_entry(uint8_t drive, uint16_t src_dir, const char *src83,
+                       uint16_t dst_dir, const char *dst_name,
+                       dir_entry_t *moved) {
+    dir_entry_t e;
+    uint32_t lba, nlba;
+    int idx, nidx;
+    if (!find83(drive, src_dir, src83, &e, &lba, &idx))
+        return false;
+    dir_entry_t ne = e;
+    if (!make_entry(drive, dst_dir, dst_name, &ne, &nlba, &nidx))
+        return false;
+    lfn_clear(drive, src_dir, src83);
+    if (!free_slot(drive, lba, idx))
+        return false;
+    if (moved)
+        *moved = ne;
+    return true;
 }
 
 bool fs_move_file(const char *src_path, const char *dst_path) {
@@ -1526,12 +2020,12 @@ bool fs_move_file(const char *src_path, const char *dst_path) {
 
     uint8_t src_drive, dst_drive;
     uint16_t src_dir, dst_dir;
-    char src83[12], dst83[12];
-    uint8_t sector_buf[512];
+    char src83[12], dst83[12], sleaf[FS_NAME_SZ], dleaf[FS_NAME_SZ];
+    bool sex, dex;
 
-    if (!fs_resolve(src_path, &src_drive, &src_dir, src83))
+    if (!resolve_ex(src_path, &src_drive, &src_dir, src83, sleaf, &sex) || !sex)
         return false;
-    if (!fs_resolve(dst_path, &dst_drive, &dst_dir, dst83))
+    if (!resolve_ex(dst_path, &dst_drive, &dst_dir, dst83, dleaf, &dex))
         return false;
 
     dir_entry_t src_entry;
@@ -1540,41 +2034,13 @@ bool fs_move_file(const char *src_path, const char *dst_path) {
     if (src_entry.attr & ATTR_DIRECTORY)
         return false;
 
-    dir_entry_t collision;
-    if (fs_find_in_dir(dst_drive, dst_dir, dst83, &collision))
+    if (src_drive == dst_drive && src_dir == dst_dir)
+        return rename_in(src_drive, src_dir, src83, dleaf);
+    if (dex)
         return false;
-
-    if (src_drive == dst_drive && src_dir == dst_dir) {
-        modify_ctx ctx = {src83, false, dst83, 1};
-        dir_iterate(src_drive, src_dir, modify_cb, &ctx);
-        return ctx.done;
-    }
-
-    if (src_drive == dst_drive) {
-        uint32_t dst_lba;
-        int dst_idx;
-        if (!alloc_dir_entry(dst_drive, dst_dir, &dst_lba, &dst_idx))
-            return false;
-        if (!fs_read_sector(dst_drive, dst_lba, sector_buf))
-            return false;
-        dir_entry_t *dst_entries = (dir_entry_t *)sector_buf;
-        uint8_t was_end = dst_entries[dst_idx].name[0];
-        dst_entries[dst_idx] = src_entry;
-        memcpy(dst_entries[dst_idx].name, dst83, 11);
-        if (was_end == DIR_ENTRY_END && dst_idx + 1 < 16)
-            dst_entries[dst_idx + 1].name[0] = DIR_ENTRY_END;
-        if (!fs_write_sector(dst_drive, dst_lba, sector_buf))
-            return false;
-
-        locate_ctx loc = {src83, 0, 0, false};
-        dir_iterate(src_drive, src_dir, locate_cb, &loc);
-        if (!loc.found)
-            return false;
-        if (!fs_read_sector(src_drive, loc.lba, sector_buf))
-            return false;
-        ((dir_entry_t *)sector_buf)[loc.idx].name[0] = DIR_ENTRY_FREE;
-        return fs_write_sector(src_drive, loc.lba, sector_buf);
-    }
+    g_fs_rev++;
+    if (src_drive == dst_drive)
+        return move_entry(src_drive, src_dir, src83, dst_dir, dleaf, NULL);
 
     if (!fs_copy_file(src_path, dst_path))
         return false;
@@ -1591,32 +2057,20 @@ bool fs_copy_dir(const char *src_path, const char *dst_path) {
     if (!(src_entry.attr & ATTR_DIRECTORY))
         return false;
 
-    dir_entry_t collision;
-    if (fs_find(dst_path, &collision))
+    uint8_t src_drive, dst_drive;
+    uint16_t src_dir, dst_dir;
+    char src83[12], dst83[12], sleaf[FS_NAME_SZ], dleaf[FS_NAME_SZ];
+    bool sex, dex;
+    if (!resolve_ex(dst_path, &dst_drive, &dst_dir, dst83, dleaf, &dex) || dex)
+        return false;
+    if (!resolve_ex(src_path, &src_drive, &src_dir, src83, sleaf, &sex))
         return false;
 
-    uint8_t dst_drive;
-    uint16_t dst_dir;
-    char dst83[12];
-    if (!fs_resolve(dst_path, &dst_drive, &dst_dir, dst83))
+    g_fs_rev++;
+    uint16_t nc;
+    if (!mkdir_in(dst_drive, dst_dir, dleaf, &nc))
         return false;
-
-    if (!fs_mkdir(dst_path))
-        return false;
-
-    dir_entry_t new_de;
-    if (!fs_find(dst_path, &new_de)) {
-        fs_rm_rf(dst_path);
-        return false;
-    }
-
-    uint8_t src_drive;
-    uint16_t src_dir;
-    char src83[12];
-    fs_resolve(src_path, &src_drive, &src_dir, src83);
-
-    if (!_copy_dir_cluster(src_drive, src_entry.cluster_lo, dst_drive,
-                           new_de.cluster_lo)) {
+    if (!copy_dir_cluster(src_drive, src_entry.cluster_lo, dst_drive, nc)) {
         fs_rm_rf(dst_path);
         return false;
     }
@@ -1629,12 +2083,13 @@ bool fs_move_dir(const char *src_path, const char *dst_path) {
 
     uint8_t src_drive, dst_drive;
     uint16_t src_dir, dst_dir;
-    char src83[12], dst83[12];
+    char src83[12], dst83[12], sleaf[FS_NAME_SZ], dleaf[FS_NAME_SZ];
+    bool sex, dex;
     uint8_t sector_buf[512];
 
-    if (!fs_resolve(src_path, &src_drive, &src_dir, src83))
+    if (!resolve_ex(src_path, &src_drive, &src_dir, src83, sleaf, &sex) || !sex)
         return false;
-    if (!fs_resolve(dst_path, &dst_drive, &dst_dir, dst83))
+    if (!resolve_ex(dst_path, &dst_drive, &dst_dir, dst83, dleaf, &dex))
         return false;
 
     dir_entry_t src_entry;
@@ -1643,40 +2098,24 @@ bool fs_move_dir(const char *src_path, const char *dst_path) {
     if (!(src_entry.attr & ATTR_DIRECTORY))
         return false;
 
-    dir_entry_t collision;
-    if (fs_find_in_dir(dst_drive, dst_dir, dst83, &collision))
+    if (src_drive == dst_drive && src_dir == dst_dir)
+        return rename_in(src_drive, src_dir, src83, dleaf);
+    if (dex)
         return false;
 
     if (src_drive == dst_drive) {
-        if (src_dir == dst_dir) {
-            modify_ctx ctx = {src83, false, dst83, 1};
-            dir_iterate(src_drive, src_dir, modify_cb, &ctx);
-            return ctx.done;
+        /* not into itself or a folder inside it */
+        uint16_t c = dst_dir;
+        for (int guard = 0; c != 0 && guard < 256; guard++) {
+            if (c == src_entry.cluster_lo)
+                return false;
+            dir_entry_t up;
+            if (!fs_find_in_dir(src_drive, c, "..         ", &up))
+                break;
+            c = up.cluster_lo;
         }
-
-        uint32_t dst_lba;
-        int dst_idx;
-        if (!alloc_dir_entry(dst_drive, dst_dir, &dst_lba, &dst_idx))
-            return false;
-        if (!fs_read_sector(dst_drive, dst_lba, sector_buf))
-            return false;
-        dir_entry_t *dst_entries = (dir_entry_t *)sector_buf;
-        uint8_t was_end = dst_entries[dst_idx].name[0];
-        dst_entries[dst_idx] = src_entry;
-        memcpy(dst_entries[dst_idx].name, dst83, 11);
-        if (was_end == DIR_ENTRY_END && dst_idx + 1 < 16)
-            dst_entries[dst_idx + 1].name[0] = DIR_ENTRY_END;
-        if (!fs_write_sector(dst_drive, dst_lba, sector_buf))
-            return false;
-
-        locate_ctx loc = {src83, 0, 0, false};
-        dir_iterate(src_drive, src_dir, locate_cb, &loc);
-        if (!loc.found)
-            return false;
-        if (!fs_read_sector(src_drive, loc.lba, sector_buf))
-            return false;
-        ((dir_entry_t *)sector_buf)[loc.idx].name[0] = DIR_ENTRY_FREE;
-        if (!fs_write_sector(src_drive, loc.lba, sector_buf))
+        g_fs_rev++;
+        if (!move_entry(src_drive, src_dir, src83, dst_dir, dleaf, NULL))
             return false;
 
         uint32_t dotdot_lba =
@@ -1703,22 +2142,23 @@ bool fs_move_dir(const char *src_path, const char *dst_path) {
 bool fs_set_hidden(const char *path, bool hidden) {
     uint8_t drive_id;
     uint16_t dir_cluster;
-    char name83[12];
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
     uint8_t sector_buf[512];
-    if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
-    locate_ctx loc = {name83, 0, 0, false};
-    dir_iterate(drive_id, dir_cluster, locate_cb, &loc);
-    if (!loc.found)
+    uint32_t lba;
+    int idx;
+    if (!find83(drive_id, dir_cluster, name83, NULL, &lba, &idx))
         return false;
-    if (!fs_read_sector(drive_id, loc.lba, sector_buf))
+    if (!fs_read_sector(drive_id, lba, sector_buf))
         return false;
     dir_entry_t *entries = (dir_entry_t *)sector_buf;
     if (hidden)
-        entries[loc.idx].attr |= ATTR_HIDDEN;
+        entries[idx].attr |= ATTR_HIDDEN;
     else
-        entries[loc.idx].attr &= ~ATTR_HIDDEN;
-    return fs_write_sector(drive_id, loc.lba, sector_buf);
+        entries[idx].attr &= ~ATTR_HIDDEN;
+    return fs_write_sector(drive_id, lba, sector_buf);
 }
 
 bool fs_is_hidden(const char *path) {
@@ -1728,7 +2168,7 @@ bool fs_is_hidden(const char *path) {
     return (de.attr & ATTR_HIDDEN) != 0;
 }
 
-/* ── 8.3 name validation (used by desktop + FileF dialogs) ───────────── */
+/* ── name checks (used by the desktop, file dialogs and the shell) ───── */
 bool fs_name_char_ok(char c) {
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
         (c >= '0' && c <= '9'))
@@ -1740,38 +2180,31 @@ bool fs_name_char_ok(char c) {
     return false;
 }
 
+/* a name typed by the user: up to FS_NAME_MAX characters, spaces and more
+ * than one dot allowed, not \ / : * ? " < > | */
 bool fs_validate_name(const char *n, bool is_dir, const char **err) {
+    (void)is_dir;
+    char t[FS_NAME_SZ];
     if (!n || !n[0]) {
         *err = "Name cannot be empty.";
         return false;
     }
-    const char *dot = strchr(n, '.');
-    int base_len = dot ? (int)(dot - n) : (int)strlen(n);
-    int ext_len = dot ? (int)strlen(dot + 1) : 0;
-    if (is_dir && ext_len > 0) {
-        *err = "Folder: no extension.";
+    int len = (int)strlen(n);
+    if (len > FS_NAME_MAX) {
+        *err = "Name too long (max 63).";
         return false;
     }
-    if (ext_len > 3) {
-        *err = "Extension too long (max 3).";
+    if (!name_trim(n, t)) {
+        *err = "Name cannot be empty.";
         return false;
     }
-    if (base_len == 0) {
-        *err = "Base name empty.";
+    if (strcmp(t, ".") == 0 || strcmp(t, "..") == 0) {
+        *err = "Name not allowed.";
         return false;
     }
-    if (base_len > 8) {
-        *err = "Base name too long (8).";
-        return false;
-    }
-    for (int i = 0; i < base_len; i++)
-        if (!fs_name_char_ok(n[i])) {
-            *err = "Invalid character.";
-            return false;
-        }
-    for (int i = 0; i < ext_len; i++)
-        if (!fs_name_char_ok(dot[1 + i])) {
-            *err = "Invalid ext char.";
+    for (int i = 0; n[i]; i++)
+        if (!fs_long_char_ok(n[i])) {
+            *err = "No \\ / : * ? \" < > |";
             return false;
         }
     return true;

@@ -36,7 +36,7 @@ static uint8_t fgc_or(const control *c, uint8_t d) {
 #define N_ASKED 0x08 /* EV_EXPAND already sent */
 
 typedef struct {
-    char text[28];
+    char text[64]; /* a folder's long name (FS_NAME_SZ) */
     uint32_t data;
     int16_t parent, first, next;
     uint8_t depth, flags;
@@ -332,9 +332,9 @@ void tree_set_text(control *c, int node, const char *text) {
 /* ── path helpers (node texts as path components) ─────────────────────── */
 
 void tree_path(const control *c, int node, char *out, int sz) {
-    const char *parts[24];
+    const char *parts[48];
     int n = 0;
-    for (int k = node; k >= 0 && n < 24; k = tree_parent(c, k))
+    for (int k = node; k >= 0 && n < 48; k = tree_parent(c, k))
         parts[n++] = tree_text(c, k);
     out[0] = 0;
     int len = 0;
@@ -360,7 +360,7 @@ int tree_find_path(control *c, const char *path) {
     tree_t *t = T(c);
     if (!t)
         return -1;
-    char comp[28];
+    char comp[64];
     int node = -1;
     const char *p = path;
     while (*p) {

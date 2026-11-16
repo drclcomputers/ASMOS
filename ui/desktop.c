@@ -193,7 +193,7 @@ static void open_item(int idx) {
             }
         return;
     }
-    char path[270];
+    char path[FS_PATH_SZ];
     if (desktop_fs_item_path(idx, path, sizeof(path)))
         fo_open(NULL, path);
 }
@@ -221,13 +221,13 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
         draw_app_icon(ax, ay, it->selected);
         break;
     case DESKTOP_ITEM_FILE: {
-        const char *dot = strchr(it->name, '.');
+        const char *dot = strrchr(it->name, '.');
         const char *ext = dot ? dot + 1 : "";
-        if (strcmp(ext, "PIC") == 0)
+        if (strcasecmp(ext, "PIC") == 0)
             draw_pic_icon(ax, ay, it->selected);
-        else if (strcmp(ext, "TXT") == 0)
+        else if (strcasecmp(ext, "TXT") == 0)
             draw_txt_icon(ax, ay, it->selected);
-        else if (strcmp(ext, "CFG") == 0)
+        else if (strcasecmp(ext, "CFG") == 0)
             draw_cfg_icon(ax, ay, it->selected);
         else
             draw_unknown_icon(ax, ay, it->selected);
@@ -244,18 +244,33 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
         break;
     }
 
-    char disp[ICO_LABEL_MAX + 1];
-    int nlen = (int)strlen(it->name);
-    int dlen = nlen < ICO_LABEL_MAX ? nlen : ICO_LABEL_MAX;
-    for (int i = 0; i < dlen; i++)
-        disp[i] = it->name[i];
-    disp[dlen] = '\0';
-
+    /* A long name is cut to the icon's column with "..."; the selected
+     * icon shows it whole, on a dark band (like Windows 95). */
+    char disp[DESKTOP_NAME_MAX + 4];
+    int room = ICON_SPACING_X + 4; /* as wide as 8 characters were */
+    snprintf(disp, sizeof(disp), "%s", it->name);
     int lw = text_width(disp, UI_FONT_SMALL);
+    bool whole = it->selected && !dragged_ghost;
+    if (!whole && lw > room) {
+        int n = (int)strlen(disp);
+        while (n > 1 && text_width_n(disp, n, UI_FONT_SMALL) +
+                                text_width("...", UI_FONT_SMALL) >
+                            room)
+            n--;
+        strcpy(disp + n, "...");
+        lw = text_width(disp, UI_FONT_SMALL);
+    }
     int lx = ax + ICON_W / 2 - lw / 2;
     int ly = ay + ICON_H + 2;
+    if (lx < 1)
+        lx = 1;
+    if (lx + lw > SCREEN_WIDTH - 1)
+        lx = SCREEN_WIDTH - 1 - lw;
 
     uint8_t label_col = is_cut ? DARK_GRAY : WHITE;
+    if (whole && text_width(it->name, UI_FONT_SMALL) > room)
+        fill_rect(lx - 1, ly - 1, lw + 2, font_height(UI_FONT_SMALL) + 2,
+                  BLACK);
     draw_string(lx + 1, ly + 1, disp, BLACK, UI_FONT_SMALL);
     draw_string(lx, ly, disp, label_col, UI_FONT_SMALL);
 }
@@ -315,28 +330,28 @@ static void menu_new_folder(void) {
     fo_ask_new(NULL, DESKTOP_PATH, true, NULL, NULL);
 }
 static void menu_rename(void) {
-    char p[270];
+    char p[FS_PATH_SZ];
     if (sel_path("Rename", p, sizeof(p)))
         fo_ask_rename(NULL, p, NULL, NULL);
 }
 static void menu_delete(void) {
-    char p[270];
+    char p[FS_PATH_SZ];
     if (sel_path("Delete", p, sizeof(p)))
         fo_ask_delete(NULL, p, NULL, NULL);
 }
 static void menu_info(void) {
-    char p[270];
+    char p[FS_PATH_SZ];
     if (sel_path("Get Info", p, sizeof(p)))
         fo_show_info(NULL, p);
 }
 static void menu_reload(void) { desktop_fs_set_dirty(); }
 static void menu_copy(void) {
-    char p[270];
+    char p[FS_PATH_SZ];
     if (sel_path("Copy", p, sizeof(p)))
         fo_report(NULL, "Copy", fo_clip(p, false));
 }
 static void menu_cut(void) {
-    char p[270];
+    char p[FS_PATH_SZ];
     if (sel_path("Cut", p, sizeof(p)))
         fo_report(NULL, "Cut", fo_clip(p, true));
 }
@@ -461,7 +476,8 @@ extern app_descriptor fdformat_app;
 static void menu_format_fdd(void) { os_launch_app(&fdformat_app); }
 
 static void menu_insert_fdd(void) {
-    if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
+    bool a = fdd_insert(DRIVE_FDD0), b = fdd_insert(DRIVE_FDD1); /* both */
+    if (a || b) {
         desktop_fs_set_dirty();
     } else {
         dlg_message(NULL, "Insert Floppy",
@@ -487,15 +503,15 @@ static menu *s_apps_menu;
 
 typedef struct {
     char label[24];
-    char path[64];        /* a .APP to load, or */
+    char path[192];       /* a .APP to load, or */
     app_descriptor *desc; /* a built-in app (from a shortcut) */
 } ext_app_t;
 
 static ext_app_t s_ext[MAX_EXT_APPS];
 static int s_next;
 static struct {
-    char name[24]; /* shown */
-    char dir[9];   /* folder */
+    char name[24];        /* shown */
+    char dir[FS_NAME_SZ]; /* folder */
 } s_groups[MAX_USER_GROUPS];
 static int s_ngroups;
 static const char *const BUILTIN_DIRS[APP_GROUPS] = {"", "ACCESSOR", "GAMES",
@@ -517,7 +533,7 @@ static void launch_ext(void *ud) {
  * so built-in apps can be put in groups too (`write X.LNK Calculator`);
  * deleting the shortcut leaves the app. */
 static bool read_shortcut(const char *path, ext_app_t *x) {
-    char buf[128];
+    char buf[256];
     fat_file_t f;
     if (!fs_open(path, &f))
         return false;
@@ -602,9 +618,10 @@ static void add_folder_apps(menu *m, const char *dir) {
     uint8_t drive;
     uint16_t cluster;
     static dir_entry_t ents[48];
+    static char names[48][FS_NAME_SZ];
     int count = 0;
     if (!m || !fs_resolve_dir(dir, &drive, &cluster) ||
-        !fs_list_dir(drive, cluster, ents, 48, &count))
+        !fs_list_dir_names(drive, cluster, ents, names, 48, &count))
         return;
     for (int i = 0; i < count && s_next < MAX_EXT_APPS; i++) {
         const dir_entry_t *e = &ents[i];
@@ -614,9 +631,8 @@ static void add_folder_apps(menu *m, const char *dir) {
         if (m->item_count >= MAX_MENU_ITEMS)
             break;
         ext_app_t *x = &s_ext[s_next];
-        char fn[13], full[64];
-        name83(e, fn, true);
-        snprintf(full, sizeof(full), "%s/%s", dir, fn);
+        char full[192];
+        snprintf(full, sizeof(full), "%s/%s", dir, names[i]);
         if (lnk) {
             if (!read_shortcut(full, x))
                 continue; /* a shortcut to nothing */
@@ -637,23 +653,25 @@ static void find_groups(void) {
     uint8_t drive;
     uint16_t cluster;
     static dir_entry_t ents[48];
+    static char names[48][FS_NAME_SZ];
     int count = 0;
     if (!fs_resolve_dir(APPS_DIR, &drive, &cluster) ||
-        !fs_list_dir(drive, cluster, ents, 48, &count))
+        !fs_list_dir_names(drive, cluster, ents, names, 48, &count))
         return;
     for (int i = 0; i < count && s_ngroups < MAX_USER_GROUPS; i++) {
         if (!is_folder(&ents[i]))
             continue;
-        char dn[9];
-        name83(&ents[i], dn, false);
+        char dn9[9], *dn = names[i];
+        name83(&ents[i], dn9, false);
         bool builtin = false;
         for (int g = 1; g < APP_GROUPS; g++)
-            builtin |= !strcmp(dn, BUILTIN_DIRS[g]);
+            builtin |= !strcasecmp(dn, BUILTIN_DIRS[g]) ||
+                       !strcmp(dn9, BUILTIN_DIRS[g]);
         if (builtin)
             continue;
         strcpy(s_groups[s_ngroups].dir, dn);
         /* the name: GROUP.TXT, else "ACME" -> "Acme" */
-        char path[40], *nm = s_groups[s_ngroups].name;
+        char path[96], *nm = s_groups[s_ngroups].name;
         snprintf(path, sizeof(path), "%s/%s/GROUP.TXT", APPS_DIR, dn);
         fat_file_t f;
         int n = 0;
@@ -665,17 +683,20 @@ static void find_groups(void) {
         while (k < n && nm[k] != '\r' && nm[k] != '\n' && nm[k] >= 32)
             k++;
         nm[k] = 0;
-        if (!k) {
-            for (k = 0; dn[k]; k++)
-                nm[k] = k ? (char)(dn[k] >= 'A' && dn[k] <= 'Z' ? dn[k] + 32
-                                                                : dn[k])
-                          : dn[k];
+        if (!k) { /* "ACME" -> "Acme"; a long name as it is */
+            bool upper = fs_name_is_83(dn);
+            for (k = 0; dn[k] && k < 23; k++)
+                nm[k] = upper && k
+                            ? (char)(dn[k] >= 'A' && dn[k] <= 'Z' ? dn[k] + 32
+                                                                  : dn[k])
+                            : dn[k];
             nm[k] = 0;
         }
         /* keep them sorted by name */
         int at = s_ngroups++;
-        while (at > 0 && strcmp(s_groups[at - 1].name, s_groups[at].name) > 0) {
-            char tn[24], td[9];
+        while (at > 0 &&
+               strcasecmp(s_groups[at - 1].name, s_groups[at].name) > 0) {
+            char tn[24], td[FS_NAME_SZ];
             strcpy(tn, s_groups[at].name), strcpy(td, s_groups[at].dir);
             strcpy(s_groups[at].name, s_groups[at - 1].name);
             strcpy(s_groups[at].dir, s_groups[at - 1].dir);
@@ -692,7 +713,7 @@ void desktop_refresh_apps_menu(void) {
     menu_clear(s_apps_menu);
     s_next = 0;
     s_apps_rev = g_fs_rev;
-    char dir[24];
+    char dir[96];
     /* the built-in groups, with the .APPs of their folders */
     for (int g = 1; g < APP_GROUPS; g++) {
         menu *sub = menu_add_submenu(s_apps_menu, (char *)APP_GROUP_NAMES[g]);
@@ -710,7 +731,6 @@ void desktop_refresh_apps_menu(void) {
         snprintf(dir, sizeof(dir), "%s/%s", APPS_DIR, s_groups[i].dir);
         add_folder_apps(sub, dir);
     }
-    menu_add_separator(s_apps_menu);
     /* the .APPs in /APPS itself, then the built-ins that sit here */
     add_folder_apps(s_apps_menu, APPS_DIR);
     for (int i = 0; i < app_registry_count; i++)
@@ -781,13 +801,20 @@ void desktop_init(void) {
 
 /* ── per-frame ──────────────────────────────────────────────────────────── */
 static void draw_items(int count, desktop_item_t *items) {
+    int sel = -1;
     for (int i = 0; i < count; i++) {
         if (!items[i].used)
             continue;
         if (i == s_drag_idx)
             continue;
+        if (items[i].selected && sel < 0) {
+            sel = i; /* last: its whole name may cover the neighbours */
+            continue;
+        }
         draw_desktop_item(&items[i], false);
     }
+    if (sel >= 0)
+        draw_desktop_item(&items[sel], false);
     if (s_drag_idx >= 0 && s_drag_idx < count)
         draw_desktop_item(&items[s_drag_idx], false);
 }
@@ -802,7 +829,7 @@ static void ctx_open(void) {
 }
 
 static void ctx_paste_into(void) {
-    char p[270];
+    char p[FS_PATH_SZ];
     if (s_ctx_idx >= 0 && desktop_fs_item_path(s_ctx_idx, p, sizeof(p)))
         fo_report(NULL, "Paste", fo_paste(p));
 }
@@ -922,7 +949,7 @@ void desktop_on_frame(void) {
             int idx = s_drag_idx;
             s_drag_idx = -1;
             wm_clear_overlay(&s_drag_idx);
-            char src[270], dst[270];
+            char src[FS_PATH_SZ], dst[FS_PATH_SZ];
             int target = desktop_hit_except(mouse.x, mouse.y, idx);
             bool into = false;
             if (desktop_fs_item_path(idx, src, sizeof(src))) {

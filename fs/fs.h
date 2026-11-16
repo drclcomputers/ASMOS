@@ -33,6 +33,13 @@ typedef struct __attribute__((packed)) {
 #define ATTR_DIRECTORY 0x10
 #define ATTR_ARCHIVE 0x20
 
+/* Long file names (VFAT): names up to FS_NAME_MAX characters, paths up to
+ * FS_PATH_MAX. Buffers: char name[FS_NAME_SZ], path[FS_PATH_SZ]. */
+#define FS_NAME_MAX 63
+#define FS_NAME_SZ (FS_NAME_MAX + 1)
+#define FS_PATH_MAX 511
+#define FS_PATH_SZ (FS_PATH_MAX + 1)
+
 #define DIR_ENTRY_FREE 0xE5
 #define DIR_ENTRY_END 0x00
 
@@ -100,7 +107,7 @@ typedef struct {
 typedef struct {
     uint8_t drive_id;
     uint16_t current_cluster;
-    char path[256];
+    char path[FS_PATH_SZ];
 } fat_dir_ctx_t;
 
 typedef struct {
@@ -144,7 +151,8 @@ bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
 
 void fs_make_83(const char *filename, char *out83);
 bool fs_name_char_ok(char c);
-/* Validate a user-typed 8.3 name; on failure *err gets a short message. */
+/* Validate a user-typed name (long names allowed); on failure *err gets a
+ * short message. */
 bool fs_validate_name(const char *name, bool is_dir, const char **err);
 bool fs_resolve(const char *path, uint8_t *out_drive,
                 uint16_t *out_parent_cluster, char out_name83[12]);
@@ -157,6 +165,26 @@ bool fs_find_in_dir(uint8_t drive_id, uint16_t dir_cluster, const char *name83,
 bool fs_find(const char *path, dir_entry_t *out);
 bool fs_list_dir(uint8_t drive_id, uint16_t dir_cluster, dir_entry_t *buf,
                  int max, int *count);
+/* the same, with each one's name to show (its long name, if it has one);
+ * buf or names may be NULL */
+bool fs_list_dir_names(uint8_t drive_id, uint16_t dir_cluster, dir_entry_t *buf,
+                       char (*names)[FS_NAME_SZ], int max, int *count);
+/* each file and folder (not . and ..) with the name to show; cb returns
+ * false to stop. No arrays: any number of entries. */
+typedef bool (*fs_walk_cb)(const dir_entry_t *e, const char *name, void *user);
+bool fs_walk_dir(uint8_t drive_id, uint16_t dir_cluster, fs_walk_cb cb,
+                 void *user);
+/* find by long or 8.3 name, any case (fs_find_in_dir: exact 8.3 only) */
+bool fs_find_name(uint8_t drive_id, uint16_t dir_cluster, const char *name,
+                  dir_entry_t *out);
+/* the name to show for the last part of path (its long name if any) */
+bool fs_name_of(const char *path, char out[FS_NAME_SZ]);
+/* an entry's 8.3 name as text, "README.TXT" */
+void fs_entry_name(const dir_entry_t *e, char out[13]);
+/* fits 8.3 as typed (any case) */
+bool fs_name_is_83(const char *name);
+/* may be in a long name: not a control character or \ / : * ? " < > | */
+bool fs_long_char_ok(char c);
 bool fs_is_dir_empty(uint8_t drive_id, uint16_t cluster);
 void fs_wipe_cluster(uint8_t drive_id, uint16_t cluster);
 

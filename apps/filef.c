@@ -22,14 +22,13 @@
 #define CONTENT_TOP 6
 #define CHAR_W 5
 #define CHAR_H 6
-#define LABEL_CHARS 12 /* a whole 8.3 name; cut to the cell when drawn */
 
 #define MAX_ENTRIES 128
 #define SORT_NAME 0
 #define SORT_DATE 1
 #define SORT_SIZE 2
 
-#define MAX_HISTORY 32
+#define MAX_HISTORY 16
 
 /* ── Virtual root drive entries ─────────────────────────────── */
 typedef struct {
@@ -50,8 +49,7 @@ static const vdrive_t k_vdrives[] = {
 /* ── Item ────────────────────────────────────────────────────── */
 typedef struct {
     dir_entry_t entry;
-    char name[13];
-    char label[LABEL_CHARS + 1];
+    char name[FS_NAME_SZ]; /* its long name, if it has one */
     bool is_dotdot;
     bool is_vdrive;
     uint8_t vdrive_id;
@@ -71,10 +69,10 @@ typedef struct {
     control *back, *fwd, *up, *home, *desk, *path_edit, *view, *sb, *status_lbl;
     control *tree; /* folder tree pane (View > Folder Tree) */
     bool tree_shown;
-    char tree_at[256]; /* path the tree selection was last synced to */
+    char tree_at[FS_PATH_SZ]; /* path the tree selection was last synced to */
 
     uint16_t dir_cluster;
-    char path[256];
+    char path[FS_PATH_SZ];
     uint8_t drive_id;
     bool at_vroot;
 
@@ -87,7 +85,6 @@ typedef struct {
 
     bool newname_is_dir;
     bool newname_hidden; /* "Hidden" box of the New File/Folder dialog */
-    char rename_old[13];
 
     int drag_idx;  /* item being dragged, -1 = none */
     int press_idx; /* item under the last mouse-down */
@@ -95,18 +92,11 @@ typedef struct {
 
     char status[48]; /* transient message; empty = item count */
 
-    char info_name[13];
-    char info_path[270];
-    char info_type[32];
-    char info_size[32];
-    char info_date[32];
-    char info_time[32];
-
     int scroll_y;
     int content_h_total;
     int last_view_w;
 
-    char history[MAX_HISTORY][256];
+    char history[MAX_HISTORY][FS_PATH_SZ];
     int history_index;
     int history_count;
 } ff_inst_t;
@@ -168,7 +158,7 @@ static void build_vpath(uint8_t drive_id, const char *sub, char *out,
 static bool resolve_dir(const char *path, uint8_t *out_drive,
                         uint16_t *out_cluster) {
     uint8_t drive;
-    char sub[256];
+    char sub[FS_PATH_SZ];
     if (!resolve_vpath(path, &drive, sub, sizeof(sub)))
         return false;
     if (!fs_drive_mounted(drive))
@@ -179,7 +169,7 @@ static bool resolve_dir(const char *path, uint8_t *out_drive,
         return true;
     }
     uint16_t cluster = 0;
-    char component[256];
+    char component[FS_NAME_SZ + 1];
     const char *ptr = sub;
     while (*ptr) {
         while (*ptr == '/')
@@ -187,13 +177,14 @@ static bool resolve_dir(const char *path, uint8_t *out_drive,
         if (!*ptr)
             break;
         int ci = 0;
-        while (*ptr && *ptr != '/')
-            component[ci++] = *ptr++;
+        while (*ptr && *ptr != '/') {
+            if (ci < FS_NAME_SZ)
+                component[ci++] = *ptr;
+            ptr++;
+        }
         component[ci] = '\0';
-        char name83[12];
-        fs_make_83(component, name83);
-        dir_entry_t de;
-        if (!fs_find_in_dir(drive, cluster, name83, &de))
+        dir_entry_t de; /* by its long or its 8.3 name */
+        if (!fs_find_name(drive, cluster, component, &de))
             return false;
         if (!(de.attr & ATTR_DIRECTORY))
             return false;
@@ -219,8 +210,8 @@ static void ff_history_add(ff_inst_t *s, const char *new_path) {
         s->history_index = MAX_HISTORY - 1;
         s->history_count = MAX_HISTORY;
     }
-    strncpy(s->history[s->history_index], new_path, 255);
-    s->history[s->history_index][255] = '\0';
+    strncpy(s->history[s->history_index], new_path, FS_PATH_MAX);
+    s->history[s->history_index][FS_PATH_MAX] = '\0';
 }
 
 static void ff_history_go(ff_inst_t *s, int idx) {
@@ -291,7 +282,7 @@ static int item_sort_cmp(const ff_item_t *a, const ff_item_t *b, int sort) {
         int dc = (int)b->entry.modify_date - (int)a->entry.modify_date;
         return dc ? dc : (int)b->entry.modify_time - (int)a->entry.modify_time;
     }
-    return strcmp(a->name, b->name);
+    return strcasecmp(a->name, b->name);
 }
 
 static void ff_sort(ff_inst_t *s) {
@@ -334,27 +325,6 @@ static void ff_layout(ff_inst_t *s) {
 }
 
 /* ── Reload ─────────────────────────────────────────────────────── */
-static void entry_to_name(const dir_entry_t *e, char *out) {
-    int j = 0;
-    for (int k = 0; k < 8 && e->name[k] != ' '; k++)
-        out[j++] = e->name[k];
-    if (!(e->attr & ATTR_DIRECTORY) && e->name[0] != '.' && e->ext[0] != ' ') {
-        out[j++] = '.';
-        for (int k = 0; k < 3 && e->ext[k] != ' '; k++)
-            out[j++] = e->ext[k];
-    }
-    out[j] = '\0';
-}
-
-static void ff_make_label(const char *name, char *out) {
-    int i = 0;
-    while (name[i] && i < LABEL_CHARS) {
-        out[i] = name[i];
-        i++;
-    }
-    out[i] = '\0';
-}
-
 static bool item_is_app(const ff_item_t *it) {
     if (it->is_dotdot || it->is_vdrive || (it->entry.attr & ATTR_DIRECTORY))
         return false;
@@ -377,8 +347,7 @@ static void ff_reload(ff_inst_t *s) {
             it->vdrive_id = k_vdrives[i].drive_id;
             it->vdrive_hdd = k_vdrives[i].is_hdd;
             strncpy(it->vdrive_path, k_vdrives[i].vpath, 11);
-            strncpy(it->name, k_vdrives[i].label, 12);
-            ff_make_label(it->name, it->label);
+            strncpy(it->name, k_vdrives[i].label, FS_NAME_MAX);
         }
         ff_layout(s);
         s->drag_idx = -1;
@@ -390,7 +359,7 @@ static void ff_reload(ff_inst_t *s) {
 
     {
         uint8_t dummy_drive;
-        char sub[256];
+        char sub[FS_PATH_SZ];
         bool at_drive_root =
             resolve_vpath(s->path, &dummy_drive, sub, sizeof(sub)) &&
             strcmp(sub, "/") == 0;
@@ -399,14 +368,15 @@ static void ff_reload(ff_inst_t *s) {
             memset(up, 0, sizeof(ff_item_t));
             up->is_dotdot = true;
             strcpy(up->name, "..");
-            strcpy(up->label, "..");
         }
     }
 
-    dir_entry_t raw[MAX_ENTRIES];
+    static dir_entry_t raw[MAX_ENTRIES]; /* (one reload at a time) */
+    static char names[MAX_ENTRIES][FS_NAME_SZ];
     int count = 0;
     s->unfiltered = 0;
-    fs_list_dir(s->drive_id, s->dir_cluster, raw, MAX_ENTRIES, &count);
+    fs_list_dir_names(s->drive_id, s->dir_cluster, raw, names, MAX_ENTRIES,
+                      &count);
     for (int i = 0; i < count && s->item_count < MAX_ENTRIES; i++) {
         if (raw[i].name[0] == '.')
             continue;
@@ -414,18 +384,13 @@ static void ff_reload(ff_inst_t *s) {
         if (is_hidden && !s->show_hidden)
             continue;
         s->unfiltered++;
-        if (s->filter[0]) {
-            char nm[13];
-            entry_to_name(&raw[i], nm);
-            if (!fo_match(nm, s->filter))
-                continue;
-        }
+        if (s->filter[0] && !fo_match(names[i], s->filter))
+            continue;
         ff_item_t *it = &s->items[s->item_count++];
         memset(it, 0, sizeof(ff_item_t));
         it->entry = raw[i];
         it->hidden = is_hidden;
-        entry_to_name(&raw[i], it->name);
-        ff_make_label(it->name, it->label);
+        strcpy(it->name, names[i]);
     }
     ff_sort(s);
     ff_layout(s);
@@ -451,7 +416,7 @@ static void ff_refresh_all(void) {
 
 /* fileops: something in `dir` changed -> reload windows showing it */
 void ff_dir_changed_pub(const char *dir) {
-    char want[270], have[270];
+    char want[FS_PATH_SZ], have[FS_PATH_SZ];
     fo_norm(dir, want, sizeof(want));
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
@@ -485,8 +450,8 @@ static void ff_navigate_internal(ff_inst_t *s, uint16_t cluster,
     s->at_vroot = false;
     s->dir_cluster = cluster;
     s->drive_id = drive_id;
-    strncpy(s->path, path, 255);
-    s->path[255] = '\0';
+    strncpy(s->path, path, FS_PATH_MAX);
+    s->path[FS_PATH_MAX] = '\0';
     s->win->title = fo_is_trash(s->path) ? "Trash" : s->path;
     s->scroll_y = 0;
     ff_reload(s);
@@ -514,7 +479,7 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
                 ff_go_vroot(s);
             else {
                 uint8_t drv;
-                char sub[256];
+                char sub[FS_PATH_SZ];
                 if (resolve_vpath(path, &drv, sub, sizeof(sub)))
                     ff_navigate(s, cluster, path, drv);
             }
@@ -530,7 +495,7 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
         ff_go_vroot(s);
     } else {
         uint8_t drv = DRIVE_HDA;
-        char sub[256];
+        char sub[FS_PATH_SZ];
         resolve_vpath(path, &drv, sub, sizeof(sub));
         ff_navigate(s, cluster, path, drv);
     }
@@ -553,20 +518,13 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     else if (item_is_app(it))
         draw_app_icon(ax, ay, it->selected);
     else {
-        char ext[4] = {0};
-        for (int j = 0; j < 3; j++)
-            ext[j] = it->entry.ext[j];
-        for (int j = 2; j >= 0; j--) {
-            if (ext[j] == ' ')
-                ext[j] = '\0';
-            else
-                break;
-        }
-        if (!strcmp(ext, "PIC") || !strcmp(ext, "pic"))
+        const char *dot = strrchr(it->name, '.');
+        const char *ext = dot ? dot + 1 : "";
+        if (!strcasecmp(ext, "PIC"))
             draw_pic_icon(ax, ay, it->selected);
-        else if (!strcmp(ext, "TXT") || !strcmp(ext, "txt"))
+        else if (!strcasecmp(ext, "TXT"))
             draw_txt_icon(ax, ay, it->selected);
-        else if (!strcmp(ext, "CFG") || !strcmp(ext, "cfg"))
+        else if (!strcasecmp(ext, "CFG"))
             draw_cfg_icon(ax, ay, it->selected);
         else
             draw_unknown_icon(ax, ay, it->selected);
@@ -580,17 +538,37 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
          g_clipboard.is_cut && strcmp(g_clipboard.name, it->name) == 0 &&
          strcmp(g_clipboard.src_path, s->path) == 0);
 
+    /* the name fits the cell, cut with "..."; the selected one is shown
+     * whole (drawn last, over its neighbours: paint_view) */
     int font = UI_FONT_SMALL;
-    int n = text_fit(it->label, ICON_CELL_W - 2, font); /* what fits */
-    int lw = text_width_n(it->label, n, font);
+    int room = it->selected && s->view ? s->view->aw - 6 : ICON_CELL_W - 2;
+    char lab[FS_NAME_SZ + 4];
+    int n = text_fit(it->name, room, font);
+    if (it->name[n]) {
+        int dots = text_width("...", font);
+        n = text_fit(it->name, room - dots, font);
+        snprintf(lab, sizeof(lab), "%.*s...", n, it->name);
+    } else {
+        snprintf(lab, sizeof(lab), "%s", it->name);
+    }
+    int lw = text_width(lab, font);
     int lx = ax + ICON_W / 2 - lw / 2;
     int ly = ay + ICON_H + 1;
+    if (s->view && lw < s->view->aw - 4) { /* keep it inside the view */
+        int left = s->view->ax + 3, right = s->view->ax + s->view->aw - 3;
+        if (s->drag_idx != i) {
+            if (lx < left)
+                lx = left;
+            if (lx + lw > right)
+                lx = right - lw;
+        }
+    }
     uint8_t lc = (is_cut || it->hidden) ? DARK_GRAY : BLACK;
     if (it->selected) {
         fill_rect(lx - 1, ly - 1, lw + 1, CHAR_H + 2, BLACK);
-        draw_text_n(lx, ly, it->label, n, WHITE, font);
+        draw_text_n(lx, ly, lab, (int)strlen(lab), WHITE, font);
     } else {
-        draw_text_n(lx, ly, it->label, n, lc, font);
+        draw_text_n(lx, ly, lab, (int)strlen(lab), lc, font);
     }
 }
 
@@ -669,7 +647,7 @@ static void item_fspath(ff_inst_t *s, const char *name, char *out, int sz) {
     }
 
     uint8_t drv;
-    char sub[256];
+    char sub[FS_PATH_SZ];
     if (!resolve_vpath(s->path, &drv, sub, sizeof(sub))) {
         snprintf(out, sz, "%s/%s", s->path, name);
         return;
@@ -785,7 +763,7 @@ static void ff_go_up(ff_inst_t *s) {
 }
 
 static void ff_go_desktop(ff_inst_t *s) {
-    char dp[270];
+    char dp[FS_PATH_SZ];
     uint8_t drv;
     uint16_t cl;
     build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));
@@ -823,14 +801,14 @@ static void menu_new_folder(void) { new_item(true); }
 
 static void menu_rename(void) {
     ff_inst_t *s = active_finder();
-    char p[270];
+    char p[FS_PATH_SZ];
     if (s && sel_path(s, p, sizeof(p)))
         fo_ask_rename(s->win, p, op_done, s);
 }
 
 static void menu_delete(void) {
     ff_inst_t *s = active_finder();
-    char p[270];
+    char p[FS_PATH_SZ];
     if (s && sel_path(s, p, sizeof(p)))
         fo_ask_delete(s->win, p, op_done, s);
 }
@@ -844,7 +822,7 @@ static void menu_get_info(void) {
         strcpy(s->status, "Nothing selected.");
         return;
     }
-    char p[270];
+    char p[FS_PATH_SZ];
     if (s->items[sel].is_vdrive)
         strncpy(p, s->items[sel].vdrive_path, sizeof(p) - 1);
     else
@@ -860,7 +838,7 @@ static void menu_reload(void) {
 
 static void menu_toggle_hidden(void) {
     ff_inst_t *s = active_finder();
-    char p[270];
+    char p[FS_PATH_SZ];
     if (!s || !sel_path(s, p, sizeof(p)))
         return;
     bool hide = !s->items[ff_selected_file(s)].hidden;
@@ -889,7 +867,7 @@ static void menu_copy_path(void) {
 
 static void ff_clip_selected(bool is_cut) {
     ff_inst_t *s = active_finder();
-    char p[270];
+    char p[FS_PATH_SZ];
     if (!s || !sel_path(s, p, sizeof(p)))
         return;
     const char *err = fo_clip(p, is_cut);
@@ -961,7 +939,8 @@ static void menu_insert_fdd(void) {
     ff_inst_t *s = active_finder();
     if (!s)
         return;
-    if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
+    bool a = fdd_insert(DRIVE_FDD0), b = fdd_insert(DRIVE_FDD1); /* both */
+    if (a || b) {
         ff_refresh_all();
         strcpy(s->status, "Floppy mounted.");
     } else {
@@ -991,7 +970,7 @@ static void ff_drop_into(ff_inst_t *src, int idx, const char *dst_dir) {
     ff_item_t *it = &src->items[idx];
     if (it->is_dotdot || it->is_vdrive)
         return;
-    char p[270];
+    char p[FS_PATH_SZ];
     item_fspath(src, it->name, p, sizeof(p));
     const char *err = fo_move(p, dst_dir);
     fo_report(src->win, "Move", err);
@@ -1009,12 +988,12 @@ static void ff_open_item(ff_inst_t *s, int idx) {
         }
     } else if (it->is_dotdot) {
         uint8_t drv;
-        char sub[256];
+        char sub[FS_PATH_SZ];
         bool has_vp = resolve_vpath(s->path, &drv, sub, sizeof(sub));
         if (has_vp && strcmp(sub, "/") == 0) {
             ff_go_vroot(s);
         } else {
-            char parent_logical[256];
+            char parent_logical[FS_PATH_SZ];
             char *sl = strrchr(s->path, '/');
             if (sl && sl != s->path) {
                 int plen = (int)(sl - s->path);
@@ -1031,7 +1010,7 @@ static void ff_open_item(ff_inst_t *s, int idx) {
                 ff_go_vroot(s);
         }
     } else if (it->entry.attr & ATTR_DIRECTORY) {
-        char child_logical[270];
+        char child_logical[FS_PATH_SZ];
         snprintf(child_logical, sizeof(child_logical), "%s/%s", s->path,
                  it->name);
         uint16_t child_cluster = it->entry.cluster_lo;
@@ -1041,7 +1020,7 @@ static void ff_open_item(ff_inst_t *s, int idx) {
             ff_open_dir_pub(child_cluster, child_logical);
     } else {
         /* files and apps: same rules as the desktop */
-        char fspath[270];
+        char fspath[FS_PATH_SZ];
         item_fspath(s, it->name, fspath, sizeof(fspath));
         fo_open(s->win, fspath);
     }
@@ -1056,9 +1035,16 @@ static void paint_view(control *c, int x, int y, int w, int h) {
         ff_layout(s);
         ff_sync(s);
     }
+    int sel = -1;
     for (int i = 0; i < s->item_count; i++)
-        if (!s->items[i].dragging)
-            ff_draw_item(s, i, x, y - s->scroll_y);
+        if (!s->items[i].dragging) {
+            if (s->items[i].selected && sel < 0)
+                sel = i; /* last: its whole name covers the neighbours */
+            else
+                ff_draw_item(s, i, x, y - s->scroll_y);
+        }
+    if (sel >= 0)
+        ff_draw_item(s, sel, x, y - s->scroll_y);
 }
 
 /* Dragged icon follows the pointer over every window and the desktop. */
@@ -1124,7 +1110,8 @@ static bool filter_key(ff_inst_t *s) {
     }
     bool name_char = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                      (c >= '0' && c <= '9') || c == '.' || c == '_' ||
-                     c == '-' || c == '*' || c == '?' || c == '~';
+                     c == '-' || c == '*' || c == '?' || c == '~' ||
+                     (c == ' ' && n > 0);
     if (name_char && n < (int)sizeof(s->filter) - 1 && sc != ENTER) {
         char f[16];
         strcpy(f, s->filter);
@@ -1186,7 +1173,7 @@ static void ctx_open(void) {
 /* Paste into the folder that was right-clicked, else the current one. */
 static void ctx_paste_into(void) {
     ff_inst_t *s = active_finder();
-    char p[270];
+    char p[FS_PATH_SZ];
     int sel = s ? ff_selected_file(s) : -1;
     if (!s || sel < 0 || !(s->items[sel].entry.attr & ATTR_DIRECTORY)) {
         menu_paste();
@@ -1202,7 +1189,7 @@ static void ctx_paste_into(void) {
 /* ── Trash ── */
 static void ctx_put_back(void) {
     ff_inst_t *s = active_finder();
-    char p[270];
+    char p[FS_PATH_SZ];
     if (s && sel_path(s, p, sizeof(p))) {
         const char *err = fo_put_back(p);
         fo_report(s->win, "Put Back", err);
@@ -1366,7 +1353,7 @@ static void on_path(control *c, int ev) {
     ff_inst_t *s = c->user;
     if (ev != EV_SUBMIT)
         return;
-    char p[256];
+    char p[FS_PATH_SZ];
     strncpy(p, ctl_text(c), sizeof(p) - 1);
     p[sizeof(p) - 1] = 0;
     int n = (int)strlen(p);
@@ -1411,7 +1398,7 @@ static void tree_sync(ff_inst_t *s) {
 static void tree_refresh_dir(ff_inst_t *s, const char *dir) {
     if (!s->tree || !s->tree_shown)
         return;
-    char v[270];
+    char v[FS_PATH_SZ];
     fo_vpath(dir, v, sizeof(v));
     int node = tree_find_path(s->tree, v);
     if (node >= 0 && tree_is_expanded(s->tree, node)) {
@@ -1449,9 +1436,9 @@ static void on_tree(control *c, int ev) {
     ff_inst_t *s = c->user;
     if (ev == EV_EXPAND) {
         int node = tree_event_node(c);
-        char path[270];
+        char path[FS_PATH_SZ];
         tree_path(c, node, path, sizeof(path));
-        static char names[64][13];
+        static char names[64][FS_NAME_SZ];
         int n = fo_list_dirs(path, names, 64, s->show_hidden);
         for (int i = 0; i < n; i++)
             tree_add(c, node, names[i], 0, true);
@@ -1459,7 +1446,7 @@ static void on_tree(control *c, int ev) {
         int node = tree_sel(c);
         if (node < 0)
             return;
-        char path[270];
+        char path[FS_PATH_SZ];
         tree_path(c, node, path, sizeof(path));
         uint8_t drv;
         uint16_t cl;
@@ -1524,8 +1511,8 @@ static void ff_init(void *state) {
     control *tb[] = {s->back, s->fwd, s->up, s->home, s->desk};
     for (int i = 0; i < 5; i++)
         ctl_style_add(tb[i], CS_NOFOCUS);
-    s->path_edit = ctl_edit(w, 98, 2, cw - 100, 12, "/", 255,
-                            ES_UPPER | CS_STRETCH_W, on_path);
+    s->path_edit = ctl_edit(w, 98, 2, cw - 100, 12, "/", FS_PATH_MAX,
+                            CS_STRETCH_W, on_path);
     s->tree =
         ctl_tree(w, 2, 16, TREE_W, ch - 29, TS_FOLDERS | CS_STRETCH_H, on_tree);
     s->view =
@@ -1590,7 +1577,7 @@ static void ff_on_frame(void *state) {
     if (wm_focused_window() == s->win)
         s_last_active = s;
     if (!s->at_vroot && desktop_fs_is_dirty()) {
-        char dp[270];
+        char dp[FS_PATH_SZ];
         build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));
         if (strcmp(s->path, dp) == 0)
             ff_reload(s);

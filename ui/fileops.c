@@ -69,9 +69,25 @@ void fo_norm(const char *path, char *out, int sz) {
     out[n] = 0;
 }
 
+/* like fo_norm, but names keep their case (long names are shown) */
+static void norm_keep_case(const char *path, char *out, int sz) {
+    const char *p = path;
+    if ((p[0] == '/') && (p[1] | 32) == 'h' && (p[2] | 32) == 'd' &&
+        (p[3] | 32) == 'a' && (p[4] == '/' || p[4] == 0))
+        p += 4;
+    int n = 0;
+    if (*p != '/' && n < sz - 1)
+        out[n++] = '/';
+    for (; *p && n < sz - 1; p++)
+        out[n++] = *p;
+    while (n > 1 && out[n - 1] == '/')
+        n--;
+    out[n] = 0;
+}
+
 void fo_vpath(const char *path, char *out, int sz) {
-    char n[270];
-    fo_norm(path, n, sizeof(n));
+    char n[FS_PATH_SZ];
+    norm_keep_case(path, n, sizeof(n));
     char first[16] = "";
     int i = 0;
     for (const char *p = n + 1; *p && *p != '/' && i < 15; p++)
@@ -86,7 +102,7 @@ void fo_vpath(const char *path, char *out, int sz) {
 }
 
 uint8_t fo_drive(const char *path) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     for (int m = 0; m < VFS_MOUNT_COUNT; m++) {
         int l = (int)strlen(g_vfs_mounts[m].path);
@@ -109,7 +125,7 @@ bool fo_stat(const char *path, bool *is_dir, uint32_t *size) {
 }
 
 bool fo_protected(const char *path) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     return !strcmp(n, "/") || path_is_protected(fo_base(n)) ||
            path_is_protected(n);
@@ -117,7 +133,7 @@ bool fo_protected(const char *path) {
 
 /* Drive + directory cluster for a folder path (drive roots are cluster 0). */
 static bool dir_of(const char *path, uint8_t *drive, uint16_t *cluster) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     *drive = fo_drive(n);
     if (!fs_drive_mounted(*drive))
@@ -138,36 +154,29 @@ static bool dir_of(const char *path, uint8_t *drive, uint16_t *cluster) {
     return true;
 }
 
-int fo_list_dirs(const char *dir, char (*names)[13], int max, bool hidden) {
+int fo_list_dirs(const char *dir, char (*names)[FS_NAME_SZ], int max,
+                 bool hidden) {
     uint8_t drive;
     uint16_t cl;
     if (!dir_of(dir, &drive, &cl))
         return 0;
     static dir_entry_t raw[128];
+    static char nm[128][FS_NAME_SZ];
     int count = 0, n = 0;
-    fs_list_dir(drive, cl, raw, 128, &count);
+    fs_list_dir_names(drive, cl, raw, nm, 128, &count);
     for (int i = 0; i < count && n < max; i++) {
         if (!(raw[i].attr & ATTR_DIRECTORY) || raw[i].name[0] == '.')
             continue;
         if ((raw[i].attr & ATTR_HIDDEN) && !hidden)
             continue;
-        int k = 0;
-        for (int j = 0; j < 8 && raw[i].name[j] != ' '; j++)
-            names[n][k++] = raw[i].name[j];
-        if (raw[i].ext[0] != ' ') {
-            names[n][k++] = '.';
-            for (int j = 0; j < 3 && raw[i].ext[j] != ' '; j++)
-                names[n][k++] = raw[i].ext[j];
-        }
-        names[n][k] = 0;
-        n++;
+        strcpy(names[n++], nm[i]);
     }
     for (int i = 1; i < n; i++) /* insertion sort by name */
-        for (int j = i; j > 0 && strcmp(names[j - 1], names[j]) > 0; j--) {
-            char t[13];
-            memcpy(t, names[j], 13);
-            memcpy(names[j], names[j - 1], 13);
-            memcpy(names[j - 1], t, 13);
+        for (int j = i; j > 0 && strcasecmp(names[j - 1], names[j]) > 0; j--) {
+            char t[FS_NAME_SZ];
+            strcpy(t, names[j]);
+            strcpy(names[j], names[j - 1]);
+            strcpy(names[j - 1], t);
         }
     return n;
 }
@@ -175,7 +184,7 @@ int fo_list_dirs(const char *dir, char (*names)[13], int max, bool hidden) {
 /* ── change notification ───────────────────────────────────────────────── */
 
 void fo_changed(const char *dir) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(dir, n, sizeof(n));
     if (!strcmp(n, DESKTOP_PATH) || !strncmp(n, DESKTOP_PATH "/", 9) ||
         !strcmp(n, "/"))
@@ -184,7 +193,7 @@ void fo_changed(const char *dir) {
 }
 
 static void changed_at(const char *path) {
-    char d[270];
+    char d[FS_PATH_SZ];
     fo_parent(path, d, sizeof(d));
     fo_changed(d);
 }
@@ -200,7 +209,7 @@ const char *fo_create(const char *dir, const char *name, bool is_dir,
         return "nothing can be made in the Trash";
     if (!fs_validate_name(name, is_dir, &err))
         return err ? err : "invalid name";
-    char path[270];
+    char path[FS_PATH_SZ];
     fo_join(dir, name, path, sizeof(path));
     if (fo_stat(path, NULL, NULL))
         return "an item with that name already exists";
@@ -227,15 +236,19 @@ const char *fo_rename(const char *path, const char *new_name) {
     bool is_dir = false;
     if (!fo_stat(path, &is_dir, NULL))
         return "item not found";
-    if (!strcasecmp(fo_base(path), new_name))
+    char cur[FS_NAME_SZ];
+    if (!fs_name_of(path, cur))
+        snprintf(cur, sizeof(cur), "%s", fo_base(path));
+    if (!strcmp(cur, new_name))
         return NULL; /* unchanged */
     const char *err = NULL;
     if (!fs_validate_name(new_name, is_dir, &err))
         return err ? err : "invalid name";
-    char dir[270], dst[270];
+    char dir[FS_PATH_SZ], dst[FS_PATH_SZ];
     fo_parent(path, dir, sizeof(dir));
     fo_join(dir, new_name, dst, sizeof(dst));
-    if (fo_stat(dst, NULL, NULL))
+    /* the same name in another case is this item itself */
+    if (strcasecmp(cur, new_name) && fo_stat(dst, NULL, NULL))
         return "an item with that name already exists";
     if (!fs_rename(path, new_name))
         return "rename failed";
@@ -254,7 +267,7 @@ const char *fo_delete(const char *path) {
     if (!(is_dir ? fs_rm_rf(path) : fs_delete(path)))
         return "delete failed";
     if (fo_in_trash(path))
-        forget_origin(fo_base(path));
+        forget_origin(path); /* (gone: the key is its name) */
     changed_at(path);
     return NULL;
 }
@@ -265,7 +278,7 @@ static const char *transfer(const char *src, const char *dst, bool move) {
     bool is_dir = false;
     if (!fo_stat(src, &is_dir, NULL))
         return "source not found";
-    char ns[270], nd[270];
+    char ns[FS_PATH_SZ], nd[FS_PATH_SZ];
     fo_norm(src, ns, sizeof(ns));
     fo_norm(dst, nd, sizeof(nd));
     if (!strcmp(ns, nd))
@@ -299,7 +312,7 @@ const char *fo_move(const char *src, const char *dst_dir) {
     if (fo_in_trash(src) || fo_in_trash(dst_dir))
         return fo_in_trash(src) ? "use Put Back to take it out of the Trash"
                                 : "the Trash takes items only as a whole";
-    char dst[270];
+    char dst[FS_PATH_SZ];
     fo_join(dst_dir, fo_base(src), dst, sizeof(dst));
     return transfer(src, dst, true);
 }
@@ -321,7 +334,7 @@ const char *fo_clip(const char *path, bool cut) {
     bool is_dir = false;
     if (!fo_stat(path, &is_dir, NULL))
         return "item not found";
-    char dir[270];
+    char dir[FS_PATH_SZ];
     fo_parent(path, dir, sizeof(dir));
     clipboard_set_file(dir, fo_base(path), is_dir, cut, fo_drive(path));
     return NULL;
@@ -332,7 +345,7 @@ const char *fo_paste(const char *dst_dir) {
         return "the clipboard holds no file";
     if (fo_is_trash(dst_dir) || fo_in_trash(dst_dir))
         return "nothing can be pasted into the Trash";
-    char src[270], dst[270];
+    char src[FS_PATH_SZ], dst[FS_PATH_SZ];
     fo_join(g_clipboard.src_path, g_clipboard.name, src, sizeof(src));
     fo_join(dst_dir, g_clipboard.name, dst, sizeof(dst));
     bool cut = g_clipboard.is_cut;
@@ -360,7 +373,7 @@ static const char *type_name(const char *name, bool is_dir) {
 
 void fo_info_text(const char *path, char *out, int sz) {
     dir_entry_t de;
-    char vp[270];
+    char vp[FS_PATH_SZ];
     fo_vpath(path, vp, sizeof(vp));
     if (!fs_find(path, &de)) {
         snprintf(out, sz, "Path:   %s\n(not found)", vp);
@@ -383,17 +396,23 @@ void fo_info_text(const char *path, char *out, int sz) {
         snprintf(date, sizeof(date), "%04u-%02u-%02u %02u:%02u",
                  ((d >> 9) & 0x7F) + 1980, mo, dy, (t >> 11) & 0x1F,
                  (t >> 5) & 0x3F);
+    char name[FS_NAME_SZ], dos[13], dosl[24] = "";
+    if (!fs_name_of(path, name))
+        snprintf(name, sizeof(name), "%s", fo_base(path));
+    fs_entry_name(&de, dos);
+    if (strcasecmp(dos, name)) /* a long name: show the one DOS sees */
+        snprintf(dosl, sizeof(dosl), "\nDOS:    %s", dos);
     snprintf(out, sz,
-             "Name:   %s\nPath:   %s\nType:   %s\nSize:   %s\n"
+             "Name:   %s%s\nPath:   %s\nType:   %s\nSize:   %s\n"
              "Date:   %s\nHidden: %s",
-             fo_base(path), vp, type_name(fo_base(path), dir), size, date,
+             name, dosl, vp, type_name(name, dir), size, date,
              (de.attr & ATTR_HIDDEN) ? "yes" : "no");
 }
 
 /* ── open ──────────────────────────────────────────────────────────────── */
 
 bool fo_launch_app(window *owner, const char *path) {
-    char name[16];
+    char name[FS_NAME_SZ];
     strncpy(name, fo_base(path), sizeof(name) - 1);
     name[sizeof(name) - 1] = 0;
     char *dot = strrchr(name, '.');
@@ -404,8 +423,8 @@ bool fo_launch_app(window *owner, const char *path) {
     if (appload_try_open(path) || appload_try_open(name))
         return true;
     /* 2. a shortcut to a built-in app: try "NAME", "Name", "name" */
-    char v[3][16];
-    for (int k = 0; k < 16; k++) {
+    char v[3][FS_NAME_SZ];
+    for (int k = 0; k < FS_NAME_SZ; k++) {
         char c = name[k];
         v[0][k] = (c >= 'a' && c <= 'z') ? c - 32 : c;
         v[1][k] = k == 0 ? v[0][k] : (c >= 'A' && c <= 'Z') ? c + 32 : c;
@@ -418,7 +437,7 @@ bool fo_launch_app(window *owner, const char *path) {
             return true;
         }
     }
-    char msg[160];
+    char msg[240];
     snprintf(msg, sizeof(msg),
              "Could not find application '%s'.\nPut %s.APP in /apps or "
              "/FDD0, or rebuild the kernel.",
@@ -445,7 +464,7 @@ void fo_open(window *owner, const char *path) {
     }
     const char *name = fo_base(path);
     if (de.attr & ATTR_DIRECTORY) {
-        char vp[270];
+        char vp[FS_PATH_SZ];
         fo_vpath(path, vp, sizeof(vp));
         ff_open_dir_pub(de.cluster_lo, vp);
         return;
@@ -478,7 +497,7 @@ void fo_open(window *owner, const char *path) {
 
 typedef struct {
     window *owner;
-    char path[270]; /* dir for new, item for rename/delete */
+    char path[FS_PATH_SZ]; /* dir for new, item for rename/delete */
     bool is_dir;
     bool hidden; /* the "Hidden" box (must outlive the dialog) */
     fo_done_cb done;
@@ -533,8 +552,8 @@ void fo_ask_new(window *owner, const char *dir, bool is_dir, fo_done_cb done,
         return;
     a->is_dir = is_dir;
     dlg_input_check(owner, is_dir ? "New Folder" : "New File",
-                    is_dir ? "Folder name:" : "File name:", "", 12, ES_FILENAME,
-                    "Hidden", &a->hidden, new_done, a);
+                    is_dir ? "Folder name:" : "File name:", "", FS_NAME_MAX,
+                    ES_FILENAME, "Hidden", &a->hidden, new_done, a);
 }
 
 static void rename_done(void *user, const char *text) {
@@ -553,8 +572,11 @@ void fo_ask_rename(window *owner, const char *path, fo_done_cb done,
         return;
     }
     ask_t *a = ask_new(owner, path, done, user);
+    char cur[FS_NAME_SZ];
+    if (!fs_name_of(path, cur))
+        snprintf(cur, sizeof(cur), "%s", fo_base(path));
     if (a)
-        dlg_input(owner, "Rename", "New name:", fo_base(path), 12, ES_FILENAME,
+        dlg_input(owner, "Rename", "New name:", cur, FS_NAME_MAX, ES_FILENAME,
                   rename_done, a);
 }
 
@@ -585,7 +607,7 @@ void fo_ask_delete(window *owner, const char *path, fo_done_cb done,
         return;
     bool is_dir = false;
     fo_stat(path, &is_dir, NULL);
-    char m[120];
+    char m[FS_NAME_SZ + 80];
     snprintf(m, sizeof(m),
              fo_in_trash(path) ? "Delete %s for good?\nIt can't be put back."
              : is_dir ? "Delete folder %s and everything\nin it? (no Trash "
@@ -596,7 +618,7 @@ void fo_ask_delete(window *owner, const char *path, fo_done_cb done,
 }
 
 void fo_show_info(window *owner, const char *path) {
-    static char text[400];
+    static char text[FS_PATH_SZ + 240];
     fo_info_text(path, text, sizeof(text));
     dlg_message(owner, "Get Info", text);
 }
@@ -656,11 +678,17 @@ static void find_in(find_t *f, const char *dir, int depth) {
     if (f->stop || !dir_of(dir, &drive, &cl))
         return;
     dir_entry_t *raw = (dir_entry_t *)kmalloc(FIND_BATCH * sizeof(dir_entry_t));
-    if (!raw)
+    char (*names)[FS_NAME_SZ] = kmalloc(FIND_BATCH * FS_NAME_SZ);
+    if (!raw || !names) {
+        if (raw)
+            kfree(raw);
+        if (names)
+            kfree(names);
         return;
+    }
     int count = 0;
-    fs_list_dir(drive, cl, raw, FIND_BATCH, &count);
-    char path[270], name[13];
+    fs_list_dir_names(drive, cl, raw, names, FIND_BATCH, &count);
+    char path[FS_PATH_SZ];
     for (int pass = 0; pass < 2 && !f->stop; pass++) /* files, then folders */
         for (int i = 0; i < count && !f->stop; i++) {
             const dir_entry_t *e = &raw[i];
@@ -668,15 +696,7 @@ static void find_in(find_t *f, const char *dir, int depth) {
             if (e->name[0] == '.' || (e->attr & ATTR_VOLUME_ID) ||
                 ((e->attr & ATTR_HIDDEN) && !f->hidden))
                 continue;
-            int k = 0;
-            for (int j = 0; j < 8 && e->name[j] != ' '; j++)
-                name[k++] = e->name[j];
-            if (e->ext[0] != ' ') {
-                name[k++] = '.';
-                for (int j = 0; j < 3 && e->ext[j] != ' '; j++)
-                    name[k++] = e->ext[j];
-            }
-            name[k] = 0;
+            const char *name = names[i];
             fo_join(dir, name, path, sizeof(path));
             if (pass == 0 && fo_match(name, f->pattern)) {
                 f->found++;
@@ -686,6 +706,7 @@ static void find_in(find_t *f, const char *dir, int depth) {
             if (pass == 1 && is_dir && depth < FIND_DEPTH)
                 find_in(f, path, depth + 1);
         }
+    kfree(names);
     kfree(raw);
 }
 
@@ -703,25 +724,37 @@ int fo_find(const char *root, const char *pattern, bool hidden, fo_find_cb cb,
 
 #define ORIGINS "TRASH" /* app_prefs file: trash name -> original folder */
 
-static void forget_origin(const char *name) {
-    app_prefs_set(ORIGINS, name, ""); /* empty value = no record */
+/* the record's key: the item's DOS name in the Trash (long names are too
+ * long for a key) */
+static const char *origin_key(const char *trash_path, const char *name) {
+    static char k[13];
+    dir_entry_t de;
+    if (fs_find(trash_path, &de))
+        fs_entry_name(&de, k);
+    else
+        snprintf(k, sizeof(k), "%.12s", name);
+    return k;
+}
+
+static void forget_origin(const char *trash_path) {
+    app_prefs_set(ORIGINS, origin_key(trash_path, fo_base(trash_path)), "");
 }
 
 bool fo_is_trash(const char *path) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     return !strcmp(n, FO_TRASH);
 }
 
 bool fo_in_trash(const char *path) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     int l = (int)strlen(FO_TRASH);
     return !strncmp(n, FO_TRASH, l) && n[l] == '/';
 }
 
 bool fo_trashable(const char *path) {
-    char n[270];
+    char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     return fo_drive(n) == DRIVE_HDA && !fo_is_trash(n) && !fo_in_trash(n) &&
            fs_drive_mounted(DRIVE_HDA);
@@ -737,29 +770,24 @@ static bool ensure_trash(void) {
     return true;
 }
 
-/* NAME.EXT, or NAME~2.EXT ... if taken */
+/* its own name, or "Name (2).ext" ... if taken */
 static bool trash_name(const char *base, char *out, int sz) {
-    char stem[9], ext[4] = "";
     const char *dot = strrchr(base, '.');
-    int sl = dot ? (int)(dot - base) : (int)strlen(base);
-    if (sl > 8)
-        sl = 8;
-    memcpy(stem, base, sl);
-    stem[sl] = 0;
-    if (dot)
-        strncpy(ext, dot + 1, 3), ext[3] = 0;
+    int sl = dot && dot != base ? (int)(dot - base) : (int)strlen(base);
+    const char *ext = base + sl;
     for (int k = 1; k < 100; k++) {
-        char nm[13], p[270];
-        if (k == 1)
+        char nm[FS_NAME_SZ], p[FS_PATH_SZ];
+        if (k == 1) {
             snprintf(nm, sizeof(nm), "%s", base);
-        else {
-            int keep = 8 - (k < 10 ? 2 : 3); /* room for ~N or ~NN */
-            char st[9];
-            snprintf(st, sizeof(st), "%s", stem);
-            if (keep < sl)
-                st[keep] = 0;
-            snprintf(nm, sizeof(nm), "%s~%d%s%s", st, k, ext[0] ? "." : "",
-                     ext);
+        } else {
+            char tail[8];
+            int tl = snprintf(tail, sizeof(tail), " (%d)", k);
+            int keep = sl;
+            if (keep + tl + (int)strlen(ext) > FS_NAME_MAX)
+                keep = FS_NAME_MAX - tl - (int)strlen(ext);
+            if (keep < 1)
+                return false;
+            snprintf(nm, sizeof(nm), "%.*s%s%s", keep, base, tail, ext);
         }
         fo_join(FO_TRASH, nm, p, sizeof(p));
         if (!fo_stat(p, NULL, NULL)) {
@@ -779,17 +807,19 @@ const char *fo_trash(const char *path) {
         return "item not found";
     if (!ensure_trash())
         return "could not make the Trash folder";
-    char nm[13], dst[270], dir[270];
-    if (!trash_name(fo_base(path), nm, sizeof(nm)))
+    char nm[FS_NAME_SZ], dst[FS_PATH_SZ], dir[FS_PATH_SZ], base[FS_NAME_SZ];
+    if (!fs_name_of(path, base))
+        snprintf(base, sizeof(base), "%s", fo_base(path));
+    if (!trash_name(base, nm, sizeof(nm)))
         return "the Trash is too full: empty it";
     fo_join(FO_TRASH, nm, dst, sizeof(dst));
     const char *err = transfer(path, dst, true);
     if (err)
         return err;
     fo_parent(path, dir, sizeof(dir));
-    char n[270];
-    fo_norm(dir, n, sizeof(n));
-    app_prefs_set(ORIGINS, nm, n);
+    char n[FS_PATH_SZ];
+    norm_keep_case(dir, n, sizeof(n));
+    app_prefs_set(ORIGINS, origin_key(dst, nm), n);
     fo_changed(FO_TRASH);
     desktop_fs_set_dirty(); /* the Trash icon fills */
     return NULL;
@@ -798,23 +828,27 @@ const char *fo_trash(const char *path) {
 const char *fo_put_back(const char *trash_path) {
     if (!fo_in_trash(trash_path))
         return "it is not in the Trash";
-    char dir[96], dst[270];
-    const char *nm = fo_base(trash_path);
-    if (!app_prefs_get(ORIGINS, nm, dir, sizeof(dir)) || !dir[0])
+    char dir[FS_PATH_SZ], dst[FS_PATH_SZ], nm[FS_NAME_SZ];
+    if (!fs_name_of(trash_path, nm))
+        snprintf(nm, sizeof(nm), "%s", fo_base(trash_path));
+    const char *key = origin_key(trash_path, nm);
+    char keep[13];
+    snprintf(keep, sizeof(keep), "%s", key);
+    if (!app_prefs_get(ORIGINS, keep, dir, sizeof(dir)) || !dir[0])
         snprintf(dir, sizeof(dir), "%s", DESKTOP_PATH); /* unknown: desktop */
     bool is_dir;
     if (!fo_stat(dir, &is_dir, NULL) || !is_dir)
         snprintf(dir, sizeof(dir), "%s", DESKTOP_PATH); /* folder is gone */
-    /* back under its own name when we renamed it (NAME~2.EXT) */
-    char orig[13];
+    /* back under its own name when we renamed it ("Name (2).ext") */
+    char orig[FS_NAME_SZ];
     snprintf(orig, sizeof(orig), "%s", nm);
-    char *t = strchr(orig, '~');
-    if (t) {
-        char *dot = strchr(t, '.');
-        if (dot)
-            memmove(t, dot, strlen(dot) + 1);
-        else
-            *t = 0;
+    char *t = strrchr(orig, '(');
+    if (t && t > orig && t[-1] == ' ') {
+        char *c = t + 1;
+        while (*c >= '0' && *c <= '9')
+            c++;
+        if (*c == ')' && c > t + 1)
+            memmove(t - 1, c + 1, strlen(c + 1) + 1);
     }
     fo_join(dir, orig, dst, sizeof(dst));
     if (fo_stat(dst, NULL, NULL))
@@ -822,7 +856,7 @@ const char *fo_put_back(const char *trash_path) {
     const char *err = transfer(trash_path, dst, true);
     if (err)
         return err;
-    forget_origin(nm);
+    app_prefs_set(ORIGINS, keep, "");
     fo_changed(FO_TRASH);
     desktop_fs_set_dirty();
     return NULL;
@@ -855,16 +889,8 @@ const char *fo_empty_trash(void) {
         for (int i = 0; i < count; i++) {
             if (raw[i].name[0] == '.' || (raw[i].attr & ATTR_VOLUME_ID))
                 continue;
-            char nm[13], p[270];
-            int k = 0;
-            for (int j = 0; j < 8 && raw[i].name[j] != ' '; j++)
-                nm[k++] = raw[i].name[j];
-            if (raw[i].ext[0] != ' ') {
-                nm[k++] = '.';
-                for (int j = 0; j < 3 && raw[i].ext[j] != ' '; j++)
-                    nm[k++] = raw[i].ext[j];
-            }
-            nm[k] = 0;
+            char nm[13], p[FS_PATH_SZ];
+            fs_entry_name(&raw[i], nm); /* the DOS name finds it too */
             fo_join(FO_TRASH, nm, p, sizeof(p));
             bool ok =
                 (raw[i].attr & ATTR_DIRECTORY) ? fs_rm_rf(p) : fs_delete(p);
@@ -900,7 +926,7 @@ void fo_ask_empty_trash(window *owner, fo_done_cb done, void *user) {
     if (!a)
         return;
     char m[96];
-    snprintf(m, sizeof(m), "Delete the %d item%s in the Trash for good?", n,
+    snprintf(m, sizeof(m), "Delete the %d item%s in the Trash\nfor good?", n,
              n == 1 ? "" : "s");
     dlg_confirm(owner, "Empty Trash", m, empty_done, a);
 }

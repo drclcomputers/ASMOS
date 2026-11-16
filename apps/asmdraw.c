@@ -29,9 +29,9 @@ typedef struct {
 
     bool drawing;
     int start_x, start_y, cur_x, cur_y, last_cx, last_cy;
-    char path[128];
+    char path[FS_PATH_SZ];
     char title[48];
-    char dir[96]; /* folder of the last open/save (remembered) */
+    char dir[FS_PATH_SZ]; /* folder of the last open/save (remembered) */
     uint32_t status_until;
 } asmdraw_state_t;
 

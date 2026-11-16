@@ -26,7 +26,7 @@ typedef struct {
 
 static uint8_t *s_data;
 static uint32_t s_len_ms;
-static char s_info[48], s_path[128];
+static char s_info[48], s_path[FS_PATH_SZ];
 static const codec_t *s_codec;
 static int s_state = AUDIO_EMPTY;
 static bool s_loop, s_finished;

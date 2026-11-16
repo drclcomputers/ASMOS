@@ -15,7 +15,7 @@ typedef struct {
     control *view, *vsb, *status;
     uint8_t *data;
     int len, top, sel, rows_vis, bpr;
-    char path[128];
+    char path[FS_PATH_SZ];
 } hexview_state_t;
 
 app_descriptor hexview_app;

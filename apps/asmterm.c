@@ -1,3 +1,4 @@
+#include "fs/fs.h"
 #include "os/api.h"
 #include "os/scheduler.h"
 #include "shell/asm.h"
@@ -238,7 +239,7 @@ static void term_execute(asmterm_state_t *s, const char *input) {
         return;
     }
 
-    char command[64] = "", arg[256] = "";
+    char command[64] = "", arg[FS_PATH_SZ] = "";
     const char *p = input;
     int ci = 0;
     while (*p == ' ')

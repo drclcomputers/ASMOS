@@ -29,7 +29,7 @@ typedef struct {
     control *edit, *list, *path, *check;
     control *tree;   /* file dialogs: folder tree */
     bool *check_out; /* dlg_input_check: receives the box on OK */
-    char dir[128];
+    char dir[FS_PATH_SZ];
     char ext[4];
     char title[40]; /* callers may pass a stack buffer */
     void *xdata;    /* kind-specific (print dialog, preview); freed here */
@@ -60,7 +60,7 @@ static void unlink_dlg(dlg_t *d) {
 
 /* close the dialog, then report. text: result for text dialogs */
 static void finish(dlg_t *d, bool ok, const char *text) {
-    static char result[160];
+    static char result[FS_PATH_SZ];
     if (text) {
         strncpy(result, text, sizeof(result) - 1);
         result[sizeof(result) - 1] = 0;
@@ -336,22 +336,11 @@ static void join(char *out, int n, const char *dir, const char *name) {
         snprintf(out, n, "%s/%s", dir, name);
 }
 
-static void name83(const dir_entry_t *e, char *out) {
-    int j = 0;
-    for (int k = 0; k < 8 && e->name[k] != ' '; k++)
-        out[j++] = (char)e->name[k];
-    if (e->ext[0] != ' ' && !(e->attr & ATTR_DIRECTORY)) {
-        out[j++] = '.';
-        for (int k = 0; k < 3 && e->ext[k] != ' '; k++)
-            out[j++] = (char)e->ext[k];
-    }
-    out[j] = 0;
-}
-
 static void fill_list(dlg_t *d) {
     list_clear(d->list);
     ctl_set_text(d->path, d->dir);
-    static char names[160][13];
+    static char names[160][FS_NAME_SZ];
+    static char got[128][FS_NAME_SZ];
     static uint8_t isdir[160];
     int n = 0;
     if (strcmp(d->dir, "/") != 0) {
@@ -369,7 +358,7 @@ static void fill_list(dlg_t *d) {
     static dir_entry_t ents[128];
     int cnt = 0;
     if (fs_resolve_dir(d->dir, &drv, &cl) &&
-        fs_list_dir(drv, cl, ents, 128, &cnt)) {
+        fs_list_dir_names(drv, cl, ents, got, 128, &cnt)) {
         for (int i = 0; i < cnt && n < 160; i++) {
             dir_entry_t *e = &ents[i];
             if (e->name[0] == 0 || e->name[0] == 0xE5 || e->name[0] == '.' ||
@@ -377,14 +366,11 @@ static void fill_list(dlg_t *d) {
                 continue;
             bool dir = (e->attr & ATTR_DIRECTORY) != 0;
             if (!dir && d->ext[0]) {
-                char ex[4] = {(char)e->ext[0], (char)e->ext[1], (char)e->ext[2],
-                              0};
-                for (int k = 2; k >= 0 && ex[k] == ' '; k--)
-                    ex[k] = 0;
-                if (strcasecmp(ex, d->ext) != 0)
+                const char *dot = strrchr(got[i], '.');
+                if (!dot || strcasecmp(dot + 1, d->ext) != 0)
                     continue;
             }
-            name83(e, names[n]);
+            strcpy(names[n], got[i]);
             isdir[n++] = dir;
         }
     }
@@ -393,11 +379,11 @@ static void fill_list(dlg_t *d) {
         for (int j = i; j > 0; j--) {
             bool swap = isdir[j] > isdir[j - 1] ||
                         (isdir[j] == isdir[j - 1] &&
-                         strcmp(names[j], names[j - 1]) < 0 &&
+                         strcasecmp(names[j], names[j - 1]) < 0 &&
                          strcmp(names[j - 1], "..") != 0);
             if (!swap)
                 break;
-            char t[13];
+            char t[FS_NAME_SZ];
             strcpy(t, names[j]);
             strcpy(names[j], names[j - 1]);
             strcpy(names[j - 1], t);
@@ -406,7 +392,7 @@ static void fill_list(dlg_t *d) {
             isdir[j - 1] = b;
         }
     for (int i = 0; i < n; i++) {
-        char row[20];
+        char row[FS_NAME_SZ + 4];
         snprintf(row, sizeof(row), isdir[i] ? "[%s]" : "%s", names[i]);
         list_add_data(d->list, row, isdir[i] ? F_DIR : 0);
     }
@@ -426,7 +412,7 @@ static void go_dir(dlg_t *d, const char *name) {
         else
             strcpy(d->dir, "/");
     } else {
-        char nd[128];
+        char nd[FS_PATH_SZ];
         join(nd, sizeof(nd), d->dir, name);
         strncpy(d->dir, nd, sizeof(d->dir) - 1);
     }
@@ -436,14 +422,14 @@ static void go_dir(dlg_t *d, const char *name) {
 static void item_name(dlg_t *d, int i, char *out) {
     const char *t = list_get(d->list, i);
     if (t[0] == '[') {
-        strncpy(out, t + 1, 12);
-        out[12] = 0;
+        strncpy(out, t + 1, FS_NAME_MAX);
+        out[FS_NAME_MAX] = 0;
         int n = (int)strlen(out);
         if (n && out[n - 1] == ']')
             out[n - 1] = 0;
     } else {
-        strncpy(out, t, 12);
-        out[12] = 0;
+        strncpy(out, t, FS_NAME_MAX);
+        out[FS_NAME_MAX] = 0;
     }
 }
 
@@ -451,8 +437,8 @@ static void save_overwrite_cb(void *user, bool yes) {
     dlg_t *d = (dlg_t *)user;
     if (!yes)
         return;
-    char path[160];
-    char nm[64];
+    char path[FS_PATH_SZ];
+    char nm[FS_PATH_SZ];
     strncpy(nm, ctl_text(d->edit), sizeof(nm) - 1);
     nm[sizeof(nm) - 1] = 0;
     join(path, sizeof(path), d->dir, nm);
@@ -460,13 +446,13 @@ static void save_overwrite_cb(void *user, bool yes) {
 }
 
 static void file_ok(dlg_t *d) {
-    char nm[64];
+    char nm[FS_PATH_SZ];
     strncpy(nm, ctl_text(d->edit), sizeof(nm) - 1);
     nm[sizeof(nm) - 1] = 0;
     int sel = list_sel(d->list);
     if (!nm[0]) {
         if (sel >= 0 && (list_data(d->list, sel) & F_DIR)) {
-            char n[13];
+            char n[FS_NAME_SZ];
             item_name(d, sel, n);
             go_dir(d, n);
         }
@@ -477,7 +463,7 @@ static void file_ok(dlg_t *d) {
         ctl_set_text(d->edit, "");
         return;
     }
-    char path[160];
+    char path[FS_PATH_SZ];
     join(path, sizeof(path), d->dir, nm);
     dir_entry_t de;
     uint8_t drv;
@@ -516,7 +502,7 @@ static void file_ok(dlg_t *d) {
         return;
     }
     if (exists) {
-        char msg[96];
+        char msg[FS_NAME_SZ + 32];
         snprintf(msg, sizeof(msg), "%s already exists.\nReplace it?", base);
         dlg_confirm(d->win, "Save", msg, save_overwrite_cb, d);
         return;
@@ -540,7 +526,7 @@ static void on_list(control *c, int ev) {
     if (sel < 0)
         return;
     bool dir = (list_data(c, sel) & F_DIR) != 0;
-    char n[13];
+    char n[FS_NAME_SZ];
     item_name(d, sel, n);
     if (ev == EV_CHANGE && !dir)
         ctl_set_text(d->edit, n);
@@ -556,11 +542,11 @@ static void on_list(control *c, int ev) {
 
 static void on_dir_tree(control *c, int ev) {
     dlg_t *d = (dlg_t *)c->user;
-    char path[128];
+    char path[FS_PATH_SZ];
     if (ev == EV_EXPAND) {
         int node = tree_event_node(c);
         tree_path(c, node, path, sizeof(path));
-        static char names[64][13];
+        static char names[64][FS_NAME_SZ];
         int n = fo_list_dirs(path, names, 64, false);
         for (int i = 0; i < n; i++)
             tree_add(c, node, names[i], 0, true);
@@ -603,7 +589,7 @@ static void file_dialog(window *owner, int kind, const char *title,
     d->list = ctl_list(w, 86, 21, 214, 98, 0, on_list);
     ctl_label(w, 6, 125, 30, 12, "Name:", 0);
     d->edit =
-        ctl_edit(w, 36, 125, 264, 12, name ? name : "", 63, ES_FILENAME, NULL);
+        ctl_edit(w, 36, 125, 264, 12, name ? name : "", 255, ES_FILENAME, NULL);
     control *ok = ctl_button(w, 194, 142, 50, 13,
                              kind == K_SAVE ? "Save" : "Open", 1, on_file_ok);
     control *ca = ctl_button(w, 250, 142, 50, 13, "Cancel", 2, on_cancel);

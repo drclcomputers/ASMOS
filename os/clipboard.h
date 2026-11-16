@@ -4,8 +4,8 @@
 #include "lib/core.h"
 
 #define CLIP_TEXT_MAX 4096
-#define CLIP_PATH_MAX 256
-#define CLIP_NAME_MAX 13
+#define CLIP_PATH_MAX 512 /* FS_PATH_SZ */
+#define CLIP_NAME_MAX 64  /* FS_NAME_SZ: long names */
 
 #define CLIP_HISTORY_MAX 20
 

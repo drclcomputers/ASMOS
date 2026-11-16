@@ -5,7 +5,7 @@
 #include "lib/string.h"
 
 #define PREFS_DIR "/PREFS"
-#define PREFS_MAX 4096
+#define PREFS_MAX 8192
 
 static char s_buf[PREFS_MAX]; /* file text, '\0'-terminated */
 static int s_len;
@@ -144,7 +144,7 @@ static bool put(const char *key, const char *value) {
 }
 
 bool app_prefs_set(const char *app, const char *key, const char *value) {
-    if (!app || !key_ok(key) || !value || strlen(value) > 95)
+    if (!app || !key_ok(key) || !value || strlen(value) > FS_PATH_MAX)
         return false;
     for (const char *v = value; *v; v++)
         if (*v == '\n' || *v == '\r')

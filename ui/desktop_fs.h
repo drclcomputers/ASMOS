@@ -15,7 +15,7 @@
 #define DESKTOP_ITEM_TRASH 4 /* the Trash (bottom right; /TRASH) */
 
 #define DESKTOP_MAX_ITEMS 256
-#define DESKTOP_NAME_MAX 13
+#define DESKTOP_NAME_MAX FS_NAME_SZ /* long names */
 #define DESKTOP_APP_EXT "APP"
 
 typedef struct {

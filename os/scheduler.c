@@ -1,5 +1,6 @@
 #include "os/scheduler.h"
 #include "config/runtime_config.h"
+#include "drivers/fdd.h"
 #include "drivers/gpu.h"
 #include "lib/audio.h"
 #include "os/error.h"
@@ -253,6 +254,7 @@ void scheduler_kernel_task(void) {
         speaker_update();
         audio_update(); /* MIDI plays from here (lib/audio.h) */
         print_pump();   /* the print queue: what the printer takes now */
+        fdd_poll();     /* floppy motors stop when idle */
 
         if (saver_update()) { /* screen saver up: it is the whole frame */
             os_tick_apps();

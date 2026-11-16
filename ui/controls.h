@@ -92,7 +92,7 @@ typedef enum {
 #define ES_NUMBER (1u << 14)   /* digits only                         */
 #define ES_UPPER (1u << 15)    /* force upper case                    */
 #define ES_PASSWORD (1u << 16) /* show '*'                            */
-#define ES_FILENAME (1u << 17) /* 8.3 file name characters (+ '/')    */
+#define ES_FILENAME (1u << 17) /* file name characters (+ /), any case */
 #define ES_DECIMAL (1u << 18)  /* digits, '.', '-'                    */
 #define ES_TERMFONT (1u << 19) /* terminal font (6 px cells), as ASMTerm */
 /* Lists */

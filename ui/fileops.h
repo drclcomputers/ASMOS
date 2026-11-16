@@ -12,6 +12,7 @@
  * open FileF windows (fo_changed), so callers only refresh their own state.
  */
 
+#include "fs/fs.h"
 #include "lib/core.h"
 #include "ui/window.h"
 
@@ -29,7 +30,8 @@ uint8_t fo_drive(const char *path);
 bool fo_stat(const char *path, bool *is_dir, uint32_t *size);
 bool fo_protected(const char *path);
 /* Sub-folders of `dir` (names, sorted), for folder trees. Returns count. */
-int fo_list_dirs(const char *dir, char (*names)[13], int max, bool hidden);
+int fo_list_dirs(const char *dir, char (*names)[FS_NAME_SZ], int max,
+                 bool hidden);
 
 /* ── operations ────────────────────────────────────────────────────────── */
 const char *fo_create(const char *dir, const char *name, bool is_dir,
