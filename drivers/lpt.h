@@ -30,6 +30,10 @@ const char *lpt_status_text(lpt_status_t st);
  * bytes sent; *st (optional) receives the final status. */
 uint32_t lpt_write(int n, const void *data, uint32_t len, lpt_status_t *st);
 
+/* One byte if the printer is ready now (no waiting): LPT_READY = sent,
+ * LPT_BUSY = try later, anything else = the printer's problem. */
+lpt_status_t lpt_try_put(int n, uint8_t c);
+
 /* Text helper: LF -> CR LF, ends with a form feed (eject the page). */
 uint32_t lpt_print_text(int n, const char *text, uint32_t len,
                         lpt_status_t *st);

@@ -1,8 +1,10 @@
 #include "os/scheduler.h"
 #include "config/runtime_config.h"
 #include "drivers/gpu.h"
+#include "lib/audio.h"
 #include "os/error.h"
 #include "os/os.h"
+#include "os/print.h"
 #include "os/watchdog.h"
 #include "ui/popup.h"
 #include "ui/saver.h"
@@ -249,7 +251,8 @@ void scheduler_kernel_task(void) {
         ps2_update();
         net_poll();
         speaker_update();
-        midi_player_update();
+        audio_update(); /* MIDI plays from here (lib/audio.h) */
+        print_pump();   /* the print queue: what the printer takes now */
 
         if (saver_update()) { /* screen saver up: it is the whole frame */
             os_tick_apps();

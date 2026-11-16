@@ -91,6 +91,8 @@ bool appload_unload(app_descriptor *desc);
 void appload_gc(void);
 /* Load every *.APP in dir. Returns count loaded. */
 int appload_scan_dir(const char *dir_path);
+/* the app's name from a .APP header, without loading it */
+bool appload_peek_name(const char *path, char *out, int max);
 app_descriptor *appload_find(const char *name);
 /* Try path as-is, then common locations. */
 bool appload_try_open(const char *path_or_name);

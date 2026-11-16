@@ -19,7 +19,8 @@
 #include "ui/menubar.h"
 
 menu *popup_menu(void);
-void popup_show(int x, int y); /* screen position, kept on screen */
+bool popup_is_menu(const menu *m); /* the context menu (no submenus) */
+void popup_show(int x, int y);     /* screen position, kept on screen */
 void popup_show_for(const control *c);
 bool popup_is_open(void);
 /* the window the popup belongs to closes: its actions' data goes too */

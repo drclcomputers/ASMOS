@@ -150,6 +150,104 @@ static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
     return true;
 }
 
+/* ── long file names (Windows 95 and later) ─────────────────────────────
+ * Before its 8.3 entry, a file with a long name has entries with attr 0x0F
+ * holding the name, each with a checksum of the 8.3 name (byte 13). They
+ * are skipped when listing, like DOS does; but deleting, renaming or
+ * removing the file must take them away too, or Windows' ScanDisk reports
+ * them as lost. Only entries right before the file, with its checksum,
+ * are touched: never another file's. */
+#define ATTR_LFN 0x0F
+
+static uint8_t lfn_checksum(const uint8_t name11[11]) {
+    uint8_t sum = 0;
+    for (int i = 0; i < 11; i++)
+        sum = (uint8_t)(((sum & 1) << 7) + (sum >> 1) + name11[i]);
+    return sum;
+}
+
+/* the n-th sector of a directory (cluster 0: the root); false past its end */
+static bool dir_sector(uint8_t drive_id, uint16_t dir_cluster, uint32_t n,
+                       uint32_t *lba) {
+    fat_vol_t *v = vol(drive_id);
+    if (dir_cluster == 0) {
+        uint32_t root_sectors = (v->bpb.root_entry_count * 32 + 511) / 512;
+        if (n >= root_sectors)
+            return false;
+        *lba = v->root_lba + n;
+        return true;
+    }
+    uint16_t c = dir_cluster;
+    uint32_t spc = v->bpb.sectors_per_cluster;
+    for (uint32_t k = n / spc; k > 0; k--) {
+        c = fat_get(drive_id, c);
+        if (!vol_cluster_active(v, c))
+            return false;
+    }
+    if (!vol_cluster_active(v, c))
+        return false;
+    *lba = fat_cluster_to_lba(drive_id, c) + n % spc;
+    return true;
+}
+
+#define LFN_MAX 20 /* 20 x 13 = 260 characters: the longest name */
+
+static void lfn_clear(uint8_t drive_id, uint16_t dir_cluster,
+                      const char name11[11]) {
+    struct {
+        uint32_t lba;
+        uint8_t idx, sum;
+    } run[LFN_MAX];
+    int nrun = 0;
+    uint8_t buf[512];
+    uint32_t lba;
+    for (uint32_t n = 0; dir_sector(drive_id, dir_cluster, n, &lba); n++) {
+        if (!fs_read_sector(drive_id, lba, buf))
+            return;
+        dir_entry_t *e = (dir_entry_t *)buf;
+        for (int i = 0; i < 16; i++) {
+            if (e[i].name[0] == DIR_ENTRY_END)
+                return;
+            if (e[i].name[0] == DIR_ENTRY_FREE) {
+                nrun = 0;
+                continue;
+            }
+            if ((e[i].attr & 0x3F) == ATTR_LFN) {
+                if (nrun < LFN_MAX) {
+                    run[nrun].lba = lba;
+                    run[nrun].idx = (uint8_t)i;
+                    run[nrun].sum = ((uint8_t *)&e[i])[13];
+                    nrun++;
+                }
+                continue;
+            }
+            if (!name83_eq(e[i].name, name11)) {
+                nrun = 0;
+                continue;
+            }
+            /* the file: free the long-name entries that belong to it */
+            uint8_t sum = lfn_checksum((const uint8_t *)&e[i]); /* name+ext */
+            uint8_t sb[512];
+            uint32_t have = 0xFFFFFFFF;
+            for (int k = 0; k < nrun; k++) {
+                if (run[k].sum != sum)
+                    continue;
+                if (run[k].lba != have) {
+                    if (have != 0xFFFFFFFF)
+                        fs_write_sector(drive_id, have, sb);
+                    if (!fs_read_sector(drive_id, run[k].lba, sb))
+                        return;
+                    have = run[k].lba;
+                }
+                sb[run[k].idx * 32] = DIR_ENTRY_FREE;
+            }
+            if (have != 0xFFFFFFFF)
+                fs_write_sector(drive_id, have, sb);
+            return;
+        }
+    }
+}
+
 typedef bool (*cluster_cb)(uint8_t drive_id, dir_entry_t *e, uint16_t cluster,
                            int idx, void *user);
 
@@ -357,7 +455,11 @@ static void extract_volume_label(fat_vol_t *v) {
     }
 }
 
+/* any change to names on any disk (fs.h) */
+uint32_t g_fs_rev;
+
 bool fs_mount_drive(uint8_t drive_id) {
+    g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return false;
     fat_vol_t *v = vol(drive_id);
@@ -369,8 +471,32 @@ bool fs_mount_drive(uint8_t drive_id) {
     if (!fs_read_sector(drive_id, 0, tmp_buf))
         return false;
     memcpy(&v->bpb, tmp_buf, sizeof(bpb_t));
-    if (v->bpb.bytes_per_sector != 512)
-        return false;
+    if (v->bpb.bytes_per_sector != 512 || !v->bpb.sectors_per_cluster ||
+        !v->bpb.fat_count) {
+        /* DOS 1.x floppies have no BPB: the FAT's media byte says the
+         * size, and the size gives the standard layout */
+        if (drive_id != DRIVE_FDD0 && drive_id != DRIVE_FDD1)
+            return false;
+        uint8_t unit = drive_id == DRIVE_FDD0 ? 0 : 1;
+        int m = fdd_media(unit);
+        if (fs_read_sector(drive_id, 1, tmp_buf) &&
+            fdd_media_from_byte(tmp_buf[0]))
+            m = fdd_media_from_byte(tmp_buf[0]);
+        if (m <= FDD_MEDIA_NONE || m > FDD_MEDIA_360K)
+            return false; /* the later sizes always have a BPB */
+        const fdd_format_t *f = &FDD_FORMATS[m];
+        memset(&v->bpb, 0, sizeof(v->bpb));
+        v->bpb.bytes_per_sector = 512;
+        v->bpb.sectors_per_cluster = f->sec_per_clus;
+        v->bpb.reserved_sectors = 1;
+        v->bpb.fat_count = 2;
+        v->bpb.root_entry_count = f->root_entries;
+        v->bpb.total_sectors_16 = (uint16_t)(f->spt * f->heads * f->tracks);
+        v->bpb.media_type = f->media_byte;
+        v->bpb.sectors_per_fat = f->fat_sectors;
+        v->bpb.sectors_per_track = f->spt;
+        v->bpb.head_count = f->heads;
+    }
 
     v->fat_lba = v->bpb.reserved_sectors;
     v->root_lba = v->fat_lba + v->bpb.fat_count * v->bpb.sectors_per_fat;
@@ -436,6 +562,7 @@ bool fs_mount(void) {
 }
 
 void fs_unmount(uint8_t drive_id) {
+    g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return;
     g_drives[drive_id].mounted = false;
@@ -882,6 +1009,7 @@ bool fs_open(const char *path, fat_file_t *f) {
 }
 
 bool fs_create(const char *path, fat_file_t *f) {
+    g_fs_rev++;
     uint8_t drive_id;
     uint16_t dir_cluster;
     char name83[12];
@@ -1106,6 +1234,7 @@ bool fs_close(fat_file_t *f) {
 }
 
 bool fs_mkdir(const char *path) {
+    g_fs_rev++;
     uint8_t drive_id;
     uint16_t dir_cluster;
     char name83[12];
@@ -1157,6 +1286,7 @@ bool fs_mkdir(const char *path) {
 }
 
 bool fs_rename(const char *path, const char *new_name) {
+    g_fs_rev++;
     if (path_is_protected(path))
         return false;
     uint8_t drive_id;
@@ -1179,12 +1309,14 @@ bool fs_rename(const char *path, const char *new_name) {
     if (fs_find_in_dir(drive_id, dir_cluster, new83, &tmp2))
         return false;
 
+    lfn_clear(drive_id, dir_cluster, name83); /* the long name goes too */
     modify_ctx ctx = {name83, false, new83, 1};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
     return ctx.done;
 }
 
 bool fs_delete(const char *path) {
+    g_fs_rev++;
     if (path_is_protected(path))
         return false;
     uint8_t drive_id;
@@ -1192,12 +1324,14 @@ bool fs_delete(const char *path) {
     char name83[12];
     if (!fs_resolve(path, &drive_id, &dir_cluster, name83))
         return false;
+    lfn_clear(drive_id, dir_cluster, name83);
     modify_ctx ctx = {name83, false, NULL, 0};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
     return ctx.done;
 }
 
 bool fs_rmdir(const char *path) {
+    g_fs_rev++;
     if (path_is_protected(path))
         return false;
     uint8_t drive_id;
@@ -1212,12 +1346,14 @@ bool fs_rmdir(const char *path) {
         return false;
     if (!fs_is_dir_empty(drive_id, entry.cluster_lo))
         return false;
+    lfn_clear(drive_id, dir_cluster, name83);
     modify_ctx ctx = {name83, false, NULL, 2};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
     return ctx.done;
 }
 
 bool fs_rm_rf(const char *path) {
+    g_fs_rev++;
     if (path_is_protected(path))
         return false;
     uint8_t drive_id;
@@ -1231,6 +1367,7 @@ bool fs_rm_rf(const char *path) {
     if (!(entry.attr & ATTR_DIRECTORY))
         return false;
     fs_wipe_cluster(drive_id, entry.cluster_lo);
+    lfn_clear(drive_id, dir_cluster, name83);
     modify_ctx ctx = {name83, false, NULL, 2};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
     return ctx.done;

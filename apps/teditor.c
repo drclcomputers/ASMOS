@@ -172,26 +172,17 @@ static void do_goto(teditor_state_t *s) {
 }
 
 static void do_print(teditor_state_t *s) {
-    if (!lpt_count()) {
-        dlg_message(s->win, "Print", "No parallel port found.");
-        return;
-    }
-    lpt_status_t st = lpt_status(0);
-    if (st != LPT_READY && st != LPT_BUSY) {
-        char m[64];
-        snprintf(m, sizeof(m), "LPT1: %s.", lpt_status_text(st));
-        dlg_message(s->win, "Print", m);
-        return;
-    }
-    uint32_t sent =
-        lpt_print_text(0, ctl_text(s->edit), s->edit->text_len, &st);
-    char m[80];
-    if (st == LPT_READY)
-        snprintf(m, sizeof(m), "Sent %u bytes to LPT1.", sent);
-    else
-        snprintf(m, sizeof(m), "Stopped after %u bytes:\n%s.", sent,
-                 lpt_status_text(st));
-    dlg_message(s->win, "Print", m);
+    const char *base = strrchr(s->path, '/');
+    base = base ? base + 1 : (s->path[0] ? s->path : "Untitled");
+    print_doc_t doc = {PRINT_DOC_TEXT,
+                       base,
+                       ctl_text(s->edit),
+                       (uint32_t)s->edit->text_len,
+                       NULL,
+                       0,
+                       0,
+                       0};
+    dlg_print(s->win, &doc);
 }
 
 /* closing with unsaved changes asks first */
@@ -251,7 +242,7 @@ static void teditor_init(void *state) {
     menu_add_item(f, "Open...", menu_open);
     menu_add_item(f, "Save", menu_save);
     menu_add_item(f, "Save As...", menu_save_as);
-    menu_add_item(f, "Print", menu_print);
+    menu_add_item(f, "Print...", menu_print);
     menu_add_separator(f);
     menu_add_item(f, "Close", menu_close);
     menu_add_item(f, "About", menu_about);

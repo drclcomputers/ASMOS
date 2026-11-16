@@ -255,6 +255,8 @@ void wm_unregister(window *win) {
         for (int j = i; j < win_count - 1; j++)
             win_stack[j] = win_stack[j + 1];
         win_stack[--win_count] = NULL;
+        for (int m = 0; m < win->win_menu_count; m++)
+            menu_free_subs(&win->win_menus[m]);
         kfree(win);
 
         for (int k = win_count - 1; k >= 0; k--) {
@@ -305,8 +307,14 @@ void wm_sync_menubar(menubar *mb) {
 
     const char *open_title =
         (mb->open_index >= 0) ? mb->menus[mb->open_index].title : NULL;
+    int sub = mb->sub_item;
     mb->menu_count = 0;
     mb->open_index = -1;
+    mb->sub_item = -1;
+    if (mb->owner != fw) { /* another window: its first page */
+        mb->owner = fw;
+        mb->first = mb->npages = 0;
+    }
 
     if (!fw || fw->win_menu_count == 0)
         return;
@@ -318,6 +326,7 @@ void wm_sync_menubar(menubar *mb) {
             strcmp(mb->menus[mb->menu_count].title, open_title) == 0) {
             mb->menus[mb->menu_count].open = true;
             mb->open_index = mb->menu_count;
+            mb->sub_item = sub; /* the same menu: its submenu stays */
         }
         mb->menu_count++;
     }
@@ -857,6 +866,8 @@ static uint32_t scene_sig(const menubar *mb) {
         }
     }
     MIX(mb->open_index);
+    MIX(mb->sub_item);
+    MIX(mb->first);
     MIX(popup_is_open() | ctl_overlay_active() << 1 | (s_overlay != NULL) << 2);
     MIX(desktop_sig());
     return h;
@@ -895,6 +906,7 @@ static uint32_t bar_sig(const menubar *mb) {
     MIX(mb->menu_count);
     for (int i = 0; i < mb->menu_count; i++)
         MIX((uintptr_t)mb->menus[i].title);
+    MIX(mb->first);
     return h;
 }
 

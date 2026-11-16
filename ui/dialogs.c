@@ -4,17 +4,20 @@
 #include "ui/uifont.h"
 
 #include "config/config.h"
+#include "config/runtime_config.h"
+#include "drivers/keyboard.h"
 #include "fs/fs.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "os/print.h"
 #include "ui/fileops.h"
 #include "ui/window.h"
 
 void (*g_dlg_call_hook)(window *owner, void (*fn)(void *, void *), void *user,
                         void *arg) = NULL;
 
-enum { K_MSG, K_CONFIRM, K_INPUT, K_OPEN, K_SAVE };
+enum { K_MSG, K_CONFIRM, K_INPUT, K_OPEN, K_SAVE, K_PRINT, K_PREVIEW };
 
 typedef struct {
     window *win;
@@ -29,6 +32,7 @@ typedef struct {
     char dir[128];
     char ext[4];
     char title[40]; /* callers may pass a stack buffer */
+    void *xdata;    /* kind-specific (print dialog, preview); freed here */
 } dlg_t;
 
 #define MAX_DLG 8
@@ -70,6 +74,7 @@ static void finish(dlg_t *d, bool ok, const char *text) {
     int kind = d->kind;
     unlink_dlg(d);
     wm_unregister(d->win); /* frees the controls */
+    kfree(d->xdata);
     kfree(d);
     if (owner)
         wm_focus(owner);
@@ -148,6 +153,7 @@ void dlg_owner_destroyed(window *owner) {
             s_open[i] = NULL;
             d->owner = NULL;
             wm_unregister(d->win);
+            kfree(d->xdata);
             kfree(d);
         }
     }
@@ -676,4 +682,341 @@ void dlg_draw_now(const char *title, const char *msg) {
             break;
         p = e + 1;
     }
+}
+
+/* ── Print and Print Preview ─────────────────────────────────────────── */
+
+typedef struct {
+    print_doc_t doc;
+    int pages;
+    control *copies, *all, *range, *from, *to, *print, *status;
+} prn_dlg_t;
+
+typedef struct {
+    print_doc_t doc;
+    int pages, page; /* 1-based */
+    bool zoom;       /* readable text instead of the whole page */
+    int top;         /* zoomed: first line shown */
+    control *view, *label, *prev, *next, *zoom_btn;
+} prn_prev_t;
+
+static int field_int(control *c, int def) {
+    const char *t = ctl_text(c);
+    int v = 0, n = 0;
+    for (; *t >= '0' && *t <= '9'; t++, n++)
+        v = v * 10 + (*t - '0');
+    return n && !*t ? v : def;
+}
+
+/* paper: letter, 8.5 x 11 inches; text: 80 columns from 0.25" and 60
+ * lines from 0.5" at 10 characters and 6 lines an inch */
+#define PAPER_W 85 /* tenths of an inch */
+#define PAPER_H 110
+
+static void paint_page(control *c, int x, int y, int w, int h) {
+    dlg_t *d = c->user;
+    prn_prev_t *p = d->xdata;
+    fill_rect(x, y, w, h, DARK_GRAY);
+    int f = FONT_MONO; /* 4x6 in 5-pixel cells: the closest to a printer */
+
+    if (p->zoom && p->doc.kind == PRINT_DOC_TEXT) { /* readable */
+        static char lines[PRINT_LINES][PRINT_COLS + 1];
+        int n = print_text_page(p->doc.text, p->doc.len, p->page, lines);
+        int pw = PRINT_COLS * 5 + 16, px = x + (w - pw) / 2;
+        if (pw > w)
+            px = x;
+        fill_rect(px, y, pw, h, WHITE);
+        int rows = (h - 8) / 7;
+        if (p->top > n - rows)
+            p->top = n - rows;
+        if (p->top < 0)
+            p->top = 0;
+        for (int i = 0; i < rows && p->top + i < n; i++)
+            draw_string(px + 8, y + 4 + i * 7, lines[p->top + i], BLACK, f);
+        return;
+    }
+
+    /* the whole page, to scale */
+    int ph = h - 8, pw = ph * PAPER_W / PAPER_H;
+    if (pw > w - 8) {
+        pw = w - 8;
+        ph = pw * PAPER_H / PAPER_W;
+    }
+    int px = x + (w - pw) / 2, py = y + (h - ph) / 2;
+    fill_rect(px + 3, py + 3, pw, ph, BLACK); /* shadow */
+    fill_rect(px, py, pw, ph, WHITE);
+    draw_rect(px, py, pw, ph, BLACK);
+
+    if (p->doc.kind == PRINT_DOC_TEXT) {
+        /* each word as a grey bar, where the printer will put it */
+        static char lines[PRINT_LINES][PRINT_COLS + 1];
+        int n = print_text_page(p->doc.text, p->doc.len, p->page, lines);
+        for (int i = 0; i < n; i++) {
+            int ly = py + (5 + i * 10 / 6) * ph / PAPER_H;
+            int lh = ph / (PAPER_H * 6 / 10) - 1;
+            if (lh < 1)
+                lh = 1;
+            const char *l = lines[i];
+            for (int col = 0; l[col];) {
+                if (l[col] == ' ') {
+                    col++;
+                    continue;
+                }
+                int e = col;
+                while (l[e] && l[e] != ' ')
+                    e++;
+                int x0 =
+                    px + (int)((25 + col * 10) * (long)pw / (PAPER_W * 10));
+                int x1 = px + (int)((25 + e * 10) * (long)pw / (PAPER_W * 10));
+                fill_rect(x0, ly, x1 - x0 > 0 ? x1 - x0 : 1, lh, DARK_GRAY);
+                col = e;
+            }
+        }
+        return;
+    }
+
+    /* a picture: the printer's dots, from the top-left margin */
+    int type = g_cfg.printer_type % PRN_TYPES, sx, sy;
+    print_image_scale(p->doc.w, p->doc.h, type, &sx, &sy);
+    int dpi = type == PRN_PCL ? 100 : 80;
+    if (type == PRN_TEXT) { /* characters: 10 an inch, 6 lines an inch */
+        int cw = (p->doc.w + PRINT_COLS - 1) / PRINT_COLS;
+        if (cw < 1)
+            cw = 1;
+        int chh = cw * 2;
+        for (int yy = 0; yy < p->doc.h; yy += chh)
+            for (int xx = 0; xx < p->doc.w; xx += cw) {
+                uint32_t sum = 0, k = 0;
+                for (int a = yy; a < yy + chh && a < p->doc.h; a++)
+                    for (int b = xx; b < xx + cw && b < p->doc.w; b++) {
+                        sum += print_grey(p->doc.pix[a * p->doc.stride + b]);
+                        k++;
+                    }
+                int ci = xx / cw, li = yy / chh;
+                if (li >= PRINT_LINES)
+                    break;
+                int x0 = px + (25 + ci * 10) * pw / (PAPER_W * 10);
+                int x1 = px + (25 + ci * 10 + 10) * pw / (PAPER_W * 10);
+                int y0 = py + (50 + li * 100 / 6) * ph / (PAPER_H * 10);
+                int y1 = py + (50 + (li + 1) * 100 / 6) * ph / (PAPER_H * 10);
+                uint8_t g = (uint8_t)(k ? sum / k : 255);
+                fill_rect(x0, y0, x1 - x0, y1 - y0,
+                          g < 64    ? BLACK
+                          : g < 128 ? DARK_GRAY
+                          : g < 200 ? LIGHT_GRAY
+                                    : WHITE);
+            }
+        return;
+    }
+    /* printed size in tenths of an inch */
+    int iw = p->doc.w * sx * 10 / dpi, ih = p->doc.h * sy * 10 / dpi;
+    int ox = px + 3 * pw / PAPER_W, oy = py + 3 * ph / PAPER_H;
+    int vw = iw * pw / PAPER_W, vh = ih * ph / PAPER_H;
+    for (int vy = 0; vy < vh && oy + vy < py + ph - 1; vy++) {
+        int dy = (int)((long)vy * p->doc.h * sy / vh); /* printer dot row */
+        for (int vx = 0; vx < vw && ox + vx < px + pw - 1; vx++) {
+            int dx = (int)((long)vx * p->doc.w * sx / vw);
+            uint8_t g =
+                print_grey(p->doc.pix[(dy / sy) * p->doc.stride + dx / sx]);
+            if (print_ink(g, dx, dy))
+                draw_dot(ox + vx, oy + vy, BLACK);
+        }
+    }
+}
+
+static void prev_update(dlg_t *d) {
+    prn_prev_t *p = d->xdata;
+    char b[48];
+    snprintf(b, sizeof(b), "Page %d of %d", p->page, p->pages);
+    ctl_set_text(p->label, b);
+    ctl_enable(p->prev, p->page > 1);
+    ctl_enable(p->next, p->page < p->pages);
+    ctl_set_text(p->zoom_btn, p->zoom ? "Whole Page" : "Zoom");
+    wm_invalidate(d->win);
+}
+
+static void on_prev_btn(control *c, int ev) {
+    dlg_t *d = c->user;
+    prn_prev_t *p = d->xdata;
+    if (ev != EV_CLICK)
+        return;
+    if (c->id == 1 && p->page > 1)
+        p->page--, p->top = 0;
+    else if (c->id == 2 && p->page < p->pages)
+        p->page++, p->top = 0;
+    else if (c->id == 3)
+        p->zoom = !p->zoom;
+    else if (c->id == 4) {
+        finish(d, false, NULL);
+        return;
+    }
+    prev_update(d);
+}
+
+static void on_page_view(control *c, int ev) {
+    dlg_t *d = c->user;
+    prn_prev_t *p = d->xdata;
+    if (ev == EV_DBLCLICK && p->doc.kind == PRINT_DOC_TEXT) {
+        p->zoom = !p->zoom;
+    } else if (ev == EV_KEY) {
+        uint8_t sc = kb.last_scancode;
+        if (sc == PAGE_DOWN || (!p->zoom && sc == RIGHT_ARROW)) {
+            if (p->page < p->pages)
+                p->page++, p->top = 0;
+        } else if (sc == PAGE_UP || (!p->zoom && sc == LEFT_ARROW)) {
+            if (p->page > 1)
+                p->page--, p->top = 0;
+        } else if (sc == DOWN_ARROW && p->zoom) {
+            p->top += 3;
+        } else if (sc == UP_ARROW && p->zoom) {
+            p->top -= 3;
+        } else {
+            return;
+        }
+    } else {
+        return;
+    }
+    prev_update(d);
+}
+
+static void open_preview(dlg_t *owner, const print_doc_t *doc) {
+    int w = SCREEN_WIDTH - 40, h = SCREEN_HEIGHT - MENUBAR_H - 24;
+    dlg_t *d = open_dlg(owner->win, K_PREVIEW, "Print Preview", w, h);
+    if (!d)
+        return;
+    prn_prev_t *p = kzalloc(sizeof(prn_prev_t));
+    if (!p) {
+        finish(d, false, NULL);
+        return;
+    }
+    d->xdata = p;
+    d->win->x = 20;
+    d->win->y = 2;
+    p->doc = *doc;
+    p->pages =
+        doc->kind == PRINT_DOC_TEXT ? print_text_pages(doc->text, doc->len) : 1;
+    p->page = 1;
+    int ch = h - 16;
+    p->view = ctl_custom(d->win, 2, 2, w - 6, ch - 22, paint_page, on_page_view,
+                         CS_FOCUSABLE);
+    p->prev = ctl_button(d->win, 4, ch - 17, 40, 13, "< Prev", 1, on_prev_btn);
+    p->next = ctl_button(d->win, 48, ch - 17, 40, 13, "Next >", 2, on_prev_btn);
+    p->label = ctl_label(d->win, 96, ch - 17, 90, 13, "", 0);
+    p->zoom_btn =
+        ctl_button(d->win, w - 128, ch - 17, 64, 13, "Zoom", 3, on_prev_btn);
+    ctl_enable(p->zoom_btn, doc->kind == PRINT_DOC_TEXT);
+    control *cl =
+        ctl_button(d->win, w - 60, ch - 17, 52, 13, "Close", 4, on_prev_btn);
+    ctl_style_add(cl, CS_DEFAULT | CS_CANCEL);
+    d->win->lazy_custom = true;
+    prev_update(d);
+    ctl_focus(p->view);
+}
+
+static void prn_refresh(dlg_t *d) {
+    prn_dlg_t *p = d->xdata;
+    char b[96];
+    snprintf(b, sizeof(b), "%s on %s: %s",
+             PRN_TYPE_NAMES[g_cfg.printer_type % PRN_TYPES], print_port_name(),
+             print_status_text());
+    ctl_set_text(p->status, b);
+    ctl_enable(p->print, print_available());
+}
+
+static void on_prn_btn(control *c, int ev) {
+    dlg_t *d = c->user;
+    prn_dlg_t *p = d->xdata;
+    if (ev != EV_CLICK && !(ev == EV_CHANGE && (c == p->all || c == p->range)))
+        return;
+    if (c == p->all || c == p->range) {
+        bool r = ctl_value(p->range) != 0;
+        if (p->from) {
+            ctl_enable(p->from, r);
+            ctl_enable(p->to, r);
+        }
+        return;
+    }
+    if (c->id == 3) { /* Preview */
+        open_preview(d, &p->doc);
+        return;
+    }
+    if (c->id == 2) { /* Cancel */
+        finish(d, false, NULL);
+        return;
+    }
+    /* Print */
+    int copies = field_int(p->copies, 0);
+    if (copies < 1 || copies > 99) {
+        dlg_message(d->win, "Print", "Copies: 1 to 99.");
+        return;
+    }
+    int from = 0, to = 0;
+    if (p->from && ctl_value(p->range)) {
+        from = field_int(p->from, 0);
+        to = field_int(p->to, 0);
+        if (from < 1 || to < from || to > p->pages) {
+            char m[48];
+            snprintf(m, sizeof(m), "Pages: 1 to %d.", p->pages);
+            dlg_message(d->win, "Print", m);
+            return;
+        }
+    }
+    int id = p->doc.kind == PRINT_DOC_TEXT
+                 ? print_submit_text(p->doc.name, p->doc.text, p->doc.len,
+                                     copies, from, to)
+                 : print_submit_image(p->doc.name, p->doc.pix, p->doc.w,
+                                      p->doc.h, p->doc.stride, copies);
+    if (id < 0) {
+        dlg_message(d->win, "Print",
+                    print_available() ? "The print queue is full, or there "
+                                        "is not enough memory."
+                                      : "There is no printer port.");
+        return;
+    }
+    finish(d, true, NULL);
+}
+
+void dlg_print(window *owner, const print_doc_t *doc) {
+    if (!doc)
+        return;
+    bool text = doc->kind == PRINT_DOC_TEXT;
+    int h = text ? 112 : 84;
+    dlg_t *d = open_dlg(owner, K_PRINT, "Print", 230, h + 16);
+    if (!d)
+        return;
+    prn_dlg_t *p = kzalloc(sizeof(prn_dlg_t));
+    if (!p) {
+        finish(d, false, NULL);
+        return;
+    }
+    d->xdata = p;
+    p->doc = *doc;
+    p->pages = text ? print_text_pages(doc->text, doc->len) : 1;
+    window *w = d->win;
+    p->status = ctl_label(w, 8, 6, 214, 9, "", 0);
+    ctl_label(w, 8, 22, 50, 12, "Copies:", 0);
+    p->copies = ctl_edit(w, 60, 22, 26, 12, "1", 2, ES_DECIMAL, NULL);
+    int y = 40;
+    if (text) {
+        char b[40];
+        snprintf(b, sizeof(b), "All %d page%s", p->pages,
+                 p->pages == 1 ? "" : "s");
+        p->all = ctl_radio(w, 8, y, 120, b, 1, true, on_prn_btn);
+        p->range = ctl_radio(w, 8, y + 14, 50, "Pages", 1, false, on_prn_btn);
+        p->from = ctl_edit(w, 60, y + 13, 26, 12, "1", 3, ES_DECIMAL, NULL);
+        ctl_label(w, 90, y + 13, 14, 12, "to", 0);
+        snprintf(b, sizeof(b), "%d", p->pages);
+        p->to = ctl_edit(w, 106, y + 13, 26, 12, b, 3, ES_DECIMAL, NULL);
+        ctl_enable(p->from, false);
+        ctl_enable(p->to, false);
+        y += 34;
+    }
+    control *pv = ctl_button(w, 8, y, 60, 13, "Preview...", 3, on_prn_btn);
+    ctl_set_tooltip(pv, "See the pages before they print");
+    p->print = ctl_button(w, 112, y, 52, 13, "Print", 1, on_prn_btn);
+    control *ca = ctl_button(w, 170, y, 52, 13, "Cancel", 2, on_prn_btn);
+    ctl_style_add(p->print, CS_DEFAULT);
+    ctl_style_add(ca, CS_CANCEL);
+    prn_refresh(d);
+    ctl_focus(print_available() ? p->print : ca);
 }

@@ -17,6 +17,7 @@
 #include "lib/core.h"
 #include "lib/io.h"
 #include "lib/memory.h"
+#include "lib/time.h"
 
 #define DSP_RESET (s_port + 0x6)
 #define DSP_READ (s_port + 0xA)
@@ -67,6 +68,10 @@ static uint32_t s_src_len = 0, s_src_offset = 0;
 static uint32_t s_rate = 22050; /* what the card plays */
 static uint32_t s_step = 1;     /* source samples per played sample */
 static bool s_looping = false;
+/* paused: the block in flight finishes, the next is not started */
+static volatile bool s_paused = false, s_idle = false;
+static uint32_t s_block_start; /* source offset where the playing block began */
+static uint32_t s_block_end, s_block_pit; /* its end, and when it started */
 
 extern void isr_sb16(void);
 
@@ -235,7 +240,10 @@ static bool dsp_program_chunk(uint32_t count_minus_1) {
 }
 
 static bool start_block(void) {
+    s_block_start = s_src_offset;
+    s_block_pit = pit_ticks;
     uint32_t n = fill_buffer();
+    s_block_end = s_src_offset;
     if (!n && s_looping && s_src_data) {
         s_src_offset = 0;
         n = fill_buffer();
@@ -249,7 +257,9 @@ static bool start_block(void) {
 void sb16_irq_handler(void) {
     if (s_detected) {
         (void)inb(DSP_ACK_8);
-        if (s_playing && !start_block()) {
+        if (s_playing && s_paused) {
+            s_idle = true; /* resume starts the next block */
+        } else if (s_playing && !start_block()) {
             s_playing = false;
             s_src_data = NULL;
         }
@@ -362,6 +372,7 @@ void sb16_play_pcm(const uint8_t *data, uint32_t len, uint32_t sample_rate,
     s_src_len = len;
     s_src_offset = 0;
     s_looping = false;
+    s_paused = s_idle = false;
     s_playing = true;
     irq_on();
     if (!start_block()) {
@@ -372,6 +383,46 @@ void sb16_play_pcm(const uint8_t *data, uint32_t len, uint32_t sample_rate,
 }
 
 void sb16_set_loop(bool loop) { s_looping = loop; }
+
+/* Pause: the card finishes the block it has (a fraction of a second) and
+ * the next one waits. Resume starts it. */
+void sb16_pause(bool pause) {
+    if (!s_detected || !s_playing)
+        return;
+    __asm__ volatile("cli");
+    s_paused = pause;
+    bool restart = !pause && s_idle;
+    s_idle = false;
+    __asm__ volatile("sti");
+    if (restart && !start_block()) {
+        s_playing = false;
+        s_src_data = NULL;
+        irq_off();
+    }
+}
+
+bool sb16_paused(void) { return s_playing && s_paused; }
+
+/* where in the source the sound coming out is: the block being played,
+ * plus the time since it started (paused: where it stopped) */
+uint32_t sb16_position(void) {
+    if (!s_playing)
+        return 0;
+    if (s_idle)
+        return s_block_end;
+    uint32_t ms = pit_ticks - s_block_pit;
+    uint32_t p = s_block_start + ms * s_rate / 1000 * s_step;
+    return p < s_block_end ? p : s_block_end;
+}
+
+/* the next block starts at `offset` (source samples) */
+void sb16_seek(uint32_t offset) {
+    if (!s_playing)
+        return;
+    __asm__ volatile("cli");
+    s_src_offset = offset < s_src_len ? offset : s_src_len;
+    __asm__ volatile("sti");
+}
 
 void sb16_stop(void) {
     if (!s_detected)

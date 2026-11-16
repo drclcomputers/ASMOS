@@ -3,12 +3,24 @@
 
 #include "os/os.h"
 
+/* Apps menu groups (submenus); APP_TOP = directly in Apps */
+enum {
+    APP_TOP,
+    APP_ACCESSORIES,
+    APP_GAMES,
+    APP_MULTIMEDIA,
+    APP_SYSTEM,
+    APP_GROUPS
+};
+extern const char *const APP_GROUP_NAMES[APP_GROUPS];
+
 typedef struct {
     app_descriptor *desc;
-    const char     *menu_label;
+    const char *menu_label;
+    int group; /* APP_* */
 } registered_app_t;
 
 extern registered_app_t app_registry[];
-extern int              app_registry_count;
+extern int app_registry_count;
 
 #endif

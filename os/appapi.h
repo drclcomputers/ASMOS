@@ -202,6 +202,13 @@ typedef struct os_api {
     /* the user's Settings > Speed choices: go lighter when asked */
     uint32_t (*speed_flags)(void); /* SPEED_* bits */
     int (*frame_ms)(void);         /* ms per frame: 16, 33 or 50 */
+
+    /* ── appended in API size 5: submenus ── */
+    /* An item of `m` (from ui->add_menu) that opens a submenu to the side,
+     * with an arrow, like the groups of the Apps menu. Fill it with
+     * ui->menu_item / ui->menu_separator. One level: NULL for a submenu
+     * inside a submenu, in a context menu, or when `m` is full (16). */
+    menu *(*submenu)(menu *m, const char *label);
 } os_api_t;
 
 /* api->speed_flags() */

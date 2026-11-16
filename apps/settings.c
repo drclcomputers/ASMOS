@@ -2,14 +2,17 @@
  * ASMOS.CFG. */
 #include "config/runtime_config.h"
 #include "config/video_cfg.h"
+#include "drivers/lpt.h"
 #include "drivers/sb16.h"
 #include "lib/time.h"
 #include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
+#include "os/print.h"
 #include "ui/saver.h"
 #include "ui/uifont.h"
 
-enum { P_WALL, P_SOUND, P_SYSTEM, P_NET, P_SAVER, P_PERF, P_CLOCK };
+/* tabs; Screen Saver and Speed open from Display */
+enum { P_WALL, P_SOUND, P_CLOCK, P_NET, P_PRINT, P_SYSTEM };
 
 #define PERF_FLAGS 6
 
@@ -25,6 +28,9 @@ typedef struct {
     control *c_day, *c_mon, *c_year, *c_h, *c_m, *c_s, *c_wd, *c_now;
     bool clock_edited;
     uint32_t clock_shown; /* second last shown */
+    window *sub;          /* Screen Saver or Speed, while open */
+    control *p_type, *p_port, *p_status;
+    uint32_t p_rev, p_tick;
     bool dirty;
 } settings_state_t;
 
@@ -231,8 +237,10 @@ static void on_preset(control *c, int ev) {
         return;
     cfg_set_low_end(c->id != 0);
     for (int i = 0; i < PERF_FLAGS; i++)
-        ctl_set_value(s->perf[i], *PERF[i].off == 0);
-    list_set_sel(s->fps, g_cfg.fps_cap);
+        if (s->perf[i])
+            ctl_set_value(s->perf[i], *PERF[i].off == 0);
+    if (s->fps)
+        list_set_sel(s->fps, g_cfg.fps_cap);
     set_dirty(s, true);
 }
 
@@ -274,6 +282,199 @@ static void on_saver_test(control *c, int ev) {
     (void)c;
     if (ev == EV_CLICK)
         saver_start();
+}
+
+/* ── Screen Saver and Speed: small windows over Settings ─────────────── */
+
+static void close_sub(settings_state_t *s) {
+    if (!s->sub)
+        return;
+    window *w = s->sub;
+    s->sub = NULL;
+    for (int i = 0; i < PERF_FLAGS; i++)
+        s->perf[i] = NULL;
+    s->fps = NULL;
+    if (s->win && s->win->modal_child == w)
+        s->win->modal_child = NULL;
+    wm_unregister(w);
+    if (s->win)
+        wm_focus(s->win);
+}
+
+static bool on_sub_close(window *w) {
+    close_sub(w->userdata);
+    return true;
+}
+
+static void on_sub_ok(control *c, int ev) {
+    if (ev == EV_CLICK)
+        close_sub(c->user);
+}
+
+static window *open_sub(settings_state_t *s, const char *title, int w, int h) {
+    if (s->sub)
+        close_sub(s);
+    window *sw = app_window(s, title, s->win->x + 16, s->win->y + 16, w, h,
+                            DARK_GRAY, 0);
+    if (!sw)
+        return NULL;
+    sw->on_close = on_sub_close;
+    sw->lazy_custom = true;
+    sw->modal_owner = s->win; /* Settings waits until this one closes */
+    s->win->modal_child = sw;
+    s->sub = sw;
+    return sw;
+}
+
+static void open_saver(settings_state_t *s) {
+    window *w = open_sub(s, "Screen Saver", 260, 158);
+    if (!w)
+        return;
+    ctl_label(w, 10, 6, 60, 12, "Effect:", 0);
+    control *fx = ctl_combo(w, 76, 6, 110, on_saver_fx);
+    for (int i = 0; i < SAVER_COUNT; i++)
+        list_add(fx, SAVER_NAMES[i]);
+    list_set_sel(fx, g_cfg.saver_effect < SAVER_COUNT ? g_cfg.saver_effect : 0);
+    ctl_label(w, 10, 22, 60, 12, "Start after:", 0);
+    control *dl = ctl_combo(w, 76, 22, 110, on_saver_delay);
+    int pick = 0;
+    for (int i = 0; i < SAVER_DELAYS; i++) {
+        char t[16];
+        if (SAVER_DELAY[i])
+            snprintf(t, sizeof(t), "%d minute%s", SAVER_DELAY[i],
+                     SAVER_DELAY[i] > 1 ? "s" : "");
+        else
+            strcpy(t, "Never");
+        list_add(dl, t);
+        if (SAVER_DELAY[i] == g_cfg.saver_minutes)
+            pick = i;
+    }
+    list_set_sel(dl, pick);
+    ctl_custom(w, 10, 40, 238, 76, paint_saver, NULL, CS_BORDER);
+    control *tb = ctl_button(w, 10, 122, 50, 13, "Test", 0, on_saver_test);
+    ctl_set_tooltip(tb, "Move the mouse or press a key to come back");
+    control *ok = ctl_button(w, 198, 122, 50, 13, "OK", 1, on_sub_ok);
+    ctl_style_add(ok, CS_DEFAULT | CS_CANCEL);
+    ctl_focus(ok);
+}
+
+/* each flag is stored as "off", so 0 = all on */
+static void open_speed(settings_state_t *s) {
+    window *w = open_sub(s, "Speed", 260, 158);
+    if (!w)
+        return;
+    for (int i = 0; i < PERF_FLAGS; i++) {
+        s->perf[i] = ctl_check(w, 10, 6 + i * 13, 240, PERF[i].text,
+                               *PERF[i].off == 0, on_perf);
+        s->perf[i]->id = i;
+        ctl_set_tooltip(s->perf[i], PERF[i].tip);
+    }
+    ctl_label(w, 10, 86, 60, 12, "Frame rate:", 0);
+    s->fps = ctl_combo(w, 76, 86, 80, on_fps);
+    list_add(s->fps, "60 a second");
+    list_add(s->fps, "30 a second");
+    list_add(s->fps, "20 a second");
+    list_set_sel(s->fps, g_cfg.fps_cap < 3 ? g_cfg.fps_cap : 0);
+    ctl_set_tooltip(s->fps, "Lower leaves more time for programs "
+                            "working in the background");
+    control *lo =
+        ctl_button(w, 10, 104, 90, 13, "Low-end machine", 0, on_preset);
+    lo->id = 1;
+    ctl_set_tooltip(lo, "Everything light: for a 386");
+    control *hi = ctl_button(w, 106, 104, 70, 13, "All effects", 0, on_preset);
+    hi->id = 0;
+    ctl_label(w, 10, 124, 180, 9, "Changes apply now; Save keeps them.", 0);
+    control *ok = ctl_button(w, 198, 122, 50, 13, "OK", 1, on_sub_ok);
+    ctl_style_add(ok, CS_DEFAULT | CS_CANCEL);
+    ctl_focus(ok);
+}
+
+static void on_open_sub(control *c, int ev) {
+    if (ev != EV_CLICK)
+        return;
+    if (c->id == 0)
+        open_saver(c->user);
+    else
+        open_speed(c->user);
+}
+
+/* ── Printers tab ──────────────────────────────────────────────────── */
+
+static void prn_status(settings_state_t *s) {
+    char b[80];
+    int n = print_job_count();
+    if (n)
+        snprintf(b, sizeof(b), "Status: %s, %d job%s waiting",
+                 print_status_text(), n, n == 1 ? "" : "s");
+    else
+        snprintf(b, sizeof(b), "Status: %s", print_status_text());
+    ctl_set_text(s->p_status, b);
+    s->p_rev = print_queue_rev();
+}
+
+static void on_prn_type(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.printer_type = (uint8_t)ctl_value(c);
+    set_dirty(c->user, true);
+}
+
+static void on_prn_port(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.printer_port = (uint8_t)ctl_value(c);
+    set_dirty(c->user, true);
+    prn_status(c->user);
+}
+
+static void on_prn_ff(control *c, int ev) {
+    if (ev != EV_CHANGE)
+        return;
+    g_cfg.printer_no_ff = ctl_value(c) ? 0 : 1;
+    set_dirty(c->user, true);
+}
+
+extern app_descriptor printq_app;
+static void on_prn_queue(control *c, int ev) {
+    (void)c;
+    if (ev == EV_CLICK)
+        os_launch_app(&printq_app);
+}
+
+static void on_prn_test(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    if (!print_available()) {
+        dlg_message(s->win, "Test Page",
+                    "There is no printer port here (LPT1-3).");
+        return;
+    }
+    static char t[1400];
+    int n = 0;
+    time_full_t now = time_rtc_local();
+    n += snprintf(t + n, sizeof(t) - n,
+                  "ASMOS %s printer test page\n"
+                  "%d %s %u, %02u:%02u\n\n"
+                  "Printer type: %s\nPort: %s\n\n"
+                  "Every printable character:\n",
+                  VER, now.day, time_month_name(now.month), now.year, now.hours,
+                  now.minutes, PRN_TYPE_NAMES[g_cfg.printer_type % PRN_TYPES],
+                  print_port_name());
+    for (int ch = 32; ch < 127; ch++) {
+        t[n++] = (char)ch;
+        if ((ch - 31) % 32 == 0)
+            t[n++] = '\n';
+    }
+    n += snprintf(t + n, sizeof(t) - n,
+                  "\n\nColumns:\n"
+                  "1234567890123456789012345678901234567890"
+                  "1234567890123456789012345678901234567890\n"
+                  "\tTab\tstops\tevery\teight\tcolumns\n\n"
+                  "If this page looks right, the printer works.\n");
+    if (print_submit_text("Test page", t, (uint32_t)n, 1, 0, 0) < 0)
+        dlg_message(s->win, "Test Page", "The print queue is full.");
+    prn_status(s);
 }
 
 /* ── Clock tab ─────────────────────────────────────────────────────── */
@@ -379,7 +580,14 @@ static void on_clock_set(control *c, int ev) {
 /* once a second: the live line, and the fields unless being edited */
 static void settings_frame(void *state) {
     settings_state_t *s = state;
-    if (!s->win || !s->c_now || ctl_value(s->tabs) != P_CLOCK)
+    if (!s->win || !s->c_now)
+        return;
+    if (ctl_value(s->tabs) == P_PRINT && s->p_status &&
+        (print_queue_rev() != s->p_rev || pit_ticks - s->p_tick > 1000)) {
+        s->p_tick = pit_ticks; /* the printer's own state: once a second */
+        prn_status(s);
+    }
+    if (ctl_value(s->tabs) != P_CLOCK)
         return;
     time_full_t t = time_rtc_local();
     uint32_t now = (uint32_t)t.hours * 3600 + t.minutes * 60 + t.seconds;
@@ -390,11 +598,11 @@ static void settings_frame(void *state) {
 static void build(settings_state_t *s) {
     window *w = s->win;
     s->tabs = ctl_tabs(w, 4, 3, 250,
-                       "Display|Sound|System|Network|Saver|Speed|Clock", NULL);
+                       "Display|Sound|Clock|Network|Printers|System", NULL);
 
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
-    s->screen = on_page(s, ctl_combo(w, 76, 24, 130, on_screen), P_WALL);
+    s->screen = on_page(s, ctl_combo(w, 76, 24, 176, on_screen), P_WALL);
     list_add(s->screen, "320x200, 256 colours");
     list_add(s->screen, "640x400, 16 colours");
     int vm = video_cfg_get();
@@ -404,14 +612,22 @@ static void build(settings_state_t *s) {
     ctl_set_tooltip(s->screen, vm >= 0 ? "Takes effect when you restart"
                                        : "This boot disk can't store it: "
                                          "rebuild the image");
+    control *sb = on_page(
+        s, ctl_button(w, 178, 40, 74, 13, "Screen Saver...", 0, on_open_sub),
+        P_WALL);
+    sb->id = 0;
+    control *pb = on_page(
+        s, ctl_button(w, 178, 57, 74, 13, "Speed...", 0, on_open_sub), P_WALL);
+    pb->id = 1;
+    ctl_set_tooltip(pb, "What a slow machine can do without");
     on_page(s, ctl_label(w, 10, 40, 60, 12, "Pattern:", 0), P_WALL);
-    s->pattern = on_page(s, ctl_combo(w, 76, 40, 110, on_wall), P_WALL);
+    s->pattern = on_page(s, ctl_combo(w, 76, 40, 96, on_wall), P_WALL);
     for (int i = 0; i < 5; i++)
         list_add(s->pattern, PATTERNS[i]);
     on_page(s, ctl_label(w, 10, 56, 60, 12, "Color A:", 0), P_WALL);
-    s->col_a = on_page(s, ctl_combo(w, 76, 56, 110, on_wall), P_WALL);
+    s->col_a = on_page(s, ctl_combo(w, 76, 56, 96, on_wall), P_WALL);
     on_page(s, ctl_label(w, 10, 72, 60, 12, "Color B:", 0), P_WALL);
-    s->col_b = on_page(s, ctl_combo(w, 76, 72, 110, on_wall), P_WALL);
+    s->col_b = on_page(s, ctl_combo(w, 76, 72, 96, on_wall), P_WALL);
     for (int i = 0; i < 16; i++) {
         list_add(s->col_a, COLORS[i]);
         list_add(s->col_b, COLORS[i]);
@@ -425,34 +641,6 @@ static void build(settings_state_t *s) {
     control *cf = flag(s, P_WALL, 10, 124, "Classic fonts (the old 4x6 type)",
                        &g_cfg.classic_fonts);
     ctl_set_tooltip(cf, "Titles, menus and labels in the original font");
-
-    /* Saver */
-    on_page(s, ctl_label(w, 10, 24, 60, 12, "Effect:", 0), P_SAVER);
-    control *fx = on_page(s, ctl_combo(w, 76, 24, 110, on_saver_fx), P_SAVER);
-    for (int i = 0; i < SAVER_COUNT; i++)
-        list_add(fx, SAVER_NAMES[i]);
-    list_set_sel(fx, g_cfg.saver_effect < SAVER_COUNT ? g_cfg.saver_effect : 0);
-    on_page(s, ctl_label(w, 10, 40, 60, 12, "Start after:", 0), P_SAVER);
-    control *dl =
-        on_page(s, ctl_combo(w, 76, 40, 110, on_saver_delay), P_SAVER);
-    int pick = 0;
-    for (int i = 0; i < SAVER_DELAYS; i++) {
-        char t[16];
-        if (SAVER_DELAY[i])
-            snprintf(t, sizeof(t), "%d minute%s", SAVER_DELAY[i],
-                     SAVER_DELAY[i] > 1 ? "s" : "");
-        else
-            strcpy(t, "Never");
-        list_add(dl, t);
-        if (SAVER_DELAY[i] == g_cfg.saver_minutes)
-            pick = i;
-    }
-    list_set_sel(dl, pick);
-    on_page(s, ctl_custom(w, 10, 58, 238, 58, paint_saver, NULL, CS_BORDER),
-            P_SAVER);
-    control *tb = on_page(
-        s, ctl_button(w, 10, 121, 50, 13, "Test", 0, on_saver_test), P_SAVER);
-    ctl_set_tooltip(tb, "Move the mouse or press a key to come back");
 
     /* Sound */
     flag(s, P_SOUND, 10, 24, "Sound enabled", &g_cfg.sound_enabled);
@@ -521,34 +709,6 @@ static void build(settings_state_t *s) {
                       "QEMU user networking: DNS 10.0.2.3 or 8.8.8.8", 0),
             P_NET);
 
-    /* Speed: what a slow machine can do without (each flag is stored as
-     * "off", so 0 = all on) */
-    for (int i = 0; i < PERF_FLAGS; i++) {
-        s->perf[i] = on_page(s,
-                             ctl_check(w, 10, 22 + i * 13, 240, PERF[i].text,
-                                       *PERF[i].off == 0, on_perf),
-                             P_PERF);
-        s->perf[i]->id = i;
-        ctl_set_tooltip(s->perf[i], PERF[i].tip);
-    }
-    on_page(s, ctl_label(w, 10, 102, 60, 12, "Frame rate:", 0), P_PERF);
-    s->fps = on_page(s, ctl_combo(w, 76, 102, 80, on_fps), P_PERF);
-    list_add(s->fps, "60 a second");
-    list_add(s->fps, "30 a second");
-    list_add(s->fps, "20 a second");
-    list_set_sel(s->fps, g_cfg.fps_cap < 3 ? g_cfg.fps_cap : 0);
-    ctl_set_tooltip(s->fps, "Lower leaves more time for programs "
-                            "working in the background");
-    control *lo = on_page(
-        s, ctl_button(w, 10, 121, 90, 13, "Low-end machine", 0, on_preset),
-        P_PERF);
-    lo->id = 1;
-    ctl_set_tooltip(lo, "Everything light: for a 386");
-    control *hi =
-        on_page(s, ctl_button(w, 106, 121, 70, 13, "All effects", 0, on_preset),
-                P_PERF);
-    hi->id = 0;
-
     /* Clock: date, time, time zone. Set Clock writes the clock chip at
      * once; the time zone is a setting (Save). */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Date:", 0), P_CLOCK);
@@ -593,6 +753,45 @@ static void build(settings_state_t *s) {
     s->c_now = on_page(s, ctl_label(w, 10, 112, 240, 9, "", 0), P_CLOCK);
     clock_fill(s, true);
 
+    /* Printers */
+    on_page(s, ctl_label(w, 10, 24, 60, 12, "Printer:", 0), P_PRINT);
+    s->p_type = on_page(s, ctl_combo(w, 76, 24, 172, on_prn_type), P_PRINT);
+    for (int i = 0; i < PRN_TYPES; i++)
+        list_add(s->p_type, PRN_TYPE_NAMES[i]);
+    list_set_sel(s->p_type, g_cfg.printer_type % PRN_TYPES);
+    ctl_set_tooltip(s->p_type, "Text works on any printer; the other two "
+                               "also print pictures");
+    on_page(s, ctl_label(w, 10, 40, 60, 12, "Port:", 0), P_PRINT);
+    s->p_port = on_page(s, ctl_combo(w, 76, 40, 100, on_prn_port), P_PRINT);
+    for (int i = 0; i < LPT_MAX; i++) {
+        char t[20];
+        if (lpt_base(i))
+            snprintf(t, sizeof(t), "LPT%d (%Xh)", i + 1, lpt_base(i));
+        else
+            snprintf(t, sizeof(t), "LPT%d (none)", i + 1);
+        list_add(s->p_port, t);
+    }
+    list_set_sel(s->p_port,
+                 g_cfg.printer_port < LPT_MAX ? g_cfg.printer_port : 0);
+    control *ff =
+        on_page(s,
+                ctl_check(w, 10, 58, 230, "Form feed after each job (new page)",
+                          !g_cfg.printer_no_ff, on_prn_ff),
+                P_PRINT);
+    ctl_set_tooltip(ff, "Off: the next job goes on the same page");
+    s->p_status = on_page(s, ctl_label(w, 10, 76, 238, 9, "", 0), P_PRINT);
+    on_page(s, ctl_button(w, 10, 92, 80, 13, "Print Queue...", 0, on_prn_queue),
+            P_PRINT);
+    on_page(s, ctl_button(w, 96, 92, 70, 13, "Test Page", 0, on_prn_test),
+            P_PRINT);
+    on_page(s,
+            ctl_label(w, 10, 112, 240, 18,
+                      "Pick the printer's language: ESC/P for Epson-style\n"
+                      "dot matrix, PCL for HP lasers. Unsure? Text only.",
+                      0),
+            P_PRINT);
+    prn_status(s);
+
     /* bottom bar */
     s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
     s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
@@ -601,6 +800,11 @@ static void build(settings_state_t *s) {
 }
 
 static void on_close(void) { os_quit_app_by_desc(&settings_app); }
+
+static void settings_destroy(void *state) {
+    settings_state_t *s = state;
+    close_sub(s);
+}
 
 static void settings_init(void *state) {
     settings_state_t *s = state;
@@ -621,5 +825,6 @@ app_descriptor settings_app = {
     .state_size = sizeof(settings_state_t),
     .init = settings_init,
     .on_frame = settings_frame,
+    .destroy = settings_destroy,
     .single_instance = true,
 };

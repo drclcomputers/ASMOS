@@ -58,6 +58,21 @@ void dlg_draw_now(const char *title, const char *msg);
 
 /* system hooks */
 void dlg_owner_destroyed(window *owner);
+
+/* Print: printer and status, copies, pages (text), Preview and Print. The
+ * job goes to the print queue (os/print.h); the document must stay as it
+ * is while the dialog is open (it is modal). */
+enum { PRINT_DOC_TEXT, PRINT_DOC_IMAGE };
+typedef struct {
+    int kind;
+    const char *name; /* in the queue */
+    const char *text; /* PRINT_DOC_TEXT */
+    uint32_t len;
+    const uint8_t *pix; /* PRINT_DOC_IMAGE: 16-colour bytes */
+    int w, h, stride;
+} print_doc_t;
+void dlg_print(window *owner, const print_doc_t *doc);
+
 /* call fn(user, arg) for `owner`'s app (guarded for .APP windows) */
 extern void (*g_dlg_call_hook)(window *owner, void (*fn)(void *, void *),
                                void *user, void *arg);

@@ -9,7 +9,10 @@
 #include "fs/fs.h"
 
 #include "config/runtime_config.h"
+#include "drivers/fdd.h"
 #include "drivers/ne2000.h"
+#include "fs/fdformat.h"
+#include "lib/audio.h"
 #include "lib/cpu.h"
 #include "lib/fpu_emu.h"
 #include "lib/memory.h"
@@ -19,6 +22,7 @@
 #include "network/gopher.h"
 #include "network/net.h"
 #include "os/appload.h"
+#include "os/print.h"
 #include "os/scheduler.h"
 #include "ui/fileops.h"
 
@@ -46,7 +50,8 @@ static const help_topic_t HELP[] = {
      "  write <f> <text> Write text to a file\n"
      "  cp <src> <dst>   Copy a file or directory\n"
      "  mv <src> <dst>   Move or rename\n"
-     "  rm [-r] <f>      Delete a file or directory\n"},
+     "  rm [-r] <f>      Delete a file or directory\n"
+     "  format a: [720|1440] [/q] [label]  Format a floppy\n"},
     {"time", "Date, time and calendar",
      "  date             Show the date and time\n"
      "  date <date>      Set the date: 2026-11-16 or 16.11.2026\n"
@@ -67,9 +72,10 @@ static const help_topic_t HELP[] = {
      "  netconf          Network card and settings\n"
      "  Address, gateway and DNS are in Settings > Network.\n"},
     {"devices", "Sound, printer and ports",
-     "  play <f.wav>     Play a WAV (play stop, ... loop)\n"
+     "  play <f> [loop]  Play a WAV or MIDI file; play stop\n"
      "  lpt              Parallel and serial ports\n"
-     "  print <f> [n]    Print a text file on LPTn\n"},
+     "  print <f> [n]    Print a text file (on LPTn); it is queued\n"
+     "  Printer type and queue: Settings > Printers.\n"},
     {"programs", "Programs",
      "  asm <f> [out]    Assemble .ASM into a .BIN\n"
      "  run <f.bin>      Run a flat .BIN (Ctrl+C stops it)\n"
@@ -728,10 +734,10 @@ void cmd_play(const char *args, char *out, size_t max) {
     while (*args == ' ')
         args++;
     if (!*args || !strcmp(args, "stop")) {
-        wav_stop();
+        audio_close();
         append(out, max,
                *args ? "Stopped.\n"
-                     : "usage: play <file.wav> [loop] | play stop\n");
+                     : "usage: play <file.wav|file.mid> [loop] | play stop\n");
         return;
     }
     char path[128];
@@ -742,13 +748,18 @@ void cmd_play(const char *args, char *out, size_t max) {
     }
     path[n] = 0;
     bool loop = strstr(args + n, "loop") != NULL;
-    const char *err = wav_play_file(path, loop);
+    const char *err = audio_open(path);
     char buf[160];
-    if (err)
+    if (err) {
         sprintf(buf, "play: %s\n", err);
-    else
-        sprintf(buf, "Playing %s on %s%s. 'play stop' to stop.\n", path,
-                sb_model_name(), loop ? " (loop)" : "");
+    } else {
+        audio_set_loop(loop);
+        audio_play();
+        uint32_t sec = audio_len_ms() / 1000;
+        sprintf(buf, "Playing %s (%s, %s, %u:%02u)%s. 'play stop' stops.\n",
+                path, audio_codec_name(), audio_info(), sec / 60, sec % 60,
+                loop ? ", repeating" : "");
+    }
     append(out, max, buf);
 }
 
@@ -808,16 +819,100 @@ void cmd_print(const char *args, char *out, size_t max) {
     }
     int got = fs_read(&f, text, (int)size);
     fs_close(&f);
-    lpt_status_t st;
-    uint32_t sent =
-        lpt_print_text(port, text, got > 0 ? (uint32_t)got : 0, &st);
+    /* through the queue: it prints in the background */
+    uint8_t keep = g_cfg.printer_port;
+    g_cfg.printer_port = (uint8_t)port;
+    const char *nm = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    int id = print_submit_text(nm, text, got > 0 ? (uint32_t)got : 0, 1, 0, 0);
+    g_cfg.printer_port = keep;
     kfree(text);
-    if (st == LPT_READY)
-        sprintf(buf, "Printed %u bytes on LPT%d.\n", sent, port + 1);
+    if (id < 0)
+        sprintf(buf, "print: the queue is full (or out of memory)\n");
     else
-        sprintf(buf, "print: stopped after %u bytes: %s\n", sent,
-                lpt_status_text(st));
+        sprintf(buf, "Queued as job %d on LPT%d (%s).\n", id, port + 1,
+                PRN_TYPE_NAMES[g_cfg.printer_type % PRN_TYPES]);
     append(out, max, buf);
+}
+
+/* format a: [360|720|1200|1440|2880] [/q] [label] */
+void cmd_format(const char *args, char *out, size_t max) {
+    const char *p = args ? args : "";
+    while (*p == ' ')
+        p++;
+    int unit = -1;
+    if ((p[0] == 'a' || p[0] == 'A') && p[1] == ':')
+        unit = 0;
+    else if ((p[0] == 'b' || p[0] == 'B') && p[1] == ':')
+        unit = 1;
+    if (unit < 0) {
+        append(out, max,
+               "Usage: format a: [160|180|320|360|720|1200|1440|2880] [/q] "
+               "[label]\n"
+               "  /q  quick: only a new file system (disk already "
+               "formatted)\n  Erases everything on the disk.\n\n");
+        return;
+    }
+    p += 2;
+    int kb = 0;
+    bool quick = false;
+    char label[12] = "";
+    while (*p) {
+        while (*p == ' ')
+            p++;
+        if (!*p)
+            break;
+        if (p[0] == '/' && (p[1] == 'q' || p[1] == 'Q')) {
+            quick = true;
+            p += 2;
+        } else if (*p >= '0' && *p <= '9') {
+            while (*p >= '0' && *p <= '9')
+                kb = kb * 10 + (*p++ - '0');
+        } else {
+            int n = 0;
+            while (*p && *p != ' ' && n < 11)
+                label[n++] = *p++;
+            label[n] = 0;
+            while (*p && *p != ' ')
+                p++;
+        }
+    }
+    int ok[FDD_MAX_FORMATS], n = fdd_drive_formats((uint8_t)unit, ok),
+                             media = -1;
+    if (!n) {
+        append(out, max, "format: no such floppy drive\n\n");
+        return;
+    }
+    if (!kb)
+        media = ok[0]; /* the drive's own size */
+    for (int i = 0; i < n && media < 0; i++)
+        if (FDD_FORMATS[ok[i]].kb == kb)
+            media = ok[i];
+    if (media < 0) {
+        append(out, max, "format: this drive cannot format that size\n\n");
+        return;
+    }
+    fdformat_t f;
+    if (!fdformat_begin(&f, unit ? DRIVE_FDD1 : DRIVE_FDD0, media, label,
+                        quick)) {
+        append(out, max, "format: ");
+        append(out, max, f.err);
+        append(out, max, "\n\n");
+        return;
+    }
+    int pct;
+    while ((pct = fdformat_step(&f)) >= 0 && pct < 100) {
+    }
+    char b[96];
+    if (pct < 0) {
+        snprintf(b, sizeof(b), "format: %s\n\n", f.err);
+    } else {
+        const fdd_format_t *fm = &FDD_FORMATS[media];
+        uint32_t data = (uint32_t)(fm->spt * fm->heads * fm->tracks) - 1 -
+                        2u * fm->fat_sectors - fm->root_entries / 16;
+        snprintf(b, sizeof(b), "Formatted %c: as %s. %u bytes free.\n\n",
+                 'A' + unit, fm->name, data * 512);
+    }
+    append(out, max, b);
 }
 
 void cmd_lspci(char *out, size_t max) {

@@ -38,7 +38,11 @@ typedef struct __attribute__((packed)) {
     uint8_t no_tooltips;
     uint8_t no_power_anim; /* shut down / restart at once */
     uint8_t fps_cap;       /* 0 = 60, 1 = 30, 2 = 20 frames a second */
-    uint8_t _reserved[25];
+    /* Printing (os/print.h) */
+    uint8_t printer_type;  /* PRN_TEXT, PRN_ESCP, PRN_PCL */
+    uint8_t printer_port;  /* 0 = LPT1 */
+    uint8_t printer_no_ff; /* 1 = no form feed after a job */
+    uint8_t _reserved[22];
 } os_config_t;
 
 extern os_config_t g_cfg;

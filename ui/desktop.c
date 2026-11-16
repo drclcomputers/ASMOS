@@ -457,6 +457,9 @@ static void menu_eject_fdd(void) {
     dlg_message(NULL, "Eject", "No floppy selected or mounted.");
 }
 
+extern app_descriptor fdformat_app;
+static void menu_format_fdd(void) { os_launch_app(&fdformat_app); }
+
 static void menu_insert_fdd(void) {
     if (fdd_insert(DRIVE_FDD0) || fdd_insert(DRIVE_FDD1)) {
         desktop_fs_set_dirty();
@@ -466,8 +469,266 @@ static void menu_insert_fdd(void) {
     }
 }
 
-/* ── desktop init ───────────────────────────────────────────────────────── */
+/* ── the Apps menu ──────────────────────────────────────────────────────── */
 static menu *s_apps_menu;
+
+/* The Apps menu mirrors the /APPS folder (.APPs and .LNK shortcuts):
+ *   /APPS/X.APP          directly in Apps
+ *   /APPS/GAMES/X.APP    in the built-in Games group (folders ACCESSOR,
+ *                        GAMES, MULTIMED, SYSTEM: the built-in groups)
+ *   /APPS/ACME/X.APP     a group of its own, "Acme" (or the first line of
+ *                        /APPS/ACME/GROUP.TXT: "Acme Software")
+ * Copy a .APP in to add it; delete it (or the folder) to take it away.
+ * The built-in apps are not files: they can't be deleted. The menu is
+ * rebuilt when files change (g_fs_rev), at most once a second. */
+#define APPS_DIR "/APPS"
+#define MAX_EXT_APPS 64
+#define MAX_USER_GROUPS 10
+
+typedef struct {
+    char label[24];
+    char path[64];        /* a .APP to load, or */
+    app_descriptor *desc; /* a built-in app (from a shortcut) */
+} ext_app_t;
+
+static ext_app_t s_ext[MAX_EXT_APPS];
+static int s_next;
+static struct {
+    char name[24]; /* shown */
+    char dir[9];   /* folder */
+} s_groups[MAX_USER_GROUPS];
+static int s_ngroups;
+static const char *const BUILTIN_DIRS[APP_GROUPS] = {"", "ACCESSOR", "GAMES",
+                                                     "MULTIMED", "SYSTEM"};
+static uint32_t s_apps_rev = 0xFFFFFFFF, s_apps_tick;
+
+static void launch_ext(void *ud) {
+    const ext_app_t *e = ud;
+    if (e->desc)
+        os_launch_app(e->desc);
+    else if (!appload_launch(e->path))
+        dlg_message(NULL, e->label, appload_last_error());
+}
+
+/* ── shortcuts (.LNK) ──────────────────────────────────────────────────
+ * A text file: line 1 the target, line 2 (optional) the label.
+ *   Calculator             a built-in app, by its name in the Apps menu
+ *   /FDD0/GAME.APP         a .APP anywhere
+ * so built-in apps can be put in groups too (`write X.LNK Calculator`);
+ * deleting the shortcut leaves the app. */
+static bool read_shortcut(const char *path, ext_app_t *x) {
+    char buf[128];
+    fat_file_t f;
+    if (!fs_open(path, &f))
+        return false;
+    int n = fs_read(&f, buf, sizeof(buf) - 1);
+    fs_close(&f);
+    if (n <= 0)
+        return false;
+    buf[n] = 0;
+    char *l1 = buf, *l2 = NULL;
+    for (char *p = buf; *p; p++)
+        if (*p == '\r' || *p == '\n') {
+            *p++ = 0;
+            while (*p == '\r' || *p == '\n')
+                p++;
+            l2 = p;
+            for (char *q = l2; *q; q++)
+                if (*q == '\r' || *q == '\n')
+                    *q = 0;
+            break;
+        }
+    while (*l1 == ' ')
+        l1++;
+    int e = (int)strlen(l1);
+    while (e && l1[e - 1] == ' ')
+        l1[--e] = 0;
+    if (!*l1)
+        return false;
+    x->desc = NULL;
+    x->path[0] = 0;
+    for (int i = 0; i < app_registry_count && !x->desc; i++)
+        if (app_registry[i].menu_label &&
+            (!strcasecmp(l1, app_registry[i].menu_label) ||
+             !strcasecmp(l1, app_registry[i].desc->name))) {
+            x->desc = app_registry[i].desc;
+            snprintf(x->label, sizeof(x->label), "%s",
+                     app_registry[i].menu_label);
+        }
+    if (!x->desc) {
+        snprintf(x->path, sizeof(x->path), "%s", l1);
+        if (!appload_peek_name(x->path, x->label, sizeof(x->label)))
+            return false; /* nothing there to run */
+    }
+    if (l2 && *l2)
+        snprintf(x->label, sizeof(x->label), "%s", l2);
+    return true;
+}
+
+/* FileF and the desktop: opening a .LNK runs its target */
+bool desktop_open_shortcut(const char *path) {
+    ext_app_t x;
+    if (!read_shortcut(path, &x))
+        return false;
+    launch_ext(&x);
+    return true;
+}
+
+/* "GAMES   " + "APP" -> "GAMES", and the 8.3 name as text */
+static void name83(const dir_entry_t *e, char *out, bool with_ext) {
+    int n = 0;
+    for (int k = 0; k < 8 && e->name[k] != ' '; k++)
+        out[n++] = (char)e->name[k];
+    if (with_ext && e->ext[0] != ' ') {
+        out[n++] = '.';
+        for (int k = 0; k < 3 && e->ext[k] != ' '; k++)
+            out[n++] = (char)e->ext[k];
+    }
+    out[n] = 0;
+}
+
+static bool is_ext(const dir_entry_t *e, const char *x) {
+    return !(e->attr & (ATTR_DIRECTORY | 0x08)) && (e->ext[0] | 0x20) == x[0] &&
+           (e->ext[1] | 0x20) == x[1] && (e->ext[2] | 0x20) == x[2];
+}
+
+static bool is_folder(const dir_entry_t *e) {
+    return (e->attr & ATTR_DIRECTORY) && e->name[0] != '.' && e->name[0] != 0 &&
+           e->name[0] != 0xE5;
+}
+
+/* the .APPs of one folder, as items of `m` */
+static void add_folder_apps(menu *m, const char *dir) {
+    uint8_t drive;
+    uint16_t cluster;
+    static dir_entry_t ents[48];
+    int count = 0;
+    if (!m || !fs_resolve_dir(dir, &drive, &cluster) ||
+        !fs_list_dir(drive, cluster, ents, 48, &count))
+        return;
+    for (int i = 0; i < count && s_next < MAX_EXT_APPS; i++) {
+        const dir_entry_t *e = &ents[i];
+        bool app = is_ext(e, "app"), lnk = is_ext(e, "lnk");
+        if (e->name[0] == 0 || e->name[0] == 0xE5 || !(app || lnk))
+            continue;
+        if (m->item_count >= MAX_MENU_ITEMS)
+            break;
+        ext_app_t *x = &s_ext[s_next];
+        char fn[13], full[64];
+        name83(e, fn, true);
+        snprintf(full, sizeof(full), "%s/%s", dir, fn);
+        if (lnk) {
+            if (!read_shortcut(full, x))
+                continue; /* a shortcut to nothing */
+        } else {
+            x->desc = NULL;
+            snprintf(x->path, sizeof(x->path), "%s", full);
+            if (!appload_peek_name(x->path, x->label, sizeof(x->label)))
+                continue; /* not a .APP we can run */
+        }
+        s_next++;
+        menu_add_item_ud(m, x->label, launch_ext, x);
+    }
+}
+
+/* the folders in /APPS that aren't built-in groups: new groups */
+static void find_groups(void) {
+    s_ngroups = 0;
+    uint8_t drive;
+    uint16_t cluster;
+    static dir_entry_t ents[48];
+    int count = 0;
+    if (!fs_resolve_dir(APPS_DIR, &drive, &cluster) ||
+        !fs_list_dir(drive, cluster, ents, 48, &count))
+        return;
+    for (int i = 0; i < count && s_ngroups < MAX_USER_GROUPS; i++) {
+        if (!is_folder(&ents[i]))
+            continue;
+        char dn[9];
+        name83(&ents[i], dn, false);
+        bool builtin = false;
+        for (int g = 1; g < APP_GROUPS; g++)
+            builtin |= !strcmp(dn, BUILTIN_DIRS[g]);
+        if (builtin)
+            continue;
+        strcpy(s_groups[s_ngroups].dir, dn);
+        /* the name: GROUP.TXT, else "ACME" -> "Acme" */
+        char path[40], *nm = s_groups[s_ngroups].name;
+        snprintf(path, sizeof(path), "%s/%s/GROUP.TXT", APPS_DIR, dn);
+        fat_file_t f;
+        int n = 0;
+        if (fs_open(path, &f)) {
+            n = fs_read(&f, nm, 23);
+            fs_close(&f);
+        }
+        int k = 0;
+        while (k < n && nm[k] != '\r' && nm[k] != '\n' && nm[k] >= 32)
+            k++;
+        nm[k] = 0;
+        if (!k) {
+            for (k = 0; dn[k]; k++)
+                nm[k] = k ? (char)(dn[k] >= 'A' && dn[k] <= 'Z' ? dn[k] + 32
+                                                                : dn[k])
+                          : dn[k];
+            nm[k] = 0;
+        }
+        /* keep them sorted by name */
+        int at = s_ngroups++;
+        while (at > 0 && strcmp(s_groups[at - 1].name, s_groups[at].name) > 0) {
+            char tn[24], td[9];
+            strcpy(tn, s_groups[at].name), strcpy(td, s_groups[at].dir);
+            strcpy(s_groups[at].name, s_groups[at - 1].name);
+            strcpy(s_groups[at].dir, s_groups[at - 1].dir);
+            strcpy(s_groups[at - 1].name, tn), strcpy(s_groups[at - 1].dir, td);
+            at--;
+        }
+    }
+}
+
+void desktop_refresh_apps_menu(void) {
+    if (!s_apps_menu)
+        return;
+    menubar_close_all(&g_menubar); /* no dropdown on the old submenus */
+    menu_clear(s_apps_menu);
+    s_next = 0;
+    s_apps_rev = g_fs_rev;
+    char dir[24];
+    /* the built-in groups, with the .APPs of their folders */
+    for (int g = 1; g < APP_GROUPS; g++) {
+        menu *sub = menu_add_submenu(s_apps_menu, (char *)APP_GROUP_NAMES[g]);
+        for (int i = 0; sub && i < app_registry_count; i++)
+            if (app_registry[i].group == g && app_registry[i].menu_label)
+                menu_add_item_ud(sub, (char *)app_registry[i].menu_label,
+                                 launch_app_ud, app_registry[i].desc);
+        snprintf(dir, sizeof(dir), "%s/%s", APPS_DIR, BUILTIN_DIRS[g]);
+        add_folder_apps(sub, dir);
+    }
+    /* the groups made as folders */
+    find_groups();
+    for (int i = 0; i < s_ngroups; i++) {
+        menu *sub = menu_add_submenu(s_apps_menu, s_groups[i].name);
+        snprintf(dir, sizeof(dir), "%s/%s", APPS_DIR, s_groups[i].dir);
+        add_folder_apps(sub, dir);
+    }
+    menu_add_separator(s_apps_menu);
+    /* the .APPs in /APPS itself, then the built-ins that sit here */
+    add_folder_apps(s_apps_menu, APPS_DIR);
+    for (int i = 0; i < app_registry_count; i++)
+        if (app_registry[i].group == APP_TOP && app_registry[i].menu_label)
+            menu_add_item_ud(s_apps_menu, (char *)app_registry[i].menu_label,
+                             launch_app_ud, app_registry[i].desc);
+}
+
+/* files changed: rebuild, once a second at most, never under an open menu */
+static void apps_menu_follow(void) {
+    if (g_fs_rev == s_apps_rev || g_menubar.open_index >= 0 ||
+        pit_ticks - s_apps_tick < 1000)
+        return;
+    s_apps_tick = pit_ticks;
+    desktop_refresh_apps_menu();
+}
+
+/* ── desktop init ───────────────────────────────────────────────────────── */
 
 void desktop_init(void) {
     static window_spec_t spec = {
@@ -487,11 +748,7 @@ void desktop_init(void) {
     win->show_order = -1;
 
     s_apps_menu = window_add_menu(win, "Apps");
-    for (int i = 0; i < app_registry_count; i++) {
-        if (app_registry[i].menu_label)
-            menu_add_item_ud(s_apps_menu, (char *)app_registry[i].menu_label,
-                             launch_app_ud, app_registry[i].desc);
-    }
+    desktop_refresh_apps_menu(); /* built from /APPS: see above */
 
     menu *file_menu = window_add_menu(win, "File");
     menu_add_item(file_menu, "New File", menu_new_file);
@@ -512,6 +769,7 @@ void desktop_init(void) {
     menu *action_menu = window_add_menu(win, "Action");
     menu_add_item(action_menu, "Insert Floppy", menu_insert_fdd);
     menu_add_item(action_menu, "Eject Floppy", menu_eject_fdd);
+    menu_add_item(action_menu, "Format Floppy...", menu_format_fdd);
     menu_add_separator(action_menu);
     menu_add_item(action_menu, "Restart", menu_restart);
     menu_add_item(action_menu, "Shut Down", menu_shutdown);
@@ -633,6 +891,7 @@ void desktop_draw(void) {
 }
 
 void desktop_on_frame(void) {
+    apps_menu_follow();
     if (desktop_fs_is_dirty())
         desktop_fs_reload();
 

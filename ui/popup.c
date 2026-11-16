@@ -23,6 +23,8 @@ static int s_hot = -1;           /* highlighted item */
 static int s_mx = -1, s_my = -1; /* last mouse position seen */
 static const window *s_owner;    /* focused window when shown */
 
+bool popup_is_menu(const menu *m) { return m == &s_menu; }
+
 menu *popup_menu(void) {
     memset(&s_menu, 0, sizeof(s_menu));
     s_menu.title = "";

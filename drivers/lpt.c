@@ -148,3 +148,20 @@ uint32_t lpt_print_text(int n, const char *text, uint32_t len,
         *st = s;
     return i;
 }
+
+/* Non-blocking: send one byte if the printer is ready for it now.
+ * LPT_READY = sent; LPT_BUSY = try again later; else the error. */
+lpt_status_t lpt_try_put(int n, uint8_t c) {
+    uint16_t b = lpt_base(n);
+    if (!b)
+        return LPT_NO_PORT;
+    lpt_status_t s = decode(inb(b + 1));
+    if (s != LPT_READY)
+        return s;
+    outb(b, c);
+    io_delay(1);
+    outb(b + 2, CT_SELECTIN | CT_NINIT | CT_STROBE);
+    io_delay(1);
+    outb(b + 2, CT_SELECTIN | CT_NINIT);
+    return LPT_READY;
+}

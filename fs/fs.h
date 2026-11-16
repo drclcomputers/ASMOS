@@ -124,6 +124,9 @@ bool path_is_protected(const char *name_or_path);
 bool fs_mount(void);
 void fs_unmount(uint8_t drive_id);
 bool fs_mount_drive(uint8_t drive_id);
+/* goes up whenever a file or folder is made, deleted or renamed, or a disk
+ * is mounted: for views that list folders (the Apps menu) */
+extern uint32_t g_fs_rev;
 bool fs_select_drive(uint8_t drive_id);
 uint8_t fs_current_drive(void);
 const char *fs_drive_label(uint8_t drive_id);

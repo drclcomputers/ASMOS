@@ -16,8 +16,10 @@
 
 #include "config/config.h"
 #include "fs/fs.h"
+#include "lib/audio.h"
 #include "network/net.h"
 #include "os/os.h"
+#include "os/print.h"
 #include "os/scheduler.h"
 
 /* ── tunables ─────────────────────────────────────────────── */
@@ -302,6 +304,8 @@ void cli_run(void) {
         ps2_update();
         net_poll();
         task_yield(); /* gopher and run execute as tasks */
+        print_pump();
+        audio_update();
         scheduler_reap();
 
         if (!kb.key_pressed) {
@@ -505,6 +509,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_time(argument, out_buffer, max_len);
     else if (!strcmp(command, "cal"))
         cmd_cal(argument, out_buffer, max_len);
+    else if (!strcmp(command, "format"))
+        cmd_format(argument, out_buffer, max_len);
     else if (!strcmp(command, "shutdown"))
         cmd_shutdown(argument, out_buffer, max_len);
     else if (!strcmp(command, "reboot"))

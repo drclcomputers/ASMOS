@@ -21,6 +21,10 @@ void sb16_stop(void);
 bool sb16_is_playing(void);
 void sb16_unmute_fm(void);
 void sb16_set_loop(bool loop);
+void sb16_pause(bool pause); /* stops after the block in flight */
+bool sb16_paused(void);
+uint32_t sb16_position(void);    /* source sample being played */
+void sb16_seek(uint32_t offset); /* next block from there */
 
 const char *sb_model_name(void); /* "Sound Blaster Pro", ... */
 int sb_dsp_version(void);        /* major << 8 | minor, 0 = none */

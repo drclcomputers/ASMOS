@@ -1,5 +1,6 @@
 #include "ui/fileops.h"
 #include "fs/fs.h"
+#include "lib/audio.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/wav.h"
@@ -8,6 +9,7 @@
 #include "os/os.h"
 #include "os/prefs.h"
 #include "os/watchdog.h"
+#include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 #include "ui/dialogs.h"
 
@@ -16,6 +18,7 @@ extern void ff_open_dir_pub(uint16_t cluster, const char *path);
 extern void ff_dir_changed_pub(const char *dir);
 extern void teditor_open_file(const char *path);
 extern void hexview_open_file(const char *path);
+extern void audioplayer_open_file(const char *path);
 extern void asmdraw_open_file(const char *path);
 
 /* ── paths ─────────────────────────────────────────────────────────────── */
@@ -450,16 +453,20 @@ void fo_open(window *owner, const char *path) {
     static const char *const text[] = {"TXT", "CFG", "ASM", "MD",  "INI",
                                        "BAT", "C",   "H",   "LOG", NULL};
     static const char *const app[] = {"APP", NULL};
-    static const char *const wav[] = {"WAV", NULL};
+    static const char *const lnk[] = {"LNK", NULL};
+    const char *const *wav = audio_extensions(); /* WAV, MID, ... */
     static const char *const pic[] = {"PIC", NULL};
     if (ext_is(name, app)) {
         fo_launch_app(owner, path);
+    } else if (ext_is(name, lnk)) {
+        if (!desktop_open_shortcut(path))
+            dlg_message(owner, "Open",
+                        "This shortcut leads nowhere: its first line must "
+                        "be an app's name or the path of a .APP.");
     } else if (ext_is(name, text) || !strchr(name, '.')) {
         teditor_open_file(path);
     } else if (ext_is(name, wav)) {
-        const char *err = wav_play_file(path, false);
-        if (err)
-            fo_report(owner, "Play", err);
+        audioplayer_open_file(path);
     } else if (ext_is(name, pic)) {
         asmdraw_open_file(path);
     } else {
@@ -893,7 +900,7 @@ void fo_ask_empty_trash(window *owner, fo_done_cb done, void *user) {
     if (!a)
         return;
     char m[96];
-    snprintf(m, sizeof(m), "Delete the %d item%s in the Trash\nfor good?", n,
+    snprintf(m, sizeof(m), "Delete the %d item%s in the Trash for good?", n,
              n == 1 ? "" : "s");
     dlg_confirm(owner, "Empty Trash", m, empty_done, a);
 }

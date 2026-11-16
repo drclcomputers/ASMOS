@@ -437,6 +437,17 @@ static void menu_close(void) {
     if (s)
         os_close_own_instance(s->win);
 }
+static void menu_print(void) {
+    asmdraw_state_t *s = ui_active_state();
+    if (!s || !s->canvas)
+        return;
+    const char *base = strrchr(s->path, '/');
+    base = base ? base + 1 : (s->path[0] ? s->path : "Picture");
+    print_doc_t doc = {PRINT_DOC_IMAGE, base,        NULL,        0,
+                       s->canvas,       s->canvas_w, s->canvas_h, s->canvas_w};
+    dlg_print(s->win, &doc);
+}
+
 static void menu_about(void) {
     dlg_message(NULL, "About ASMDraw",
                 "ASMDraw v2.0\nPencil, eraser, line, rectangle, fill.\n"
@@ -486,6 +497,7 @@ static void asmdraw_init(void *state) {
     menu_add_item(f, "Open...", menu_open);
     menu_add_item(f, "Save", menu_save);
     menu_add_item(f, "Save As...", menu_save_as);
+    menu_add_item(f, "Print...", menu_print);
     menu_add_separator(f);
     menu_add_item(f, "Close", menu_close);
     menu_add_item(f, "About", menu_about);

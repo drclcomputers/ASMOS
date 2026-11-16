@@ -378,6 +378,12 @@ static void api_menu_enable(menu *m, bool on) {
         menu_enable_last(m, on);
 }
 
+static menu *api_submenu(menu *m, const char *label) {
+    if (!m || !label || !s_calling_state || popup_is_menu(m))
+        return NULL;
+    return menu_add_submenu(m, (char *)label);
+}
+
 static void api_menu_separator(menu *m) {
     if (m)
         menu_add_separator(m);
@@ -583,6 +589,7 @@ static const os_api_t s_api = {
     .mem_set = memset,
     .speed_flags = api_speed_flags,
     .frame_ms = cfg_frame_ms,
+    .submenu = api_submenu,
 };
 
 /* ── guarded trampolines ────────────────────────────────────────────── */
@@ -996,6 +1003,24 @@ app_descriptor *appload_find(const char *name) {
 }
 
 /* ── directory scan ─────────────────────────────────────────────────── */
+
+/* the name in a .APP's header, without loading it (the Apps menu) */
+bool appload_peek_name(const char *path, char *out, int max) {
+    fat_file_t f;
+    asma_header_t h;
+    if (!path || !fs_open(path, &f))
+        return false;
+    int n = fs_read(&f, &h, (int)sizeof(h));
+    fs_close(&f);
+    if (n < (int)__builtin_offsetof(asma_header_t, entry_init) ||
+        h.magic != ASMA_MAGIC)
+        return false;
+    int k = 0;
+    for (; k < max - 1 && k < ASMA_NAME_MAX && h.name[k]; k++)
+        out[k] = (h.name[k] >= 32 && h.name[k] < 127) ? h.name[k] : '?';
+    out[k] = 0;
+    return k > 0;
+}
 
 int appload_scan_dir(const char *dir_path) {
     uint8_t drive;
