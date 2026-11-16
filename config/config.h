@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "1.9.0"
+#define VER "1.7.3"
 
 extern int g_screen_width;
 extern int g_screen_height;
@@ -18,6 +18,9 @@ extern int g_video_mode;
 
 /* the back buffer: after the kernel's zeroed data, above 1 MB (linker.ld) */
 extern unsigned char _backbuf[];
+/* RAM in bytes as the BIOS reported it at boot (INT 15h AH=88h), 0 =
+ * unknown; set in kernel.c */
+extern unsigned int g_ram_bytes;
 #define BACKBUF ((uint8_t *)_backbuf)
 #define BACKBUF_SIZE g_backbuf_size
 #define HEAP_MIN_START (0x100000)

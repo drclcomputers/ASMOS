@@ -84,7 +84,8 @@ typedef enum {
 /* Labels */
 #define LS_CENTER (1u << 12)
 #define LS_RIGHT (1u << 13)
-#define LS_BIG (1u << 14) /* 8x8 font instead of the small one */
+#define LS_BIG (1u << 14)  /* 8x8 font instead of the small one */
+#define LS_BOLD (1u << 15) /* the bold system font */
 /* Edits */
 #define ES_MULTILINE (1u << 12)
 #define ES_READONLY (1u << 13)

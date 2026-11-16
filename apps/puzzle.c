@@ -132,7 +132,8 @@ static void paint(control *c, int x, int y, int w, int h) {
         sprintf(n, "%d", s->t[i]);
         int f = UI_FONT_BOLD;
         draw_string(tx + (TILE - text_width(n, f)) / 2,
-                    ty + (TILE - font_height(f)) / 2, n, WHITE, f);
+                    ty + (TILE - font_height(f)) / 2, n,
+                    s->solved ? BLACK : WHITE, f);
     }
 }
 
@@ -189,7 +190,7 @@ static void menu_about(void) {
 static void puzzle_init(void *state) {
     puzzle_state_t *s = state;
     int cw = BOARD + 8, ch = BOARD + 8 + 16;
-    s->win = app_window(s, "Puzzle", 40, 40, cw + 2, ch + 11, DARK_GRAY, 0);
+    s->win = app_window(s, "Puzzle", 40, 40, cw + 2, ch + 17, DARK_GRAY, 0);
     if (!s->win)
         return;
     s->win->lazy_custom = true; /* the board only changes in its handler */

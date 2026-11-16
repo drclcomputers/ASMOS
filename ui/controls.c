@@ -918,8 +918,10 @@ static void list_row(const control *c, int x, int y, int w, const char *t,
 /* ── drawing ───────────────────────────────────────────────────────────── */
 
 static void draw_label(control *c) {
-    int big = (c->style & LS_BIG) ? 1 : CF;
-    int lh = big == 1 ? 10 : 8;
+    int big = (c->style & LS_BIG)    ? 1
+              : (c->style & LS_BOLD) ? UI_FONT_BOLD
+                                     : CF;
+    int lh = big == CF ? 8 : 10;
     if (c->bg != 0xFF)
         fill_rect(c->ax, c->ay, c->aw, c->ah, c->bg);
     if (c->style & CS_BORDER)
@@ -932,7 +934,10 @@ static void draw_label(control *c) {
             lines++;
     int y = c->ay + pad;
     if (lines == 1)
-        y = c->ay + (c->ah - (big == 1 ? 8 : 6)) / 2;
+        y = c->ay + (c->ah - (big == 1    ? 8
+                              : big == CF ? 6
+                                          : font_height(big))) /
+                        2;
     const char *p = c->text;
     uint8_t col = fgc(c, TH_TEXT);
     while (1) {

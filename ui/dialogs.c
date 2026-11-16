@@ -105,6 +105,8 @@ static dlg_t *open_dlg(window *owner, int kind, const char *title, int w,
         return NULL;
     }
     int x = (SCREEN_WIDTH - w) / 2, y = (SCREEN_HEIGHT - h) / 3;
+    if (y < MENUBAR_H + 1) /* tall dialog, small screen */
+        y = MENUBAR_H + 1;
     if (owner) {
         x = owner->x + (owner->w - w) / 2;
         y = owner->y + 20;
@@ -234,6 +236,47 @@ static void message_box(window *owner, int kind, const char *title,
 
 void dlg_message(window *owner, const char *title, const char *msg) {
     message_box(owner, K_MSG, title, msg, NULL, NULL);
+}
+
+void dlg_info(window *owner, const char *title, const char *heading,
+              const char *sub, const dlg_row_t *rows, int n,
+              const char *footer) {
+    char ftext[256];
+    int flines = footer ? wrap_text(footer, ftext, sizeof(ftext), 52) : 0;
+    const int W = 260, KX = 8, KW = 62, VX = KX + KW + 6, VW = W - VX - 10;
+    bool tight = SCREEN_HEIGHT < 300; /* 320x200: must fit under the bar */
+    int rh = tight ? 8 : 9, gap = tight ? 3 : 6;
+    int h = gap + 10 + (sub ? 10 : 0) + gap + 4 + n * rh + gap + 6 +
+            (flines ? flines * 8 + gap : 0) + 13 + gap;
+    dlg_t *d = open_dlg(owner, K_MSG, title, W, h + 16);
+    if (!d)
+        return;
+    int y = gap;
+    ctl_label(d->win, 0, y, W - 2, 10, heading, LS_CENTER | LS_BOLD);
+    y += 10;
+    if (sub) {
+        ctl_label(d->win, 0, y, W - 2, 8, sub, LS_CENTER);
+        y += 10;
+    }
+    y += gap;
+    ctl_group(d->win, KX - 4, y - 4, W - 2 * KX + 2, n * rh + 10, "");
+    y += 2;
+    for (int i = 0; i < n; i++, y += rh) {
+        if (rows[i].key && rows[i].key[0]) {
+            char k[24];
+            snprintf(k, sizeof(k), "%s:", rows[i].key);
+            ctl_label(d->win, KX, y, KW, 8, k, LS_RIGHT);
+        }
+        ctl_label(d->win, VX, y, VW, 8, rows[i].value ? rows[i].value : "", 0);
+    }
+    y += gap + 6;
+    if (flines) {
+        ctl_label(d->win, 8, y, W - 18, flines * 8, ftext, LS_CENTER);
+        y += flines * 8 + gap;
+    }
+    control *ok = ctl_button(d->win, (W - 52) / 2, y, 50, 13, "OK", 1, on_ok);
+    ctl_style_add(ok, CS_DEFAULT | CS_CANCEL);
+    ctl_focus(ok);
 }
 
 void dlg_confirm(window *owner, const char *title, const char *msg,
@@ -616,6 +659,8 @@ void dlg_draw_now(const char *title, const char *msg) {
         lines = 12;
     int w = 210, h = 16 + 8 + lines * 8 + 8;
     int x = (SCREEN_WIDTH - w) / 2, y = (SCREEN_HEIGHT - h) / 3;
+    if (y < MENUBAR_H + 1) /* tall dialog, small screen */
+        y = MENUBAR_H + 1;
     gfx_reset_clip();
     fill_rect(x + 3, y + 3, w, h, BLACK);
     fill_rect(x, y, w, h, TH_FACE);

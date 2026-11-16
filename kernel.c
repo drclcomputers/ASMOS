@@ -95,6 +95,7 @@ static void dbg_bar(int col, uint8_t color) {
     }
 }
 
+unsigned int g_ram_bytes;
 static uint32_t s_ram_top; /* end of RAM (or of what we use of it) */
 
 static void detect_heap_range(void) {
@@ -115,6 +116,7 @@ static void detect_heap_range(void) {
     dbg_bar(2, 1);
 
     uint32_t total_ram = *(volatile uint32_t *)0x0500;
+    g_ram_bytes = total_ram;
 
     dbg_bar(3, 6);
 

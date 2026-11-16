@@ -16,10 +16,16 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 
+#include "drivers/ne2000.h"
+#include "drivers/opl2.h"
+#include "drivers/sb16.h"
 #include "drivers/serial.h"
 #include "drivers/speaker.h"
 #include "fs/fdd_ctrl.h"
+#include "lib/alloc.h"
 #include "lib/core.h"
+#include "lib/cpu.h"
+#include "lib/pmm.h"
 
 /* Defined in apps/filef.c (apps have no public headers). */
 void ff_open_dir_pub(uint16_t cluster, const char *path);
@@ -345,12 +351,77 @@ static void run_if_yes(void *fn, bool yes) {
 }
 
 static void menu_about_os(void) {
-    char x[200];
-    sprintf(x,
-            "ASMOS ver %s\nDeveloped by drclcomputers.\n\nCheck out more of my "
-            "work here: https://github.com/drclcomputers/ASMOS",
-            VER);
-    dlg_message(NULL, "About ASMOS", x);
+    char ver[24], cpu[56], fpu[48], mem[48], disp[48], snd[48], snd2[48],
+        net[48], net2[48], up[24];
+    sprintf(ver, "ASMOS %s", VER);
+
+    snprintf(cpu, sizeof(cpu), "%s", cpu_model_str());
+    if (!cpu_has_fpu())
+        strcpy(fpu, "None (x87 emulated)");
+    else if (cpu_fpu_emulated())
+        strcpy(fpu, "Present, emulation forced");
+    else if (cpu_family() == 3)
+        strcpy(fpu, "80387 coprocessor");
+    else
+        strcpy(fpu, "x87 FPU");
+
+    uint32_t free_kb = (heap_remaining() + pmm_free_count() * 4096) / 1024;
+    if (g_ram_bytes)
+        sprintf(mem, "%u KB, %u KB free", g_ram_bytes / 1024, free_kb);
+    else
+        sprintf(mem, "Unknown, %u KB free", free_kb);
+
+    sprintf(disp, "VGA %dx%d, %d colors", SCREEN_WIDTH, SCREEN_HEIGHT,
+            SCREEN_WIDTH == 320 ? 256 : 16);
+
+    snd2[0] = 0;
+    if (sb16_detected()) {
+        int v = sb_dsp_version();
+        sprintf(snd, "%s, DSP %d.%02d", sb_model_name(), v >> 8, v & 0xFF);
+        sprintf(snd2, "Port %Xh, IRQ %d, DMA %d", sb_port(), sb_irq(),
+                sb_dma());
+    } else if (opl2_detected()) {
+        strcpy(snd, "AdLib (OPL2 FM)");
+    } else {
+        strcpy(snd, "PC speaker");
+    }
+
+    net2[0] = 0;
+    if (ne2000_detected()) {
+        uint8_t m[6];
+        ne2000_get_mac(m);
+        int irq = ne2000_irq();
+        if (irq >= 0)
+            sprintf(net, "NE2000 (%s), %Xh, IRQ %d", ne2000_bus(),
+                    ne2000_io_base(), irq);
+        else
+            sprintf(net, "NE2000 (%s), %Xh", ne2000_bus(), ne2000_io_base());
+        sprintf(net2, "MAC %02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2],
+                m[3], m[4], m[5]);
+    } else {
+        strcpy(net, "None");
+    }
+
+    time_hms_t u = uptime_hms();
+    sprintf(up, "%u:%02u:%02u", u.hours, u.minutes, u.seconds);
+
+    dlg_row_t rows[10];
+    int n = 0;
+    rows[n++] = (dlg_row_t){"Processor", cpu};
+    rows[n++] = (dlg_row_t){"Coprocessor", fpu};
+    rows[n++] = (dlg_row_t){"Memory", mem};
+    rows[n++] = (dlg_row_t){"Display", disp};
+    rows[n++] = (dlg_row_t){"Sound", snd};
+    if (snd2[0])
+        rows[n++] = (dlg_row_t){"", snd2};
+    rows[n++] = (dlg_row_t){"Network", net};
+    if (net2[0])
+        rows[n++] = (dlg_row_t){"", net2};
+    rows[n++] = (dlg_row_t){"Uptime", up};
+
+    dlg_info(NULL, "About ASMOS", ver, "Developed by drclcomputers.", rows, n,
+             "Check out more of my work here: "
+             "https://github.com/drclcomputers/ASMOS");
 }
 
 static void do_shutdown(void) {

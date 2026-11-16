@@ -21,6 +21,14 @@ typedef void (*dlg_text_cb)(void *user, const char *text); /* NULL=cancel */
 typedef void (*dlg_bool_cb)(void *user, bool yes);
 
 void dlg_message(window *owner, const char *title, const char *msg);
+/* Information box: a centred heading and subtitle, then rows of
+ * "key: value" (key "" continues the row above), a footer and OK. */
+typedef struct {
+    const char *key, *value;
+} dlg_row_t;
+void dlg_info(window *owner, const char *title, const char *heading,
+              const char *sub, const dlg_row_t *rows, int n,
+              const char *footer);
 void dlg_confirm(window *owner, const char *title, const char *msg,
                  dlg_bool_cb cb, void *user);
 void dlg_input(window *owner, const char *title, const char *prompt,

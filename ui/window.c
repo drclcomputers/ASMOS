@@ -60,9 +60,18 @@ static void draw_titlebar_btn(int ax, int ay, int w, int h, const char *label,
                               uint8_t bg) {
     fill_rect(ax, ay, w, h, bg);
     draw_rect(ax, ay, w, h, BLACK);
-    int tx = ax + w / 2 - (int)(strlen(label) * 3) + 1;
-    int ty = ay + h / 2 - 3 + 1;
-    draw_string(tx, ty, (char *)label, WHITE, 2);
+    /* drawn, not a font glyph: centred exactly, 2 px strokes to match the
+     * bold title (a 6x6 X; a 1 px underscore low in the box) */
+    int s6 = 6, x0 = ax + (w - s6) / 2, y0 = ay + (h - s6) / 2;
+    if (label[0] == 'X') {
+        for (int i = 0; i < s6; i++) {
+            fill_rect(x0 + i, y0 + i, i < s6 - 1 ? 2 : 1, 1, WHITE);
+            fill_rect(x0 + s6 - 1 - i - (i < s6 - 1 ? 1 : 0), y0 + i,
+                      i < s6 - 1 ? 2 : 1, 1, WHITE);
+        }
+    } else {
+        fill_rect(x0, y0 + s6 - 1, s6, 1, WHITE);
+    }
 }
 
 static bool clicked_titlebar_btn(int ax, int ay, int w, int h) {
@@ -513,8 +522,9 @@ void window_draw(window *win) {
             title = title_buf;
         }
 
-        int title_area_center = (button_offset + win->w) / 2;
-        int tx = win->x + title_area_center - text_width(title, font) / 2;
+        /* centred on the whole bar, as on Windows 3.1 and the Mac;
+         * pushed right only if it would run into the buttons */
+        int tx = win->x + (win->w - text_width(title, font)) / 2;
         if (tx < win->x + button_offset + 3)
             tx = win->x + button_offset + 3;
 
