@@ -428,7 +428,7 @@ static void menu_close(void) {
 }
 static void menu_about(void) {
     dlg_message(NULL, "About ASMTerm",
-                "ASMTerm v1.2\nUp/Down: history, PgUp/PgDn: scroll.\n"
+                "ASMTerm v2\nUp/Down: history, PgUp/PgDn: scroll.\n"
                 "(c)2026 @drclcomputers");
 }
 
@@ -468,7 +468,7 @@ static void asmterm_init(void *state) {
     s->term_ctx.size = tctx_size;
     s->term_ctx.userdata = s;
 
-    term_push_line(s, "ASMOS Terminal v1.2");
+    term_push_line(s, "ASMOS Terminal v2");
     term_push_line(s, "Commands: help  asm  run  gopher");
     term_push_line(s, "");
     ctl_focus(s->input);

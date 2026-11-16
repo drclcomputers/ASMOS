@@ -2,15 +2,10 @@
  * with a playlist. Space play/pause, S stop, R start, N next, L loop,
  * +/- volume, Del removes from the list. The list and volume are kept in
  * /PREFS/AUDIOPLA.INI. */
-#include "drivers/opl2.h"
-#include "drivers/sb16.h"
-#include "lib/audio.h"
-#include "os/api.h"
-#include "os/prefs.h"
-#include "ui/uifont.h"
+#include "extapps/shim.h"
 
 #define MAX_LIST 16
-#define PATH_LEN 96
+#define PATH_LEN 192 /* long names */
 #define BARS 24
 #define STATUS_MS 4000
 
@@ -26,8 +21,6 @@ typedef struct {
     uint32_t frame, shown_s, status_until;
     int shown_state;
 } ap_state_t;
-
-app_descriptor audioplayer_app;
 
 static const char *base_of(const char *p) {
     const char *b = strrchr(p, '/');
@@ -378,7 +371,7 @@ static void m_about(void) {
 
 static void ap_init(void *state) {
     ap_state_t *s = state;
-    s->win = app_window(s, "Audio Player", 20, 14, 262, 178, DARK_GRAY, 0);
+    s->win = app_window(s, "Audio Player", 20, 14, 262, 176, DARK_GRAY, 0);
     if (!s->win)
         return;
     s->win->lazy_custom = true; /* meter and bar: invalidated in on_frame */
@@ -438,7 +431,11 @@ static void ap_frame(void *state) {
     ap_state_t *s = state;
     if (!s->win)
         return;
-    audio_update();
+    char req[FS_PATH_SZ]; /* FileF / the desktop: play this file */
+    if (app_open_request(req, sizeof(req))) {
+        got_file(s, req);
+        wm_focus(s->win);
+    }
     if (audio_finished()) { /* the end: the next in the list, if any */
         if (s->cur >= 0 && s->cur + 1 < s->count)
             load_item(s, s->cur + 1, true);
@@ -497,29 +494,4 @@ static void ap_destroy(void *state) {
     audio_close();
 }
 
-/* open a file from the file manager / desktop: in the running player */
-void audioplayer_open_file(const char *path) {
-    ap_state_t *s = NULL;
-    for (int i = 0; i < MAX_RUNNING_APPS && !s; i++)
-        if (running_apps[i].running && running_apps[i].desc == &audioplayer_app)
-            s = running_apps[i].state;
-    if (!s) {
-        app_instance_t *a = os_launch_app(&audioplayer_app);
-        if (!a)
-            return;
-        s = a->state;
-    }
-    if (s && s->win) {
-        got_file(s, path);
-        wm_focus(s->win);
-    }
-}
-
-app_descriptor audioplayer_app = {
-    .name = "AUDIOPLA",
-    .state_size = sizeof(ap_state_t),
-    .init = ap_init,
-    .on_frame = ap_frame,
-    .destroy = ap_destroy,
-    .single_instance = true,
-};
+APP_META("Audio Player", ap_state_t, true, 0, ap_init, ap_frame, ap_destroy);

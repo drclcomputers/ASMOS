@@ -1,4 +1,4 @@
-#include "os/api.h"
+#include "extapps/shim.h"
 
 typedef struct {
     window *win; /* must stay first */
@@ -18,8 +18,11 @@ static void refresh(clock_state_t *s) {
     ctl_set_text(s->time, buf);
     sprintf(buf, "%02d/%02d/%04d", t.day, t.month, t.year);
     ctl_set_text(s->date, buf);
-    if (g_alarm.set && !g_alarm.fired)
-        sprintf(buf, "Alarm %02d:%02d", g_alarm.hour, g_alarm.minute);
+    bool set;
+    int ah, am;
+    A->time->alarm_get(&set, &ah, &am); /* the desktop rings it */
+    if (set)
+        sprintf(buf, "Alarm %02d:%02d", ah, am);
     else
         strcpy(buf, "No alarm");
     ctl_set_text(s->alarm, buf);
@@ -38,10 +41,7 @@ static void alarm_entered(void *user, const char *text) {
         dlg_message(s->win, "Set Alarm", "Use HH:MM, e.g. 07:30.");
         return;
     }
-    g_alarm.hour = h;
-    g_alarm.minute = m;
-    g_alarm.set = true;
-    g_alarm.fired = false;
+    A->time->alarm_set(true, h, m);
     s->last[0] = 0; /* redraw now */
 }
 
@@ -54,7 +54,7 @@ static void on_set_alarm(void) {
 
 static void on_clear_alarm(void) {
     clock_state_t *s = ui_active_state();
-    g_alarm.set = false;
+    A->time->alarm_set(false, 0, 0);
     if (s)
         s->last[0] = 0;
 }
@@ -88,10 +88,4 @@ static void clock_init(void *state) {
 
 static void clock_on_frame(void *state) { refresh(state); }
 
-app_descriptor clock_app = {
-    .name = "CLOCK",
-    .state_size = sizeof(clock_state_t),
-    .init = clock_init,
-    .on_frame = clock_on_frame,
-    .single_instance = true,
-};
+APP_META("Clock", clock_state_t, true, 0, clock_init, clock_on_frame, NULL);

@@ -1,4 +1,9 @@
 #include "os/appload.h"
+#include "config/config.h"
+#include "drivers/opl2.h"
+#include "drivers/speaker.h"
+#include "lib/audio.h"
+#include "os/clipboard.h"
 
 #include "config/runtime_config.h"
 #include "drivers/keyboard.h"
@@ -107,10 +112,14 @@ typedef struct {
     void *state;
     loaded_app_t *la;
     heap_t heap;
-    uint8_t *mem;   /* the heap's block */
-    uint32_t pages; /* in the frame pool, else 0 (kernel heap block) */
-    vmm_ctx_t *ctx; /* NULL: no paging / no frames */
+    uint8_t *mem;          /* the heap's block */
+    uint32_t pages;        /* in the frame pool, else 0 (kernel heap block) */
+    vmm_ctx_t *ctx;        /* NULL: no paging / no frames */
+    char open[FS_PATH_SZ]; /* a file to open (api->open_request) */
 } dyn_inst_t;
+
+/* a file for the next instance started (appload_run_named) */
+static char s_next_open[FS_PATH_SZ];
 
 static dyn_inst_t s_inst[MAX_RUNNING_APPS];
 
@@ -143,17 +152,25 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
     if (!la || !di)
         return NULL;
     memset(di, 0, sizeof(*di));
-    uint32_t want =
-        (size + APP_HEAP_DEFAULT + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    /* the heap the app asked for (header flags), else 64 KB; failing
+     * that in the frame pool, a block of the kernel heap of that size (a
+     * paint program's canvas needs it), then the least that runs */
+    uint32_t heap = (la->hdr.flags & ASMA_HEAP_MASK) >> ASMA_HEAP_SHIFT;
+    heap = heap ? heap * 16384u : APP_HEAP_DEFAULT;
+    uint32_t want = (size + heap + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint32_t least = (size + APP_HEAP_MIN + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint32_t bytes = want;
     uint32_t mem = pmm_alloc_frames(want / PAGE_SIZE);
-    if (!mem && (mem = pmm_alloc_frames(least / PAGE_SIZE)) != 0)
-        bytes = least;
     if (mem) {
         di->mem = (uint8_t *)(uintptr_t)mem;
         di->pages = bytes / PAGE_SIZE;
-    } else { /* no frames: a block of the kernel heap, still its own heap */
+    } else if ((di->mem = (uint8_t *)kmalloc(want)) != NULL) {
+        bytes = want; /* kernel heap block: still the app's own heap */
+    } else if ((mem = pmm_alloc_frames(least / PAGE_SIZE)) != 0) {
+        bytes = least;
+        di->mem = (uint8_t *)(uintptr_t)mem;
+        di->pages = bytes / PAGE_SIZE;
+    } else {
         bytes = least;
         di->mem = (uint8_t *)kmalloc(bytes);
         if (!di->mem)
@@ -183,6 +200,10 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
     di->state = state;
     di->la = la;
     di->used = true;
+    if (s_next_open[0]) { /* started to open a file */
+        snprintf(di->open, sizeof(di->open), "%s", s_next_open);
+        s_next_open[0] = 0;
+    }
     return state;
 }
 
@@ -490,6 +511,139 @@ static bool api_rename(const char *path, const char *new_name) {
            fo_rename(path, new_name) == NULL;
 }
 
+/* ── API size 7 ── */
+
+static bool api_open_request(char *path, int sz) {
+    dyn_inst_t *di = inst_of(s_calling_state);
+    if (!di || !di->open[0] || !path || sz <= 0)
+        return false;
+    snprintf(path, sz, "%s", di->open);
+    di->open[0] = 0;
+    return true;
+}
+
+static void api_screen_size(int *w, int *h) {
+    if (w)
+        *w = g_screen_width;
+    if (h)
+        *h = g_screen_height;
+}
+
+static bool api_window_focused(const window *w) {
+    return w && window_is_focused((window *)w);
+}
+
+static control *api_focused_control(const window *w) {
+    return w ? ctl_focused((window *)w) : NULL;
+}
+
+static bool api_classic_fonts(void) { return g_cfg.classic_fonts; }
+
+static int api_file_read_at(const char *path, uint32_t off, void *buf,
+                            int max) {
+    fat_file_t f;
+    if (!path || !buf || max < 0 || !fs_open(path, &f))
+        return -1;
+    int n = 0;
+    if (off < f.entry.file_size && fs_seek(&f, off))
+        n = fs_read(&f, buf, max);
+    fs_close(&f);
+    return n;
+}
+
+static bool api_file_append(const char *path, const void *buf, int len) {
+    fat_file_t f;
+    if (!path || len < 0 || (len && !buf))
+        return false;
+    if (!fs_open(path, &f)) {
+        if (!fs_create(path, &f))
+            return false;
+    } else if (!fs_seek(&f, f.entry.file_size)) {
+        fs_close(&f);
+        return false;
+    }
+    int n = len ? fs_write(&f, buf, len) : 0;
+    fs_close(&f);
+    return n == len;
+}
+
+static void api_alarm_get(bool *set, int *hour, int *minute) {
+    if (set)
+        *set = g_alarm.set && !g_alarm.fired;
+    if (hour)
+        *hour = g_alarm.hour;
+    if (minute)
+        *minute = g_alarm.minute;
+}
+
+static void api_alarm_set(bool set, int hour, int minute) {
+    if (set && (hour < 0 || hour > 23 || minute < 0 || minute > 59))
+        return;
+    g_alarm.hour = (uint8_t)hour;
+    g_alarm.minute = (uint8_t)minute;
+    g_alarm.fired = false;
+    g_alarm.set = set;
+}
+
+static const app_time_api_t s_time = {
+    .size = sizeof(app_time_api_t),
+    .now = time_rtc_local,
+    .days_in_month = time_days_in_month,
+    .date_valid = time_date_valid,
+    .days_from_civil = time_days_from_civil,
+    .civil_from_days = time_civil_from_days,
+    .weekday = time_weekday,
+    .iso_week = time_iso_week,
+    .month_name = time_month_name,
+    .weekday_name = time_weekday_name,
+    .alarm_get = api_alarm_get,
+    .alarm_set = api_alarm_set,
+};
+
+static void api_set_volume(int v) {
+    if (v < 0)
+        v = 0;
+    if (v > 255)
+        v = 255;
+    sb16_set_volume((uint8_t)v, (uint8_t)v);
+    opl2_set_master_volume((uint8_t)(v * 100 / 255));    /* it takes 0..100 */
+    mixer_write(0x26, (uint8_t)((v & 0xF0) | (v >> 4))); /* FM on the SB */
+}
+
+static const app_sound_api_t s_sound = {
+    .size = sizeof(app_sound_api_t),
+    .beep = speaker_beep_async,
+    .has_sb = sb16_detected,
+    .has_fm = opl2_detected,
+    .set_volume = api_set_volume,
+    .open = audio_open,
+    .close = audio_close,
+    .play = audio_play,
+    .pause = audio_pause,
+    .stop = audio_stop,
+    .set_loop = audio_set_loop,
+    .seek_ms = audio_seek_ms,
+    .state = audio_state,
+    .finished = audio_finished,
+    .pos_ms = audio_pos_ms,
+    .len_ms = audio_len_ms,
+    .codec = audio_codec_name,
+    .info = audio_info,
+    .file = audio_file,
+    .level = audio_level,
+    .extensions = audio_extensions,
+};
+
+static int api_clip_current(void) { return g_clip_history_current; }
+
+static const app_clip_api_t s_clip = {
+    .size = sizeof(app_clip_api_t),
+    .set_text = clipboard_set_text,
+    .history_count = clipboard_history_count,
+    .history_text = clipboard_history_get_text,
+    .history_current = api_clip_current,
+};
+
 static const ui_api_t s_ui = {
     .size = sizeof(ui_api_t),
     .app_window = api_app_window,
@@ -673,6 +827,18 @@ static const os_api_t s_api = {
     .make_dir = api_make_dir,
     .remove = api_remove,
     .rename = api_rename,
+    .active_state = ui_active_state,
+    .open_request = api_open_request,
+    .screen_size = api_screen_size,
+    .window_focused = api_window_focused,
+    .focused_control = api_focused_control,
+    .classic_fonts = api_classic_fonts,
+    .file_read_at = api_file_read_at,
+    .file_append = api_file_append,
+    .print = dlg_print,
+    .time = &s_time,
+    .sound = &s_sound,
+    .clip = &s_clip,
 };
 
 /* ── guarded trampolines ────────────────────────────────────────────── */
@@ -1083,6 +1249,95 @@ app_descriptor *appload_find(const char *name) {
         return NULL;
     loaded_app_t *la = find_by_name(name);
     return la ? &la->desc : NULL;
+}
+
+/* ── apps by name, in /APPS ─────────────────────────────────────────── */
+
+typedef struct {
+    const char *name, *dir;
+    char *out;
+    int sz;
+    bool found;
+    char sub[8][FS_NAME_SZ]; /* folders to look in after the files */
+    int nsub;
+} named_t;
+
+static bool named_cb(const dir_entry_t *e, const char *nm, void *user) {
+    named_t *f = user;
+    if (e->attr & ATTR_DIRECTORY) {
+        if (f->nsub < 8)
+            snprintf(f->sub[f->nsub++], FS_NAME_SZ, "%s", nm);
+        return true;
+    }
+    const char *dot = strrchr(nm, '.');
+    if (!dot || strcasecmp(dot, ".APP"))
+        return true;
+    char path[FS_PATH_SZ], hn[ASMA_NAME_MAX + 1];
+    snprintf(path, sizeof(path), "%s/%s", f->dir, nm);
+    if (appload_peek_name(path, hn, sizeof(hn)) && !strcasecmp(hn, f->name)) {
+        snprintf(f->out, f->sz, "%s", path);
+        f->found = true;
+        return false;
+    }
+    return true;
+}
+
+static bool find_in(const char *dir, const char *name, char *out, int sz,
+                    int depth) {
+    uint8_t drive;
+    uint16_t cl;
+    if (!fs_resolve_dir(dir, &drive, &cl))
+        return false;
+    named_t f;
+    memset(&f, 0, sizeof(f));
+    f.name = name;
+    f.dir = dir;
+    f.out = out;
+    f.sz = sz;
+    fs_walk_dir(drive, cl, named_cb, &f);
+    if (f.found)
+        return true;
+    for (int i = 0; depth > 0 && i < f.nsub; i++) {
+        char sub[FS_PATH_SZ];
+        snprintf(sub, sizeof(sub), "%s/%s", dir, f.sub[i]);
+        if (find_in(sub, name, out, sz, depth - 1))
+            return true;
+    }
+    return false;
+}
+
+bool appload_find_named(const char *name, char *out, int sz) {
+    if (!name || !name[0])
+        return false;
+    /* a loaded one: its file (fast, and the same copy) */
+    for (int i = 0; i < MAX_LOADED_APPS; i++)
+        if (s_loaded[i].loaded && !strcasecmp(s_loaded[i].hdr.name, name)) {
+            dir_entry_t de;
+            if (fs_find(s_loaded[i].path, &de)) {
+                snprintf(out, sz, "%s", s_loaded[i].path);
+                return true;
+            }
+        }
+    return find_in("/APPS", name, out, sz, 1);
+}
+
+bool appload_run_named(const char *name, const char *file) {
+    char path[FS_PATH_SZ];
+    if (!appload_find_named(name, path, sizeof(path)))
+        return false;
+    s_next_open[0] = 0;
+    if (file)
+        snprintf(s_next_open, sizeof(s_next_open), "%s", file);
+    app_instance_t *a = appload_launch(path);
+    if (a && s_next_open[0]) { /* not taken: it was running already */
+        dyn_inst_t *di = inst_of(a->state);
+        if (di)
+            snprintf(di->open, sizeof(di->open), "%s", s_next_open);
+    }
+    s_next_open[0] = 0;
+    if (!a && appload_last_error()[0])
+        dlg_message(NULL, name, appload_last_error());
+    return a != NULL;
 }
 
 /* ── directory scan ─────────────────────────────────────────────────── */

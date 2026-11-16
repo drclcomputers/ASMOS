@@ -1,5 +1,5 @@
 /* ASMDraw - small paint program. .PIC = 2x u16 (w, h) + w*h colour bytes */
-#include "os/api.h"
+#include "extapps/shim.h"
 #include "os/prefs.h"
 
 #define TOOL_PENCIL 0
@@ -44,8 +44,6 @@ static void set_title(asmdraw_state_t *s) {
     snprintf(s->title, sizeof(s->title), "%s - ASMDraw", base);
     s->win->title = s->title;
 }
-
-app_descriptor asmdraw_app;
 
 static void draw_set_status(asmdraw_state_t *s, const char *msg) {
     ctl_set_text(s->status, msg);
@@ -192,70 +190,63 @@ static void update_canvas_size(asmdraw_state_t *s) {
     s->canvas_h = ch;
 }
 
+/* .PIC: width, height (16-bit each), then the pixels row by row. Written
+ * and read in parts of up to 8 KB: the canvas may be 250 KB. */
+#define PART 8192
+
 static void asmdraw_save(asmdraw_state_t *s, const char *path) {
     update_canvas_size(s);
     if (s->canvas_w <= 0 || s->canvas_h <= 0) {
         draw_set_status(s, "Invalid canvas size.");
         return;
     }
-
-    dir_entry_t de;
-    if (fs_find(path, &de))
-        fs_delete(path);
-    fat_file_t f;
-    if (!fs_create(path, &f)) {
-        draw_set_status(s, "Save failed.");
-        return;
-    }
-
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(s->canvas_w & 0xFF);
     hdr[1] = (uint8_t)((s->canvas_w >> 8) & 0xFF);
     hdr[2] = (uint8_t)(s->canvas_h & 0xFF);
     hdr[3] = (uint8_t)((s->canvas_h >> 8) & 0xFF);
-    fs_write(&f, hdr, 4);
-
-    for (int y = 0; y < s->canvas_h; y++)
-        fs_write(&f, s->canvas + y * s->canvas_w, s->canvas_w);
-
-    fs_close(&f);
-    draw_set_status(s, "Saved.");
+    bool ok = A->file_write(path, hdr, 4); /* replaces the old file */
+    int total = s->canvas_w * s->canvas_h;
+    for (int at = 0; ok && at < total; at += PART)
+        ok = A->file_append(path, s->canvas + at,
+                            total - at < PART ? total - at : PART);
+    draw_set_status(s, ok ? "Saved." : "Save failed.");
 }
 
 static void asmdraw_load(asmdraw_state_t *s, const char *path) {
-    fat_file_t f;
-    if (!fs_open(path, &f)) {
-        draw_set_status(s, "File not found.");
-        return;
-    }
-
     uint8_t hdr[4];
-    if (fs_read(&f, hdr, 4) < 4) {
-        fs_close(&f);
-        draw_set_status(s, "Bad file.");
+    if (A->file_read_at(path, 0, hdr, 4) < 4) {
+        draw_set_status(s, "File not found.");
         return;
     }
     int fw = hdr[0] | (hdr[1] << 8);
     int fh = hdr[2] | (hdr[3] << 8);
     if (fw < 1 || fw > g_screen_width || fh < 1 || fh > g_screen_height) {
-        fs_close(&f);
         draw_set_status(s, "Unsupported size.");
         return;
     }
 
     memset(s->canvas, WHITE, (uint32_t)(s->canvas_w * s->canvas_h));
 
-    for (int y = 0; y < fh; y++) {
-        uint8_t row[640]; /* max screen width */
-        int got = fs_read(&f, row, fw);
+    uint8_t *part = (uint8_t *)kmalloc(PART);
+    if (!part) {
+        draw_set_status(s, "Out of memory.");
+        return;
+    }
+    uint32_t off = 4;
+    int rows = PART / fw; /* whole rows per part */
+    for (int y = 0; y < fh && y < s->canvas_h; y += rows) {
+        int n = fh - y < rows ? fh - y : rows;
+        int got = A->file_read_at(path, off, part, n * fw);
         if (got < fw)
             break;
-        if (y >= s->canvas_h)
-            break; /* picture bigger than the canvas: clip */
-        for (int x = 0; x < fw && x < s->canvas_w; x++)
-            s->canvas[(y)*s->canvas_w + (x)] = row[x];
+        n = got / fw;
+        for (int r = 0; r < n && y + r < s->canvas_h; r++)
+            for (int x = 0; x < fw && x < s->canvas_w; x++)
+                s->canvas[(y + r) * s->canvas_w + x] = part[r * fw + x];
+        off += (uint32_t)(n * fw);
     }
-    fs_close(&f);
+    kfree(part);
     draw_set_status(s, "Opened.");
 }
 
@@ -513,8 +504,13 @@ static void asmdraw_init(void *state) {
     update_canvas_size(s);
 }
 
+static void opened(void *user, const char *path);
+
 static void asmdraw_on_frame(void *state) {
     asmdraw_state_t *s = state;
+    char req[FS_PATH_SZ]; /* FileF: open this picture (a new window) */
+    if (s->win && app_open_request(req, sizeof(req)))
+        opened(s, req);
     if (time_millis() > s->status_until) {
         char info[32] = "";
         control *c = s->canvas_ctl;
@@ -545,22 +541,6 @@ static void asmdraw_destroy(void *state) {
     s->canvas = NULL;
 }
 
-/* Used by FileF / the desktop: open a .PIC in a new ASMDraw window. */
-void asmdraw_open_file(const char *path) {
-    app_instance_t *a = os_launch_app(&asmdraw_app);
-    asmdraw_state_t *s = a ? a->state : NULL;
-    if (!s || !s->win)
-        return;
-    strncpy(s->path, path, sizeof(s->path) - 1);
-    asmdraw_load(s, s->path);
-    set_title(s);
-    note_dir(s);
-}
-
-app_descriptor asmdraw_app = {
-    .name = "ASMDRAW",
-    .state_size = sizeof(asmdraw_state_t),
-    .init = asmdraw_init,
-    .on_frame = asmdraw_on_frame,
-    .destroy = asmdraw_destroy,
-};
+/* the canvas (up to the screen, 250 KB at 640x400) lives in the heap */
+APP_META("ASMDraw", asmdraw_state_t, false, 272, asmdraw_init, asmdraw_on_frame,
+         asmdraw_destroy);

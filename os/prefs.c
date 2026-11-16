@@ -9,8 +9,10 @@
 
 static char s_buf[PREFS_MAX]; /* file text, '\0'-terminated */
 static int s_len;
-static char s_app[9]; /* app whose file s_buf holds */
-static bool s_batch;  /* inside begin/end */
+/* the app whose file s_buf holds: its whole name (a name like "Audio
+ * Player" cut to 8 characters gave another file than file_of(name)) */
+static char s_app[40];
+static bool s_batch; /* inside begin/end */
 
 /* "/PREFS/ASMDRAW.INI": first 8 name characters, upper case, safe ones */
 static void file_of(const char *app, char *out, int sz) {
@@ -150,7 +152,7 @@ bool app_prefs_set(const char *app, const char *key, const char *value) {
         if (*v == '\n' || *v == '\r')
             return false;
     if (s_batch) {
-        if (strncmp(app, s_app, 8))
+        if (strcmp(app, s_app))
             return false; /* begin() was for another app */
         return put(key, value);
     }

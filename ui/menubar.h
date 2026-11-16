@@ -4,7 +4,7 @@
 #include "lib/core.h"
 #include "lib/string.h"
 
-#define MAX_MENUS 16      /* a window's menus; the bar pages them (<< >>) */
+#define MAX_MENUS 17
 #define MAX_MENU_ITEMS 16 /* items in a menu or submenu */
 #define MENU_ITEM_H 10
 #define MENU_ITEM_MIN_W 60

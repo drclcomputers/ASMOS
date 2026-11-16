@@ -316,11 +316,21 @@ void wm_sync_menubar(menubar *mb) {
         mb->first = mb->npages = 0;
     }
 
-    if (!fw || fw->win_menu_count == 0)
-        return;
+    /* the desktop's Apps menu comes first on every app's bar: no need to
+     * go back to the desktop to start another app */
+    window *desk = NULL;
+    for (int i = 0; i < win_count && !desk; i++)
+        if (win_stack[i]->pinned_bottom)
+            desk = win_stack[i];
+    const menu *apps = NULL;
+    for (int i = 0; desk && desk != fw && i < desk->win_menu_count; i++)
+        if (desk->win_menus[i].title &&
+            !strcmp(desk->win_menus[i].title, "Apps"))
+            apps = &desk->win_menus[i];
 
-    for (int i = 0; i < fw->win_menu_count && mb->menu_count < MAX_MENUS; i++) {
-        mb->menus[mb->menu_count] = fw->win_menus[i];
+    int n = fw ? fw->win_menu_count : 0;
+    for (int i = apps ? -1 : 0; i < n && mb->menu_count < MAX_MENUS; i++) {
+        mb->menus[mb->menu_count] = i < 0 ? *apps : fw->win_menus[i];
         mb->menus[mb->menu_count].open = false;
         if (open_title &&
             strcmp(mb->menus[mb->menu_count].title, open_title) == 0) {

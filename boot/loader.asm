@@ -15,7 +15,8 @@ _start:
     mov  ss, eax
 
     ; Set stack pointer to the top of the kernel stack region.
-    ; _kstack_top is a linker symbol (value = 0x80000).
+    ; _kstack_top is a linker symbol (value = 0x98000). The code runs at
+    ; 1 MB: stage 2 copied the image there (boot_stage2.asm).
     ; We want the VALUE of the symbol as an immediate, not a memory read.
     mov  esp, _kstack_top
     mov  ebp, esp

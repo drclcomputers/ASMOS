@@ -1,7 +1,6 @@
 /* ClipView - clipboard history: pick an entry to see it, Copy puts it back
  * on the clipboard. */
-#include "os/api.h"
-#include "os/clipboard.h"
+#include "extapps/shim.h"
 
 typedef struct {
     window *win; /* must stay first */
@@ -81,10 +80,4 @@ static void cv_on_frame(void *state) {
         refill(s);
 }
 
-app_descriptor clipview_app = {
-    .name = "CLIPVIEW",
-    .state_size = sizeof(cv_state_t),
-    .init = cv_init,
-    .on_frame = cv_on_frame,
-    .single_instance = true,
-};
+APP_META("ClipView", cv_state_t, true, 0, cv_init, cv_on_frame, NULL);

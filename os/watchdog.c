@@ -57,7 +57,13 @@ void wd_heartbeat(void) {
     }
 }
 
-void wd_stop(void) { s_beat = 0; }
+void wd_stop(void) {
+    s_beat = 0;
+    if (s_shown) { /* take the hourglass off: the next blit is whole */
+        s_shown = false;
+        gpu_invalidate();
+    }
+}
 
 void wd_busy(void) {
     if (!s_beat)

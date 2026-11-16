@@ -1,9 +1,7 @@
 /* Puzzle - the 15-tile sliding puzzle (a desk accessory, as on the first
  * Mac). Click a tile in the row or column of the gap to slide it (and any
  * tiles between) into the gap, or use the arrow keys. */
-#include "os/api.h"
-#include "os/prefs.h"
-#include "ui/uifont.h"
+#include "extapps/shim.h"
 
 #define N 4
 #define TILE 22
@@ -208,9 +206,4 @@ static void puzzle_init(void *state) {
     ctl_focus(s->view);
 }
 
-app_descriptor puzzle_app = {
-    .name = "PUZZLE",
-    .state_size = sizeof(puzzle_state_t),
-    .init = puzzle_init,
-    .single_instance = true,
-};
+APP_META("Puzzle", puzzle_state_t, true, 0, puzzle_init, NULL, NULL);

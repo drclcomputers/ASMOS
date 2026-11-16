@@ -101,11 +101,9 @@ static uint32_t s_ram_top; /* end of RAM (or of what we use of it) */
 static void detect_heap_range(void) {
     dbg_bar(0, 4);
 
-    uint32_t heap_bot = (uint32_t)BACKBUF + (uint32_t)g_backbuf_size;
-
-    uint32_t kernel_end = (uint32_t)&_heap_start;
-    if (kernel_end > heap_bot)
-        heap_bot = kernel_end;
+    /* the kernel (code, data, zeroed data) is at 1 MB; the heap follows
+     * (the back buffer is below 640 KB: linker.ld) */
+    uint32_t heap_bot = (uint32_t)&_heap_start;
 
     if (heap_bot < HEAP_MIN_START)
         heap_bot = HEAP_MIN_START;
@@ -158,8 +156,11 @@ static void detect_heap_range(void) {
 
     alloc_set_range(heap_bot, heap_top);
 
-    /* what is left below 640 KB between the kernel and its stack */
-    alloc_add_low((uint32_t)&_low_heap_start, (uint32_t)&_kstack_bottom);
+    /* below 640 KB, after the back buffer (where the image was read before
+     * stage 2 copied it to 1 MB), up to the stack: a second heap */
+    uint32_t low =
+        ((uint32_t)&_low_heap_start + (uint32_t)g_backbuf_size + 15U) & ~15U;
+    alloc_add_low(low, (uint32_t)&_kstack_bottom);
 
     dbg_bar(6, 7);
 }

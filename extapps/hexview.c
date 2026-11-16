@@ -1,5 +1,5 @@
 /* HexView - read-only hex + ASCII viewer (files up to 64 KB). */
-#include "os/api.h"
+#include "extapps/shim.h"
 
 #define MAX_FILE_SIZE 65536
 #define CW 5
@@ -57,16 +57,15 @@ static void update(hexview_state_t *s) {
 }
 
 static bool load(hexview_state_t *s, const char *path) {
-    fat_file_t f;
-    if (!fs_open(path, &f))
+    app_dirent_t de;
+    if (!A->file_info(path, &de) || (de.attr & APP_ATTR_DIR))
         return false;
-    uint32_t n =
-        f.entry.file_size > MAX_FILE_SIZE ? MAX_FILE_SIZE : f.entry.file_size;
-    uint8_t *buf = n ? (uint8_t *)kmalloc(n) : NULL;
-    int got = buf ? fs_read(&f, buf, (int)n) : 0;
-    fs_close(&f);
-    if (s->data)
+    uint32_t n = de.size > MAX_FILE_SIZE ? MAX_FILE_SIZE : de.size;
+    if (s->data) /* first: the new one may need the room */
         kfree(s->data);
+    s->data = NULL;
+    uint8_t *buf = n ? (uint8_t *)kmalloc(n) : NULL;
+    int got = buf ? A->file_read_at(path, 0, buf, (int)n) : 0;
     s->data = buf;
     s->len = got > 0 ? got : 0;
     s->top = 0;
@@ -294,16 +293,14 @@ static void hexview_destroy(void *state) {
     s->data = NULL;
 }
 
-/* Used by FileF: open a file in a new HexView window. */
-void hexview_open_file(const char *path) {
-    app_instance_t *a = os_launch_app(&hexview_app);
-    if (a && a->state)
-        opened(a->state, path);
+/* FileF asked to show a file (a new window each time: multi-instance) */
+static void hexview_frame(void *state) {
+    hexview_state_t *s = state;
+    char p[FS_PATH_SZ];
+    if (s->win && app_open_request(p, sizeof(p)))
+        opened(s, p);
 }
 
-app_descriptor hexview_app = {
-    .name = "HEXVIEW",
-    .state_size = sizeof(hexview_state_t),
-    .init = hexview_init,
-    .destroy = hexview_destroy,
-};
+/* 64 KB of file plus the window: a 96 KB heap */
+APP_META("HexView", hexview_state_t, false, 96, hexview_init, hexview_frame,
+         hexview_destroy);

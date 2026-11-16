@@ -1,5 +1,5 @@
+#include "extapps/shim.h"
 #include "lib/cpu.h"
-#include "os/api.h"
 
 #define BTN_W 22
 #define BTN_H 14
@@ -335,10 +335,4 @@ static void calc_on_frame(void *state) {
     show(s);
 }
 
-app_descriptor calculator_app = {
-    .name = "CALCULATOR",
-    .state_size = sizeof(calc_state_t),
-    .init = calc_init,
-    .on_frame = calc_on_frame,
-    .single_instance = true,
-};
+APP_META("Calculator", calc_state_t, true, 0, calc_init, calc_on_frame, NULL);

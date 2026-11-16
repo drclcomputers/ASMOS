@@ -1,5 +1,6 @@
 #include "ui/menubar.h"
 #include "config/runtime_config.h"
+#include "os/appload.h"
 #include "ui/uifont.h"
 
 #include "lib/graphics.h"
@@ -23,8 +24,6 @@
 #define PADDING 4
 #define CLOCK_CHARS 8
 #define CLOCK_W (CLOCK_CHARS * 5 + PADDING * 2)
-
-extern app_descriptor clock_app;
 
 void menubar_init(void) {
     memset(&g_menubar, 0, sizeof(menubar));
@@ -341,7 +340,7 @@ void menubar_update(menubar *mb) {
         mouse.left_clicked = false;
 
         if (mouse.x < 2 + CLOCK_W) {
-            os_launch_app(&clock_app);
+            appload_run_named("Clock", NULL); /* /APPS: an .APP now */
             return;
         }
         if (mb->next_x >= 0 && mouse.x >= mb->next_x &&

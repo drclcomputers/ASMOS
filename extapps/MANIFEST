@@ -1,0 +1,25 @@
+# What goes in /APPS on the disk image (tools/mkhdimg.py; makefile).
+# The Apps menu is that folder: each folder is a group. A line per file:
+#   <path in /APPS> | <name>       a bundled app: build/extapps/<name>.APP
+#   <path in /APPS> | @<target>    a shortcut (.LNK): a built-in app's name,
+#                                  an .APP's name, or a path
+FileF.LNK                         | @FileF
+Settings.LNK                      | @Settings
+
+Accessories/ASMDraw.APP           | asmdraw
+Accessories/Calculator.APP        | calculator
+Accessories/Calendar.APP          | calendar
+Accessories/ClipView.APP          | clipview
+Accessories/Clock.APP             | clock
+Accessories/TEditor.LNK           | @TEditor
+
+Games/Puzzle.APP                  | puzzle
+Games/Sudoku.APP                  | sudoku
+
+Multimedia/Audio Player.APP       | audioplayer
+
+System Tools/ASMTerm.LNK          | @ASMTerm
+System Tools/Format Disk.LNK      | @Format Disk
+System Tools/HexView.APP          | hexview
+System Tools/Monitor.LNK          | @Monitor
+System Tools/Print Queue.LNK      | @Print Queue

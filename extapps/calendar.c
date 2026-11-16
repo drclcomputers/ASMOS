@@ -9,11 +9,7 @@
  * Notes live in /PREFS/CALNOTES.TXT, one per line: "YYYYMMDD text".
  * The week starts on Monday (ISO); View switches it to Sunday (kept in
  * /PREFS/CALENDAR.INI). Dates are proleptic Gregorian (lib/time.h). */
-#include "fs/fs.h"
-#include "lib/time.h"
-#include "os/api.h"
-#include "os/prefs.h"
-#include "ui/uifont.h"
+#include "extapps/shim.h"
 
 #define NOTES_FILE "/PREFS/CALNOTES.TXT"
 #define MAX_NOTES 64
@@ -56,12 +52,8 @@ static int note_find(const cal_state_t *s, int32_t day) {
 
 static void notes_load(cal_state_t *s) {
     static char buf[MAX_NOTES * (NOTE_LEN + 10) + 1];
-    fat_file_t f;
     s->nnotes = 0;
-    if (!fs_open(NOTES_FILE, &f))
-        return;
-    int n = fs_read(&f, buf, sizeof(buf) - 1);
-    fs_close(&f);
+    int n = A->file_read(NOTES_FILE, buf, sizeof(buf) - 1);
     if (n <= 0)
         return;
     buf[n] = 0;
@@ -101,22 +93,14 @@ static bool notes_save(cal_state_t *s) {
         n += snprintf(buf + n, sizeof(buf) - n, "%04d%02d%02d %s\n", y, m, d,
                       s->notes[i].text);
     }
-    dir_entry_t de;
-    if (!fs_find("/PREFS", &de)) {
-        if (!fs_mkdir("/PREFS"))
-            return false;
-        fs_set_hidden("/PREFS", true);
-    }
-    if (fs_find(NOTES_FILE, &de))
-        fs_delete(NOTES_FILE);
-    if (!s->nnotes)
-        return true;
-    fat_file_t f;
-    if (!fs_create(NOTES_FILE, &f))
+    app_dirent_t de;
+    if (!A->file_info("/PREFS", &de) && !A->make_dir("/PREFS"))
         return false;
-    bool ok = fs_write(&f, buf, n) == n;
-    fs_close(&f);
-    return ok;
+    if (!s->nnotes) { /* no notes: no file */
+        A->remove(NOTES_FILE);
+        return true;
+    }
+    return A->file_write(NOTES_FILE, buf, n);
 }
 
 /* ── state ──────────────────────────────────────────────────────────── */
@@ -418,7 +402,7 @@ static void m_close(void) { os_quit_app_by_desc(&calendar_app); }
 static void m_about(void) {
     dlg_message(NULL, "About Calendar",
                 "Calendar 1.0\nDouble-click a day to write a note.\n"
-                "Arrows, PgUp/PgDn (Ctrl: a year)");
+                "Arrows, PgUp/PgDn (Ctrl: a year), Home: today.");
 }
 
 /* ── life cycle ─────────────────────────────────────────────────────── */
@@ -427,7 +411,7 @@ static void cal_init(void *state) {
     cal_state_t *s = state;
     int cw = GRID_W + 12;
     int ch = 18 + GRID_H + 3 + 12 + 16;
-    s->win = app_window(s, "Calendar", 50, 20, cw + 2, ch + 17, DARK_GRAY, 0);
+    s->win = app_window(s, "Calendar", 50, 20, cw + 2, ch + 17, LIGHT_GRAY, 0);
     if (!s->win)
         return;
     s->win->lazy_custom = true; /* changes come from handlers and on_frame */
@@ -453,7 +437,7 @@ static void cal_init(void *state) {
     s->status = ctl_status(s->win, "");
 
     menu *f = window_add_menu(s->win, "Calendar");
-    menu_add_item(f, "Today", m_today);
+    menu_add_item(f, "Today  Home", m_today);
     menu_add_item(f, "Go To Date...", m_goto);
     menu_add_separator(f);
     menu_add_item(f, "Edit Note...  Enter", m_note);
@@ -488,10 +472,4 @@ static void cal_frame(void *state) {
     }
 }
 
-app_descriptor calendar_app = {
-    .name = "CALENDAR",
-    .state_size = sizeof(cal_state_t),
-    .init = cal_init,
-    .on_frame = cal_frame,
-    .single_instance = true,
-};
+APP_META("Calendar", cal_state_t, true, 0, cal_init, cal_frame, NULL);

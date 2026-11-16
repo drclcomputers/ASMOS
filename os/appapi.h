@@ -10,6 +10,7 @@
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "lib/core.h"
+#include "lib/time.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
 #include "ui/window.h"
@@ -150,6 +151,59 @@ typedef struct {
     uint16_t time;     /* FAT: hour<<11 | min<<5 | sec/2 */
 } app_dirent_t;
 
+/* ── API size 7 sub-tables (each starts with its own size) ── */
+
+/* date and time: the clock is local time (Settings > Clock) */
+typedef struct {
+    uint32_t size;
+    time_full_t (*now)(void); /* local date and time */
+    int (*days_in_month)(int m, int y);
+    bool (*date_valid)(int y, int m, int d);
+    int32_t (*days_from_civil)(int y, int m, int d); /* since 1970-01-01 */
+    void (*civil_from_days)(int32_t z, int *y, int *m, int *d);
+    int (*weekday)(int y, int m, int d); /* 0 = Monday .. 6 = Sunday */
+    int (*iso_week)(int y, int m, int d);
+    const char *(*month_name)(int m);    /* "January" */
+    const char *(*weekday_name)(int wd); /* "Monday" */
+    /* the desktop alarm (the Clock app sets it; the desktop rings it) */
+    void (*alarm_get)(bool *set, int *hour, int *minute);
+    void (*alarm_set)(bool set, int hour, int minute);
+} app_time_api_t;
+
+/* sound: the PC speaker, and one sound file at a time (lib/audio.h) */
+typedef struct {
+    uint32_t size;
+    void (*beep)(uint32_t hz, uint32_t ms); /* returns at once */
+    bool (*has_sb)(void);                   /* Sound Blaster found */
+    bool (*has_fm)(void);                   /* OPL2 / AdLib found */
+    void (*set_volume)(int v);              /* 0..255, all outputs */
+    const char *(*open)(const char *path);  /* NULL = ok, else why not */
+    void (*close)(void);
+    void (*play)(void);
+    void (*pause)(void); /* toggles */
+    void (*stop)(void);
+    void (*set_loop)(bool loop);
+    bool (*seek_ms)(uint32_t ms);
+    int (*state)(void); /* AUDIO_* (lib/audio.h) */
+    bool (*finished)(void);
+    uint32_t (*pos_ms)(void);
+    uint32_t (*len_ms)(void);
+    const char *(*codec)(void); /* "WAV", "MIDI" */
+    const char *(*info)(void);  /* "22050 Hz, 8-bit mono" */
+    const char *(*file)(void);
+    int (*level)(void); /* 0..255, for a meter */
+    const char *const *(*extensions)(void);
+} app_sound_api_t;
+
+/* the text clipboard and its history */
+typedef struct {
+    uint32_t size;
+    void (*set_text)(const char *text, int len);
+    int (*history_count)(void);
+    const char *(*history_text)(int index); /* 0 = oldest */
+    int (*history_current)(void);
+} app_clip_api_t;
+
 typedef struct os_api {
     uint32_t version;
     uint32_t size; /* sizeof(os_api_t) – check before using newer members */
@@ -229,6 +283,28 @@ typedef struct os_api {
     bool (*make_dir)(const char *path); /* new folder */
     bool (*remove)(const char *path);   /* a file, or an empty folder */
     bool (*rename)(const char *path, const char *new_name); /* name only */
+
+    /* ── appended in API size 7 ── */
+    /* the state of the app whose window has the focus (menu commands of a
+     * multi-instance app use it to know which window they are for) */
+    void *(*active_state)(void);
+    /* A file the OS asks this app to open (a double-click in FileF on a
+     * file of a type the app is registered for, see docs). Call it in
+     * init and in on_frame: true (and the path) once per request. */
+    bool (*open_request)(char *path, int sz);
+    void (*screen_size)(int *w, int *h);
+    bool (*window_focused)(const window *w);
+    control *(*focused_control)(const window *w);
+    bool (*classic_fonts)(void); /* Settings > Display: the 4x6 font */
+    /* part of a file: bytes read (0 at the end), -1 if it can't be read */
+    int (*file_read_at)(const char *path, uint32_t offset, void *buf, int max);
+    /* add to the end of a file (made if missing): save big data in parts
+     * after a file_write of the first part */
+    bool (*file_append)(const char *path, const void *buf, int len);
+    void (*print)(window *owner, const print_doc_t *doc); /* print dialog */
+    const app_time_api_t *time;
+    const app_sound_api_t *sound;
+    const app_clip_api_t *clip;
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */

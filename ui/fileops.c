@@ -17,9 +17,6 @@
 extern void ff_open_dir_pub(uint16_t cluster, const char *path);
 extern void ff_dir_changed_pub(const char *dir);
 extern void teditor_open_file(const char *path);
-extern void hexview_open_file(const char *path);
-extern void audioplayer_open_file(const char *path);
-extern void asmdraw_open_file(const char *path);
 
 /* ── paths ─────────────────────────────────────────────────────────────── */
 
@@ -419,8 +416,10 @@ bool fo_launch_app(window *owner, const char *path) {
     if (dot)
         *dot = 0;
 
-    /* 1. a real package: that file, else NAME.APP in the usual places */
-    if (appload_try_open(path) || appload_try_open(name))
+    /* 1. a real package: that file, else NAME.APP in the usual places,
+     *    else the .APP in /APPS whose name is NAME (Calculator, ASMDRAW) */
+    if (appload_try_open(path) || appload_try_open(name) ||
+        appload_run_named(name, NULL))
         return true;
     /* 2. a shortcut to a built-in app: try "NAME", "Name", "name" */
     char v[3][FS_NAME_SZ];
@@ -484,12 +483,17 @@ void fo_open(window *owner, const char *path) {
                         "be an app's name or the path of a .APP.");
     } else if (ext_is(name, text) || !strchr(name, '.')) {
         teditor_open_file(path);
-    } else if (ext_is(name, wav)) {
-        audioplayer_open_file(path);
-    } else if (ext_is(name, pic)) {
-        asmdraw_open_file(path);
     } else {
-        hexview_open_file(path);
+        /* the apps for these are .APPs in /APPS (extapps/) */
+        const char *app = ext_is(name, wav)   ? "Audio Player"
+                          : ext_is(name, pic) ? "ASMDraw"
+                                              : "HexView";
+        if (!appload_run_named(app, path)) {
+            char m[96];
+            snprintf(m, sizeof(m), "%s is not in /APPS: copy %s.APP back.", app,
+                     app);
+            dlg_message(owner, "Open", m);
+        }
     }
 }
 

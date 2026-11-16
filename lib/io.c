@@ -37,7 +37,10 @@ void cpu_halt(void) { asm volatile("hlt"); }
 
 void cpu_idle(void) { asm volatile("sti; hlt"); }
 
+void wd_stop(void);
+
 void cpu_shutdown(void) {
+    wd_stop();
     outw(0x604, 0x2000);  /* QEMU */
     outw(0xB004, 0x2000); /* Bochs / old QEMU */
     /* Still running: real hardware (no ACPI/APM driver yet). Say so, the

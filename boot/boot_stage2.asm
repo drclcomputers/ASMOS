@@ -1,7 +1,9 @@
 [bits 16]
 [org 0x7E00]
 
-KERNEL_ENTRY    equ 0x10000
+KERNEL_LOAD     equ 0x10000     ; where stage 1 read the image
+KERNEL_ENTRY    equ 0x100000    ; where it runs (linker.ld)
+KERNEL_BYTES    equ 1000 * 512  ; SECTORS_TO_LOAD in boot.asm
 
 %macro io_delay 0
     call _io_delay_impl
@@ -367,9 +369,26 @@ entry:
     mov  eax, cr0
     or   eax, 1
     mov  cr0, eax
-    db  0x66, 0xEA          ; far jump 32-bit, encoding manual complet
-    dd  0x00010000          ; sare direct la loader
-    dw  0x0008
+    jmp  dword 0x08:pm_entry    ; 32-bit far jump: flushes the prefetch
+
+; ── Protected mode: move the kernel to 1 MB and run it ──────────────────────
+; Real mode could only read it below 640 KB; it runs at KERNEL_ENTRY (A20 is
+; on, checked above). Copying the whole load area is harmless: it is just
+; the sectors stage 1 read.
+[bits 32]
+pm_entry:
+    mov  eax, 0x10
+    mov  ds, eax
+    mov  es, eax
+    mov  ss, eax
+    mov  esp, 0x6000
+    cld
+    mov  esi, KERNEL_LOAD
+    mov  edi, KERNEL_ENTRY
+    mov  ecx, KERNEL_BYTES / 4
+    rep  movsd
+    jmp  0x08:KERNEL_ENTRY
+[bits 16]
 
 
 ; ── Subroutines ──────────────────────────────────────────────────────────────

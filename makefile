@@ -33,6 +33,31 @@ ASM_SRC = boot/loader.asm interrupts/interrupt.asm os/task_switch.asm
 OBJ = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SRC)) \
       $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRC))
 
+# ── Bundled apps: .APP packages put in /APPS on the disk image ──────────────
+# extapps/<name>.c + extapps/shim.c (kernel calls -> app API) + the string
+# and number helpers, linked at 0 with only what is used (--gc-sections),
+# packed by tools/mkapp.py (name, state, heap from APP_META). Where each goes
+# in /APPS, and the shortcuts to the built-in apps: extapps/MANIFEST.
+EXT_APPS    = puzzle sudoku calendar clock calculator clipview hexview asmdraw audioplayer
+EXT_DIR     = $(BUILD_DIR)/extapps
+EXT_LIB_SRC = extapps/shim.c lib/string.c lib/math.c lib/mem.c
+EXT_LIB_OBJ = $(patsubst %.c,$(EXT_DIR)/%.o,$(EXT_LIB_SRC))
+EXT_CFLAGS  = $(CFLAGS) -ffunction-sections -fdata-sections
+EXT_PKGS    = $(patsubst %,$(EXT_DIR)/%.APP,$(EXT_APPS))
+
+$(EXT_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(EXT_CFLAGS) $< -o $@
+
+$(EXT_DIR)/%.APP: $(EXT_DIR)/extapps/%.o $(EXT_LIB_OBJ)
+	$(LD) -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs --gc-sections \
+	      -e init -u on_frame -u destroy -u app_meta -o $(EXT_DIR)/$*.elf $^
+	python3 tools/mkapp.py --elf $(EXT_DIR)/$*.elf --meta --out $@ >/dev/null
+
+apps: $(EXT_PKGS)
+
+.DEFAULT_GOAL := all
+
 # ── Build ────────────────────────────────────────────────────────────────────
 all: os_image.bin
 	@KSIZE=$$(wc -c < kernel.bin); \
@@ -63,7 +88,7 @@ $(BUILD_DIR)/%.o: %.c
 %.bin: boot/%.asm
 	$(AS) -f bin $< -o $@
 
-os_image.bin: boot.bin boot_stage2.bin kernel.bin
+os_image.bin: boot.bin boot_stage2.bin kernel.bin $(EXT_PKGS) extapps/MANIFEST tools/mkhdimg.py
 	@# 66 cyl x 16 heads x 63 spt = 66528 sectors: a whole number of
 	@# cylinders, so emulators/BIOSes that derive the geometry from the
 	@# file size (86Box) see all 65536 sectors the FAT16 volume uses.
@@ -71,8 +96,11 @@ os_image.bin: boot.bin boot_stage2.bin kernel.bin
 	dd if=boot.bin         of=$@ bs=512 seek=0 conv=notrunc 2>/dev/null
 	dd if=boot_stage2.bin  of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
 	dd if=kernel.bin       of=$@ bs=512 seek=9 conv=notrunc 2>/dev/null
+	@# the FAT16 volume: /APPS with the bundled apps and the shortcuts
+	python3 tools/mkhdimg.py $@ extapps/MANIFEST $(EXT_DIR)
 
 -include $(OBJ:.o=.d)
+-include $(EXT_LIB_OBJ:.o=.d) $(patsubst %,$(EXT_DIR)/extapps/%.d,$(EXT_APPS))
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 QEMU_FLAGS = -drive format=raw,file=os_image.bin \
@@ -90,7 +118,7 @@ qemu: all
 	qemu-system-i386 $(QEMU_FLAGS)
 
 qemu-fdd: all
-	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=floppy_35.img,if=floppy,index=0 -drive format=raw,file=floppy_525.img,if=floppy,index=1
+	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=floppy.img,if=floppy
 
 bochs: all
 	bochs -f bochs/bochssrc.txt -q
@@ -106,4 +134,4 @@ kernelmap: $(OBJ)
 bloat: $(OBJ)
 	$(NM) --print-size --size-sort --radix=d $(OBJ) | awk '$$3 ~ /[bBcC]/' | sort -k2 -n -r | head -30
 
-.PHONY: all qemu qemu-fdd bochs clean kernelmap bloat
+.PHONY: all apps qemu qemu-fdd bochs clean kernelmap bloat

@@ -9,6 +9,8 @@
  *   4    2     version        1 (legacy) or 2
  *   6    2     flags          bit0 single_instance
  *                             bit1 state starts with a window* (v2 only)
+ *                             bits 8-15 heap size in 16 KB units (0: the
+ *                             default 64 KB; up to ~4 MB)
  *   8    4     header_size    68 (v1) or 80 (v2)
  *   12   4     code_offset    from file start
  *   16   4     code_size      bytes of code+data stored in the file
@@ -37,7 +39,10 @@
 #define ASMA_VERSION_2 2
 #define ASMA_FLAG_SINGLE (1u << 0)
 #define ASMA_FLAG_WINDOW_FIRST (1u << 1)
-#define ASMA_FLAGS_KNOWN (ASMA_FLAG_SINGLE | ASMA_FLAG_WINDOW_FIRST)
+#define ASMA_HEAP_SHIFT 8
+#define ASMA_HEAP_MASK 0xFF00u /* heap size, 16 KB units */
+#define ASMA_FLAGS_KNOWN                                                       \
+    (ASMA_FLAG_SINGLE | ASMA_FLAG_WINDOW_FIRST | ASMA_HEAP_MASK)
 
 #define ASMA_NAME_MAX 32
 #define ASMA_HEADER_V1 68
@@ -82,6 +87,13 @@ typedef struct {
     uint16_t mod_date, mod_time;
     char path[FS_PATH_SZ];
 } loaded_app_t;
+
+/* The .APP in /APPS (or one of its folders) whose header name is `name`
+ * (any case): its path in out. */
+bool appload_find_named(const char *name, char *out, int sz);
+/* Run the app called `name` from /APPS; with `file`, ask it to open that
+ * file (api->open_request). False if there is no such app. */
+bool appload_run_named(const char *name, const char *file);
 
 /* Load (or reuse / hot-reload if the file changed) and register. */
 app_descriptor *appload_load(const char *path);
