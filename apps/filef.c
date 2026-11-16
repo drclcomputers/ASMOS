@@ -118,8 +118,22 @@ static void ff_navigate_internal(ff_inst_t *s, uint16_t cluster,
                                  const char *path, uint8_t drive_id);
 
 /* ── Path/drive helpers ────────────────────────────────────────── */
+/* the root of everything is "/" inside; on screen it's "Drives", and
+ * typing "Drives" in the path box goes there too */
 static bool is_vroot_path(const char *path) {
-    return path[0] == '/' && path[1] == '\0';
+    if (path[0] == '/' && path[1] == '\0')
+        return true;
+    const char *d = "drives";
+    for (; *d; d++, path++)
+        if ((*path | 0x20) != *d)
+            return false;
+    return *path == '\0' || (*path == '/' && path[1] == '\0');
+}
+
+static const char *shown_path(const ff_inst_t *s) {
+    if (s->at_vroot)
+        return "Drives";
+    return fo_is_trash(s->path) ? "Trash" : s->path;
 }
 
 static bool resolve_vpath(const char *path, uint8_t *out_drive, char *out_sub,
@@ -439,7 +453,7 @@ static void ff_go_vroot_internal(ff_inst_t *s) {
     s->dir_cluster = 0;
     s->drive_id = DRIVE_HDA;
     strcpy(s->path, "/");
-    s->win->title = s->path;
+    s->win->title = "Drives";
     s->scroll_y = 0;
     ff_reload(s);
 }
@@ -452,7 +466,7 @@ static void ff_navigate_internal(ff_inst_t *s, uint16_t cluster,
     s->drive_id = drive_id;
     strncpy(s->path, path, FS_PATH_MAX);
     s->path[FS_PATH_MAX] = '\0';
-    s->win->title = fo_is_trash(s->path) ? "Trash" : s->path;
+    s->win->title = shown_path(s);
     s->scroll_y = 0;
     ff_reload(s);
 }
@@ -526,6 +540,8 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
             draw_txt_icon(ax, ay, it->selected);
         else if (!strcasecmp(ext, "CFG"))
             draw_cfg_icon(ax, ay, it->selected);
+        else if (!strcasecmp(ext, "ZIP"))
+            draw_zip_icon(ax, ay, it->selected);
         else
             draw_unknown_icon(ax, ay, it->selected);
     }
@@ -726,8 +742,8 @@ static void ff_sync(ff_inst_t *s) {
     ctl_enable(s->fwd, s->history_index < s->history_count - 1);
     ctl_enable(s->up, !s->at_vroot);
     if (s->win->focus != s->path_edit &&
-        strcmp(ctl_text(s->path_edit), s->path))
-        ctl_set_text(s->path_edit, s->path);
+        strcmp(ctl_text(s->path_edit), s->at_vroot ? "Drives" : s->path))
+        ctl_set_text(s->path_edit, s->at_vroot ? "Drives" : s->path);
     char stat[64];
     if (s->status[0]) {
         strncpy(stat, s->status, 63);
@@ -811,6 +827,48 @@ static void menu_delete(void) {
     char p[FS_PATH_SZ];
     if (s && sel_path(s, p, sizeof(p)))
         fo_ask_delete(s->win, p, op_done, s);
+}
+
+/* Compress: the selected item, else the folder shown */
+static void menu_compress(void) {
+    ff_inst_t *s = active_finder();
+    if (!s)
+        return;
+    char p[FS_PATH_SZ];
+    int sel = s->at_vroot ? -1 : ff_selected_file(s);
+    if (sel >= 0) {
+        item_fspath(s, s->items[sel].name, p, sizeof(p));
+    } else if (!s->at_vroot && !fo_is_trash(s->path)) {
+        uint8_t drv;
+        char sub[FS_PATH_SZ];
+        if (resolve_vpath(s->path, &drv, sub, sizeof(sub)) &&
+            !strcmp(sub, "/")) {
+            dlg_message(s->win, "Compress",
+                        "Select what to put in the archive: a whole drive "
+                        "can't go in one.");
+            return;
+        }
+        snprintf(p, sizeof(p), "%s", s->path);
+    } else {
+        strcpy(s->status, "Nothing selected.");
+        return;
+    }
+    fo_ask_compress(s->win, p, op_done, s);
+}
+
+static void menu_extract(void) {
+    ff_inst_t *s = active_finder();
+    if (!s)
+        return;
+    char p[FS_PATH_SZ];
+    int sel = s->at_vroot ? -1 : ff_selected_file(s);
+    if (sel < 0 || (s->items[sel].entry.attr & ATTR_DIRECTORY) ||
+        !fo_is_zip(s->items[sel].name)) {
+        dlg_message(s->win, "Extract", "Select a .ZIP file first.");
+        return;
+    }
+    item_fspath(s, s->items[sel].name, p, sizeof(p));
+    fo_ask_extract(s->win, p, op_done, s);
 }
 
 static void menu_get_info(void) {
@@ -1253,6 +1311,11 @@ static void view_context_menu(ff_inst_t *s, control *c) {
             menu_enable_last(m, clipboard_has_file());
         }
         menu_add_separator(m);
+        menu_add_item(m, "Compress...", menu_compress);
+        menu_enable_last(m, !prot);
+        if (!dir && fo_is_zip(it->name))
+            menu_add_item(m, "Extract...", menu_extract);
+        menu_add_separator(m);
         menu_add_item(m, "Rename", menu_rename);
         menu_enable_last(m, !prot);
         menu_add_item(m, "Delete", menu_delete);
@@ -1366,7 +1429,7 @@ static void on_path(control *c, int ev) {
     else if (resolve_dir(p, &drv, &cl))
         ff_navigate(s, cl, p, drv);
     else {
-        ctl_set_text(c, s->path);
+        ctl_set_text(c, s->at_vroot ? "Drives" : s->path);
         dlg_message(s->win, "FileF", "Folder not found.");
         return;
     }
@@ -1511,7 +1574,7 @@ static void ff_init(void *state) {
     control *tb[] = {s->back, s->fwd, s->up, s->home, s->desk};
     for (int i = 0; i < 5; i++)
         ctl_style_add(tb[i], CS_NOFOCUS);
-    s->path_edit = ctl_edit(w, 98, 2, cw - 100, 12, "/", FS_PATH_MAX,
+    s->path_edit = ctl_edit(w, 98, 2, cw - 100, 12, "Drives", FS_PATH_MAX,
                             CS_STRETCH_W, on_path);
     s->tree =
         ctl_tree(w, 2, 16, TREE_W, ch - 29, TS_FOLDERS | CS_STRETCH_H, on_tree);
@@ -1541,6 +1604,9 @@ static void ff_init(void *state) {
     menu_add_item(m, "Copy Path", menu_copy_path);
     menu_add_separator(m);
     menu_add_item(m, "Toggle Hidden", menu_toggle_hidden);
+    menu_add_separator(m);
+    menu_add_item(m, "Compress...", menu_compress);
+    menu_add_item(m, "Extract...", menu_extract);
     m = window_add_menu(w, "View");
     menu_add_item(m, "By Name", menu_sort_name);
     menu_add_item(m, "By Date", menu_sort_date);
@@ -1558,7 +1624,7 @@ static void ff_init(void *state) {
     s->press_idx = -1;
     s->at_vroot = true;
     strcpy(s->path, "/");
-    w->title = s->path;
+    w->title = "Drives";
     strcpy(s->history[0], "/");
     s->history_index = 0;
     s->history_count = 1;

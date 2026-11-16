@@ -62,6 +62,13 @@ void fo_ask_rename(window *owner, const char *path, fo_done_cb done,
 void fo_ask_delete(window *owner, const char *path, fo_done_cb done,
                    void *user);
 void fo_show_info(window *owner, const char *path);
+/* ZIP archives (ui/zipui.c): a dialog for the name, place and options,
+ * then the job with a progress box. done runs after it worked. */
+bool fo_is_zip(const char *path); /* by its name: .ZIP */
+void fo_ask_compress(window *owner, const char *path, fo_done_cb done,
+                     void *user);
+void fo_ask_extract(window *owner, const char *zip, fo_done_cb done,
+                    void *user);
 /* Message for a failed operation (does nothing when err is NULL). */
 void fo_report(window *owner, const char *title, const char *err);
 

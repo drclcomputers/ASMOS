@@ -48,6 +48,7 @@ extern unsigned int g_ram_bytes;
 #define WALLPAPER_STRIPES 2
 #define WALLPAPER_VERTICAL_STRIPES 3
 #define WALLPAPER_DOTS 4
+#define WALLPAPER_CUSTOM 5 /* g_cfg.wall_custom, 8x8 */
 
 #define MENUBAR_H 10
 #define TASKBAR_H 10

@@ -342,6 +342,7 @@ void wm_sync_menubar(menubar *mb) {
     }
 }
 
+static bool s_sw_on; /* the Alt+Tab list is up (below) */
 static void (*s_overlay)(void *);
 static void *s_overlay_user;
 
@@ -886,7 +887,7 @@ static uint32_t scene_sig(const menubar *mb) {
 /* things that move every frame or are drawn over the windows */
 static bool scene_transient(const menubar *mb) {
     if (mb->open_index >= 0 || popup_is_open() || ctl_overlay_active() ||
-        s_overlay)
+        s_overlay || s_sw_on)
         return true;
     for (int i = 0; i < win_count; i++) {
         const window *w = win_stack[i];
@@ -990,6 +991,133 @@ static void xor_frame(int x, int y, int w, int h) {
     }
 }
 
+/* ── Alt+Tab ─────────────────────────────────────────────────────────────
+ * Hold Alt, press Tab (Shift+Tab backwards) to walk the windows, most
+ * recently used first; let go of Alt to switch, Esc to stay. A box in the
+ * middle of the screen lists them. Dialogs go with their window. */
+#define SW_MAX 16
+static window *s_sw[SW_MAX];
+static int s_sw_n, s_sw_sel;
+
+static window *top_level(window *w) {
+    while (w && w->modal_owner)
+        w = w->modal_owner;
+    return w;
+}
+
+static void sw_collect(void) {
+    /* most recent first: a window counts from its highest dialog too */
+    s_sw_n = 0;
+    window *cur = top_level(wm_focused_window());
+    if (cur && !cur->pinned_bottom)
+        s_sw[s_sw_n++] = cur;
+    for (int i = win_count - 1; i >= 0 && s_sw_n < SW_MAX; i--) {
+        window *w = top_level(win_stack[i]);
+        if (!w || !w->visible || w->pinned_bottom ||
+            w->anim_state == WIN_ANIM_CLOSE)
+            continue;
+        bool have = false;
+        for (int k = 0; k < s_sw_n; k++)
+            have |= s_sw[k] == w;
+        if (!have)
+            s_sw[s_sw_n++] = w;
+    }
+}
+
+static void sw_finish(bool go) {
+    s_sw_on = false;
+    s_force = true;
+    if (!go || s_sw_sel < 0 || s_sw_sel >= s_sw_n)
+        return;
+    window *w = s_sw[s_sw_sel];
+    if (!wm_is_registered(w))
+        return; /* closed while the box was up */
+    if (w->minimized) {
+        w->minimized = false;
+        if (w->animate_open_close && !g_cfg.reduce_motion) {
+            w->anim_state = WIN_ANIM_RESTORE;
+            w->anim_frame = 0;
+        }
+    }
+    wm_focus(w);
+    window *d = w->modal_child; /* its dialog on top of it */
+    while (d && d->modal_child)
+        d = d->modal_child;
+    if (d)
+        wm_focus(d);
+}
+
+bool wm_switcher_key(void) {
+    if (s_sw_on && !kb.alt) { /* Alt let go: switch */
+        sw_finish(true);
+        return false;
+    }
+    if (!kb.key_pressed)
+        return s_sw_on;
+    uint8_t sc = kb.last_scancode;
+    if (kb.alt && !kb.ctrl && sc == TAB) {
+        kb.key_pressed = false;
+        kb.last_char = 0;
+        if (!s_sw_on) {
+            sw_collect();
+            if (s_sw_n < 2 && !(s_sw_n == 1 && s_sw[0]->minimized))
+                return false; /* nothing to switch to */
+            s_sw_on = true;
+            s_sw_sel = 0;
+        }
+        if (s_sw_n > 0)
+            s_sw_sel = (s_sw_sel + (kb.shift ? s_sw_n - 1 : 1)) % s_sw_n;
+        s_force = true;
+        return true;
+    }
+    if (s_sw_on) { /* other keys while the box is up */
+        kb.key_pressed = false;
+        kb.last_char = 0;
+        if (sc == ESC)
+            sw_finish(false);
+        else if (sc == ENTER)
+            sw_finish(true);
+        return true;
+    }
+    return false;
+}
+
+bool wm_switcher_active(void) { return s_sw_on; }
+
+static void sw_draw(void) {
+    if (!s_sw_on)
+        return;
+    int f = UI_FONT_SMALL;
+    int rh = MENU_ITEM_H;
+    int w = 120;
+    for (int i = 0; i < s_sw_n; i++) {
+        int tw = text_width(s_sw[i]->title ? s_sw[i]->title : "", f) + 16;
+        if (tw > w)
+            w = tw;
+    }
+    if (w > SCREEN_WIDTH - 20)
+        w = SCREEN_WIDTH - 20;
+    int head = rh + 4;
+    int h = head + s_sw_n * rh + 4;
+    int x = (SCREEN_WIDTH - w) / 2, y = (SCREEN_HEIGHT - h) / 2;
+    gfx_reset_clip();
+    fill_rect(x + 2, y + 2, w, h, BLACK);
+    fill_rect(x, y, w, h, CYAN);
+    draw_rect(x, y, w, h, BLACK);
+    draw_string(x + 6, y + 3, "Switch to:", WHITE, UI_FONT_BOLD);
+    draw_line(x + 3, y + head - 1, x + w - 4, y + head - 1, WHITE);
+    gfx_set_clip(x + 1, y + 1, w - 2, h - 2);
+    for (int i = 0; i < s_sw_n; i++) {
+        int ry = y + head + 1 + i * rh;
+        if (i == s_sw_sel)
+            fill_rect(x + 1, ry, w - 2, rh, RED);
+        const char *t = s_sw[i]->title ? s_sw[i]->title : "(untitled)";
+        draw_string(x + 8, ry + 2, t, s_sw[i]->minimized ? LIGHT_GRAY : WHITE,
+                    f);
+    }
+    gfx_reset_clip();
+}
+
 static void draw_scene(menubar *mb) {
     gfx_reset_clip();
     desktop_draw();
@@ -997,6 +1125,7 @@ static void draw_scene(menubar *mb) {
     menubar_draw(mb);
     popup_draw();
     ctl_draw_tooltip();
+    sw_draw();
 }
 
 int wm_compose(menubar *mb, int *y0, int *y1) {

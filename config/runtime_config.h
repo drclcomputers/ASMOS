@@ -4,7 +4,7 @@
 #include "lib/core.h"
 
 #define CFG_MAGIC 0x4153434F
-#define CFG_VERSION 2
+#define CFG_VERSION 3
 #define CFG_PATH "/ASMOS.CFG"
 
 typedef struct __attribute__((packed)) {
@@ -43,9 +43,20 @@ typedef struct __attribute__((packed)) {
     uint8_t printer_port;  /* 0 = LPT1 */
     uint8_t printer_no_ff; /* 1 = no form feed after a job */
     uint8_t _reserved[22];
+    /* version 3: the desktop pattern drawn in Settings (WALLPAPER_CUSTOM):
+     * 8x8 pixels, row by row, two to a byte (left one in the high nibble).
+     * Older files end before it: they load with the default one. */
+    uint8_t wall_custom[32];
 } os_config_t;
 
 extern os_config_t g_cfg;
+
+/* colour of pixel (x, y) of the custom pattern, 0..15 (it repeats) */
+static inline uint8_t cfg_wall_px(int x, int y) {
+    uint8_t b = g_cfg.wall_custom[(y & 7) * 4 + ((x & 7) >> 1)];
+    return (uint8_t)(x & 1 ? b & 15 : b >> 4);
+}
+void cfg_default_pattern(uint8_t out[32]);
 
 void cfg_init_defaults(void);
 /* the Performance settings: true = everything light (for a 386), false =

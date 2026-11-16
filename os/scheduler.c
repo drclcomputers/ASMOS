@@ -207,6 +207,8 @@ static void open_monitor(void) {
 }
 
 static void handle_global_shortcuts(void) {
+    if (wm_switcher_key()) /* Alt+Tab, or its list is up */
+        return;
     uint8_t sc = kb.last_scancode;
     /* Monitor: Ctrl+Shift+Esc, Ctrl+Alt+Win, Ctrl+Alt+Del (also asked for
      * by the watchdog when an app was stuck: os/watchdog.h) */

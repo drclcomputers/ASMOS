@@ -81,6 +81,33 @@ void draw_txt_icon(int ax, int ay, bool sel) {
     draw_line(ax + 3, ay + 13, ax + ICON_W - 9, ay + 13, line_col);
 }
 
+/* a page with a zip fastener down the middle, open at the top */
+void draw_zip_icon(int ax, int ay, bool sel) {
+    uint8_t bg = sel ? DARK_GRAY : YELLOW;
+    fill_rect(ax + 1, ay, ICON_W - 5, ICON_H, bg);
+    draw_rect(ax + 1, ay, ICON_W - 5, ICON_H, BLACK);
+    fill_rect(ax + ICON_W - 5, ay, 4, ICON_H, BLACK);
+    draw_line(ax + ICON_W - 5, ay, ax + ICON_W - 1, ay + 4, BLACK);
+    fill_rect(ax + ICON_W - 4, ay, 3, 4, bg);
+    int cx = ax + 1 + (ICON_W - 5) / 2; /* the middle of the page */
+    uint8_t tooth = sel ? WHITE : DARK_GRAY;
+    uint8_t tape = sel ? LIGHT_GRAY : BROWN;
+    /* the tapes either side, then the teeth meeting between them */
+    draw_line(cx - 3, ay + 1, cx - 3, ay + ICON_H - 2, tape);
+    draw_line(cx + 2, ay + 1, cx + 2, ay + ICON_H - 2, tape);
+    for (int y = ay + 2; y < ay + 8; y += 2) { /* open: apart */
+        draw_line(cx - 2, y, cx - 2, y, tooth);
+        draw_line(cx + 1, y + 1, cx + 1, y + 1, tooth);
+    }
+    for (int y = ay + 13; y < ay + ICON_H - 1; y += 2) { /* closed */
+        draw_line(cx - 2, y, cx, y, tooth);
+        draw_line(cx - 1, y + 1, cx + 1, y + 1, tooth);
+    }
+    /* the slider, a shine on it */
+    fill_rect(cx - 2, ay + 9, 4, 4, BLACK);
+    draw_dot(cx - 1, ay + 10, sel ? WHITE : LIGHT_GRAY);
+}
+
 void draw_cfg_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : LIGHT_GRAY;
     fill_rect(ax + 1, ay, ICON_W - 5, ICON_H, bg);

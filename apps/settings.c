@@ -30,6 +30,11 @@ typedef struct {
     uint32_t clock_shown; /* second last shown */
     window *sub;          /* Screen Saver or Speed, while open */
     control *p_type, *p_port, *p_status;
+    /* the pattern editor, while open: its copy of the pattern, the two
+     * colours (left button / right button) */
+    uint8_t pat[64];
+    uint8_t pen, back;
+    int pat_lx, pat_ly; /* last cell painted while dragging */
     uint32_t p_rev, p_tick;
     bool dirty;
 } settings_state_t;
@@ -41,8 +46,9 @@ static const char *COLORS[16] = {
     "Red",       "Magenta",       "Brown",       "Light Gray",
     "Dark Gray", "Light Blue",    "Light Green", "Light Cyan",
     "Light Red", "Light Magenta", "Yellow",      "White"};
-static const char *PATTERNS[5] = {"Solid", "Checkerboard", "Stripes",
-                                  "Vertical stripes", "Dots"};
+#define NPATTERNS 6
+static const char *PATTERNS[NPATTERNS] = {
+    "Solid", "Checkerboard", "Stripes", "Vertical stripes", "Dots", "Custom"};
 
 static void set_dirty(settings_state_t *s, bool d) {
     s->dirty = d;
@@ -76,6 +82,15 @@ static void paint_preview(control *c, int x, int y, int w, int h) {
             for (int xx = 2; xx < w; xx += 4)
                 draw_dot(x + xx, y + yy, b);
         break;
+    case WALLPAPER_CUSTOM: { /* as it is on the desktop */
+        static uint8_t row[640];
+        for (int yy = 0; yy < h; yy++) {
+            for (int xx = 0; xx < w && xx < 640; xx++)
+                row[xx] = cfg_wall_px(xx, yy);
+            draw_pixels(x, y + yy, w, 1, row, w);
+        }
+        break;
+    }
     default:
         fill_rect(x, y, w, h, a);
     }
@@ -389,13 +404,215 @@ static void open_speed(settings_state_t *s) {
     ctl_focus(ok);
 }
 
+/* ── desktop pattern editor ─────────────────────────────────────────── */
+
+#define PAT_CELL 11 /* a pixel of the pattern, in the grid */
+
+static void paint_pat_grid(control *c, int x, int y, int w, int h) {
+    settings_state_t *s = c->user;
+    fill_rect(x, y, w, h, DARK_GRAY); /* the lines between cells */
+    for (int cy = 0; cy < 8; cy++)
+        for (int cx = 0; cx < 8; cx++)
+            fill_rect(x + 1 + cx * PAT_CELL, y + 1 + cy * PAT_CELL,
+                      PAT_CELL - 1, PAT_CELL - 1, s->pat[cy * 8 + cx]);
+}
+
+static void paint_pat_preview(control *c, int x, int y, int w, int h) {
+    settings_state_t *s = c->user;
+    static uint8_t row[640];
+    for (int yy = 0; yy < h; yy++) {
+        for (int xx = 0; xx < w && xx < 640; xx++)
+            row[xx] = s->pat[(yy & 7) * 8 + (xx & 7)];
+        draw_pixels(x, y + yy, w, 1, row, w);
+    }
+}
+
+static void paint_pat_palette(control *c, int x, int y, int w, int h) {
+    settings_state_t *s = c->user;
+    /* the two colours: left button's over right button's (as ASMDraw) */
+    fill_rect(x + 6, y + 3, 10, h - 6, s->back);
+    draw_rect(x + 6, y + 3, 10, h - 6, BLACK);
+    fill_rect(x + 1, y + 1, 10, h - 6, s->pen);
+    draw_rect(x + 1, y + 1, 10, h - 6, BLACK);
+    int cw = (w - 20) / 16;
+    for (int i = 0; i < 16; i++) {
+        fill_rect(x + 20 + i * cw, y + 1, cw - 1, h - 2, (uint8_t)i);
+        draw_rect(x + 20 + i * cw, y + 1, cw - 1, h - 2, BLACK);
+    }
+}
+
+static void on_pat_palette(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_MOUSEDOWN && ev != EV_DBLCLICK && ev != EV_MENU)
+        return;
+    int cw = (c->aw - 20) / 16;
+    int i = cw > 0 && c->mx >= 20 ? (c->mx - 20) / cw : -1;
+    if (i < 0 || i > 15)
+        return;
+    if (ev == EV_MENU || kb.shift)
+        s->back = (uint8_t)i;
+    else
+        s->pen = (uint8_t)i;
+}
+
+static void on_pat_grid(control *c, int ev) {
+    settings_state_t *s = c->user;
+    bool right = ev == EV_MENU || kb.shift;
+    if (ev != EV_MOUSEDOWN && ev != EV_DBLCLICK && ev != EV_MOUSEMOVE &&
+        ev != EV_MENU)
+        return;
+    int cx = (c->mx - 1) / PAT_CELL, cy = (c->my - 1) / PAT_CELL;
+    if (c->mx < 1)
+        cx = -1;
+    if (c->my < 1)
+        cy = -1;
+    if (ev == EV_MOUSEMOVE) { /* every cell between: a fast drag skips */
+        cx = cx < 0 ? 0 : cx > 7 ? 7 : cx;
+        cy = cy < 0 ? 0 : cy > 7 ? 7 : cy;
+        int x = s->pat_lx, y = s->pat_ly;
+        int dx = cx > x ? cx - x : x - cx, dy = cy > y ? cy - y : y - cy;
+        int sx = cx > x ? 1 : -1, sy = cy > y ? 1 : -1, err = dx - dy;
+        for (;;) {
+            s->pat[y * 8 + x] = right ? s->back : s->pen;
+            if (x == cx && y == cy)
+                break;
+            int e2 = 2 * err;
+            if (e2 > -dy) {
+                err -= dy;
+                x += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y += sy;
+            }
+        }
+    } else {
+        if (cx < 0 || cy < 0 || cx > 7 || cy > 7)
+            return;
+        s->pat[cy * 8 + cx] = right ? s->back : s->pen;
+    }
+    s->pat_lx = cx;
+    s->pat_ly = cy;
+}
+
+static void on_pat_btn(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    switch (c->id) {
+    case 0: /* Fill */
+        memset(s->pat, s->back, sizeof(s->pat));
+        break;
+    case 1: { /* Invert: the two colours swap places */
+        for (int i = 0; i < 64; i++)
+            s->pat[i] = s->pat[i] == s->pen    ? s->back
+                        : s->pat[i] == s->back ? s->pen
+                                               : s->pat[i];
+        break;
+    }
+    case 2: { /* the default diamond */
+        uint8_t d[32];
+        cfg_default_pattern(d);
+        for (int i = 0; i < 64; i++)
+            s->pat[i] = (uint8_t)(i & 1 ? d[i / 2] & 15 : d[i / 2] >> 4);
+        break;
+    }
+    case 3:
+    case 4:
+    case 5:
+    case 6: { /* move the whole pattern a pixel (it wraps round) */
+        uint8_t t[64];
+        int a = c->id - 3;
+        int dx = a == 0 ? 1 : a == 1 ? 7 : 0;
+        int dy = a == 2 ? 1 : a == 3 ? 7 : 0;
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++)
+                t[((y + dy) & 7) * 8 + ((x + dx) & 7)] = s->pat[y * 8 + x];
+        memcpy(s->pat, t, 64);
+        break;
+    }
+    case 10: /* OK: the desktop gets it */
+        for (int i = 0; i < 32; i++)
+            g_cfg.wall_custom[i] =
+                (uint8_t)(s->pat[i * 2] << 4 | s->pat[i * 2 + 1]);
+        g_cfg.wallpaper_pattern = WALLPAPER_CUSTOM;
+        list_set_sel(s->pattern, WALLPAPER_CUSTOM);
+        set_dirty(s, true);
+        close_sub(s);
+        break;
+    case 11: /* Cancel */
+        close_sub(s);
+        break;
+    }
+}
+
+static void open_pattern(settings_state_t *s) {
+    window *w = open_sub(s, "Desktop Pattern", 260, 158);
+    if (!w)
+        return;
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            s->pat[y * 8 + x] = cfg_wall_px(x, y);
+    /* start with the pattern's two most used colours */
+    int cnt[16] = {0};
+    for (int i = 0; i < 64; i++)
+        cnt[s->pat[i] & 15]++;
+    int a = 0, b = -1;
+    for (int i = 1; i < 16; i++)
+        if (cnt[i] > cnt[a])
+            a = i;
+    for (int i = 0; i < 16; i++)
+        if (i != a && cnt[i] && (b < 0 || cnt[i] > cnt[b]))
+            b = i;
+    s->back = (uint8_t)a;
+    s->pen = (uint8_t)(b >= 0 ? b : (a == BLACK ? WHITE : BLACK));
+
+    control *g = ctl_custom(w, 10, 6, 8 * PAT_CELL + 1, 8 * PAT_CELL + 1,
+                            paint_pat_grid, on_pat_grid, 0);
+    ctl_set_tooltip(g, "Left button: front colour; right button (or "
+                       "Shift): back colour");
+    ctl_label(w, 108, 6, 140, 9, "On the desktop:", 0);
+    ctl_custom(w, 108, 16, 140, 44, paint_pat_preview, NULL, CS_BORDER);
+    static const char *const arrows[4] = {">", "<", "v", "^"};
+    static const char *const atips[4] = {"Move right", "Move left", "Move down",
+                                         "Move up"};
+    for (int i = 0; i < 4; i++) {
+        control *m =
+            ctl_button(w, 108 + i * 18, 66, 16, 13, arrows[i], 0, on_pat_btn);
+        m->id = 3 + i;
+        ctl_set_tooltip(m, atips[i]);
+    }
+    static const char *const names[3] = {"Fill", "Swap", "Reset"};
+    static const char *const tips[3] = {"All of it in the back colour",
+                                        "Front and back colours change places",
+                                        "Back to the diamond it came with"};
+    for (int i = 0; i < 3; i++) {
+        control *b2 = ctl_button(w, 108 + (i % 3) * 47, 84, 45, 13, names[i], 0,
+                                 on_pat_btn);
+        b2->id = i;
+        ctl_set_tooltip(b2, tips[i]);
+    }
+    control *pal =
+        ctl_custom(w, 10, 102, 238, 14, paint_pat_palette, on_pat_palette, 0);
+    ctl_set_tooltip(pal, "Click: front colour, right-click: back colour");
+    control *ok = ctl_button(w, 144, 122, 50, 13, "OK", 1, on_pat_btn);
+    ok->id = 10;
+    control *ca = ctl_button(w, 198, 122, 50, 13, "Cancel", 2, on_pat_btn);
+    ca->id = 11;
+    ctl_style_add(ok, CS_DEFAULT);
+    ctl_style_add(ca, CS_CANCEL);
+    ctl_focus(ok);
+}
+
 static void on_open_sub(control *c, int ev) {
     if (ev != EV_CLICK)
         return;
     if (c->id == 0)
         open_saver(c->user);
-    else
+    else if (c->id == 1)
         open_speed(c->user);
+    else
+        open_pattern(c->user);
 }
 
 /* ── Printers tab ──────────────────────────────────────────────────── */
@@ -622,8 +839,13 @@ static void build(settings_state_t *s) {
     ctl_set_tooltip(pb, "What a slow machine can do without");
     on_page(s, ctl_label(w, 10, 40, 60, 12, "Pattern:", 0), P_WALL);
     s->pattern = on_page(s, ctl_combo(w, 76, 40, 96, on_wall), P_WALL);
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < NPATTERNS; i++)
         list_add(s->pattern, PATTERNS[i]);
+    control *eb = on_page(
+        s, ctl_button(w, 178, 74, 74, 13, "Edit Pattern...", 0, on_open_sub),
+        P_WALL);
+    eb->id = 2;
+    ctl_set_tooltip(eb, "Draw your own 8x8 desktop pattern");
     on_page(s, ctl_label(w, 10, 56, 60, 12, "Color A:", 0), P_WALL);
     s->col_a = on_page(s, ctl_combo(w, 76, 56, 96, on_wall), P_WALL);
     on_page(s, ctl_label(w, 10, 72, 60, 12, "Color B:", 0), P_WALL);
@@ -632,7 +854,7 @@ static void build(settings_state_t *s) {
         list_add(s->col_a, COLORS[i]);
         list_add(s->col_b, COLORS[i]);
     }
-    list_set_sel(s->pattern, g_cfg.wallpaper_pattern % 5);
+    list_set_sel(s->pattern, g_cfg.wallpaper_pattern % NPATTERNS);
     list_set_sel(s->col_a, g_cfg.wallpaper_main_color & 15);
     list_set_sel(s->col_b, g_cfg.wallpaper_secondary_color & 15);
     on_page(s, ctl_label(w, 10, 88, 60, 8, "Preview:", 0), P_WALL);

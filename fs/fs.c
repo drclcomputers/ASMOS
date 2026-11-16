@@ -43,43 +43,34 @@ bool path_is_protected(const char *name_or_path) {
     return false;
 }
 
-/* Floppies: a small write-through cache of recent sectors. The FAT and the
- * folders are read again and again (each cluster of a file looks up the
- * FAT), and a floppy read costs a seek and up to a turn of the disk.
- * Emptied when a floppy is mounted or unmounted. */
-#define FCACHE_N 16
-static struct {
-    uint32_t lba, used;
-    uint8_t drive; /* DRIVE_FDD0/1; 0 = empty slot */
-    uint8_t data[512];
-} s_fcache[FCACHE_N];
-static uint32_t s_fcache_clock;
+/* Floppies: drivers/fdd.c keeps recent tracks in memory (and writes
+ * them back a little later). When it sees that the disk was changed (the
+ * door was opened, no Eject), the drive is unmounted here and mounted
+ * again on the next path that goes to it (drive_ready): the open files
+ * and the folders seen were the old disk's. */
+static bool s_remount[DRIVE_COUNT];
 
-static int fcache_find(uint8_t drive_id, uint32_t lba) {
-    for (int i = 0; i < FCACHE_N; i++)
-        if (s_fcache[i].drive == drive_id && s_fcache[i].lba == lba)
-            return i;
-    return -1;
-}
-
-static void fcache_put(uint8_t drive_id, uint32_t lba, const void *buf) {
-    int k = fcache_find(drive_id, lba);
-    if (k < 0) { /* the empty or least recently used slot */
-        k = 0;
-        for (int i = 1; i < FCACHE_N && s_fcache[k].drive; i++)
-            if (!s_fcache[i].drive || s_fcache[i].used < s_fcache[k].used)
-                k = i;
+/* after a failed floppy access: true to try again (the disk was changed,
+ * nothing of the old one is in use: mounting, or not mounted) */
+static bool fdd_check_change(uint8_t drive_id) {
+    if (!fdd_take_change(drive_id == DRIVE_FDD0 ? 0 : 1))
+        return false;
+    if (g_drives[drive_id].mounted) {
+        fs_unmount(drive_id);
+        s_remount[drive_id] = true;
+        return false;
     }
-    s_fcache[k].drive = drive_id;
-    s_fcache[k].lba = lba;
-    s_fcache[k].used = ++s_fcache_clock;
-    memcpy(s_fcache[k].data, buf, 512);
+    return true;
 }
 
-static void fcache_drop(uint8_t drive_id) {
-    for (int i = 0; i < FCACHE_N; i++)
-        if (s_fcache[i].drive == drive_id)
-            s_fcache[i].drive = 0;
+/* mounted, or (once after a disk change) mounted again now */
+static bool drive_ready(uint8_t drive_id) {
+    if (fs_drive_mounted(drive_id))
+        return true;
+    if (drive_id >= DRIVE_COUNT || !s_remount[drive_id])
+        return false;
+    s_remount[drive_id] = false;
+    return fs_mount_drive(drive_id);
 }
 
 bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
@@ -88,18 +79,14 @@ bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
     case DRIVE_HDB:
         return ata_read_sector(drive_id, lba, buf);
     case DRIVE_FDD0:
-    case DRIVE_FDD1: {
-        int k = fcache_find(drive_id, lba);
-        if (k >= 0) {
-            memcpy(buf, s_fcache[k].data, 512);
-            s_fcache[k].used = ++s_fcache_clock;
-            return true;
+    case DRIVE_FDD1:
+        for (int k = 0; k < 2; k++) {
+            if (fdd_read_sector(drive_id == DRIVE_FDD0 ? 0 : 1, lba, buf))
+                return true;
+            if (!fdd_check_change(drive_id))
+                break;
         }
-        if (!fdd_read_sector(drive_id == DRIVE_FDD0 ? 0 : 1, lba, buf))
-            return false;
-        fcache_put(drive_id, lba, buf);
-        return true;
-    }
+        return false;
     default:
         return false;
     }
@@ -111,17 +98,14 @@ bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
     case DRIVE_HDB:
         return ata_write_sector(drive_id, lba, buf);
     case DRIVE_FDD0:
-    case DRIVE_FDD1: {
-        bool ok = fdd_write_sector(drive_id == DRIVE_FDD0 ? 0 : 1, lba, buf);
-        if (ok)
-            fcache_put(drive_id, lba, buf);
-        else { /* what's on the disk is unknown now */
-            int k = fcache_find(drive_id, lba);
-            if (k >= 0)
-                s_fcache[k].drive = 0;
+    case DRIVE_FDD1:
+        for (int k = 0; k < 2; k++) {
+            if (fdd_write_sector(drive_id == DRIVE_FDD0 ? 0 : 1, lba, buf))
+                return true;
+            if (!fdd_check_change(drive_id))
+                break;
         }
-        return ok;
-    }
+        return false;
     default:
         return false;
     }
@@ -863,7 +847,6 @@ bool fs_mount_drive(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return false;
-    fcache_drop(drive_id); /* maybe another disk now */
     fat_vol_t *v = vol(drive_id);
     v->drive_id = drive_id;
     v->mounted = false;
@@ -967,7 +950,6 @@ void fs_unmount(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return;
-    fcache_drop(drive_id);
     g_drives[drive_id].mounted = false;
     fs_usage_invalidate(drive_id);
 }
@@ -1018,7 +1000,7 @@ bool fs_resolve_dir(const char *path, uint8_t *out_drive,
             const char *mp = g_vfs_mounts[m].path + 1;
             if (strcasecmp(component, mp) == 0) {
                 uint8_t target = g_vfs_mounts[m].drive_id;
-                if (!fs_drive_mounted(target))
+                if (!drive_ready(target))
                     return false;
                 drive = target;
                 cluster = 0;
@@ -1218,7 +1200,7 @@ static bool resolve_ex(const char *path, uint8_t *out_drive,
                 const char *mp_name = g_vfs_mounts[m].path + 1;
                 if (strcasecmp(component, mp_name) == 0) {
                     uint8_t target = g_vfs_mounts[m].drive_id;
-                    if (!fs_drive_mounted(target))
+                    if (!drive_ready(target))
                         return false;
                     cur_drive = target;
                     cur_cluster = 0;

@@ -6,6 +6,19 @@
 
 os_config_t g_cfg;
 
+/* a diamond, light cyan on light blue */
+void cfg_default_pattern(uint8_t out[32]) {
+    static const char *rows[8] = {"...X....", "..X.X...", ".X...X..",
+                                  "X.....X.", ".X...X..", "..X.X...",
+                                  "...X....", "........"};
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x += 2) {
+            uint8_t a = rows[y][x] == 'X' ? LIGHT_CYAN : LIGHT_BLUE;
+            uint8_t b = rows[y][x + 1] == 'X' ? LIGHT_CYAN : LIGHT_BLUE;
+            out[y * 4 + x / 2] = (uint8_t)(a << 4 | b);
+        }
+}
+
 void cfg_init_defaults(void) {
     memset(&g_cfg, 0, sizeof(g_cfg));
     g_cfg.magic = CFG_MAGIC;
@@ -17,6 +30,7 @@ void cfg_init_defaults(void) {
     g_cfg.sound_enabled = 1;
     g_cfg.wallpaper_main_color = LIGHT_BLUE;
     g_cfg.wallpaper_secondary_color = LIGHT_CYAN;
+    cfg_default_pattern(g_cfg.wall_custom);
     g_cfg.filef_single_window = 0;
     g_cfg.reduce_motion = 0;
     g_cfg.classic_fonts = 0;
@@ -68,12 +82,15 @@ bool cfg_load(void) {
     if (!fs_open(CFG_PATH, &f))
         return false;
 
-    os_config_t tmp;
+    os_config_t tmp = g_cfg; /* what an older, shorter file lacks */
     int n = fs_read(&f, &tmp, sizeof(os_config_t));
     fs_close(&f);
 
-    if (n < (int)sizeof(os_config_t))
+    /* version 2 files end before wall_custom */
+    if (n < (int)(sizeof(os_config_t) - sizeof(tmp.wall_custom)))
         return false;
+    if (n < (int)sizeof(os_config_t))
+        cfg_default_pattern(tmp.wall_custom);
     if (tmp.magic != CFG_MAGIC)
         return false;
 

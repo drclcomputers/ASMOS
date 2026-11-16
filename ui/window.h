@@ -114,6 +114,10 @@ extern int win_count;
 extern window *focused_window;
 
 bool is_desktop_focused();
+/* Alt+Tab / Alt+Shift+Tab: called once a frame before the keys go
+ * anywhere else; true while the window list is up (it took the key) */
+bool wm_switcher_key(void);
+bool wm_switcher_active(void);
 
 void wm_init(void);
 window *wm_register(const window_spec_t *spec);

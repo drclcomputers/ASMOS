@@ -474,8 +474,11 @@ void fo_open(window *owner, const char *path) {
     static const char *const lnk[] = {"LNK", NULL};
     const char *const *wav = audio_extensions(); /* WAV, MID, ... */
     static const char *const pic[] = {"PIC", NULL};
+    static const char *const zip[] = {"ZIP", NULL};
     if (ext_is(name, app)) {
         fo_launch_app(owner, path);
+    } else if (ext_is(name, zip)) {
+        fo_ask_extract(owner, path, NULL, NULL);
     } else if (ext_is(name, lnk)) {
         if (!desktop_open_shortcut(path))
             dlg_message(owner, "Open",

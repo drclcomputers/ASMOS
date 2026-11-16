@@ -25,6 +25,7 @@ void draw_dotdot_icon(int ax, int ay, bool sel);
 void draw_pic_icon(int ax, int ay, bool sel);
 void draw_txt_icon(int ax, int ay, bool sel);
 void draw_cfg_icon(int ax, int ay, bool sel);
+void draw_zip_icon(int ax, int ay, bool sel);
 void draw_unknown_icon(int ax, int ay, bool sel);
 void draw_trash_icon(int ax, int ay, bool sel, bool full);
 

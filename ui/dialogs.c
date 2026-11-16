@@ -17,7 +17,17 @@
 void (*g_dlg_call_hook)(window *owner, void (*fn)(void *, void *), void *user,
                         void *arg) = NULL;
 
-enum { K_MSG, K_CONFIRM, K_INPUT, K_OPEN, K_SAVE, K_PRINT, K_PREVIEW };
+enum {
+    K_MSG,
+    K_CONFIRM,
+    K_INPUT,
+    K_OPEN,
+    K_SAVE,
+    K_PRINT,
+    K_PREVIEW,
+    K_FOLDER,
+    K_FORM
+};
 
 typedef struct {
     window *win;
@@ -365,6 +375,8 @@ static void fill_list(dlg_t *d) {
                 (e->attr & ATTR_VOLUME_ID))
                 continue;
             bool dir = (e->attr & ATTR_DIRECTORY) != 0;
+            if (!dir && d->kind == K_FOLDER)
+                continue;
             if (!dir && d->ext[0]) {
                 const char *dot = strrchr(got[i], '.');
                 if (!dot || strcasecmp(dot + 1, d->ext) != 0)
@@ -446,6 +458,19 @@ static void save_overwrite_cb(void *user, bool yes) {
 }
 
 static void file_ok(dlg_t *d) {
+    if (d->kind ==
+        K_FOLDER) { /* the folder picked in the list, else this one */
+        char path[FS_PATH_SZ];
+        int sel = list_sel(d->list);
+        snprintf(path, sizeof(path), "%s", d->dir);
+        if (sel > 0 || (sel == 0 && strcmp(list_get(d->list, 0), "[..]"))) {
+            char n[FS_NAME_SZ];
+            item_name(d, sel, n);
+            join(path, sizeof(path), d->dir, n);
+        }
+        finish(d, true, path);
+        return;
+    }
     char nm[FS_PATH_SZ];
     strncpy(nm, ctl_text(d->edit), sizeof(nm) - 1);
     nm[sizeof(nm) - 1] = 0;
@@ -587,16 +612,24 @@ static void file_dialog(window *owner, int kind, const char *title,
         if (fs_drive_mounted(g_vfs_mounts[m].drive_id))
             tree_add(d->tree, -1, g_vfs_mounts[m].path + 1, 0, true);
     d->list = ctl_list(w, 86, 21, 214, 98, 0, on_list);
-    ctl_label(w, 6, 125, 30, 12, "Name:", 0);
-    d->edit =
-        ctl_edit(w, 36, 125, 264, 12, name ? name : "", 255, ES_FILENAME, NULL);
+    if (kind == K_FOLDER) {
+        ctl_label(w, 6, 125, 294, 12,
+                  "Pick a folder (or open one), then Choose.", 0);
+    } else {
+        ctl_label(w, 6, 125, 30, 12, "Name:", 0);
+        d->edit = ctl_edit(w, 36, 125, 264, 12, name ? name : "", 255,
+                           ES_FILENAME, NULL);
+    }
     control *ok = ctl_button(w, 194, 142, 50, 13,
-                             kind == K_SAVE ? "Save" : "Open", 1, on_file_ok);
+                             kind == K_SAVE     ? "Save"
+                             : kind == K_FOLDER ? "Choose"
+                                                : "Open",
+                             1, on_file_ok);
     control *ca = ctl_button(w, 250, 142, 50, 13, "Cancel", 2, on_cancel);
     ctl_style_add(ok, CS_DEFAULT);
     ctl_style_add(ca, CS_CANCEL);
     fill_list(d);
-    if (kind == K_SAVE) {
+    if (kind == K_SAVE && d->edit) {
         ctl_focus(d->edit);
         edit_select_all(d->edit);
     } else {
@@ -615,6 +648,36 @@ void dlg_save_file(window *owner, const char *title, const char *dir,
                    void *user) {
     file_dialog(owner, K_SAVE, title ? title : "Save As", dir, name, ext, cb,
                 user);
+}
+
+void dlg_choose_folder(window *owner, const char *title, const char *dir,
+                       dlg_text_cb cb, void *user) {
+    file_dialog(owner, K_FOLDER, title ? title : "Choose a Folder", dir, NULL,
+                NULL, cb, user);
+}
+
+/* ── forms: dialogs built by the caller ─────────────────────────────────── */
+
+window *dlg_form(window *owner, const char *title, int w, int h,
+                 uint32_t state_size) {
+    dlg_t *d = open_dlg(owner, K_FORM, title, w, h);
+    if (!d)
+        return NULL;
+    d->xdata = kzalloc(state_size ? state_size : 4);
+    if (!d->xdata) {
+        finish(d, false, NULL);
+        return NULL;
+    }
+    return d->win;
+}
+
+void *dlg_form_state(window *form) {
+    return form ? ((dlg_t *)form->userdata)->xdata : NULL;
+}
+
+void dlg_form_close(window *form) {
+    if (form)
+        finish((dlg_t *)form->userdata, false, NULL);
 }
 
 /* ── messages from places that must not build windows ──────────────────── */

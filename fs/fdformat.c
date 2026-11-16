@@ -175,7 +175,8 @@ int fdformat_step(fdformat_t *f) {
     /* the file system, then use the disk */
     uint32_t serial = pit_ticks * 2654435761u ^
                       (uint32_t)date_from_rtc() << 16 ^ time_from_rtc();
-    if (!fdformat_write_fat(f->media, f->label, serial, wr_drive, &f->unit)) {
+    if (!fdformat_write_fat(f->media, f->label, serial, wr_drive, &f->unit) ||
+        !fdd_flush(f->unit)) { /* (the writes wait in the track cache) */
         f->err = f->quick ? "Could not write to the disk (no disk, not "
                             "formatted, or write-protected)."
                           : "Could not write the file system.";

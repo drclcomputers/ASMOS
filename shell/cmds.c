@@ -967,6 +967,8 @@ void cmd_shutdown(const char *args, char *out, size_t max) {
     term_buf_push_text(out);
     out[0] = '\0';
     sleep_s(1);
+    fdd_flush(0); /* cached floppy writes first */
+    fdd_flush(1);
     cpu_shutdown();
 }
 
@@ -986,6 +988,8 @@ void cmd_reboot(const char *args, char *out, size_t max) {
     term_buf_push_text(out);
     out[0] = '\0';
     sleep_s(1);
+    fdd_flush(0); /* cached floppy writes first */
+    fdd_flush(1);
     cpu_reset();
 }
 

@@ -1,4 +1,5 @@
 #include "ui/desktop.h"
+#include "drivers/fdd.h"
 #include "drivers/gpu.h"
 #include "os/watchdog.h"
 #include "ui/cursor.h"
@@ -75,6 +76,16 @@ void draw_wallpaper_pattern(void) {
             draw_pixels(0, y, SCREEN_WIDTH, 1, row, SCREEN_WIDTH);
         break;
     }
+    case WALLPAPER_CUSTOM: {
+        /* eight rows across the screen, then copies of them */
+        static uint8_t rows[8][640];
+        for (int r = 0; r < 8; r++)
+            for (int x = 0; x < SCREEN_WIDTH; x++)
+                rows[r][x] = cfg_wall_px(x, r);
+        for (int y = 0; y < SCREEN_HEIGHT; y++)
+            draw_pixels(0, y, SCREEN_WIDTH, 1, rows[y & 7], SCREEN_WIDTH);
+        break;
+    }
     default:
         clear_screen(main_col);
         break;
@@ -100,6 +111,8 @@ static uint32_t s_last_click_tick = 0;
 #define STEPS 40
 
 void power_anim_run(bool is_restart) {
+    fdd_flush(0); /* floppy writes still in memory go to the disks */
+    fdd_flush(1);
     /* no pointer from here on: neither the arrow nor the hourglass (the
      * loop stops beating while this runs) */
     wd_stop();
@@ -238,6 +251,8 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
             draw_txt_icon(ax, ay, it->selected);
         else if (strcasecmp(ext, "CFG") == 0)
             draw_cfg_icon(ax, ay, it->selected);
+        else if (strcasecmp(ext, "ZIP") == 0)
+            draw_zip_icon(ax, ay, it->selected);
         else
             draw_unknown_icon(ax, ay, it->selected);
         break;
@@ -354,6 +369,21 @@ static void menu_info(void) {
         fo_show_info(NULL, p);
 }
 static void menu_reload(void) { desktop_fs_set_dirty(); }
+static void menu_compress(void) {
+    char p[FS_PATH_SZ];
+    if (sel_path("Compress", p, sizeof(p)))
+        fo_ask_compress(NULL, p, NULL, NULL);
+}
+static void menu_extract(void) {
+    char p[FS_PATH_SZ];
+    if (!sel_path("Extract", p, sizeof(p)))
+        return;
+    bool dir;
+    if (fo_is_zip(p) && fo_stat(p, &dir, NULL) && !dir)
+        fo_ask_extract(NULL, p, NULL, NULL);
+    else
+        dlg_message(NULL, "Extract", "Select a .ZIP file first.");
+}
 static void menu_copy(void) {
     char p[FS_PATH_SZ];
     if (sel_path("Copy", p, sizeof(p)))
@@ -815,6 +845,9 @@ void desktop_init(void) {
     menu_add_item(edit_menu, "Paste", menu_paste);
     menu_add_separator(edit_menu);
     menu_add_item(edit_menu, "Delete", menu_delete);
+    menu_add_separator(edit_menu);
+    menu_add_item(edit_menu, "Compress...", menu_compress);
+    menu_add_item(edit_menu, "Extract...", menu_extract);
 
     menu *action_menu = window_add_menu(win, "Action");
     menu_add_item(action_menu, "Insert Floppy", menu_insert_fdd);
@@ -866,6 +899,18 @@ static void ctx_paste_into(void) {
 
 static void ctx_empty_trash(void) { fo_ask_empty_trash(NULL, NULL, NULL); }
 
+static void ctx_compress(void) {
+    char p[FS_PATH_SZ];
+    if (s_ctx_idx >= 0 && desktop_fs_item_path(s_ctx_idx, p, sizeof(p)))
+        fo_ask_compress(NULL, p, NULL, NULL);
+}
+
+static void ctx_extract(void) {
+    char p[FS_PATH_SZ];
+    if (s_ctx_idx >= 0 && desktop_fs_item_path(s_ctx_idx, p, sizeof(p)))
+        fo_ask_extract(NULL, p, NULL, NULL);
+}
+
 static void context_menu(int hit, int x, int y) {
     desktop_item_t *items = desktop_fs_items();
     s_ctx_idx = hit;
@@ -900,6 +945,10 @@ static void context_menu(int hit, int x, int y) {
             menu_enable_last(m, clipboard_has_file());
         }
         menu_add_separator(m);
+        menu_add_item(m, "Compress...", ctx_compress);
+        if (items[hit].kind != DESKTOP_ITEM_DIR && fo_is_zip(items[hit].name))
+            menu_add_item(m, "Extract...", ctx_extract);
+        menu_add_separator(m);
         menu_add_item(m, "Rename", menu_rename);
         menu_add_item(m, "Delete", menu_delete);
         menu_add_item(m, "Get Info", menu_info);
@@ -920,6 +969,9 @@ uint32_t desktop_sig(void) {
 #define DMIX(v) (h = h * 33u ^ (uint32_t)(v))
     DMIX(g_cfg.wallpaper_pattern);
     DMIX(g_cfg.wallpaper_main_color << 8 | g_cfg.wallpaper_secondary_color);
+    if (g_cfg.wallpaper_pattern == WALLPAPER_CUSTOM)
+        for (int i = 0; i < 32; i++)
+            DMIX(g_cfg.wall_custom[i]);
     DMIX(s_drag_idx);
     DMIX(clipboard_has_file() << 1 | g_clipboard.is_cut);
     for (const char *p = g_clipboard.name; *p; p++)

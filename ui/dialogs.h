@@ -49,6 +49,19 @@ void dlg_save_file(window *owner, const char *title, const char *dir,
                    const char *name, const char *ext, dlg_text_cb cb,
                    void *user);
 
+/* A folder (full path), from a dialog like the file ones */
+void dlg_choose_folder(window *owner, const char *title, const char *dir,
+                       dlg_text_cb cb, void *user);
+
+/* A dialog of your own: an empty window that blocks owner, with state_size
+ * zeroed bytes (dlg_form_state) freed when it closes: by the close box,
+ * Esc on a CS_CANCEL button you add, dlg_form_close, or the owner going.
+ * Put your controls on it; their c->user is yours. */
+window *dlg_form(window *owner, const char *title, int w, int h,
+                 uint32_t state_size);
+void *dlg_form_state(window *form);
+void dlg_form_close(window *form);
+
 /* From code that must not create windows (fault/error handlers): queued,
  * shown as a dlg_message at the start of the next frame. */
 void dlg_post_message(const char *title, const char *msg);

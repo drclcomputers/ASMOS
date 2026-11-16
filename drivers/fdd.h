@@ -99,7 +99,13 @@ bool fdd_read_sector(uint8_t drive_id, uint32_t lba, void *buf);
 bool fdd_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
 bool fdd_is_present(uint8_t drive_id);
 void fdd_motor_off(uint8_t drive_id);
-/* call often (main loop): motors stop 2 s after the last access */
+/* call often (main loop): cached writes go to the disk 1/2 s after the
+ * last one; motors stop 2 s after the last access */
 void fdd_poll(void);
+/* write the drive's cached tracks now (eject, shut down); false if some
+ * sector could not be written (write-protected, bad, wrong format) */
+bool fdd_flush(uint8_t drive_id);
+/* the disk was changed (door opened) since the last call: mount again */
+bool fdd_take_change(uint8_t drive_id);
 
 #endif

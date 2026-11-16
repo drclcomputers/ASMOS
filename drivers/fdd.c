@@ -1,9 +1,13 @@
 #include "drivers/fdd.h"
+#include "lib/alloc.h"
 #include "lib/core.h"
 #include "lib/memory.h"
 #include "lib/time.h"
 
 #define s_dma_buf ((uint8_t *)0x7000)
+/* a whole track by DMA (36 x 512: a 2.88 MB track), below 64 KB so it
+ * can't cross a DMA page; free once stage 2 (0x7E00) has run */
+#define s_track_dma ((uint8_t *)0x8000)
 #define s_present ((bool *)0x7200)
 #define s_motor_on ((bool *)0x7204)
 #define s_current_track ((int *)0x7208)
@@ -36,6 +40,7 @@ static uint8_t s_motors;       /* FDD_DOR_MOTOR_A/B bits that are on */
 static uint32_t s_last_use[2]; /* pit_ticks of each drive's last access */
 static int s_media[2];
 static uint8_t s_spt[2], s_heads[2], s_tracks[2], s_dstep[2];
+static int8_t s_wp[2] = {-1, -1}; /* write protected: -1 unknown */
 
 /* Timeouts: pit_ticks counts milliseconds. Each loop also gives up after
  * a number of ISA reads (~1 us each), so they still end if the timer is
@@ -126,13 +131,19 @@ static void use_media(uint8_t d, int media, int spt, int heads) {
 
 int fdd_media(uint8_t drive_id) { return drive_id < 2 ? s_media[drive_id] : 0; }
 
+static void tc_drop(uint8_t d, bool discard);
+
 void fdd_forget_media(uint8_t drive_id) {
-    if (drive_id < 2)
+    if (drive_id < 2) {
+        tc_drop(drive_id, false); /* (eject already wrote them) */
         s_media[drive_id] = FDD_MEDIA_NONE;
+        s_wp[drive_id] = -1;
+    }
 }
 
 void fdd_set_media(uint8_t drive_id, int media) {
     if (drive_id < 2 && media > 0 && media < FDD_MEDIA_COUNT) {
+        tc_drop(drive_id, true); /* formatting: the old tracks are gone */
         use_media(drive_id, media, 0, 0);
         s_current_track[drive_id] = -1; /* new rate: recalibrate */
     }
@@ -256,14 +267,6 @@ void fdd_motor_off(uint8_t drive_id) {
     write_dor(drive_id);
 }
 
-/* main loop: stop motors that have been idle a while */
-void fdd_poll(void) {
-    for (uint8_t d = 0; d < 2; d++)
-        if (s_motor_on[d] &&
-            (int32_t)(pit_ticks - s_last_use[d]) >= MOTOR_IDLE_MS)
-            fdd_motor_off(d);
-}
-
 /* ── recalibrate (seek to track 0) ─────────────────────────────────────── */
 static bool fdd_recalibrate(uint8_t drive_id) {
     fdd_motor_start(drive_id);
@@ -373,129 +376,321 @@ static void set_rate(uint8_t d) {
     outb(FDD_CCR, s_dstep[d] ? 1 : FDD_FORMATS[s_media[d]].rate);
 }
 
-/* ── read/write sector ──────────────────────────────────────────────────── */
-static bool read_raw(uint8_t drive_id, uint32_t lba, void *buf, int tries);
+/* ── transfers ──────────────────────────────────────────────────────────
+ * n sectors from (cyl, head, sector) on, through the DMA buffer: a whole
+ * track in one command takes one turn of the disk; sector by sector, each
+ * one waits most of a turn for the next to come round. */
+static bool xfer(uint8_t d, uint8_t cyl, uint8_t head, uint8_t sector, int n,
+                 bool write, int tries) {
+    const fdd_format_t *fm = &FDD_FORMATS[s_media[d]];
+    uint8_t *dma = n > 1 ? s_track_dma : s_dma_buf;
+    set_rate(d);
+    fdd_motor_start(d);
+    if (!fdd_seek(d, cyl)) {
+        fdd_motor_off(d);
+        return false;
+    }
+    for (int attempt = 0; attempt < tries; attempt++) {
+        if (write)
+            dma_setup_write(dma, (uint16_t)(n * FDD_SECTOR_SIZE));
+        else
+            dma_setup_read(dma, (uint16_t)(n * FDD_SECTOR_SIZE));
+        fdc_send_byte(write ? FDD_CMD_WRITE : FDD_CMD_READ);
+        fdc_send_byte((uint8_t)((head << 2) | (d & 1)));
+        fdc_send_byte(cyl);
+        fdc_send_byte(head);
+        fdc_send_byte(sector);
+        fdc_send_byte(2); /* sector size: 512 = 2^(2+7) */
+        fdc_send_byte((uint8_t)(sector + n - 1)); /* the last one (EOT) */
+        fdc_send_byte(fm->gap_rw);
+        fdc_send_byte(0xFF);
 
-bool fdd_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
-    if (drive_id > 1 || !s_present[drive_id])
-        return false;
-    if (!s_media[drive_id] && !fdd_detect(drive_id))
-        return false;
-    if (lba >= fdd_total_sectors(drive_id))
-        return false;
-    return read_raw(drive_id, lba, buf, 3);
+        if (!fdc_wait_result()) { /* no disk: don't try again */
+            fdc_reset();          /* frees the stuck controller */
+            return false;         /* motor is off after a reset */
+        }
+        uint8_t st0 = (uint8_t)fdc_recv_byte();
+        uint8_t st1 = (uint8_t)fdc_recv_byte();
+        uint8_t st2 = (uint8_t)fdc_recv_byte();
+        for (int k = 0; k < 4; k++)
+            (void)fdc_recv_byte(); /* C H R N */
+        if ((st0 & 0xC0) == 0 && st1 == 0 && st2 == 0) {
+            s_last_use[d] = pit_ticks; /* the motor stays on a bit */
+            return true;
+        }
+        if (st1 & 0x02) /* write protected: trying again won't help */
+            break;
+        fdd_recalibrate(d);
+        fdd_seek(d, cyl);
+    }
+    fdd_motor_off(d);
+    return false;
 }
 
 static bool read_raw(uint8_t drive_id, uint32_t lba, void *buf, int tries) {
     uint8_t cyl, head, sector;
     lba_to_chs(drive_id, lba, &cyl, &head, &sector);
-    const fdd_format_t *fm = &FDD_FORMATS[s_media[drive_id]];
-    set_rate(drive_id);
-
-    fdd_motor_start(drive_id);
-    if (!fdd_seek(drive_id, cyl)) {
-        fdd_motor_off(drive_id);
+    if (!xfer(drive_id, cyl, head, sector, 1, false, tries))
         return false;
-    }
+    memcpy(buf, s_dma_buf, FDD_SECTOR_SIZE);
+    return true;
+}
 
-    for (int attempt = 0; attempt < tries; attempt++) {
-        dma_setup_read(s_dma_buf, FDD_SECTOR_SIZE);
+/* ── the track cache ────────────────────────────────────────────────────
+ * The last few tracks (one side of a cylinder each) are kept in memory. A
+ * read that misses reads its whole track; writes stay in memory (dirty)
+ * and go to the disk a track at a time: when the line is needed for
+ * another track, 1/2 s after the last write (fdd_poll), on fdd_flush
+ * (eject, shut down). The FAT, the folder and the data of a file being
+ * saved then cost a few turns of the disk instead of several per sector.
+ * Lines are allocated on the first use, sized for the disk's track. */
+#define TC_LINES 4
+#define TC_V 1 /* sector valid */
+#define TC_D 2 /* sector dirty */
+#define FLUSH_AFTER_MS 500
 
-        fdc_send_byte(FDD_CMD_READ);
-        fdc_send_byte((head << 2) | (drive_id & 1));
-        fdc_send_byte(cyl);
-        fdc_send_byte(head);
-        fdc_send_byte(sector);
-        fdc_send_byte(2); /* sector size: 512 = 2^(2+7) */
-        fdc_send_byte(s_spt[drive_id]);
-        fdc_send_byte(fm->gap_rw);
-        fdc_send_byte(0xFF);
+typedef struct {
+    int8_t drive; /* -1: free */
+    uint8_t cyl, head;
+    uint32_t used;
+    uint8_t flag[36];
+    uint8_t *data;
+} tc_line_t;
 
-        if (!fdc_wait_result()) { /* no disk: don't try 3 times */
-            fdc_reset();          /* frees the stuck controller */
-            return false;         /* motor is off after a reset */
+static tc_line_t s_tc[TC_LINES]; /* drive -1: free (fdd_init) */
+static bool s_tc_init;
+
+static void tc_init(void) {
+    if (s_tc_init)
+        return;
+    for (int i = 0; i < TC_LINES; i++)
+        s_tc[i].drive = -1;
+    s_tc_init = true;
+}
+static int s_tc_spt; /* sectors each line holds */
+static uint32_t s_tc_clock;
+static uint32_t s_last_write[2];
+static bool s_changed[2];       /* the disk was changed (fdd_take_change) */
+static bool s_no_changeline[2]; /* this drive has none (it stays on) */
+
+static tc_line_t *tc_find(uint8_t d, uint8_t cyl, uint8_t head) {
+    tc_init();
+    for (int i = 0; i < TC_LINES; i++)
+        if (s_tc[i].drive == d && s_tc[i].cyl == cyl && s_tc[i].head == head)
+            return &s_tc[i];
+    return NULL;
+}
+
+/* the dirty sectors of a line to the disk: runs of them, one command each */
+static bool tc_flush_line(tc_line_t *l) {
+    if (l->drive < 0)
+        return true;
+    uint8_t d = (uint8_t)l->drive;
+    bool ok = true;
+    for (int s = 0; s < s_tc_spt;) {
+        if (!(l->flag[s] & TC_D)) {
+            s++;
+            continue;
         }
-
-        uint8_t st0 = (uint8_t)fdc_recv_byte();
-        uint8_t st1 = (uint8_t)fdc_recv_byte();
-        uint8_t st2 = (uint8_t)fdc_recv_byte();
-        (void)fdc_recv_byte(); /* C */
-        (void)fdc_recv_byte(); /* H */
-        (void)fdc_recv_byte(); /* R */
-        (void)fdc_recv_byte(); /* N */
-
-        if ((st0 & 0xC0) == 0 && st1 == 0 && st2 == 0) {
-            memcpy(buf, s_dma_buf, FDD_SECTOR_SIZE);
-            s_last_use[drive_id] = pit_ticks; /* the motor stays on a bit */
-            return true;
-        }
-
-        fdd_recalibrate(drive_id);
-        fdd_seek(drive_id, cyl);
+        int e = s;
+        while (e < s_tc_spt && (l->flag[e] & TC_D))
+            e++;
+        int n = e - s;
+        memcpy(n > 1 ? s_track_dma : s_dma_buf, l->data + s * FDD_SECTOR_SIZE,
+               (uint32_t)n * FDD_SECTOR_SIZE);
+        bool w = xfer(d, l->cyl, l->head, (uint8_t)(s + 1), n, true, 3);
+        if (!w && n > 1) /* one bad sector: the others one at a time */
+            for (int k = s; k < e; k++) {
+                memcpy(s_dma_buf, l->data + k * FDD_SECTOR_SIZE,
+                       FDD_SECTOR_SIZE);
+                if (!xfer(d, l->cyl, l->head, (uint8_t)(k + 1), 1, true, 3))
+                    ok = false;
+            }
+        else if (!w)
+            ok = false;
+        for (int k = s; k < e; k++)
+            l->flag[k] &= (uint8_t)~TC_D;
+        s = e;
     }
+    return ok;
+}
 
-    fdd_motor_off(drive_id);
-    return false;
+/* the drive's lines go (written first unless `discard`) */
+static void tc_drop(uint8_t d, bool discard) {
+    tc_init();
+    for (int i = 0; i < TC_LINES; i++)
+        if (s_tc[i].drive == d) {
+            if (!discard)
+                tc_flush_line(&s_tc[i]);
+            s_tc[i].drive = -1;
+        }
+}
+
+/* a line for (d, cyl, head): the free or least recently used one */
+static tc_line_t *tc_take(uint8_t d, uint8_t cyl, uint8_t head) {
+    tc_init();
+    int spt = s_spt[d];
+    if (spt > s_tc_spt) { /* a disk with longer tracks: bigger lines */
+        for (int i = 0; i < TC_LINES; i++) {
+            if (s_tc[i].drive >= 0)
+                tc_flush_line(&s_tc[i]);
+            s_tc[i].drive = -1;
+            if (s_tc[i].data)
+                kfree(s_tc[i].data);
+            s_tc[i].data = NULL;
+        }
+        s_tc_spt = spt;
+    }
+    tc_line_t *l = NULL;
+    for (int i = 0; i < TC_LINES; i++)
+        if (!l || s_tc[i].drive < 0 ||
+            (l->drive >= 0 && s_tc[i].used < l->used))
+            l = &s_tc[i];
+    if (l->drive >= 0 && !tc_flush_line(l))
+        return NULL;
+    if (!l->data &&
+        !(l->data = (uint8_t *)kmalloc((uint32_t)s_tc_spt * FDD_SECTOR_SIZE)))
+        return NULL;
+    l->drive = (int8_t)d;
+    l->cyl = cyl;
+    l->head = head;
+    memset(l->flag, 0, sizeof(l->flag));
+    return l;
+}
+
+bool fdd_flush(uint8_t d) {
+    if (d > 1)
+        return false;
+    tc_init();
+    bool ok = true;
+    for (int i = 0; i < TC_LINES; i++)
+        if (s_tc[i].drive == d && !tc_flush_line(&s_tc[i]))
+            ok = false;
+    return ok;
+}
+
+/* main loop: write what has waited 1/2 s, stop motors idle for 2 s */
+void fdd_poll(void) {
+    tc_init();
+    for (uint8_t d = 0; d < 2; d++) {
+        bool dirty = false;
+        for (int i = 0; i < TC_LINES; i++)
+            if (s_tc[i].drive == d)
+                for (int k = 0; k < s_tc_spt; k++)
+                    dirty |= (s_tc[i].flag[k] & TC_D) != 0;
+        if (dirty && (int32_t)(pit_ticks - s_last_write[d]) >= FLUSH_AFTER_MS)
+            fdd_flush(d);
+    }
+    for (uint8_t d = 0; d < 2; d++)
+        if (s_motor_on[d] &&
+            (int32_t)(pit_ticks - s_last_use[d]) >= MOTOR_IDLE_MS)
+            fdd_motor_off(d);
+}
+
+/* ── the disk change line ───────────────────────────────────────────────
+ * The drive raises it when its door opens; a step with a disk in it
+ * lowers it. Seen on: the cached tracks and the disk's size are dropped,
+ * and the file system is told (fdd_take_change) to mount it again. A
+ * drive that has no change line (always on, even with a disk read) is
+ * then not asked again. */
+static bool disk_changed(uint8_t d) {
+    if (s_no_changeline[d])
+        return false;
+    write_dor(d); /* the line is the selected drive's */
+    if (!(inb(FDD_DIR) & 0x80))
+        return false;
+    tc_drop(d, true); /* another disk: what we kept isn't its */
+    s_media[d] = FDD_MEDIA_NONE;
+    s_wp[d] = -1;
+    s_changed[d] = true;
+    /* lower it: step away and back (with a disk in the drive) */
+    s_current_track[d] = -1;
+    if (fdd_recalibrate(d) && fdd_seek(d, 1)) {
+        s_current_track[d] = 1;
+        fdd_seek(d, 0);
+    }
+    write_dor(d);
+    if ((inb(FDD_DIR) & 0x80) && fdd_detect(d))
+        s_no_changeline[d] = true; /* a disk reads, the line stays: none */
+    return true;
+}
+
+bool fdd_take_change(uint8_t d) {
+    if (d > 1 || !s_changed[d])
+        return false;
+    s_changed[d] = false;
+    return true;
+}
+
+/* the drive's own answer (SENSE DRIVE STATUS, ST3 bit 6) */
+static bool write_protected(uint8_t d) {
+    if (s_wp[d] < 0) {
+        fdc_send_byte(0x04);
+        fdc_send_byte(d & 1);
+        int st3 = fdc_recv_byte();
+        s_wp[d] = st3 >= 0 && (st3 & 0x40) ? 1 : 0;
+    }
+    return s_wp[d] == 1;
+}
+
+/* ── read/write sector ──────────────────────────────────────────────────── */
+static bool ready(uint8_t d, uint32_t lba) {
+    if (d > 1 || !s_present[d])
+        return false;
+    if (disk_changed(d))
+        return false; /* the file system mounts the new disk */
+    if (!s_media[d] && !fdd_detect(d))
+        return false;
+    return lba < fdd_total_sectors(d);
+}
+
+bool fdd_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
+    if (!ready(drive_id, lba))
+        return false;
+    uint8_t cyl, head, sector;
+    lba_to_chs(drive_id, lba, &cyl, &head, &sector);
+    int i = sector - 1, spt = s_spt[drive_id];
+    tc_line_t *l = tc_find(drive_id, cyl, head);
+    if (!l || !(l->flag[i] & TC_V)) {
+        if (!l && !(l = tc_take(drive_id, cyl, head)))
+            return read_raw(drive_id, lba, buf, 3); /* no memory: direct */
+        if (xfer(drive_id, cyl, head, 1, spt, false, 2)) { /* the track */
+            for (int k = 0; k < spt; k++)
+                if (!(l->flag[k] & TC_D)) {
+                    memcpy(l->data + k * FDD_SECTOR_SIZE,
+                           s_track_dma + k * FDD_SECTOR_SIZE, FDD_SECTOR_SIZE);
+                    l->flag[k] |= TC_V;
+                }
+        } else { /* a bad sector somewhere: just this one */
+            if (!read_raw(drive_id, lba, l->data + i * FDD_SECTOR_SIZE, 3))
+                return false;
+            l->flag[i] |= TC_V;
+        }
+    }
+    l->used = ++s_tc_clock;
+    memcpy(buf, l->data + i * FDD_SECTOR_SIZE, FDD_SECTOR_SIZE);
+    return true;
 }
 
 bool fdd_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
-    if (drive_id > 1 || !s_present[drive_id])
+    if (!ready(drive_id, lba))
         return false;
-    if (!s_media[drive_id] && !fdd_detect(drive_id))
+    fdd_motor_start(drive_id);
+    if (write_protected(drive_id))
         return false;
-    if (lba >= fdd_total_sectors(drive_id))
-        return false;
-
     uint8_t cyl, head, sector;
     lba_to_chs(drive_id, lba, &cyl, &head, &sector);
-    const fdd_format_t *fm = &FDD_FORMATS[s_media[drive_id]];
-    set_rate(drive_id);
-
-    fdd_motor_start(drive_id);
-    if (!fdd_seek(drive_id, cyl)) {
-        fdd_motor_off(drive_id);
-        return false;
+    int i = sector - 1;
+    tc_line_t *l = tc_find(drive_id, cyl, head);
+    if (!l && !(l = tc_take(drive_id, cyl, head))) { /* no memory: direct */
+        memcpy(s_dma_buf, buf, FDD_SECTOR_SIZE);
+        return xfer(drive_id, cyl, head, sector, 1, true, 3);
     }
-
-    memcpy(s_dma_buf, buf, FDD_SECTOR_SIZE);
-
-    for (int attempt = 0; attempt < 3; attempt++) {
-        dma_setup_write(s_dma_buf, FDD_SECTOR_SIZE);
-
-        fdc_send_byte(FDD_CMD_WRITE);
-        fdc_send_byte((head << 2) | (drive_id & 1));
-        fdc_send_byte(cyl);
-        fdc_send_byte(head);
-        fdc_send_byte(sector);
-        fdc_send_byte(2);
-        fdc_send_byte(s_spt[drive_id]);
-        fdc_send_byte(fm->gap_rw);
-        fdc_send_byte(0xFF);
-
-        if (!fdc_wait_result()) { /* no disk: don't try 3 times */
-            fdc_reset();          /* frees the stuck controller */
-            return false;         /* motor is off after a reset */
-        }
-
-        uint8_t st0 = (uint8_t)fdc_recv_byte();
-        uint8_t st1 = (uint8_t)fdc_recv_byte();
-        uint8_t st2 = (uint8_t)fdc_recv_byte();
-        (void)fdc_recv_byte();
-        (void)fdc_recv_byte();
-        (void)fdc_recv_byte();
-        (void)fdc_recv_byte();
-
-        if ((st0 & 0xC0) == 0 && st1 == 0 && st2 == 0) {
-            s_last_use[drive_id] = pit_ticks;
-            return true;
-        }
-
-        fdd_recalibrate(drive_id);
-        fdd_seek(drive_id, cyl);
-    }
-
-    fdd_motor_off(drive_id);
-    return false;
+    memcpy(l->data + i * FDD_SECTOR_SIZE, buf, FDD_SECTOR_SIZE);
+    l->flag[i] |= TC_V | TC_D;
+    l->used = ++s_tc_clock;
+    s_last_write[drive_id] = pit_ticks;
+    return true;
 }
 
 /* ── what disk is in the drive ─────────────────────────────────────────

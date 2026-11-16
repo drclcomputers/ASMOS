@@ -7,6 +7,7 @@ bool fdd_eject(uint8_t drive_id) {
         return false;
     if (!fs_drive_mounted(drive_id))
         return false;
+    fdd_flush(drive_id == DRIVE_FDD0 ? 0 : 1); /* what waits in memory */
     fs_unmount(drive_id);
     fdd_forget_media(drive_id == DRIVE_FDD0 ? 0
                                             : 1); /* next disk: look again */
