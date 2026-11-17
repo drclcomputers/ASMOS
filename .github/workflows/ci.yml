@@ -1,0 +1,44 @@
+# On every push and pull request: build ASMOS, boot both images in the BIOS
+# emulator (tools/boottest.py), run the simulator scenarios (tests/sim).
+#
+# GitHub's Ubuntu has no i686-elf cross compiler; its own gcc with -m32
+# builds the same freestanding 32-bit code.
+name: build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y nasm gcc-multilib
+
+      - name: Build
+        run: make -j"$(nproc)" CC="gcc -m32" LD=ld
+
+      - name: Boot tests
+        run: make boottest CC="gcc -m32" LD=ld
+
+      - name: Simulator tests
+        run: tests/sim/run.sh
+
+      - name: Screenshots (if something failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-screens
+          path: tests/sim/out/
+          if-no-files-found: ignore
+
+      - name: Images
+        uses: actions/upload-artifact@v4
+        with:
+          name: asmos-images
+          path: |
+            os_image.bin
+            setup.img
