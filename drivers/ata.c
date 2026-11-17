@@ -198,15 +198,28 @@ static bool identify(int ch, int slave, ata_disk_t *d) {
     return d->present;
 }
 
-/* Sector 0 written by our build: FAT BPB with OEM "ASMOS". */
+/* An ASMOS boot sector (OEM "ASMOS") in sector 0 (a disk without
+ * partitions, like the old 32 MB image), or in the first sector of the
+ * active partition (what Setup and tools/mkdisk.py make). */
 static bool is_asmos_disk(int idx) {
     uint8_t buf[512];
     int8_t saved = s_unit[0];
     s_unit[0] = (int8_t)idx;
-    bool ok = ata_read_sector(0, 0, buf);
+    bool ok = ata_read_sector(0, 0, buf) && buf[510] == 0x55 &&
+              buf[511] == 0xAA;
+    if (ok && memcmp(buf + 3, "ASMOS", 5) != 0) {
+        uint32_t start = 0;
+        for (int i = 0; i < 4; i++) {
+            const uint8_t *e = buf + 0x1BE + i * 16;
+            if (e[0] == 0x80)
+                start = (uint32_t)e[8] | (uint32_t)e[9] << 8 |
+                        (uint32_t)e[10] << 16 | (uint32_t)e[11] << 24;
+        }
+        ok = start && ata_read_sector(0, start, buf) && buf[510] == 0x55 &&
+             buf[511] == 0xAA && memcmp(buf + 3, "ASMOS", 5) == 0;
+    }
     s_unit[0] = saved;
-    return ok && buf[510] == 0x55 && buf[511] == 0xAA &&
-           memcmp(buf + 3, "ASMOS", 5) == 0;
+    return ok;
 }
 
 int ata_init(uint8_t bios_boot_drive) {

@@ -12,6 +12,7 @@
 #include "drivers/fdd.h"
 #include "drivers/ne2000.h"
 #include "fs/fdformat.h"
+#include "fs/install.h"
 #include "lib/audio.h"
 #include "lib/cpu.h"
 #include "lib/fpu_emu.h"
@@ -21,7 +22,9 @@
 #include "network/dns.h"
 #include "network/gopher.h"
 #include "network/net.h"
+#include "os/app_registry.h"
 #include "os/appload.h"
+#include "os/os.h"
 #include "os/print.h"
 #include "os/scheduler.h"
 #include "ui/fileops.h"
@@ -98,6 +101,8 @@ static const help_topic_t HELP[] = {
      "  mv <src> <dst>   Move or rename\n"
      "  rm [-r] <f>      Delete a file or directory\n"
      "  format a: [720|1440] [/q] [label]  Format a floppy\n"
+     "  sys hda|hdb      Make a hard disk start ASMOS: boot code and\n"
+     "                   SYSTEM\\KERNEL.SYS (files kept). Setup: new disks\n"
      "Names: up to 63 characters, spaces allowed. Quote them\n"
      "where two names follow: cp \"My File.txt\" \"Copy.txt\"\n"},
     {"time", "Date, time and calendar",
@@ -821,6 +826,71 @@ void cmd_print(const char *args, char *out, size_t max) {
     append(out, max, buf);
 }
 
+/* sys hda|hdb (c: / d:): like DOS's SYS. The disk's FAT16 volume gets the
+ * ASMOS boot code (fs/install.c, keeping the partition table and the BPB)
+ * and SYSTEM\KERNEL.SYS, from this system or from the setup floppy. Its
+ * files stay; a new or wiped disk is Setup's job. */
+void cmd_sys(const char *args, char *out, size_t max) {
+    char a[16];
+    snprintf(a, sizeof(a), "%s", args ? args : "");
+    for (char *p = a; *p; p++)
+        if (*p >= 'A' && *p <= 'Z')
+            *p = (char)(*p + 32);
+    int unit = !strcmp(a, "hda") || !strcmp(a, "c:")   ? 0
+               : !strcmp(a, "hdb") || !strcmp(a, "d:") ? 1
+                                                       : -1;
+    if (unit < 0) {
+        append(out, max,
+               "Usage: sys hda|hdb\n  Makes that hard disk start ASMOS: the "
+               "boot code and\n  SYSTEM\\KERNEL.SYS. Its files stay. For a new "
+               "disk, use Setup.\n\n");
+        return;
+    }
+    inst_disk_t d;
+    inst_probe((uint8_t)unit, &d);
+    char b[160];
+    if (!d.can_keep) {
+        snprintf(b, sizeof(b), "sys: can't: %s\n\n",
+                 d.why_not ? d.why_not : "no FAT16 volume");
+        append(out, max, b);
+        return;
+    }
+    const char *err = inst_write_boot((uint8_t)unit, -1);
+    if (!err && !fs_drive_mounted((uint8_t)unit) &&
+        !fs_mount_drive((uint8_t)unit))
+        err = "the volume does not mount";
+    /* the kernel: this system's, or the setup floppy's */
+    const char *src = NULL;
+    dir_entry_t de;
+    if (!err) {
+        if (unit != DRIVE_HDA && fs_find("/HDA/SYSTEM/KERNEL.SYS", &de))
+            src = "/HDA/SYSTEM/KERNEL.SYS";
+        else if (unit != DRIVE_HDB && fs_find("/HDB/SYSTEM/KERNEL.SYS", &de) &&
+                 g_setup_mode)
+            src = "/HDB/SYSTEM/KERNEL.SYS";
+        else if (fs_find(SETUP_KERNEL, &de))
+            src = SETUP_KERNEL;
+        char own[32];
+        snprintf(own, sizeof(own), "%s/SYSTEM/KERNEL.SYS", g_drive_paths[unit]);
+        if (src)
+            err = inst_copy_files((uint8_t)unit, src, NULL, true, NULL, NULL);
+        else if (!fs_find(own, &de))
+            err = "no KERNEL.SYS to copy (put the setup floppy in A:)";
+    }
+    if (err) {
+        snprintf(b, sizeof(b), "sys: %s\n\n", err);
+        append(out, max, b);
+        return;
+    }
+    if (src)
+        snprintf(b, sizeof(b), "%s now starts ASMOS (kernel from %s).\n\n",
+                 unit ? "HDB" : "HDA", src);
+    else
+        snprintf(b, sizeof(b), "%s now starts ASMOS.\n\n",
+                 unit ? "HDB" : "HDA");
+    append(out, max, b);
+}
+
 /* format a: [360|720|1200|1440|2880] [/q] [label] */
 void cmd_format(const char *args, char *out, size_t max) {
     const char *p = args ? args : "";
@@ -1249,6 +1319,15 @@ void cmd_app(const char *args, char *out, size_t max) {
         if (!*arg) {
             append(out, max, "app run: need a name or path\n");
             return;
+        }
+        /* a built-in by its name ("app run Setup"), else a .APP */
+        for (int i = 0; i < app_registry_count; i++) {
+            const registered_app_t *r = &app_registry[i];
+            if ((r->menu_label && !strcasecmp(arg, r->menu_label)) ||
+                !strcasecmp(arg, r->desc->name)) {
+                os_launch_app(r->desc);
+                return;
+            }
         }
         char pb[FS_PATH_SZ];
         if (!appload_try_open(whole_path(arg, pb, sizeof pb)))

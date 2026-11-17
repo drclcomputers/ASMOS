@@ -4,6 +4,63 @@
 
 static fat_vol_t *vol(uint8_t drive_id) { return &g_drives[drive_id]; }
 
+/* ── FAT sector cache ──────────────────────────────────────────────────
+ * Every cluster looked up or allocated reads a FAT sector; without this a
+ * 466 KB file written to a hard disk cost ~29000 sector reads. A few
+ * sectors, kept right by fat_cache_wrote() (fs_write_sector calls it for
+ * every write), dropped when a volume is mounted or unmounted (formatting
+ * and Setup write FATs below the file system, then mount). */
+#define FC_N 6
+static struct {
+    bool valid;
+    uint8_t drive;
+    uint32_t lba;
+    uint32_t used;
+    uint8_t data[512];
+} s_fc[FC_N];
+static uint32_t s_fc_clock;
+static uint16_t s_next_free[DRIVE_COUNT]; /* where fat_alloc looks first */
+
+static bool fat_read(uint8_t drive_id, uint32_t lba, uint8_t *out) {
+    int victim = -1;
+    for (int i = 0; i < FC_N; i++) {
+        if (s_fc[i].valid && s_fc[i].drive == drive_id && s_fc[i].lba == lba) {
+            s_fc[i].used = ++s_fc_clock;
+            memcpy(out, s_fc[i].data, 512);
+            return true;
+        }
+        if (!s_fc[i].valid) { /* an empty one first */
+            if (victim < 0 || s_fc[victim].valid)
+                victim = i;
+        } else if (victim < 0 ||
+                   (s_fc[victim].valid && s_fc[i].used < s_fc[victim].used)) {
+            victim = i; /* else the one used longest ago */
+        }
+    }
+    if (!fs_read_sector(drive_id, lba, out))
+        return false;
+    s_fc[victim].valid = true;
+    s_fc[victim].drive = drive_id;
+    s_fc[victim].lba = lba;
+    s_fc[victim].used = ++s_fc_clock;
+    memcpy(s_fc[victim].data, out, 512);
+    return true;
+}
+
+void fat_cache_wrote(uint8_t drive_id, uint32_t lba, const void *data) {
+    for (int i = 0; i < FC_N; i++)
+        if (s_fc[i].valid && s_fc[i].drive == drive_id && s_fc[i].lba == lba)
+            memcpy(s_fc[i].data, data, 512);
+}
+
+void fat_cache_drop(uint8_t drive_id) {
+    for (int i = 0; i < FC_N; i++)
+        if (s_fc[i].drive == drive_id)
+            s_fc[i].valid = false;
+    if (drive_id < DRIVE_COUNT)
+        s_next_free[drive_id] = 2;
+}
+
 bool fat_cluster_valid(uint8_t drive_id, uint16_t cluster) {
     fat_vol_t *v = vol(drive_id);
     if (cluster < 2)
@@ -32,12 +89,12 @@ uint16_t fat_get(uint8_t drive_id, uint16_t cluster) {
         uint32_t off_in_sec = byte_offset % 512;
 
         uint8_t buf0[512], buf1[512];
-        if (!fs_read_sector(drive_id, fat_sector, buf0))
+        if (!fat_read(drive_id, fat_sector, buf0))
             return vol_bad(v);
 
         uint16_t val;
         if (off_in_sec == 511) {
-            if (!fs_read_sector(drive_id, fat_sector + 1, buf1))
+            if (!fat_read(drive_id, fat_sector + 1, buf1))
                 return vol_bad(v);
             val = buf0[511] | ((uint16_t)buf1[0] << 8);
         } else {
@@ -46,17 +103,17 @@ uint16_t fat_get(uint8_t drive_id, uint16_t cluster) {
 
         val = (cluster & 1) ? (val >> 4) : (val & 0x0FFF);
 
+        if (val == FAT12_BAD) /* (0xFF7: before the end marks it is in) */
+            return FAT16_BAD;
         if (val >= FAT12_RESERVED)
             return FAT16_EOC;
-        if (val == FAT12_BAD)
-            return FAT16_BAD;
         return val;
     }
 
     uint32_t fat_sector = v->fat_lba + (cluster / 256);
     uint16_t fat_offset = (cluster % 256) * 2;
     uint8_t local_buf[512];
-    if (!fs_read_sector(drive_id, fat_sector, local_buf))
+    if (!fat_read(drive_id, fat_sector, local_buf))
         return FAT16_BAD;
     return *(uint16_t *)(local_buf + fat_offset);
 }
@@ -88,9 +145,9 @@ bool fat_set(uint8_t drive_id, uint16_t cluster, uint16_t value) {
             uint8_t buf0[512], buf1[512];
             bool straddle = (off_in_sec == 511);
 
-            if (!fs_read_sector(drive_id, lba0, buf0))
+            if (!fat_read(drive_id, lba0, buf0))
                 return false;
-            if (straddle && !fs_read_sector(drive_id, lba0 + 1, buf1))
+            if (straddle && !fat_read(drive_id, lba0 + 1, buf1))
                 return false;
 
             uint8_t *lo = straddle ? &buf0[511] : &buf0[off_in_sec];
@@ -117,7 +174,7 @@ bool fat_set(uint8_t drive_id, uint16_t cluster, uint16_t value) {
     uint8_t local_buf[512];
     for (int copy = 0; copy < v->bpb.fat_count; copy++) {
         uint32_t lba = v->fat_lba + copy * v->bpb.sectors_per_fat + fat_sector;
-        if (!fs_read_sector(drive_id, lba, local_buf))
+        if (!fat_read(drive_id, lba, local_buf))
             return false;
         *(uint16_t *)(local_buf + fat_offset) = value;
         if (!fs_write_sector(drive_id, lba, local_buf))
@@ -126,13 +183,25 @@ bool fat_set(uint8_t drive_id, uint16_t cluster, uint16_t value) {
     return true;
 }
 
+/* the first free cluster from the hint on (all clusters before it were in
+ * use when it was set), then from the start: a file grows in one piece and
+ * the FAT is not read from cluster 2 again for each cluster */
 uint16_t fat_alloc(uint8_t drive_id) {
     fat_vol_t *v = vol(drive_id);
-    for (uint16_t c = 2; c < (uint16_t)(v->cluster_count + 2); c++) {
-        if (fat_get(drive_id, c) == FAT16_FREE) {
-            if (!fat_set(drive_id, c, FAT16_EOC))
+    uint32_t end = v->cluster_count + 2;
+    uint32_t start = drive_id < DRIVE_COUNT ? s_next_free[drive_id] : 2;
+    if (start < 2 || start >= end)
+        start = 2;
+    for (uint32_t k = 0; k < end - 2; k++) {
+        uint32_t c = start + k;
+        if (c >= end)
+            c -= end - 2;
+        if (fat_get(drive_id, (uint16_t)c) == FAT16_FREE) {
+            if (!fat_set(drive_id, (uint16_t)c, FAT16_EOC))
                 return 0;
-            return c;
+            if (drive_id < DRIVE_COUNT)
+                s_next_free[drive_id] = (uint16_t)(c + 1);
+            return (uint16_t)c;
         }
     }
     return 0;
@@ -143,6 +212,8 @@ void fat_free_chain(uint8_t drive_id, uint16_t cluster) {
     while (vol_cluster_active(v, cluster)) {
         uint16_t next = fat_get(drive_id, cluster);
         fat_set(drive_id, cluster, FAT16_FREE);
+        if (drive_id < DRIVE_COUNT && cluster < s_next_free[drive_id])
+            s_next_free[drive_id] = cluster; /* free again: look here first */
         cluster = next;
     }
 }

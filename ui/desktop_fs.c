@@ -1,3 +1,4 @@
+#include "os/os.h"
 #include "ui/desktop_fs.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
@@ -65,6 +66,8 @@ void desktop_fs_init(void) {
     if (s_inited)
         return;
     s_inited = true;
+    if (g_setup_mode) /* nothing on the hard disk until Setup is done */
+        return;
 
     dir_entry_t de;
     bool exists = fs_find(DESKTOP_PATH, &de);
@@ -97,6 +100,8 @@ void desktop_fs_reload(void) {
     s_dirty = false;
     s_count = 0;
     memset(s_items, 0, sizeof(s_items));
+    if (g_setup_mode) /* an empty desktop behind Setup */
+        return;
 
     static dir_entry_t raw[DESKTOP_MAX_ITEMS];
     static char names[DESKTOP_MAX_ITEMS][FS_NAME_SZ];

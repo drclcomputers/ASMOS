@@ -20,6 +20,7 @@
 
 menubar g_menubar;
 bool g_menubar_click_consumed = false;
+bool g_setup_mode = false;
 bool gui_should_exit = false;
 
 app_descriptor *installed_apps[MAX_INSTALLED_APPS];

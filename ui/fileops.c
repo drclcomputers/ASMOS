@@ -121,11 +121,24 @@ bool fo_stat(const char *path, bool *is_dir, uint32_t *size) {
     return true;
 }
 
+/* /SYSTEM (KERNEL.SYS: the computer doesn't start without it), on any
+ * drive: Setup and the shell's SYS look after it */
+static bool in_system(const char *n) {
+    for (int d = 1; d < DRIVE_COUNT; d++) { /* /HDB/SYSTEM, /FDD0/SYSTEM... */
+        int l = (int)strlen(g_drive_paths[d]);
+        if (!strncasecmp(n, g_drive_paths[d], l) && n[l] == '/') {
+            n += l;
+            break;
+        }
+    }
+    return !strncasecmp(n, "/SYSTEM", 7) && (n[7] == 0 || n[7] == '/');
+}
+
 bool fo_protected(const char *path) {
     char n[FS_PATH_SZ];
     fo_norm(path, n, sizeof(n));
     return !strcmp(n, "/") || path_is_protected(fo_base(n)) ||
-           path_is_protected(n);
+           path_is_protected(n) || in_system(n);
 }
 
 /* Drive + directory cluster for a folder path (drive roots are cluster 0). */

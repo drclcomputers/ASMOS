@@ -9,6 +9,7 @@
 #include "lib/io.h"
 #include "lib/time.h"
 #include "os/appguard.h"
+#include "ui/cursor.h"
 
 /* hourglass, 9x11: B black, W white, . see-through */
 #define HG_W 9
@@ -41,6 +42,8 @@ static void glass_show(void) {
     glass_init();
     if (s_shown)
         gpu_overlay_clear(s_gx, s_gy, HG_W, HG_H);
+    else /* the arrow comes off the screen: only the hourglass is shown */
+        cursor_erase_screen();
     s_gx = x;
     s_gy = y;
     gpu_overlay(x, y, HG_W, HG_H, s_glass);
@@ -53,14 +56,18 @@ void wd_heartbeat(void) {
         s_beat = 1;
     if (s_shown) { /* the next blit repaints what the hourglass covered */
         s_shown = false;
+        gpu_overlay_forget();
         gpu_invalidate();
     }
 }
+
+bool wd_busy_shown(void) { return s_shown; }
 
 void wd_stop(void) {
     s_beat = 0;
     if (s_shown) { /* take the hourglass off: the next blit is whole */
         s_shown = false;
+        gpu_overlay_forget();
         gpu_invalidate();
     }
 }

@@ -11,4 +11,9 @@ void fat_free_chain(uint8_t drive_id, uint16_t cluster);
 uint32_t fat_cluster_to_lba(uint8_t drive_id, uint16_t cluster);
 bool fat_cluster_valid(uint8_t drive_id, uint16_t cluster);
 
+/* the FAT sector cache: a sector written (fs_write_sector); a volume
+ * mounted or unmounted (also forgets where free clusters were) */
+void fat_cache_wrote(uint8_t drive_id, uint32_t lba, const void *data);
+void fat_cache_drop(uint8_t drive_id);
+
 #endif

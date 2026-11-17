@@ -4,6 +4,7 @@
 #include "drivers/pci.h"
 #include "drivers/ps2.h"
 #include "fs/fs.h"
+#include "fs/install.h"
 #include "lib/cpu.h"
 #include "ui/uifont.h"
 
@@ -217,9 +218,17 @@ void kmain(void) {
     boot_check_pci();
     lpt_init();
     boot_check_input();
-    ata_init(*(volatile uint8_t *)0x0608); /* BIOS boot drive from stage 1 */
-    video_cfg_init(*(volatile uint8_t *)0x0608); /* where the mode is kept */
+    /* what stage 2 left (boot/bootdefs.inc): the BIOS drive booted from,
+     * and the volume on it (a partition's first sector; 0 on a floppy) */
+    uint8_t boot_drive = *(volatile uint8_t *)0x0608;
+    ata_init(boot_drive);
+    video_cfg_init(boot_drive); /* where the mode is kept */
+    fs_set_boot_volume(*(volatile uint32_t *)0x060C);
     fs_mount();
+    /* started from the setup floppy: Setup runs (apps/setup.c) and the
+     * hard disk is left alone until it says so */
+    dir_entry_t setup_zip;
+    g_setup_mode = boot_drive < 0x80 && fs_find(SETUP_ZIP, &setup_zip);
     boot_check_ata();
     boot_check_fat();
 
@@ -227,8 +236,11 @@ void kmain(void) {
     if (!cfg_load()) { /* first boot: light settings on a 386 */
         if (cpu_family() <= 3)
             cfg_set_low_end(true);
-        cfg_save();
+        if (!g_setup_mode)
+            cfg_save();
     }
+    if (g_setup_mode)
+        g_cfg.start_in_gui = true;
 
     /* Paging: app memory protection (lib/vmm.h). Settings > System can
      * turn it off (no_paging) should a machine misbehave with it. */
@@ -277,6 +289,11 @@ void kmain(void) {
         os_install_app(app_registry[i].desc);
 
     appload_scan_dir("/apps"); /* external .APP packages, if any */
+
+    if (g_setup_mode) {
+        extern app_descriptor setup_app;
+        os_launch_app(&setup_app);
+    }
 
     scheduler_init();
 

@@ -519,6 +519,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_cal(argument, out_buffer, max_len);
     else if (!strcmp(command, "format"))
         cmd_format(argument, out_buffer, max_len);
+    else if (!strcmp(command, "sys"))
+        cmd_sys(argument, out_buffer, max_len);
     else if (!strcmp(command, "shutdown"))
         cmd_shutdown(argument, out_buffer, max_len);
     else if (!strcmp(command, "reboot"))

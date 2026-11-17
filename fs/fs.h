@@ -82,6 +82,8 @@ typedef enum {
 
 typedef struct {
     bpb_t bpb;
+    uint32_t base_lba; /* where the volume starts on the disk: a partition's
+                        * first sector (0: a floppy, or a disk without one) */
     uint32_t fat_lba;
     uint32_t root_lba;
     uint32_t data_lba;
@@ -207,6 +209,29 @@ bool fs_copy_dir(const char *src, const char *dst);
 bool fs_move_dir(const char *src, const char *dst);
 
 bool fs_set_hidden(const char *path, bool hidden);
+/* the entry's attribute byte (ATTR_*; the folder bit is kept as it was) */
+bool fs_set_attr(const char *path, uint8_t attr);
+
+/* ── disks and partitions (fs/fs.c, fs/install.c) ──────────────────────
+ * A hard disk is either partitioned (an MBR in sector 0: the volume is a
+ * FAT partition in its table) or one volume from sector 0 (a "superfloppy",
+ * like the old 32 MB ASMOS image). fs_read_sector / fs_write_sector add
+ * the volume's start (base_lba): sector 0 is always the volume's own boot
+ * sector. */
+#define PART_TYPE_FAT12 0x01
+#define PART_TYPE_FAT16_SMALL 0x04 /* under 32 MB */
+#define PART_TYPE_FAT16 0x06
+#define PART_TYPE_FAT16_LBA 0x0E
+bool fs_bpb_valid(const uint8_t *sector); /* a FAT12/16 boot sector */
+bool fs_part_is_fat(uint8_t type);
+/* the FAT partition to use in an MBR (sector 0): the one starting at
+ * prefer_lba if there is one (the one booted from), else the active one,
+ * else the first. false: no FAT partition (or no partition table). */
+bool fs_pick_partition(const uint8_t *mbr, uint32_t prefer_lba,
+                       uint32_t *lba, uint32_t *sectors);
+/* kmain: the volume the loader started (bootdefs.inc 0x060C), so that
+ * one is HDA's when a disk has several */
+void fs_set_boot_volume(uint32_t lba);
 bool fs_is_hidden(const char *path);
 
 typedef fat_vol_t fs_fs_t;

@@ -3,6 +3,7 @@
 #include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "os/os.h"
 
 os_config_t g_cfg;
 
@@ -102,6 +103,8 @@ bool cfg_load(void) {
 }
 
 bool cfg_save(void) {
+    if (g_setup_mode) /* from the setup floppy: the hard disk is Setup's */
+        return false;
     dir_entry_t de;
     if (fs_find(CFG_PATH, &de))
         fs_delete(CFG_PATH);

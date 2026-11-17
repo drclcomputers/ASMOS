@@ -29,6 +29,8 @@ void wd_tick(void);      /* timer IRQ, every tick */
 
 /* Show the hourglass now (long job ahead) / until the next frame. */
 void wd_busy(void);
+/* the hourglass is on the screen (the arrow pointer then is not drawn) */
+bool wd_busy_shown(void);
 
 /* Main loop, once a frame: what the IRQ asked for. */
 bool wd_take_monitor_request(void);

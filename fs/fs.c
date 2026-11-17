@@ -77,7 +77,8 @@ bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
     switch (drive_id) {
     case DRIVE_HDA:
     case DRIVE_HDB:
-        return ata_read_sector(drive_id, lba, buf);
+        return ata_read_sector(drive_id, g_drives[drive_id].base_lba + lba,
+                               buf);
     case DRIVE_FDD0:
     case DRIVE_FDD1:
         for (int k = 0; k < 2; k++) {
@@ -93,10 +94,12 @@ bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf) {
 }
 
 bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
+    fat_cache_wrote(drive_id, lba, buf); /* a FAT sector: the cache follows */
     switch (drive_id) {
     case DRIVE_HDA:
     case DRIVE_HDB:
-        return ata_write_sector(drive_id, lba, buf);
+        return ata_write_sector(drive_id, g_drives[drive_id].base_lba + lba,
+                                buf);
     case DRIVE_FDD0:
     case DRIVE_FDD1:
         for (int k = 0; k < 2; k++) {
@@ -843,6 +846,55 @@ static void extract_volume_label(fat_vol_t *v) {
 /* any change to names on any disk (fs.h) */
 uint32_t g_fs_rev;
 
+static uint32_t s_boot_volume;
+
+void fs_set_boot_volume(uint32_t lba) { s_boot_volume = lba; }
+
+bool fs_bpb_valid(const uint8_t *b) {
+    const bpb_t *p = (const bpb_t *)b;
+    uint8_t spc = p->sectors_per_cluster;
+    uint32_t total =
+        p->total_sectors_16 ? p->total_sectors_16 : p->total_sectors_32;
+    return b[510] == 0x55 && b[511] == 0xAA && (b[0] == 0xEB || b[0] == 0xE9) &&
+           p->bytes_per_sector == 512 && spc && !(spc & (spc - 1)) &&
+           p->reserved_sectors >= 1 &&
+           (p->fat_count == 1 || p->fat_count == 2) && p->root_entry_count &&
+           p->sectors_per_fat && total > 64;
+}
+
+bool fs_part_is_fat(uint8_t t) {
+    return t == PART_TYPE_FAT12 || t == PART_TYPE_FAT16_SMALL ||
+           t == PART_TYPE_FAT16 || t == PART_TYPE_FAT16_LBA;
+}
+
+bool fs_pick_partition(const uint8_t *mbr, uint32_t prefer_lba, uint32_t *lba,
+                       uint32_t *sectors) {
+    if (mbr[510] != 0x55 || mbr[511] != 0xAA)
+        return false;
+    int pick = -1;
+    for (int pass = 0; pass < 3 && pick < 0; pass++)
+        for (int i = 0; i < 4; i++) {
+            const uint8_t *e = mbr + 0x1BE + i * 16;
+            uint32_t st = (uint32_t)e[8] | (uint32_t)e[9] << 8 |
+                          (uint32_t)e[10] << 16 | (uint32_t)e[11] << 24;
+            if (!fs_part_is_fat(e[4]) || !st || (e[0] & 0x7F))
+                continue;
+            if ((pass == 0 && prefer_lba && st == prefer_lba) ||
+                (pass == 1 && e[0] == 0x80) || pass == 2) {
+                pick = i;
+                break;
+            }
+        }
+    if (pick < 0)
+        return false;
+    const uint8_t *e = mbr + 0x1BE + pick * 16;
+    *lba = (uint32_t)e[8] | (uint32_t)e[9] << 8 | (uint32_t)e[10] << 16 |
+           (uint32_t)e[11] << 24;
+    *sectors = (uint32_t)e[12] | (uint32_t)e[13] << 8 | (uint32_t)e[14] << 16 |
+               (uint32_t)e[15] << 24;
+    return true;
+}
+
 bool fs_mount_drive(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
@@ -853,8 +905,24 @@ bool fs_mount_drive(uint8_t drive_id) {
     fs_usage_invalidate(drive_id);
 
     uint8_t tmp_buf[512];
+    v->base_lba = 0;
+    fat_cache_drop(drive_id);
     if (!fs_read_sector(drive_id, 0, tmp_buf))
         return false;
+    if ((drive_id == DRIVE_HDA || drive_id == DRIVE_HDB) &&
+        !fs_bpb_valid(tmp_buf)) {
+        /* a partitioned disk: the volume is a FAT partition */
+        uint32_t start, len;
+        if (!fs_pick_partition(tmp_buf,
+                               drive_id == DRIVE_HDA ? s_boot_volume : 0,
+                               &start, &len))
+            return false;
+        v->base_lba = start;
+        if (!fs_read_sector(drive_id, 0, tmp_buf) || !fs_bpb_valid(tmp_buf)) {
+            v->base_lba = 0;
+            return false;
+        }
+    }
     memcpy(&v->bpb, tmp_buf, sizeof(bpb_t));
     if (v->bpb.bytes_per_sector != 512 || !v->bpb.sectors_per_cluster ||
         !v->bpb.fat_count) {
@@ -932,18 +1000,19 @@ bool fs_drive_mounted(uint8_t drive_id) {
 
 bool fs_mount(void) {
     memset(g_drives, 0, sizeof(g_drives));
-    if (!fs_mount_drive(DRIVE_HDA))
-        return false;
-    s_current_drive = DRIVE_HDA;
-    dir_context.drive_id = DRIVE_HDA;
-    dir_context.current_cluster = 0;
-    strcpy(dir_context.path, "/");
+    /* every drive there is; HDA may be missing or blank (booted from the
+     * setup floppy to install on a new disk) */
+    bool hda = fs_mount_drive(DRIVE_HDA);
     fs_mount_drive(DRIVE_HDB);
     if (fdd_init(0))
         fs_mount_drive(DRIVE_FDD0);
     if (fdd_init(1))
         fs_mount_drive(DRIVE_FDD1);
-    return true;
+    s_current_drive = DRIVE_HDA;
+    dir_context.drive_id = DRIVE_HDA;
+    dir_context.current_cluster = 0;
+    strcpy(dir_context.path, "/");
+    return hda;
 }
 
 void fs_unmount(uint8_t drive_id) {
@@ -952,6 +1021,7 @@ void fs_unmount(uint8_t drive_id) {
         return;
     g_drives[drive_id].mounted = false;
     fs_usage_invalidate(drive_id);
+    fat_cache_drop(drive_id);
 }
 /* copy the next path component (up to '/'); one longer than any name is
  * cut so it can't match */
@@ -1584,11 +1654,12 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
         if (f->cur_offset > 0 && f->cur_offset % cluster_bytes == 0) {
             uint16_t next = fat_get(f->drive_id, f->cur_cluster);
             if (vol_is_eoc(v, next) || next == 0) {
+                /* (file data: no need to zero it first, the data goes
+                 * there; what is past the end of the file is never read) */
                 uint16_t new_cluster = fat_alloc(f->drive_id);
                 if (new_cluster == 0) {
                     return done_write(f, -1, v);
                 }
-                zero_cluster(f->drive_id, new_cluster);
                 fat_set(f->drive_id, f->cur_cluster, new_cluster);
                 f->cur_cluster = new_cluster;
             } else {
@@ -1600,7 +1671,6 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
             if (new_cluster == 0) {
                 return done_write(f, -1, v);
             }
-            zero_cluster(f->drive_id, new_cluster);
             f->entry.cluster_lo = new_cluster;
             f->cur_cluster = new_cluster;
         }
@@ -2140,6 +2210,26 @@ bool fs_set_hidden(const char *path, bool hidden) {
         entries[idx].attr |= ATTR_HIDDEN;
     else
         entries[idx].attr &= ~ATTR_HIDDEN;
+    return fs_write_sector(drive_id, lba, sector_buf);
+}
+
+bool fs_set_attr(const char *path, uint8_t attr) {
+    uint8_t drive_id;
+    uint16_t dir_cluster;
+    char name83[12], leaf[FS_NAME_SZ];
+    bool ex;
+    uint8_t sector_buf[512];
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
+        return false;
+    uint32_t lba;
+    int idx;
+    if (!find83(drive_id, dir_cluster, name83, NULL, &lba, &idx))
+        return false;
+    if (!fs_read_sector(drive_id, lba, sector_buf))
+        return false;
+    dir_entry_t *entries = (dir_entry_t *)sector_buf;
+    entries[idx].attr = (uint8_t)((attr & ~(ATTR_DIRECTORY | ATTR_VOLUME_ID)) |
+                                  (entries[idx].attr & ATTR_DIRECTORY));
     return fs_write_sector(drive_id, lba, sector_buf);
 }
 

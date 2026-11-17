@@ -70,6 +70,9 @@ extern int running_app_count;
 
 extern menubar g_menubar;
 extern bool g_menubar_click_consumed;
+/* booted from the ASMOS setup floppy (kernel.c): Setup runs, nothing is
+ * written to the hard disk until it says so (no ASMOS.CFG, no /DESKTOP) */
+extern bool g_setup_mode;
 extern bool gui_should_exit;
 
 typedef struct {

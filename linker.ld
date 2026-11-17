@@ -1,9 +1,8 @@
 ENTRY(_start)
 SECTIONS {
-    /* The kernel runs at 1 MB. Stage 1 reads the image (real mode: below
-     * 640 KB only) to 0x10000; stage 2, in protected mode, copies it here
-     * and jumps to _start. Its size is then limited only by what the boot
-     * sectors hold (1000 sectors: see the ASSERT), not by 640 KB. */
+    /* The kernel runs at 1 MB. It is the file /SYSTEM/KERNEL.SYS: stage 2
+     * (boot/stage2.asm) reads it 64 KB at a time below 1 MB and copies
+     * each piece here, then jumps to _start. No size limit but the RAM. */
     . = 0x100000;
 
     /* code + constants first: app contexts map them read-only (lib/vmm.c) */
@@ -31,7 +30,7 @@ SECTIONS {
     }
     _heap_start = ALIGN(_bss_end, 4096);
 
-    /* Below 640 KB, where the image was read: once it is copied, the back
+    /* Below 640 KB, where stage 2 read the image: once it is copied, the back
      * buffer (sized for the screen mode at run time) and a second heap
      * (lib/alloc.c) up to the stack. */
     _backbuf = 0x10000;
@@ -50,8 +49,6 @@ SECTIONS {
     }
 
     ASSERT(_kstack_top <= 0xA0000, "Stack overflows into VGA!")
-    ASSERT(_image_end - 0x100000 <= 1000 * 512,
-           "Kernel image over 1000 sectors: the boot sectors hold no more")
     ASSERT(0x10000 + 640 * 400 + 0x10000 <= _kstack_bottom,
            "No room below the stack for the back buffer and the low heap")
 }

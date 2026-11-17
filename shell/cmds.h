@@ -24,6 +24,7 @@ void cmd_date(const char *args, char *out, size_t max);
 void cmd_time(const char *args, char *out, size_t max);
 void cmd_cal(const char *args, char *out, size_t max);
 void cmd_format(const char *args, char *out, size_t max);
+void cmd_sys(const char *args, char *out, size_t max);
 void cmd_sysinfo(char *out, size_t max);
 void cmd_lspci(char *out, size_t max);
 void cmd_lpt(char *out, size_t max);

@@ -23,5 +23,10 @@ gpu_backend_t gpu_backend(void);
  * gpu_overlay_clear(), removes it. Used for the busy cursor. */
 void gpu_overlay(int x, int y, int w, int h, const uint8_t *pix);
 void gpu_overlay_clear(int x, int y, int w, int h); /* back to last frame */
+/* the overlay is gone (a full blit follows): nothing to put back */
+void gpu_overlay_forget(void);
+/* pixels (w x h, all drawn) into the last frame and onto the screen, under
+ * the overlay: takes the arrow pointer off the screen while busy */
+void gpu_patch(int x, int y, int w, int h, const uint8_t *pix);
 
 #endif

@@ -897,9 +897,12 @@ const char *zip_create(const char *src, const char *zip_path, int level,
 
 /* ══ inflate ═════════════════════════════════════════════════════════════ */
 
+#define FAST_BITS 9
 typedef struct {
     short count[16];
     short symbol[288];
+    /* the next 9 bits -> symbol | code length << 12 (0: a longer code) */
+    uint16_t fast[1 << FAST_BITS];
 } huff_t;
 
 typedef struct {
@@ -931,6 +934,22 @@ static int in_byte(inf_t *s) {
             s->err = true;
             return 0;
         }
+        s->remain -= (uint32_t)n;
+        s->ilen = n;
+        s->ipos = 0;
+    }
+    return s->ibuf[s->ipos++];
+}
+
+/* the next byte of input, or -1 at the end (no error: a look ahead) */
+static int peek_byte(inf_t *s) {
+    if (s->ipos == s->ilen) {
+        if (!s->remain)
+            return -1;
+        uint32_t k = s->remain < sizeof(s->ibuf) ? s->remain : sizeof(s->ibuf);
+        int n = fs_read(s->in, s->ibuf, (int)k);
+        if (n <= 0)
+            return -1;
         s->remain -= (uint32_t)n;
         s->ilen = n;
         s->ipos = 0;
@@ -971,8 +990,23 @@ static void out_byte(inf_t *s, uint8_t v) {
         out_flush(s);
 }
 
-/* puff-style canonical decode */
+/* A symbol: one table look-up for codes up to 9 bits (nearly all), else
+ * bit by bit, puff-style. */
 static int decode(inf_t *s, const huff_t *h) {
+    while (s->bitcnt < FAST_BITS) {
+        int c = peek_byte(s);
+        if (c < 0)
+            break;
+        s->bitbuf |= (uint32_t)c << s->bitcnt;
+        s->bitcnt += 8;
+    }
+    uint16_t e = h->fast[s->bitbuf & ((1u << FAST_BITS) - 1)];
+    int l = e >> 12;
+    if (l && l <= s->bitcnt) {
+        s->bitbuf >>= l;
+        s->bitcnt -= l;
+        return e & 0x0FFF;
+    }
     int code = 0, first = 0, index = 0;
     for (int len = 1; len < 16; len++) {
         code |= (int)bits(s, 1);
@@ -1011,6 +1045,23 @@ static int construct(huff_t *h, const uint8_t *len, int n) {
     for (int i = 0; i < n; i++)
         if (len[i])
             h->symbol[offs[len[i]]++] = (short)i;
+    /* the fast table: each short code (bit-reversed: deflate sends them
+     * high bit first) fills every slot that starts with it */
+    memset(h->fast, 0, sizeof(h->fast));
+    int code = 0, idx = 0;
+    for (int l = 1; l < 16; l++) {
+        for (int k = 0; k < h->count[l]; k++, code++) {
+            int sym = h->symbol[idx++];
+            if (l > FAST_BITS)
+                continue;
+            int rev = 0;
+            for (int b = 0; b < l; b++)
+                rev |= ((code >> b) & 1) << (l - 1 - b);
+            for (int f = rev; f < (1 << FAST_BITS); f += 1 << l)
+                h->fast[f] = (uint16_t)(sym | l << 12);
+        }
+        code <<= 1;
+    }
     return left;
 }
 
@@ -1051,16 +1102,15 @@ static bool inflate_stream(inf_t *s) {
         if (s->err)
             return false;
         if (type == 0) {
-            s->bitbuf = 0;
-            s->bitcnt = 0;
-            uint32_t len = (uint32_t)in_byte(s);
-            len |= (uint32_t)in_byte(s) << 8;
-            uint32_t nlen = (uint32_t)in_byte(s);
-            nlen |= (uint32_t)in_byte(s) << 8;
+            /* to the byte boundary; whole bytes the decoder looked ahead
+             * at are still in bitbuf, and come out of it first */
+            bits(s, s->bitcnt & 7);
+            uint32_t len = bits(s, 16);
+            uint32_t nlen = bits(s, 16);
             if (s->err || len != (~nlen & 0xFFFF))
                 return false;
             while (len--) {
-                out_byte(s, (uint8_t)in_byte(s));
+                out_byte(s, (uint8_t)(s->bitcnt ? bits(s, 8) : in_byte(s)));
                 if (s->err)
                     return false;
             }

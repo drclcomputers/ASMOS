@@ -30,25 +30,28 @@ make clean
 BOOT SEQUENCE
 =============================================================================
 
-Stage 1 (boot/boot.asm, 512 bytes)
+The full walk-through, and how to install: docs/BOOT_AND_SETUP.md
 
-- Real mode, 16-bit x86
-- BIOS loads sector 0 to 0x7C00
-- Sets up stack at 0x7000
-- Loads Stage 2 (sectors 1-8) to 0x7E00
-- Loads kernel (sectors 9-1008) to 0x10000
-- Uses LBA-to-CHS conversion for BIOS INT 13h
-- Handles flaky real hardware with retry logic
-- Reads video mode flag from 0x0602 to decide between Mode 13h or Mode X
+MBR (boot/mbr.asm, hard disks only)
 
-Stage 2 (boot/boot_stage2.asm, ~4KB)
+- BIOS loads sector 0 to 0x7C00; the MBR moves itself to 0x0600
+- Finds the active partition, reads its first sector (the VBR) to 0x7C00
+- INT 13h LBA reads if the BIOS has them, else CHS (BIOS geometry)
 
-- Real mode, 16-bit x86
-- Sets up video: either 320x200 (Mode 13h, linear) or 640x400 (Mode X, planar)
+VBR (boot/vbr.asm, the partition's or floppy's first sector)
+
+- The volume's BPB (written by Setup / tools/mkdisk.py) + code
+- Reads stage 2 (the reserved sectors after it) to 0x7E00
+
+Stage 2 (boot/stage2.asm, ~2KB)
+
 - Detects extended memory (INT 15h AH=88h), stores total RAM at 0x0500
 - Enables A20 line (tries BIOS, then KBC method, then fast method)
+- Reads the FAT12/FAT16 volume: finds /SYSTEM/KERNEL.SYS
+- Loads it 64 KB at a time and copies it to 1 MB in unreal mode (no size limit)
+- Sets up video: either 320x200 (Mode 13h, linear) or 640x400 (Mode X, planar)
 - Loads GDT and switches to 32-bit protected mode
-- Jumps to 32-bit kernel entry (0x10000)
+- Jumps to the 32-bit kernel entry (1 MB)
 
 Loader (boot/loader.asm, 32-bit)
 
@@ -75,8 +78,10 @@ MEMORY MAP
 
 0x00000 - 0x00FFF Real mode IVT / BDA
 0x01000 - 0x06FFF Available
-0x07C00 - 0x07DFF Stage 1 bootloader
-0x07E00 - 0x08DFF Stage 2 bootloader
+0x00600 - 0x007FF MBR (moved here while it loads the VBR)
+0x07C00 - 0x07DFF VBR (the volume's boot sector)
+0x07E00 - 0x09BFF Stage 2 bootloader
+0x10000 - 0x1FFFF Stage 2: 64 KB of kernel at a time, copied to 1 MB
 0x10000 - 0x87FFF Kernel (text, data, BSS, heap)
 0x88000 - 0x97FFF Kernel stack (64KB)
 0xA0000 - 0xBFFFF VGA/VESA framebuffer
@@ -107,8 +112,8 @@ FAT16 filesystem mounted during boot. Supports:
 
 Bootloader expects:
 
-- Kernel in first 1000 sectors (starting at sector 9)
-- BPB at standard offset (offset 3, see boot.asm for layout)
+- The kernel as the file /SYSTEM/KERNEL.SYS (any size, any clusters)
+- Hard disks: an MBR with an active FAT16 partition (Setup makes it)
 
 INTERRUPTS
 =============================================================================
@@ -321,20 +326,19 @@ KNOWN LIMITATIONS
 BUILDING A BOOTABLE IMAGE
 =============================================================================
 
-The makefile generates os_image.bin (65536 sectors = 31-32MB disk).
+make builds two images (tools/mkdisk.py):
 
-Layout:
-Sector 0: boot.asm (512 bytes)
-Sectors 1-8: boot_stage2.asm (~4KB)
-Sectors 9+: kernel.bin (up to 1000 sectors)
+os_image.bin  a hard disk with ASMOS installed: MBR, one FAT16 partition at
+              sector 63 with /SYSTEM/KERNEL.SYS and /APPS. 64 MB; another
+              size: make HDD_MB=200 (up to 2 GB)
+setup.img     the 1.44 MB setup floppy: boot it to install ASMOS on any
+              hard disk (ASMOS Setup starts by itself)
+
+make boottest boots both in an emulator under many BIOS kinds.
+make qemu-setup runs Setup on a new 100 MB disk in QEMU.
 
 To write to a USB drive (be careful!):
 dd if=os_image.bin of=/dev/sdX bs=512
-
-To write to a floppy image:
-dd if=boot.bin of=floppy.img bs=512 seek=0 count=1
-dd if=boot_stage2.bin of=floppy.img bs=512 seek=1 count=8
-dd if=kernel.bin of=floppy.img bs=512 seek=9
 
 DEVELOPMENT NOTES
 =============================================================================
@@ -364,7 +368,7 @@ SOURCE TREE
 kernel.c Main kernel entry
 linker.ld Linker script
 
-boot/ Boot stages (boot.asm, boot_stage2.asm) and loader.asm
+boot/ Boot code (mbr.asm, vbr.asm, stage2.asm, bootdefs.inc), loader.asm
 os/ Core OS (apps, scheduler, fault guard, error handling)
 interrupts/ IDT setup and interrupt handlers
 drivers/ All hardware drivers: GPU, sound, NIC, ATA, floppy,

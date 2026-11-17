@@ -156,6 +156,8 @@ void gpu_blit_skip(void) {
     count_frame();
 }
 
+static void overlay_after_blit(int y0, int y1);
+
 /* Only rows y0..y1 of the back buffer changed since the last blit. */
 void gpu_blit_rows(int y0, int y1) {
     if (s_full || !s_shadow || y0 < 0)
@@ -173,6 +175,7 @@ void gpu_blit_rows(int y0, int y1) {
     else
         blit_planar();
     s_full = false;
+    overlay_after_blit(y0, y1); /* the hourglass stays on top */
     count_frame();
 }
 
@@ -250,10 +253,46 @@ static void overlay_put(int x, int y, int w, int h, const uint8_t *pix) {
     outb(VGA_SEQ_ADDR, old_idx);
 }
 
+/* the overlay now on the screen (the hourglass), put back after a blit
+ * that went over it */
+static const uint8_t *volatile s_ov_pix;
+static int s_ov_x, s_ov_y, s_ov_w, s_ov_h;
+
 void gpu_overlay(int x, int y, int w, int h, const uint8_t *pix) {
+    s_ov_pix = NULL;
+    s_ov_x = x, s_ov_y = y, s_ov_w = w, s_ov_h = h;
+    s_ov_pix = pix;
     overlay_put(x, y, w, h, pix);
 }
 
 void gpu_overlay_clear(int x, int y, int w, int h) {
+    s_ov_pix = NULL;
     overlay_put(x, y, w, h, NULL);
+}
+
+void gpu_overlay_forget(void) { s_ov_pix = NULL; }
+
+void gpu_patch(int x, int y, int w, int h, const uint8_t *pix) {
+    if (!s_shadow)
+        return;
+    for (int yy = 0; yy < h; yy++) {
+        int py = y + yy;
+        if (py < 0 || py >= SCREEN_HEIGHT)
+            continue;
+        for (int xx = 0; xx < w; xx++) {
+            int px = x + xx;
+            if (px >= 0 && px < SCREEN_WIDTH)
+                s_shadow[py * SCREEN_WIDTH + px] = pix[yy * w + xx];
+        }
+    }
+    overlay_put(x, y, w, h, NULL);
+    const uint8_t *ov = s_ov_pix;
+    if (ov)
+        overlay_put(s_ov_x, s_ov_y, s_ov_w, s_ov_h, ov);
+}
+
+static void overlay_after_blit(int y0, int y1) {
+    const uint8_t *ov = s_ov_pix;
+    if (ov && s_ov_y <= y1 && s_ov_y + s_ov_h > y0)
+        overlay_put(s_ov_x, s_ov_y, s_ov_w, s_ov_h, ov);
 }

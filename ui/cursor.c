@@ -1,7 +1,9 @@
 #include "ui/cursor.h"
 #include "config/config.h"
+#include "drivers/gpu.h"
 #include "lib/core.h"
 #include "lib/graphics.h"
+#include "os/watchdog.h"
 
 #define ARROW_CURSOR 0
 #define POINTER_CURSOR 1
@@ -95,7 +97,18 @@ bool cursor_hide(int *y, int *h) {
     return true;
 }
 
+/* the hourglass came up: the arrow last sent comes off the screen (the
+ * back buffer still has it; the next frame's cursor_hide takes it off) */
+void cursor_erase_screen(void) {
+    if (s_shown)
+        gpu_patch(s_ux, s_uy, CUR_W, CUR_H, s_under);
+}
+
 void cursor_show(int x, int y) {
+    if (wd_busy_shown()) { /* the hourglass is the pointer now */
+        s_shown = false;
+        return;
+    }
     for (int r = 0; r < CUR_H; r++) {
         int py = y + r;
         if (py < 0 || py >= SCREEN_HEIGHT)

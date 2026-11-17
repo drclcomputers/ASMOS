@@ -1,4 +1,5 @@
 #include "os/error.h"
+#include "os/os.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
 #include "drivers/ata.h"
@@ -184,6 +185,8 @@ void boot_check_ata(void) {
                         d ? det : "not found");
     }
 
+    if (g_setup_mode) /* the disk may be new: Setup looks at it */
+        return;
     uint8_t buf[512];
     bool ok = ata_read_sector(0, 0, buf);
     boot_check_line("Sector 0 read", ok, ok ? NULL : "timeout or error");
@@ -199,6 +202,10 @@ void boot_check_ata(void) {
 
 void boot_check_fat(void) {
     boot_puts("Filesystem\n", LIGHT_GRAY);
+    if (g_setup_mode) {
+        boot_check_line("Setup floppy", true, "SETUP\\ASMOS.ZIP: Setup starts");
+        return;
+    }
 
     bool mounted = g_drives[0].mounted;
     boot_check_line("Mounted", mounted,

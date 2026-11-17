@@ -4,7 +4,8 @@
 /*
  * The screen mode is chosen in real mode by the boot loader, before the
  * kernel runs, so it is stored on the boot disk itself: "VM" + one byte at
- * offset 2 of the first stage-2 sector (LBA 1; boot/boot_stage2.asm).
+ * offset 2 of the first stage-2 sector (sector 1 of the boot volume: the
+ * partition's on a hard disk, which fs_read_sector adds; boot/stage2.asm).
  *   VIDEO_320 = 320x200, 256 colours (BIOS mode 13h)
  *   VIDEO_640 = 640x400, 16 colours (mode 12h reprogrammed to 400 lines)
  * A change takes effect at the next boot.
