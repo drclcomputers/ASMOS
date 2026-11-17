@@ -9,13 +9,14 @@
  * 4th byte for the middle button. Detected by toggling DTR/RTS: the mouse
  * powers up and answers 'M' ("M3" Logitech, "MZ" wheel).
  * Bytes are taken in the UART interrupt (8250/16450 UARTs have no FIFO)
- * and decoded in sermouse_poll() once per frame.
+ * and decoded in sermouse_poll() (from the timer interrupt while the
+ * desktop runs, else once a frame).
  */
 
 bool sermouse_init(void); /* probe COM1 then COM2 */
 bool sermouse_detected(void);
 int sermouse_port(void);  /* 1 or 2, 0 = none */
-void sermouse_poll(void); /* decode buffered bytes into `mouse` */
+void sermouse_poll(void); /* decode buffered bytes (mouse_apply) */
 void sermouse_irq_handler(void);
 
 #endif

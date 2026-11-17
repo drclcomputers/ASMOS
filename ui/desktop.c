@@ -1,4 +1,5 @@
 #include "ui/desktop.h"
+#include "drivers/ata.h"
 #include "drivers/fdd.h"
 #include "drivers/gpu.h"
 #include "os/watchdog.h"
@@ -103,97 +104,36 @@ static int s_drag_off_y = 0;
 static int s_last_click_idx = -1;
 static uint32_t s_last_click_tick = 0;
 
-/* ── power animations ───────────────────────────────────────────────────── */
-#define BAR_W 160
-#define BAR_H 12
-#define BAR_X ((SCREEN_WIDTH - BAR_W) / 2)
-#define BAR_Y ((SCREEN_HEIGHT / 2) + 16)
-#define STEPS 40
+/* ── shut down / restart ────────────────────────────────────────────────── */
 
+/* One line on a black screen while everything is put away: the settings
+ * (ASMOS.CFG) saved, the floppy writes still in memory written, the
+ * floppy motors stopped and the hard disks done (and, shutting down,
+ * spun down). Then the caller turns off or restarts. */
 void power_anim_run(bool is_restart) {
-    fdd_flush(0); /* floppy writes still in memory go to the disks */
-    fdd_flush(1);
-    /* no pointer from here on: neither the arrow nor the hourglass (the
-     * loop stops beating while this runs) */
-    wd_stop();
-    int cy, ch;
-    cursor_hide(&cy, &ch);
-    gpu_invalidate();
-    if (g_cfg.no_power_anim) /* Settings > Performance */
-        return;
+    wd_stop(); /* no pointer from here on */
     const char *msg = is_restart ? "Restarting..." : "Shutting down...";
-    uint8_t bar_col = is_restart ? LIGHT_GREEN : LIGHT_CYAN;
-    uint8_t glow_col = is_restart ? GREEN : CYAN;
-
-    for (int fade = 0; fade < 8; fade++) {
-        uint8_t *buf = (uint8_t *)BACKBUF;
-        for (int y = 0; y < SCREEN_HEIGHT; y++) {
-            if ((y + fade) % 3 == 0) {
-                for (int x = 0; x < SCREEN_WIDTH; x++)
-                    buf[y * SCREEN_WIDTH + x] = BLACK;
-            }
-        }
-        blit();
-        sleep_ms(50);
-    }
-
-    for (int step = 0; step <= STEPS; step++) {
-        clear_screen(BLACK);
-
-        for (int y = 1; y < SCREEN_HEIGHT; y += 3)
-            draw_line(0, y, SCREEN_WIDTH - 1, y, DARK_GRAY);
-
-        int msg_x = (SCREEN_WIDTH - text_width(msg, UI_FONT_BOLD)) / 2;
-        draw_string(msg_x, SCREEN_HEIGHT / 2 - 24, (char *)msg, WHITE,
-                    UI_FONT_BOLD);
-
-        char pct[5];
-        int p = (step * 100) / STEPS;
-        pct[0] = '0' + p / 100;
-        pct[1] = '0' + (p / 10) % 10;
-        pct[2] = '0' + p % 10;
-        pct[3] = '%';
-        pct[4] = '\0';
-        int px = (SCREEN_WIDTH - text_width(pct, UI_FONT_SMALL)) / 2;
-        draw_string(px, SCREEN_HEIGHT / 2 - 10, pct, LIGHT_GRAY, UI_FONT_SMALL);
-
-        fill_rect(BAR_X + 2, BAR_Y + 2, BAR_W, BAR_H, DARK_GRAY);
-
-        fill_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, DARK_GRAY);
-        fill_rect(BAR_X, BAR_Y, BAR_W, BAR_H, BLACK);
-
-        int filled = (step * BAR_W) / STEPS;
-        fill_rect(BAR_X, BAR_Y, filled, BAR_H, bar_col);
-
-        if (filled > 2)
-            fill_rect(BAR_X + filled - 2, BAR_Y, 2, BAR_H, WHITE);
-
-        draw_rect(BAR_X - 1, BAR_Y - 1, BAR_W + 2, BAR_H + 2, glow_col);
-
-        static const int dot_x[] = {-6, -2, 2, 6};
-        for (int d = 0; d < 4; d++) {
-            uint8_t dcol = ((step / 4 + d) % 4 == 0) ? WHITE : DARK_GRAY;
-            int sx = SCREEN_WIDTH / 2 + dot_x[d];
-            int sy = BAR_Y + BAR_H + 10;
-            fill_rect(sx, sy, 2, 2, dcol);
-        }
-
-        blit();
-        sleep_ms(50);
-    }
-
-    for (int f = 0; f < 3; f++) {
-        clear_screen(f % 2 == 0 ? DARK_GRAY : BLACK);
-        blit();
-        sleep_ms(120);
-    }
-
+    uint8_t col = is_restart ? LIGHT_GREEN : LIGHT_CYAN;
     clear_screen(BLACK);
-    int msg_x = (SCREEN_WIDTH - text_width(msg, UI_FONT_BOLD)) / 2;
-    draw_string(msg_x, SCREEN_HEIGHT / 2 - 4, (char *)msg, bar_col,
-                UI_FONT_BOLD);
+    draw_string((SCREEN_WIDTH - text_width(msg, UI_FONT_BOLD)) / 2,
+                SCREEN_HEIGHT / 2 - 4, (char *)msg, col, UI_FONT_BOLD);
+    gpu_invalidate();
     blit();
-    sleep_s(2);
+    uint32_t t0 = time_millis();
+
+    cfg_save(); /* (not in Setup: nothing is installed yet) */
+    bool spun = false;
+    for (uint8_t d = 0; d < 2; d++) {
+        fdd_flush(d);
+        spun |= fdd_motor_running(d);
+        fdd_motor_off(d);
+    }
+    ata_park(!is_restart);
+    if (spun) /* a floppy motor takes a moment to run down */
+        sleep_ms(700);
+    uint32_t took = time_millis() - t0;
+    if (took < 1000) /* long enough to read it */
+        sleep_ms(1000 - took);
 }
 
 /* ── open item ──────────────────────────────────────────────────────────── */

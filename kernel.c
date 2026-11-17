@@ -5,6 +5,7 @@
 #include "drivers/ps2.h"
 #include "fs/fs.h"
 #include "fs/install.h"
+#include "lib/apm.h"
 #include "lib/cpu.h"
 #include "ui/uifont.h"
 
@@ -207,6 +208,7 @@ void kmain(void) {
     detect_heap_range();
     cpu_init(); /* 386 safe: no CPUID unless present; sets up the FPU */
     idt_init();
+    apm_init(); /* (stage 2 connected it: lib/apm.h) */
     ps2_init();
 
     gpu_init();

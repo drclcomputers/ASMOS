@@ -267,6 +267,10 @@ void fdd_motor_off(uint8_t drive_id) {
     write_dor(drive_id);
 }
 
+bool fdd_motor_running(uint8_t drive_id) {
+    return drive_id <= 1 && s_motor_on[drive_id];
+}
+
 /* ── recalibrate (seek to track 0) ─────────────────────────────────────── */
 static bool fdd_recalibrate(uint8_t drive_id) {
     fdd_motor_start(drive_id);

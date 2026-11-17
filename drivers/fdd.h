@@ -99,6 +99,7 @@ bool fdd_read_sector(uint8_t drive_id, uint32_t lba, void *buf);
 bool fdd_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
 bool fdd_is_present(uint8_t drive_id);
 void fdd_motor_off(uint8_t drive_id);
+bool fdd_motor_running(uint8_t drive_id);
 /* call often (main loop): cached writes go to the disk 1/2 s after the
  * last one; motors stop 2 s after the last access */
 void fdd_poll(void);

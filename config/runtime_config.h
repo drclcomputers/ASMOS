@@ -36,8 +36,9 @@ typedef struct __attribute__((packed)) {
     uint8_t clock_no_secs;  /* menu bar clock without seconds */
     uint8_t caret_no_blink; /* text cursor stays on */
     uint8_t no_tooltips;
-    uint8_t no_power_anim; /* shut down / restart at once */
-    uint8_t fps_cap;       /* 0 = 60, 1 = 30, 2 = 20 frames a second */
+    uint8_t
+        no_power_anim; /* unused (the animation is gone); kept for the file */
+    uint8_t fps_cap;   /* 0 = 60, 1 = 30, 2 = 20 frames a second */
     /* Printing (os/print.h) */
     uint8_t printer_type;  /* PRN_TEXT, PRN_ESCP, PRN_PCL */
     uint8_t printer_port;  /* 0 = LPT1 */

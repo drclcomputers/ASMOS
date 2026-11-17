@@ -1,5 +1,4 @@
 #include "os/error.h"
-#include "os/os.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
 #include "drivers/ata.h"
@@ -12,11 +11,13 @@
 #include "drivers/sb16.h"
 #include "drivers/sermouse.h"
 #include "fs/fs.h"
+#include "lib/apm.h"
 #include "lib/core.h"
 #include "lib/cpu.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "os/os.h"
 #include "ui/dialogs.h"
 #include "ui/uifont.h"
 
@@ -291,6 +292,16 @@ void boot_check_input(void) {
         strcat(ports, one);
     }
     boot_check_line("Parallel", true, lpt_count() ? ports : "none");
+    {
+        char pw[40];
+        uint16_t v = apm_version();
+        if (v)
+            snprintf(pw, sizeof(pw), "APM %d.%d (turns itself off)", v >> 8,
+                     v & 0xFF);
+        else
+            strcpy(pw, "no APM (switch off by hand)");
+        boot_check_line("Power", true, pw);
+    }
     ports[0] = 0;
     for (int i = 0; i < 4; i++)
         if (bios_data_word(i * 2)) {

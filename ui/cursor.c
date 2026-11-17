@@ -1,6 +1,8 @@
 #include "ui/cursor.h"
 #include "config/config.h"
-#include "drivers/gpu.h"
+#include "drivers/mouse.h"
+#include "drivers/pointer.h"
+#include "drivers/ps2.h"
 #include "lib/core.h"
 #include "lib/graphics.h"
 #include "os/watchdog.h"
@@ -66,62 +68,38 @@ void draw_cursor(int x, int y) {
     }
 }
 
-/* ── save-under ────────────────────────────────────────────────────────
- * The back buffer is kept between frames (ui/window.h, lazy redraw), so
- * the pointer must be taken off it again: cursor_show() keeps the pixels
- * it covers, cursor_hide() puts them back. */
+/* ── the pointer on the screen (drivers/pointer.h) ──────────────────────
+ * The pointer is not drawn into the frame any more: it goes straight onto
+ * the screen and the timer interrupt moves it. These are the shapes. */
 #define CUR_W 9
 #define CUR_H 8
-static uint8_t s_under[CUR_W * CUR_H];
-static int s_ux, s_uy;
-static bool s_shown;
+static uint8_t s_sprite[4][CUR_W * CUR_H];
+static bool s_made;
 
-void cursor_forget(void) { s_shown = false; } /* the frame was redrawn */
-
-bool cursor_hide(int *y, int *h) {
-    if (!s_shown)
-        return false;
-    s_shown = false;
-    for (int r = 0; r < CUR_H; r++) {
-        int py = s_uy + r;
-        if (py < 0 || py >= SCREEN_HEIGHT)
-            continue;
-        for (int c = 0; c < CUR_W; c++) {
-            int px = s_ux + c;
-            if (px >= 0 && px < SCREEN_WIDTH)
-                BACKBUF[py * SCREEN_WIDTH + px] = s_under[r * CUR_W + c];
-        }
+const uint8_t *cursor_sprite(int shape) {
+    if (shape < 0 || shape > 3)
+        shape = 0;
+    if (!s_made) {
+        for (int k = 0; k < 4; k++)
+            for (int row = 0; row < CUR_H; row++)
+                for (int col = 0; col < CUR_W; col++) {
+                    uint16_t bit = (uint16_t)(1 << (8 - col));
+                    uint8_t c = 0xFF;
+                    if (cursor_fill[k][row] & bit)
+                        c = WHITE;
+                    if (cursor_border[k][row] & bit)
+                        c = BLACK;
+                    s_sprite[k][row * CUR_W + col] = c;
+                }
+        s_made = true;
     }
-    *y = s_uy;
-    *h = CUR_H;
-    return true;
+    return s_sprite[shape];
 }
 
-/* the hourglass came up: the arrow last sent comes off the screen (the
- * back buffer still has it; the next frame's cursor_hide takes it off) */
-void cursor_erase_screen(void) {
-    if (s_shown)
-        gpu_patch(s_ux, s_uy, CUR_W, CUR_H, s_under);
-}
-
-void cursor_show(int x, int y) {
-    if (wd_busy_shown()) { /* the hourglass is the pointer now */
-        s_shown = false;
-        return;
-    }
-    for (int r = 0; r < CUR_H; r++) {
-        int py = y + r;
-        if (py < 0 || py >= SCREEN_HEIGHT)
-            continue;
-        for (int c = 0; c < CUR_W; c++) {
-            int px = x + c;
-            if (px >= 0 && px < SCREEN_WIDTH)
-                s_under[r * CUR_W + c] = BACKBUF[py * SCREEN_WIDTH + px];
-        }
-    }
-    s_ux = x;
-    s_uy = y;
-    s_shown = true;
-    gfx_reset_clip();
-    draw_cursor(x, y);
+void cursor_frame(bool on) {
+    if (on && !wd_busy_shown()) /* the hourglass stands in while busy */
+        pointer_shape(cursor_sprite(CHOSEN_CURSOR), CUR_W, CUR_H, 0, 0);
+    if (on && !ps2_irq_active()) /* else the timer interrupt moves it */
+        pointer_move(mouse.x, mouse.y);
+    pointer_show(on);
 }

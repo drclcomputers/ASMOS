@@ -7,6 +7,7 @@
 #include "os/os.h"
 #include "os/print.h"
 #include "os/watchdog.h"
+#include "ui/cursor.h"
 #include "ui/popup.h"
 #include "ui/saver.h"
 
@@ -263,6 +264,7 @@ void scheduler_kernel_task(void) {
             os_reap_dead_apps();
             wd_heartbeat();
             saver_draw();
+            cursor_frame(false); /* no pointer over the saver */
             blit();
             do {
                 task_yield();
@@ -291,6 +293,7 @@ void scheduler_kernel_task(void) {
         int y0, y1;
         int drawn = wm_compose(&g_menubar, &y0, &y1);
         wd_heartbeat();
+        cursor_frame(true); /* shape; the timer interrupt moves it */
         if (drawn == WM_FRAME_FULL)
             blit();
         else if (drawn == WM_FRAME_PART)

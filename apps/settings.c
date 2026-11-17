@@ -14,7 +14,7 @@
 /* tabs; Screen Saver and Speed open from Display */
 enum { P_WALL, P_SOUND, P_CLOCK, P_NET, P_PRINT, P_SYSTEM };
 
-#define PERF_FLAGS 6
+#define PERF_FLAGS 5
 
 typedef struct {
     window *win; /* must stay first */
@@ -228,7 +228,6 @@ static const struct {
      &g_cfg.clock_no_secs},
     {"Blinking text cursor", "Off: the cursor stays on", &g_cfg.caret_no_blink},
     {"Tooltips", "Notes like this one", &g_cfg.no_tooltips},
-    {"Shut down and restart animation", "Off: at once", &g_cfg.no_power_anim},
 };
 
 static void on_perf(control *c, int ev) {

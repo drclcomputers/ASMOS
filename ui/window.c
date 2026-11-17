@@ -811,10 +811,6 @@ static int s_grace;          /* ... and for this many frames after input */
 static uint32_t s_scene_sig; /* the scene the back buffer shows */
 static uint32_t s_bar_sig;
 static bool s_prev_button, s_button;
-static int s_cur_x = -1, s_cur_y = -1, s_cur_shape = -1;
-
-/* the pointer drawn: its shape, or -2 while the hourglass stands in */
-static int cur_shape(void) { return wd_busy_shown() ? -2 : CHOSEN_CURSOR; }
 
 #define MIX(v) (h = h * 33u ^ (uint32_t)(v))
 
@@ -1180,18 +1176,13 @@ int wm_compose(menubar *mb, int *y0, int *y1) {
             win_stack[i]->sig = sigs[i];
             win_stack[i]->dirty = false;
         }
-        cursor_forget();
         draw_scene(mb);
         s_band_on = band;
         if (band) {
             xor_frame(bx, by, bw, bh);
             s_bx = bx, s_by = by, s_bw = bw, s_bh = bh;
         }
-        cursor_show(mouse.x, mouse.y);
         s_bar_sig = bar;
-        s_cur_x = mouse.x;
-        s_cur_y = mouse.y;
-        s_cur_shape = cur_shape();
         *y0 = 0;
         *y1 = SCREEN_HEIGHT - 1;
         g_wm_frames[WM_FRAME_FULL]++;
@@ -1199,12 +1190,11 @@ int wm_compose(menubar *mb, int *y0, int *y1) {
     }
 
     bool bar_dirty = bar != s_bar_sig;
-    bool cur_dirty =
-        mouse.x != s_cur_x || mouse.y != s_cur_y || cur_shape() != s_cur_shape;
     bool band_dirty =
         band != s_band_on ||
         (band && (bx != s_bx || by != s_by || bw != s_bw || bh != s_bh));
-    if (!any && !bar_dirty && !cur_dirty && !band_dirty) {
+    /* (the pointer is not part of the frame: drivers/pointer.h) */
+    if (!any && !bar_dirty && !band_dirty) {
         g_wm_frames[WM_FRAME_NONE]++;
         return WM_FRAME_NONE; /* the screen is already right */
     }
@@ -1217,9 +1207,6 @@ int wm_compose(menubar *mb, int *y0, int *y1) {
         if ((y) + (h) - 1 > hi)                                                \
             hi = (y) + (h) - 1;                                                \
     } while (0)
-    int cy, ch;
-    if (cursor_hide(&cy, &ch))
-        DAMAGE(cy, ch);
     /* the frame comes off before anything is drawn (drawing over it would
      * spoil the XOR), and goes back on after */
     if (s_band_on && (band_dirty || any || bar_dirty)) {
@@ -1254,11 +1241,6 @@ int wm_compose(menubar *mb, int *y0, int *y1) {
         s_band_on = true;
         s_bx = bx, s_by = by, s_bw = bw, s_bh = bh;
     }
-    cursor_show(mouse.x, mouse.y);
-    DAMAGE(mouse.y, CURSOR_H_PX);
-    s_cur_x = mouse.x;
-    s_cur_y = mouse.y;
-    s_cur_shape = cur_shape();
 #undef DAMAGE
     *y0 = lo < 0 ? 0 : lo;
     *y1 = hi >= SCREEN_HEIGHT ? SCREEN_HEIGHT - 1 : hi;
@@ -1276,8 +1258,5 @@ bool wm_debug_reference(menubar *mb) {
     int bx, by, bw, bh;
     if (band_now(&bx, &by, &bw, &bh))
         xor_frame(bx, by, bw, bh);
-    gfx_reset_clip();
-    if (!wd_busy_shown())
-        draw_cursor(mouse.x, mouse.y);
     return true;
 }

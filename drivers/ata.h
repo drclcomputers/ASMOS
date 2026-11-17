@@ -62,5 +62,9 @@ bool ata_write_sector(uint8_t unit, uint32_t lba, const void *buf);
 bool ata_read_sectors(uint8_t unit, uint32_t lba, uint8_t count, void *buf);
 bool ata_write_sectors(uint8_t unit, uint32_t lba, uint8_t count,
                        const void *buf);
+/* Shut down / restart: every disk writes out its cache and, with
+ * spin_down, stops (STANDBY IMMEDIATE: heads parked). Returns when they
+ * are done (or after a few seconds a drive does not answer). */
+void ata_park(bool spin_down);
 
 #endif

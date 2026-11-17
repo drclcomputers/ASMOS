@@ -69,8 +69,7 @@ void cfg_set_low_end(bool low) {
 
 bool cfg_is_low_end(void) {
     return g_cfg.reduce_motion && g_cfg.outline_drag && g_cfg.clock_no_secs &&
-           g_cfg.caret_no_blink && g_cfg.no_tooltips && g_cfg.no_power_anim &&
-           g_cfg.fps_cap == 1;
+           g_cfg.caret_no_blink && g_cfg.no_tooltips && g_cfg.fps_cap == 1;
 }
 
 int cfg_frame_ms(void) {

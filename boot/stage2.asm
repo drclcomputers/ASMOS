@@ -58,6 +58,48 @@ entry:
     mov  ds, ax
     mov  es, ax
 
+; ── 1b. APM: connect its 32-bit interface, so the kernel can switch the
+; machine off (lib/apm.c). Only real mode can connect it. ─────────────────
+    mov  word [BOOTINFO_APM], 0
+    pushad                      ; the APM BIOS may change any register
+    push ds
+    push es
+    mov  ax, 0x5300             ; installed?
+    xor  bx, bx
+    int  0x15
+    jc   .apm_done
+    cmp  bx, 0x504D             ; "PM"
+    jne  .apm_done
+    test cl, 0x02               ; has the 32-bit protected-mode interface
+    jz   .apm_done
+    mov  ax, 0x5304             ; disconnect any interface (may fail)
+    xor  bx, bx
+    int  0x15
+    mov  ax, 0x5303             ; connect 32-bit protected mode
+    xor  bx, bx
+    xor  esi, esi
+    xor  edi, edi
+    int  0x15
+    jc   .apm_done
+    mov  [BOOTINFO_APMCS], ax
+    mov  [BOOTINFO_APMENT], ebx
+    mov  [BOOTINFO_APMC16], cx
+    mov  [BOOTINFO_APMDS], dx
+    mov  ax, 0x5300             ; again: version and flags, now connected
+    xor  bx, bx
+    int  0x15
+    jc   .apm_done
+    mov  [BOOTINFO_APMFL], cx
+    mov  [BOOTINFO_APM], ax     ; last: the rest is valid
+.apm_done:
+    pop  es
+    pop  ds
+    popad
+    cld                         ; (and the direction flag)
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+
 ; ── 2. A20 ───────────────────────────────────────────────────────────────────
     cli
 
@@ -160,6 +202,7 @@ entry:
 
 .a20_on:
     sti
+    cld
     xor  ax, ax
     mov  ds, ax
     mov  es, ax
@@ -524,6 +567,10 @@ scan_sector:
     mov  bx, DIR_BUF
     mov  cx, 1
     call read_disk
+    xor  ax, ax                 ; cmpsb: DS:SI against ES:DI
+    mov  ds, ax
+    mov  es, ax
+    cld
     mov  di, DIR_BUF
     mov  dx, 16
 .e:
@@ -786,8 +833,10 @@ read_disk:
     mov  di, 3
     jmp  .try
 .ok:
-    xor  ax, ax                 ; some BIOSes leave DS changed
-    mov  ds, ax
+    xor  ax, ax                 ; some BIOSes leave DS changed, and ES
+    mov  ds, ax                 ; (after AH=42h, which doesn't use it):
+    mov  es, [rd_seg]           ; the callers still need it
+    cld
     movzx eax, word [rd_n]
     add  [rd_lba], eax
     sub  [rd_left], ax
@@ -813,6 +862,7 @@ damaged:
 fatal:
     xor  ax, ax
     mov  ds, ax
+    cld
     call print
     mov  si, msg_key
     call print

@@ -17,16 +17,14 @@ uint32_t gpu_fps(void);         /* frames per second, updated each second */
 uint32_t gpu_last_blocks(void); /* 32-pixel blocks the last blit sent */
 gpu_backend_t gpu_backend(void);
 
-/* Draw w*h pixels (0xFF = see-through) straight onto the screen, over what
- * the last blit showed; the back buffer is not touched. Safe from an
- * interrupt (VGA registers are saved). The next gpu_invalidate()+blit, or
- * gpu_overlay_clear(), removes it. Used for the busy cursor. */
-void gpu_overlay(int x, int y, int w, int h, const uint8_t *pix);
-void gpu_overlay_clear(int x, int y, int w, int h); /* back to last frame */
-/* the overlay is gone (a full blit follows): nothing to put back */
-void gpu_overlay_forget(void);
-/* pixels (w x h, all drawn) into the last frame and onto the screen, under
- * the overlay: takes the arrow pointer off the screen while busy */
-void gpu_patch(int x, int y, int w, int h, const uint8_t *pix);
+/* w*h pixels (0xFF = see-through; NULL = none) over the last frame sent,
+ * straight onto the screen; the back buffer is not touched. Safe from an
+ * interrupt (VGA registers are saved). Used for the pointer
+ * (drivers/pointer.h). */
+void gpu_put(int x, int y, int w, int h, const uint8_t *pix);
+/* interrupts off / back as they were, around screen work the timer
+ * interrupt must not cut into */
+uint32_t gpu_lock(void);
+void gpu_unlock(uint32_t flags);
 
 #endif

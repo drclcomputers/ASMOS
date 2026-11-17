@@ -7,12 +7,10 @@
 extern int CHOSEN_CURSOR;
 
 void draw_cursor(int x, int y);
-/* pointer on a back buffer that is kept between frames */
-void cursor_show(int x, int y);   /* remember what it covers, draw it;
-                                   * nothing while the hourglass is up */
-void cursor_erase_screen(void);   /* the hourglass came: off the screen */
-bool cursor_hide(int *y, int *h); /* put that back; rows it touched */
-void cursor_forget(void);         /* everything was redrawn */
-#define CURSOR_H_PX 8
+/* the pointer shapes (9x8, 0xFF = see-through, hot spot 0,0) */
+const uint8_t *cursor_sprite(int shape);
+/* main loop, once a frame: the pointer on (shape from CHOSEN_CURSOR, or
+ * the hourglass while busy) or off (screen saver) */
+void cursor_frame(bool on);
 
 #endif

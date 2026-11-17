@@ -3,6 +3,7 @@
 #include "lib/io.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "lib/time.h"
 
 typedef struct {
     uint16_t base; /* command block (0x1F0) */
@@ -205,8 +206,8 @@ static bool is_asmos_disk(int idx) {
     uint8_t buf[512];
     int8_t saved = s_unit[0];
     s_unit[0] = (int8_t)idx;
-    bool ok = ata_read_sector(0, 0, buf) && buf[510] == 0x55 &&
-              buf[511] == 0xAA;
+    bool ok =
+        ata_read_sector(0, 0, buf) && buf[510] == 0x55 && buf[511] == 0xAA;
     if (ok && memcmp(buf + 3, "ASMOS", 5) != 0) {
         uint32_t start = 0;
         for (int i = 0; i < 4; i++) {
@@ -321,4 +322,45 @@ bool ata_write_sectors(uint8_t unit, uint32_t lba, uint8_t count,
         if (!ata_write_sector(unit, lba + i, p))
             return false;
     return true;
+}
+
+/* ── shut down ─────────────────────────────────────────────────────────── */
+
+/* BSY clear within ms milliseconds (the timer runs: spinning down takes
+ * seconds on old drives) */
+static bool wait_idle_ms(const ata_channel_t *c, uint32_t ms) {
+    uint32_t t0 = time_millis();
+    while (time_millis() - t0 < ms) {
+        uint8_t s = status(c);
+        if (s == 0xFF)
+            return false;
+        if (!(s & ATA_SR_BSY))
+            return true;
+    }
+    return false;
+}
+
+static bool disk_cmd(const ata_disk_t *d, uint8_t cmd, uint32_t ms) {
+    const ata_channel_t *c = &s_chan[d->channel];
+    outb(c->base + ATA_REG_DRIVE, 0xA0 | (d->slave ? 0x10 : 0x00));
+    delay400(c);
+    if (!wait_idle_ms(c, 2000))
+        return false;
+    outb(c->base + ATA_REG_COMMAND, cmd);
+    delay400(c);
+    if (!wait_idle_ms(c, ms))
+        return false;
+    return !(status(c) & ATA_SR_ERR);
+}
+
+void ata_park(bool spin_down) {
+    for (int i = 0; i < ATA_MAX_DISKS; i++) {
+        const ata_disk_t *d = &s_disks[i];
+        if (!d->present)
+            continue;
+        /* FLUSH CACHE: old drives abort it (no write cache): fine */
+        disk_cmd(d, ATA_CMD_FLUSH, 5000);
+        if (spin_down && !disk_cmd(d, 0xE0, 10000)) /* STANDBY IMMEDIATE */
+            disk_cmd(d, 0x94, 10000); /* the pre-ATA-2 code for it */
+    }
 }

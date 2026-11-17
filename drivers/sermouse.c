@@ -138,7 +138,8 @@ static void feed(uint8_t c) {
         /* Logitech extension: a 4th byte right after a packet, bit 5 =
          * middle. Anything else here is noise while out of sync. */
         if (s_after_packet)
-            mouse_apply(0, 0, mouse.left, mouse.right, (c & 0x20) != 0);
+            mouse_apply(0, 0, mouse_live()->left, mouse_live()->right,
+                        (c & 0x20) != 0);
         s_after_packet = false;
         return;
     }
@@ -151,7 +152,7 @@ static void feed(uint8_t c) {
     int8_t dy = (int8_t)(((s_pkt[0] & 0x0C) << 4) | (s_pkt[2] & 0x3F));
     /* Y grows downwards on the wire, like the screen */
     mouse_apply(dx, dy, (s_pkt[0] & 0x20) != 0, (s_pkt[0] & 0x10) != 0,
-                mouse.middle);
+                mouse_live()->middle);
 }
 
 void sermouse_poll(void) {

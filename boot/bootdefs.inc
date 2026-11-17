@@ -8,6 +8,10 @@
 ;   0x0608  byte   BIOS drive booted from (0x00 floppy, 0x80 disk)
 ;   0x0609  byte   1 = the BIOS did LBA reads (INT 13h AH=42h)
 ;   0x060C  dword  LBA of the volume booted from (0 on a floppy)
+;   0x0610  word   APM version (BCD, 0x0102 = 1.2), 0 = none     (stage 2)
+;   0x0612  word   APM flags, 0x0614 32-bit code segment, 0x0616 16-bit
+;                  code segment, 0x0618 data segment (real-mode values),
+;   0x061A  dword  entry point (offset in the 32-bit code segment)
 ;   0x7C00         VBR: BPB at 0x0B..0x3D, then the values below, then code
 ;   0x7E00         stage 2 (the volume's reserved sectors after the VBR)
 ;   0x9000         stage 2: two FAT sectors, then one directory sector
@@ -22,6 +26,12 @@ BOOTINFO_HEIGHT equ 0x0606
 BOOTINFO_DRIVE  equ 0x0608
 BOOTINFO_LBA    equ 0x0609
 BOOTINFO_PART   equ 0x060C
+BOOTINFO_APM    equ 0x0610
+BOOTINFO_APMFL  equ 0x0612
+BOOTINFO_APMCS  equ 0x0614
+BOOTINFO_APMC16 equ 0x0616
+BOOTINFO_APMDS  equ 0x0618
+BOOTINFO_APMENT equ 0x061A
 
 ; the BPB, in the VBR at 0x7C00
 BPB_BYTES_SEC   equ 0x7C0B

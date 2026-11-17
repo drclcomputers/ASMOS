@@ -70,32 +70,44 @@ void mouse_init(void) {
 
 mouse_kind_t mouse_kinds(void) { return (mouse_kind_t)s_kinds; }
 
+/* Bytes are decoded into the live state (in the timer interrupt while the
+ * desktop runs); mouse_update() hands a copy to the frame, so a frame sees
+ * one consistent pointer and no click between two frames is lost. */
+static mousevar s_live = {160, 100, 0, 0, 0, 0, 0, 0, 0};
+
+const mousevar *mouse_live(void) { return &s_live; }
+
 void mouse_apply(int dx, int dy, bool left, bool right, bool middle) {
-    bool prev_left = mouse.left, prev_right = mouse.right;
-    mouse.left = left;
-    mouse.right = right;
-    mouse.middle = middle;
-    mouse.left_clicked |= !prev_left && left;
-    mouse.right_clicked |= !prev_right && right;
-    mouse.dx += dx;
-    mouse.dy += dy;
-    mouse.x += dx;
-    mouse.y += dy;
-    if (mouse.x < 0)
-        mouse.x = 0;
-    if (mouse.x >= SCREEN_WIDTH)
-        mouse.x = SCREEN_WIDTH - 1;
-    if (mouse.y < 0)
-        mouse.y = 0;
-    if (mouse.y >= SCREEN_HEIGHT)
-        mouse.y = SCREEN_HEIGHT - 1;
+    mousevar *m = &s_live;
+    bool prev_left = m->left, prev_right = m->right;
+    m->left = left;
+    m->right = right;
+    m->middle = middle;
+    m->left_clicked |= !prev_left && left;
+    m->right_clicked |= !prev_right && right;
+    m->dx += dx;
+    m->dy += dy;
+    m->x += dx;
+    m->y += dy;
+    if (m->x < 0)
+        m->x = 0;
+    if (m->x >= SCREEN_WIDTH)
+        m->x = SCREEN_WIDTH - 1;
+    if (m->y < 0)
+        m->y = 0;
+    if (m->y >= SCREEN_HEIGHT)
+        m->y = SCREEN_HEIGHT - 1;
 }
 
 void mouse_update(void) {
-    mouse.dx = 0;
-    mouse.dy = 0;
-    mouse.left_clicked = false;
-    mouse.right_clicked = false;
+    uint32_t f;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f)::"memory");
+    mouse = s_live;
+    s_live.dx = 0;
+    s_live.dy = 0;
+    s_live.left_clicked = false;
+    s_live.right_clicked = false;
+    __asm__ volatile("pushl %0; popfl" ::"r"(f) : "memory", "cc");
 }
 
 void mouse_process_byte(uint8_t b) {
