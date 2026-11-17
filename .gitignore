@@ -14,5 +14,6 @@
 *.map
 apps/asmusic.c
 /testapps
-/tools
+/tools/legacy
+/tools/music
 /build
