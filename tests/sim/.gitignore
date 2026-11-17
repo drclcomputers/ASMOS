@@ -1,0 +1,10 @@
+# built / made by run.sh
+/o/
+/sim
+/rtcfg.c
+/simguard.c
+/out/
+/disk.img
+__pycache__/
+!/fixtures/**
+!/run.sh

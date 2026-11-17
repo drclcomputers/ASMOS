@@ -494,6 +494,12 @@ Testing:
   emulator, under many BIOS kinds: LBA and CHS, odd geometries, failing
   reads, BIOSes that change registers they shouldn't, APM. It also checks
   the error messages on broken disks.
+- `tests/sim/run.sh` runs the simulator: the kernel's C code built for Linux
+  with a fake screen, disks, floppy controller and timer, through 82
+  scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
+  about 20 seconds. `tests/sim/run.sh setup zipui` runs only those.
+- GitHub Actions does the build, `make boottest` and the simulator on every
+  push (.github/workflows/ci.yml).
 - Run it in 86Box on old machines (386SX-16 is the slowest tested).
 
 Debugging:
