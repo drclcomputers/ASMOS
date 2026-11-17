@@ -15,6 +15,7 @@
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "lib/time.h"
+#include "os/prefs.h"
 #include "os/watchdog.h"
 #include "ui/cursor.h"
 #include "ui/desktop.h"
@@ -36,15 +37,18 @@ static void wm_sort(void) {
     }
 }
 
+/* on the screen: the right/bottom edge first, then the left/top, so a
+ * window bigger than the screen starts at 0, 0 (fit_to_screen() shrinks
+ * it before it is drawn) */
 static void clamp_xy(int *x, int *y, int w, int h) {
-    if (*x < 0)
-        *x = 0;
-    if (*y < 0)
-        *y = 0;
     if (*x + w > SCREEN_WIDTH)
         *x = SCREEN_WIDTH - w;
     if (*y + h + MENUBAR_H + TASKBAR_H > SCREEN_HEIGHT)
         *y = SCREEN_HEIGHT - h - MENUBAR_H - TASKBAR_H;
+    if (*x < 0)
+        *x = 0;
+    if (*y < 0)
+        *y = 0;
 }
 
 static void wm_clamp(window *win) {
@@ -238,9 +242,110 @@ window *wm_register(const window_spec_t *spec) {
     return win;
 }
 
+/* ── remembered positions: /PREFS/WINDOWS.INI, "<app name>=x,y" ────────── */
+
+#define POS_FILE "WINDOWS"
+static const char *s_launch_key;
+
+void wm_set_launch_key(const char *name) { s_launch_key = name; }
+
+const char *wm_take_launch_key(void) {
+    const char *k = s_launch_key;
+    s_launch_key = NULL; /* only the first window */
+    return k;
+}
+
+static void pos_key_of(const char *name, char *out) {
+    int k = 0;
+    for (const char *p = name; *p && k < 23; p++)
+        if (*p != '=' && *p != '\n' && *p != '\r')
+            out[k++] = *p;
+    out[k] = 0;
+}
+
+static int parse_int(const char **p) {
+    int sign = 1, v = 0;
+    if (**p == '-') {
+        sign = -1;
+        (*p)++;
+    }
+    while (**p >= '0' && **p <= '9')
+        v = v * 10 + (*(*p)++ - '0');
+    return sign * v;
+}
+
+bool wm_saved_pos(const char *name, int *x, int *y) {
+    char key[24], v[32];
+    bool found = false;
+    pos_key_of(name, key);
+    if (key[0] && !g_setup_mode && app_prefs_get(POS_FILE, key, v, sizeof(v))) {
+        const char *p = v;
+        int sx = parse_int(&p);
+        if (*p == ',') {
+            p++;
+            *x = sx;
+            *y = parse_int(&p);
+            found = true;
+        }
+    }
+    /* another window of the same app already there: a little lower right,
+     * so the new one doesn't hide it */
+    for (int n = 0; n < 8; n++) {
+        bool taken = false;
+        for (int i = 0; i < win_count; i++)
+            if (!strcmp(win_stack[i]->pos_key, key) && win_stack[i]->x == *x &&
+                win_stack[i]->y == *y)
+                taken = true;
+        if (!taken)
+            break;
+        *x += 12;
+        *y += 12;
+    }
+    return found;
+}
+
+/* where a remembered window is now (zoomed: where it goes back to) */
+static void pos_now(const window *w, int *x, int *y) {
+    *x = w->zoomed ? w->zx : w->x;
+    *y = w->zoomed ? w->zy : w->y;
+}
+
+static bool pos_moved(const window *w) {
+    int x, y;
+    pos_now(w, &x, &y);
+    return w->pos_key[0] && (x != w->pos_x0 || y != w->pos_y0);
+}
+
+static void pos_put(window *w) {
+    char v[24];
+    int x, y;
+    pos_now(w, &x, &y);
+    snprintf(v, sizeof(v), "%d,%d", x, y);
+    app_prefs_set(POS_FILE, w->pos_key, v);
+    w->pos_x0 = x;
+    w->pos_y0 = y;
+}
+
+void wm_save_positions(void) {
+    if (g_setup_mode)
+        return;
+    bool any = false;
+    for (int i = 0; i < win_count; i++)
+        if (pos_moved(win_stack[i])) {
+            if (!any)
+                app_prefs_begin(POS_FILE); /* one write for all of them */
+            any = true;
+            pos_put(win_stack[i]);
+        }
+    if (any)
+        app_prefs_end();
+}
+
 void wm_unregister(window *win) {
     if (!win || !wm_is_registered(win))
         return;
+    if (pos_moved(win) && !g_setup_mode) /* next time it opens here */
+        pos_put(win);
     dlg_owner_destroyed(win);
     if (win->modal_owner && win->modal_owner->modal_child == win)
         win->modal_owner->modal_child = NULL;

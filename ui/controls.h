@@ -155,6 +155,9 @@ struct control {
 #define AW_RESIZABLE (1u << 0)
 #define AW_HIDDEN (1u << 1)
 #define AW_NO_ANIM (1u << 2)
+/* the window opens at x, y every time; without it, an app's main window
+ * opens where it was when last closed (x, y the first time) */
+#define AW_FIXED_POS (1u << 3)
 /* Standard app window. `state` becomes the window's userdata (and every
  * control's c->user). Closing it quits the app that owns `state`. */
 window *app_window(void *state, const char *title, int x, int y, int w, int h,

@@ -121,7 +121,8 @@ void power_anim_run(bool is_restart) {
     blit();
     uint32_t t0 = time_millis();
 
-    cfg_save(); /* (not in Setup: nothing is installed yet) */
+    cfg_save();          /* (not in Setup: nothing is installed yet) */
+    wm_save_positions(); /* the open windows come back there */
     bool spun = false;
     for (uint8_t d = 0; d < 2; d++) {
         fdd_flush(d);

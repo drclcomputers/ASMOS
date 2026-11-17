@@ -128,8 +128,10 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
     app->running = true;
     running_app_count++;
 
+    wm_set_launch_key(desc->name); /* its window: where it was last */
     if (desc->init)
         desc->init(app->state);
+    wm_set_launch_key(NULL);
 
     return app;
 }

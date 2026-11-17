@@ -2215,6 +2215,12 @@ window *app_window(void *state, const char *title, int x, int y, int w, int h,
                    uint8_t bar_color, uint32_t flags) {
     window_spec_t spec;
     memset(&spec, 0, sizeof(spec));
+    /* the app's main window: where the user left it (ui/window.h) */
+    const char *key = wm_take_launch_key();
+    if (flags & AW_FIXED_POS)
+        key = NULL;
+    if (key)
+        wm_saved_pos(key, &x, &y);
     spec.x = x;
     spec.y = y;
     spec.w = w;
@@ -2236,6 +2242,11 @@ window *app_window(void *state, const char *title, int x, int y, int w, int h,
         win->anim_state = WIN_ANIM_NONE;
     win->userdata = state;
     win->fit_pending = true;
+    if (key) {
+        strncpy(win->pos_key, key, sizeof(win->pos_key) - 1);
+        win->pos_x0 = win->x;
+        win->pos_y0 = win->y;
+    }
     return win;
 }
 

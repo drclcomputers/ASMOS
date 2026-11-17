@@ -34,12 +34,12 @@ Full external example: `testapps/hello.c` (also the FDD tool's template).
 
 ## Windows
 
-| call                                                     | notes                                                                                         |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `app_window(state, title, x, y, w, h, bar_color, flags)` | `AW_RESIZABLE`, `AW_HIDDEN`, `AW_NO_ANIM`. Face colour, min size = 2/3, close = end instance. |
-| `win_client_rect(w, &x, &y, &cw, &ch)`                   | client area = `w-2` × `h-17`                                                                  |
-| `ui_active_state()`                                      | state of the focused app window (for menu callbacks)                                          |
-| `w->on_close`                                            | return `true` if handled (e.g. ask “Discard changes?”)                                        |
+| call                                                     | notes                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app_window(state, title, x, y, w, h, bar_color, flags)` | `AW_RESIZABLE`, `AW_HIDDEN`, `AW_NO_ANIM`, `AW_FIXED_POS`. Face colour, min size = 2/3, close = end instance. The first window an app makes while starting opens where the user last closed it (/PREFS/WINDOWS.INI); x, y are only the first time. `AW_FIXED_POS`: always at x, y. Off the screen, or bigger than it: moved on and shrunk to fit. |
+| `win_client_rect(w, &x, &y, &cw, &ch)`                   | client area = `w-2` × `h-17`                                                                                                                                                                                                                                                                                                                      |
+| `ui_active_state()`                                      | state of the focused app window (for menu callbacks)                                                                                                                                                                                                                                                                                              |
+| `w->on_close`                                            | return `true` if handled (e.g. ask “Discard changes?”)                                                                                                                                                                                                                                                                                            |
 
 Coordinates are relative to the client area. Font: 5 px per char, 8 px per
 line (`TH_CHAR_W`, `TH_LINE_H`). Usual heights: button/edit 12–14, label 10.

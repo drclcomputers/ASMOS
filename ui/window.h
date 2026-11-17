@@ -102,6 +102,12 @@ struct window {
      * and a frame shows where it will go; applied on release */
     bool band;
     int bx, by, bw, bh;
+
+    /* an app's main window comes back where it was last closed: the app's
+     * name (the key in /PREFS/WINDOWS.INI) and where it opened ("" = not
+     * remembered: dialogs, later windows, AW_FIXED_POS) */
+    char pos_key[24];
+    int pos_x0, pos_y0;
 };
 
 /* height the window takes on screen: just the title bar when shaded */
@@ -123,6 +129,13 @@ void wm_init(void);
 window *wm_register(const window_spec_t *spec);
 
 void wm_unregister(window *win);
+/* Remembered positions (os_launch_app): the first app_window() an app makes
+ * while starting gets `name`'s saved place. NULL after its init. */
+void wm_set_launch_key(const char *name);
+const char *wm_take_launch_key(void);
+/* where `name`'s window was last; false = never saved */
+bool wm_saved_pos(const char *name, int *x, int *y);
+void wm_save_positions(void); /* every open one (Shut Down / Restart) */
 void wm_focus(window *win);
 window *wm_focused_window(void);
 void wm_sync_menubar(menubar *mb);
