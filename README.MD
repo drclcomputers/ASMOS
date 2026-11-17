@@ -64,7 +64,7 @@ Features
 Screenshots
 =============================================================================
 
-![Boot sequence with diagnostics](resources/1.png)
+![Boot sequence with diagnostics](resources/boot.png)
 
 The same desktop at 320x200, for slow machines:
 
