@@ -58,48 +58,6 @@ entry:
     mov  ds, ax
     mov  es, ax
 
-; ── 1b. APM: connect its 32-bit interface, so the kernel can switch the
-; machine off (lib/apm.c). Only real mode can connect it. ─────────────────
-    mov  word [BOOTINFO_APM], 0
-    pushad                      ; the APM BIOS may change any register
-    push ds
-    push es
-    mov  ax, 0x5300             ; installed?
-    xor  bx, bx
-    int  0x15
-    jc   .apm_done
-    cmp  bx, 0x504D             ; "PM"
-    jne  .apm_done
-    test cl, 0x02               ; has the 32-bit protected-mode interface
-    jz   .apm_done
-    mov  ax, 0x5304             ; disconnect any interface (may fail)
-    xor  bx, bx
-    int  0x15
-    mov  ax, 0x5303             ; connect 32-bit protected mode
-    xor  bx, bx
-    xor  esi, esi
-    xor  edi, edi
-    int  0x15
-    jc   .apm_done
-    mov  [BOOTINFO_APMCS], ax
-    mov  [BOOTINFO_APMENT], ebx
-    mov  [BOOTINFO_APMC16], cx
-    mov  [BOOTINFO_APMDS], dx
-    mov  ax, 0x5300             ; again: version and flags, now connected
-    xor  bx, bx
-    int  0x15
-    jc   .apm_done
-    mov  [BOOTINFO_APMFL], cx
-    mov  [BOOTINFO_APM], ax     ; last: the rest is valid
-.apm_done:
-    pop  es
-    pop  ds
-    popad
-    cld                         ; (and the direction flag)
-    xor  ax, ax
-    mov  ds, ax
-    mov  es, ax
-
 ; ── 2. A20 ───────────────────────────────────────────────────────────────────
     cli
 
@@ -436,6 +394,48 @@ entry:
     mov  word [0x0606], 400         ; height
 
 .video_setup_done:
+; ── 5b. APM: connect its 32-bit interface, so the kernel can switch the
+; machine off (lib/apm.c). Only real mode can connect it; done last, when
+; the disk reads are over. ──────────────────────────────────────────────────
+    mov  word [BOOTINFO_APM], 0
+    pushad                      ; the APM BIOS may change any register
+    push ds
+    push es
+    mov  ax, 0x5300             ; installed?
+    xor  bx, bx
+    int  0x15
+    jc   .apm_end
+    cmp  bx, 0x504D             ; "PM"
+    jne  .apm_end
+    test cl, 0x02               ; has the 32-bit protected-mode interface
+    jz   .apm_end
+    mov  ax, 0x5304             ; disconnect any interface (may fail)
+    xor  bx, bx
+    int  0x15
+    mov  ax, 0x5303             ; connect 32-bit protected mode
+    xor  bx, bx
+    xor  esi, esi
+    xor  edi, edi
+    int  0x15
+    jc   .apm_end
+    mov  [BOOTINFO_APMCS], ax
+    mov  [BOOTINFO_APMENT], ebx
+    mov  [BOOTINFO_APMC16], cx
+    mov  [BOOTINFO_APMDS], dx
+    mov  ax, 0x5300             ; again: version and flags, now connected
+    xor  bx, bx
+    int  0x15
+    jc   .apm_end
+    mov  [BOOTINFO_APMFL], cx
+    mov  [BOOTINFO_APM], ax     ; last: the rest is valid
+.apm_end:
+    pop  es
+    pop  ds
+    popad
+    cld                         ; (and the direction flag)
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
 
 ; ── 6. Protected mode, then the kernel ──────────────────────────────────────
     cli
@@ -564,6 +564,7 @@ next_cluster:
 ;   [fe_result] = 0 not here, 1 found (ent_*), 2 the directory ends here
 scan_sector:
     pushad
+    mov  [diag_lba], eax
     mov  bx, DIR_BUF
     mov  cx, 1
     call read_disk
@@ -855,7 +856,34 @@ disk_error:
     mov  si, msg_disk
     jmp  fatal
 no_kernel:
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    cld
     mov  si, msg_nokernel
+    call print
+    ; what was read, so a wrong read can be told from a missing file:
+    ; "(SYSTEM     ; sector 0000007F LBA 1; first entry 'ASMOS      ')"
+    mov  si, msg_d1
+    call print
+    mov  si, [fe_name]
+    mov  cx, 11
+    call print_n
+    mov  si, msg_d2
+    call print
+    mov  eax, [diag_lba]
+    call print_hex
+    mov  si, msg_d3
+    call print
+    mov  al, [VBR_USE_LBA]
+    add  al, '0'
+    call putc
+    mov  si, msg_d4
+    call print
+    mov  si, DIR_BUF
+    mov  cx, 11
+    call print_n
+    mov  si, msg_d5
     jmp  fatal
 damaged:
     mov  si, msg_damaged
@@ -877,6 +905,37 @@ print:
     call putc
     jmp  print
 .d:
+    ret
+
+; print_n: CX characters at DS:SI, unprintable ones as '.'
+print_n:
+    lodsb
+    cmp  al, ' '
+    jb   .dot
+    cmp  al, '~'
+    jbe  .put
+.dot:
+    mov  al, '.'
+.put:
+    call putc
+    loop print_n
+    ret
+
+; print_hex: EAX in 8 hex digits
+print_hex:
+    mov  cx, 8
+.h:
+    rol  eax, 4
+    push eax
+    and  al, 0x0F
+    add  al, '0'
+    cmp  al, '9'
+    jbe  .p
+    add  al, 7
+.p:
+    call putc
+    pop  eax
+    loop .h
     ret
 
 putc:
@@ -946,6 +1005,11 @@ msg_disk     db 13, 10, "Disk error.", 0
 msg_nokernel db 13, 10, "SYSTEM\KERNEL.SYS is missing.", 0
 msg_damaged  db 13, 10, "SYSTEM\KERNEL.SYS is damaged.", 0
 msg_key      db 13, 10, "Press a key to restart.", 0
+msg_d1       db 13, 10, "(", 0
+msg_d2       db ": last sector ", 0
+msg_d3       db ", LBA ", 0
+msg_d4       db ", its first entry '", 0
+msg_d5       db "')", 0
 name_system  db "SYSTEM     "
 name_kernel  db "KERNEL  SYS"
 
@@ -955,6 +1019,7 @@ root_lba    dd 0
 data_lba    dd 0
 fat_cached  dd 0xFFFFFFFF
 ent_size    dd 0
+diag_lba    dd 0
 ld_dest     dd 0
 rd_lba      dd 0
 root_secs   dw 0
