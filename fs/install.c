@@ -282,7 +282,7 @@ const char *inst_write_boot(uint8_t unit, int video_mode) {
     if (video_mode < 0) {
         video_mode = 1;
         if (ata_read_sector(unit, vol + 1, b) && b[2] == 'V' && b[3] == 'M')
-            video_mode = b[4] ? 1 : 0;
+            video_mode = b[4] <= 3 ? b[4] : 1;
     }
     for (uint32_t i = 0; i < BOOT_STAGE2_SECTORS; i++) {
         memcpy(b, boot_stage2 + i * 512, 512);

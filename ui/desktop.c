@@ -66,7 +66,7 @@ void draw_wallpaper_pattern(void) {
     case WALLPAPER_VERTICAL_STRIPES:
     case WALLPAPER_DOTS: {
         /* build one row, then copy it: whole rows at memcpy speed */
-        static uint8_t row[640];
+        static uint8_t row[800];
         bool dots = g_cfg.wallpaper_pattern == WALLPAPER_DOTS;
         for (int x = 0; x < SCREEN_WIDTH; x++)
             row[x] = dots ? ((x % 10) == 5 ? sec_col : main_col)
@@ -79,7 +79,7 @@ void draw_wallpaper_pattern(void) {
     }
     case WALLPAPER_CUSTOM: {
         /* eight rows across the screen, then copies of them */
-        static uint8_t rows[8][640];
+        static uint8_t rows[8][800];
         for (int r = 0; r < 8; r++)
             for (int x = 0; x < SCREEN_WIDTH; x++)
                 rows[r][x] = cfg_wall_px(x, r);

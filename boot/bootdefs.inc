@@ -3,7 +3,10 @@
 ;
 ;   0x0500  dword  RAM size in bytes (stage 2, INT 15h AH=88h), 0 = unknown
 ;   0x0600         MBR, moved here out of the way (gone once the VBR runs)
-;   0x0602  byte   video mode: 0 = 320x200x256, 1 = 640x400x16  (stage 2)
+;   0x0602  byte   video mode: 0 = 320x200x256, 1 = 640x400x16,  (stage 2)
+;                  2 = 640x480x16, 3 = 800x600x16
+;   0x0603  byte   what the machine allows: bits 0-1 the highest mode,
+;                  bit 6 a 486 or better, bit 7 800x600 failed on the card
 ;   0x0604  word   screen width, 0x0606 word height             (stage 2)
 ;   0x0608  byte   BIOS drive booted from (0x00 floppy, 0x80 disk)
 ;   0x0609  byte   1 = the BIOS did LBA reads (INT 13h AH=42h)
@@ -21,6 +24,9 @@
 
 BOOTINFO_RAM    equ 0x0500
 BOOTINFO_VMODE  equ 0x0602
+BOOTINFO_VMAX   equ 0x0603
+VMAX_486        equ 0x40
+VMAX_NO800      equ 0x80
 BOOTINFO_WIDTH  equ 0x0604
 BOOTINFO_HEIGHT equ 0x0606
 BOOTINFO_DRIVE  equ 0x0608

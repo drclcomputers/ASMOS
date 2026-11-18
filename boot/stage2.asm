@@ -26,7 +26,9 @@
 ; ── Video mode setting, at a fixed place: "VM" + mode at bytes 2-4 of the
 ; first stage-2 sector (volume sector 1). Settings > System rewrites the mode
 ; byte (config/video_cfg.c), so it must stay here. The VBR checks the "VM".
-;   0 = 320x200x256 (mode 13h), 1 = 640x400x16 (mode 12h, 400 lines)
+;   0 = 320x200x256 (mode 13h), 1 = 640x400x16 (mode 12h, 400 lines),
+;   2 = 640x480x16 (mode 12h), 3 = 800x600x16 (SVGA mode 6Ah / VESA 102h)
+; What the machine can take limits it (step 5).
     db 'V', 'M'
 video_mode db 0
 
@@ -192,15 +194,116 @@ entry:
     mov  [BOOTINFO_PART], eax
 
 ; ── 5. Screen mode ───────────────────────────────────────────────────────────
-; ── Video Mode Setup ─────────────────────────────────────────────────────────
-; Check flag at 0x0602 to determine which mode to use
-; 0x00 = Mode 13h (320x200 chained linear)
-; 0x01 = Mode X (640x480 unchained planar)
+; The mode asked for (video_mode), but no more than the machine can take:
+;   under 3 MB              320x200 only (two 640-wide frames don't fit)
+;   a 386                   up to 640x480 (800x600 is too many pixels)
+;   a 486 or better, 4 MB   800x600 too, if the video card has the mode
+; (3 and 4 MB with some slack: BIOSes keep a little for themselves.)
+; What is allowed goes to 0x0603 for Setup and Settings (bootdefs.inc).
     xor  ax, ax
     mov  ds, ax
+    xor  bx, bx                     ; bl = highest mode, bh = flags
+    pushfd                          ; a 486 can flip AC (EFLAGS bit 18),
+    pop  eax                        ; a 386 can't
+    mov  ecx, eax
+    xor  eax, 0x40000
+    push eax
+    popfd
+    pushfd
+    pop  eax
+    push ecx
+    popfd
+    xor  eax, ecx
+    test eax, 0x40000
+    jz   .cpu_known
+    or   bh, VMAX_486
+.cpu_known:
+    mov  eax, [BOOTINFO_RAM]
+    cmp  eax, 0x2C0000              ; "3 MB"
+    jb   .limit_known
+    mov  bl, 2
+    test bh, VMAX_486
+    jz   .limit_known
+    cmp  eax, 0x3C0000              ; "4 MB"
+    jb   .limit_known
+    mov  bl, 3
+.limit_known:
+    or   bl, bh
+    mov  [BOOTINFO_VMAX], bl
+    and  bl, 3
     mov  al, [video_mode]
-    cmp  al, 0x01
+    cmp  al, bl
+    jbe  .mode_known
+    mov  al, bl
+.mode_known:
+    cmp  al, 3
+    je   .setup_800
+    cmp  al, 2
+    je   .setup_480
+    cmp  al, 1
     je   .setup_mode_x
+    jmp  .setup_mode_13h
+
+; ── 800×600×16: the SVGA BIOS's mode, planar like 640x480 (100 bytes a
+; line per plane, 60 000 bytes: inside the 64 KB window, no banks) ─────────
+; Mode 6Ah first: the old common number, set through the plain VGA
+; registers on every BIOS. VESA's number (102h) only if the card refuses it
+; (some BIOSes do 102h their own way: QEMU's leaves the screen black).
+.setup_800:
+    mov  ax, 0x006A
+    int  0x10
+    mov  ah, 0x0F                   ; did it take?
+    int  0x10
+    cmp  al, 0x6A
+    je   .ok_800
+    mov  ax, 0x4F02                 ; VESA mode 102h
+    mov  bx, 0x0102
+    int  0x10
+    cmp  ax, 0x004F
+    je   .ok_800
+    xor  ax, ax                     ; not on this card: 640x480
+    mov  ds, ax
+    or   byte [BOOTINFO_VMAX], VMAX_NO800
+    jmp  .setup_480
+.ok_800:
+    mov  cx, 30000                  ; 60 000 bytes, all 4 planes at once
+    mov  bx, 800
+    mov  si, 600
+    mov  dl, 3
+    jmp  .planar_clear
+
+; ── 640×480×16: the BIOS's mode 12h as it is ─────────────────────────────────
+.setup_480:
+    mov  ax, 0x0012
+    int  0x10
+    mov  cx, 19200                  ; 38 400 bytes
+    mov  bx, 640
+    mov  si, 480
+    mov  dl, 2
+
+; cx words to clear, bx x si pixels, dl the mode
+.planar_clear:
+    push dx
+    mov  dx, 0x03C4
+    mov  al, 0x02                   ; Map Mask: all 4 planes
+    out  dx, al
+    inc  dx
+    mov  al, 0x0F
+    out  dx, al
+    pop  dx
+    mov  ax, 0xA000
+    mov  es, ax
+    xor  di, di
+    xor  ax, ax
+    cld
+    rep  stosw
+    xor  ax, ax
+    mov  ds, ax
+    mov  es, ax
+    mov  [BOOTINFO_VMODE], dl
+    mov  [BOOTINFO_WIDTH], bx
+    mov  [BOOTINFO_HEIGHT], si
+    jmp  .video_setup_done
 
 ; ── Mode 13h: 320×200×8bpp (chained linear) ──────────────────────────────────
 .setup_mode_13h:

@@ -28,7 +28,8 @@ long (up to 63 characters): Windows 95 long-name entries and an 8.3 alias,
 the way the kernel makes them (fs/fs.c), so DOS, Windows and ASMOS agree.
 
 --fragment scatters KERNEL.SYS over the disk (to test that stage 2 follows
-the FAT chain). --video 0|1 sets the screen mode byte (320x200 / 640x400).
+the FAT chain). --video 0-3 sets the screen mode byte (320x200, 640x400, 640x480,
+800x600; the loader lowers it to what the machine can take).
 """
 
 import io
@@ -549,7 +550,7 @@ def main():
     if len(a) < 2 or a[0] not in ("hdd", "floppy"):
         die(
             "usage: mkdisk.py hdd|floppy OUT --boot DIR --kernel FILE "
-            "--apps MANIFEST APPDIR [--mb N] [--video 0|1] [--fragment]"
+            "--apps MANIFEST APPDIR [--mb N] [--video 0-3] [--fragment]"
         )
 
     def opt(name, n=1, default=None):

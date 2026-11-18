@@ -89,11 +89,11 @@ static void dbg_bar(int col, uint8_t color) {
                 fb[y * g_screen_width + x + i] = color;
     } else {
         volatile uint8_t *fb = (volatile uint8_t *)0xA0000;
-        int bx = col;
-        if (bx >= 80)
+        int bx = col, stride = g_screen_width / 8;
+        if (bx >= stride)
             return;
         for (int y = 0; y < g_screen_height; y++)
-            fb[y * 80 + bx] = color;
+            fb[y * stride + bx] = color;
     }
 }
 
@@ -177,6 +177,7 @@ static void boot_banner(void) {
 
 static void resolution_set(void) {
     g_video_mode = *(volatile uint8_t *)0x0602;
+    g_video_limits = *(volatile uint8_t *)0x0603;
     g_screen_width = *(volatile uint16_t *)0x0604;
     g_screen_height = *(volatile uint16_t *)0x0606;
 
@@ -192,14 +193,14 @@ static void resolution_set(void) {
         }
     }
 
-    if (g_screen_width > 640)
-        g_screen_width = 640;
-    if (g_screen_height > 400)
-        g_screen_height = 400;
+    if (g_screen_width > 800)
+        g_screen_width = 800;
+    if (g_screen_height > 600)
+        g_screen_height = 600;
 
     g_backbuf_size = g_screen_width * g_screen_height;
-    if (g_backbuf_size == 0 || g_backbuf_size > 640 * 400)
-        g_backbuf_size = 640 * 400;
+    if (g_backbuf_size == 0 || g_backbuf_size > 800 * 600)
+        g_backbuf_size = 800 * 600;
 }
 
 void kmain(void) {

@@ -819,15 +819,28 @@ static void build(settings_state_t *s) {
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
     s->screen = on_page(s, ctl_combo(w, 76, 24, 176, on_screen), P_WALL);
-    list_add(s->screen, "320x200, 256 colours");
-    list_add(s->screen, "640x400, 16 colours");
+    /* only what this machine can take (config/video_cfg.h): 0 .. max */
+    int max = video_max_mode();
+    for (int m = 0; m <= max; m++)
+        list_add(s->screen, video_mode_name(m));
     int vm = video_cfg_get();
-    s->screen_saved = vm >= 0 ? vm : (g_video_mode ? VIDEO_640 : VIDEO_320);
+    s->screen_saved = vm >= 0 ? vm : g_video_mode;
+    if (s->screen_saved > max) /* shown as the most it can; the disk's choice
+                                * stays unless changed here */
+        s->screen_saved = max;
     list_set_sel(s->screen, s->screen_saved);
     ctl_enable(s->screen, vm >= 0);
-    ctl_set_tooltip(s->screen, vm >= 0 ? "Takes effect when you restart"
-                                       : "This boot disk can't store it: "
-                                         "rebuild the image");
+    static char tip[96];
+    if (vm < 0)
+        snprintf(tip, sizeof(tip),
+                 "This boot disk can't store it: "
+                 "rebuild the image");
+    else if (video_limit_reason())
+        snprintf(tip, sizeof(tip), "Takes effect when you restart. No more: %s",
+                 video_limit_reason());
+    else
+        snprintf(tip, sizeof(tip), "Takes effect when you restart");
+    ctl_set_tooltip(s->screen, tip);
     control *sb = on_page(
         s, ctl_button(w, 178, 40, 74, 13, "Screen Saver...", 0, on_open_sub),
         P_WALL);

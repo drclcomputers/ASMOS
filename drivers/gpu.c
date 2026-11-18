@@ -14,7 +14,8 @@
  * writing video memory is the bottleneck, so an idle desktop now costs
  * almost nothing and a moving cursor only a few blocks.
  *
- * 640x400x16 is planar: 4 bit planes, 1 bit per pixel. A lookup table
+ * 640x400, 640x480 and 800x600 (16 colours) are planar: 4 bit planes, 1
+ * bit per pixel. A lookup table
  * spreads one pixel's 4 colour bits into the 4 plane bytes at once, so 8
  * pixels take 8 lookups instead of 32 bit extractions per plane.
  */
@@ -67,8 +68,8 @@ static void blit_planar(void) {
     const int blocks = w / 32; /* 32 pixels = 1 dword/plane */
     uint32_t *fb = (uint32_t *)MODEX_FB;
     bool full = s_full || !s_shadow;
-    uint32_t planes[4][20]; /* one row, <= 640 px */
-    uint8_t dirty[20];
+    uint32_t planes[4][25]; /* one row, <= 800 px */
+    uint8_t dirty[25];
     uint32_t sent = 0;
 
     (void)h;

@@ -61,6 +61,57 @@ def check(name, disk, kernel, **kw):
     return not probs
 
 
+# the screen: (mode byte, width, height, the BIOS mode set)
+MODES = {
+    0: (0, 320, 200, 0x13),
+    1: (1, 640, 400, 0x12),
+    2: (2, 640, 480, 0x12),
+    3: (3, 800, 600, None),  # 6Ah or VESA 102h
+}
+
+
+def check_video(name, disk, ask, want, limit, **kw):
+    """the mode byte on the disk set to `ask`: the loader must pick `want`
+    and report `limit` at 0x0603"""
+    d = bytearray(disk)
+    vol = (
+        struct.unpack_from("<I", d, 0x1BE + 8)[0]
+        if d[0x1FE] == 0x55 and d[0x1C2]
+        else 0
+    )
+    d[(vol + 1) * 512 + 4] = ask
+    cpu, bios, what = bootemu.boot(d, **kw)
+    probs = []
+    if what != "kernel":
+        probs.append(what)
+    else:
+        m, w, h, bm = MODES[want]
+        got = (
+            cpu.m[0x602],
+            struct.unpack_from("<H", cpu.m, 0x604)[0],
+            struct.unpack_from("<H", cpu.m, 0x606)[0],
+        )
+        if got != (m, w, h):
+            probs.append("got mode %d %dx%d, want %d %dx%d" % (got + (m, w, h)))
+        if cpu.m[0x603] != limit:
+            probs.append("0x603 = %02X, want %02X" % (cpu.m[0x603], limit))
+        if bm is not None and bios.vmode != bm:
+            probs.append("the BIOS was left in mode %Xh" % bios.vmode)
+        if want == 3 and bios.vmode not in (0x6A, 0x102):
+            probs.append("800x600 not set (BIOS mode %Xh)" % bios.vmode)
+        if want == 3 and kw.get("svga") in ("6a", "both") and bios.vmode != 0x6A:
+            probs.append("mode 6Ah not tried first (BIOS mode %Xh)" % bios.vmode)
+    print(
+        "  %-46s %s  %s"
+        % (
+            name,
+            "ok  " if not probs else "FAIL",
+            "; ".join(probs) or "%dx%d" % MODES[want][1:3],
+        )
+    )
+    return not probs
+
+
 def expect_message(name, disk, text, **kw):
     cpu, bios, what = bootemu.boot(disk, **kw)
     ok = text in what
@@ -121,6 +172,30 @@ def main():
         ),
     ]:
         good &= check(name, fdd, kernel, **kw)
+
+    print("screen modes: what the machine allows (0x0603: max | 40h 486 | 80h no 800)")
+    for name, ask, want, limit, kw in [
+        ("2 MB 486, 640x400 asked: 320x200", 1, 0, 0x40, dict(ram_mb=2)),
+        ("2 MB 486, 800x600 asked: 320x200", 3, 0, 0x40, dict(ram_mb=2, svga="vbe")),
+        ("3 MB 386, 640x480 asked", 2, 2, 0x02, dict(ram_mb=3, cpu486=False)),
+        ("3 MB 386, 640x400 asked", 1, 1, 0x02, dict(ram_mb=3, cpu486=False)),
+        (
+            "8 MB 386, 800x600 asked: 640x480",
+            3,
+            2,
+            0x02,
+            dict(cpu486=False, svga="vbe"),
+        ),
+        ("3 MB 486, 800x600 asked: 640x480", 3, 2, 0x42, dict(ram_mb=3, svga="vbe")),
+        ("4 MB 486, VESA card: 800x600", 3, 3, 0x43, dict(ram_mb=4, svga="vbe")),
+        ("8 MB 486, mode 6Ah card: 800x600", 3, 3, 0x43, dict(svga="6a")),
+        ("8 MB 486, both kinds: mode 6Ah used", 3, 3, 0x43, dict(svga="both")),
+        ("8 MB 486, plain VGA: 640x480", 3, 2, 0xC3, dict()),
+        ("8 MB 486, 320x200 asked", 0, 0, 0x43, dict(svga="vbe")),
+        ("setup floppy, 8 MB 486, 800x600", 3, 3, 0x43, dict(drive=0x00, svga="vbe")),
+    ]:
+        disk = fdd if kw.get("drive") == 0x00 else hdd
+        good &= check_video(name, disk, ask, want, limit, **kw)
 
     print("broken hard disks: the message")
     p = struct.unpack_from("<I", hdd, 0x1BE + 8)[0] * 512

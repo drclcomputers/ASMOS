@@ -966,6 +966,49 @@ int scen2(const char *name) {
         wr(1, fails ? "SOME FAILED\n" : "ALL PASS\n");
         return fails;
     }
+    if (!strcmp(name, "screenmodes")) {
+        /* Settings > Display offers only the screens this machine may use
+         * (the boot loader's limits at 0x0603: config/video_cfg.h) */
+        int fails = 0;
+        char b[300];
+        extern uint8_t g_video_limits;
+        extern int video_max_mode(void);
+        extern const char *video_limit_reason(void);
+        extern const char *video_mode_name(int);
+        static const struct {
+            uint8_t lim;
+            int n;
+            const char *why;
+        } cases[] = {{0x40, 1, "3 MB"},
+                     {0x02, 3, "486"},
+                     {0x42, 3, "4 MB"},
+                     {0xC3 & ~0x01, 3, "card"},
+                     {0x43, 4, NULL}};
+        for (unsigned k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+            g_video_limits = cases[k].lim;
+            sim_launch("Settings");
+            sim_frames(3);
+            window *w = wm_focused_window();
+            control *combo = NULL;
+            for (control *c = w ? w->controls : NULL; c; c = c->next)
+                if (c->type == CTL_COMBO && !combo)
+                    combo = c;
+            int n = combo ? list_count(combo) : -1;
+            const char *why = video_limit_reason();
+            snprintf(b, sizeof b,
+                     "    limits %02X: %d screens, top '%s', why: %s\n",
+                     cases[k].lim, n, n > 0 ? video_mode_name(n - 1) : "-",
+                     why ? why : "-");
+            wr(1, b);
+            T("as many screens as allowed", n == cases[k].n);
+            T("the reason names it",
+              cases[k].why ? (why && strstr(why, cases[k].why)) : why == NULL);
+            os_quit_app_by_desc(os_find_app("Settings"));
+            sim_frames(3);
+        }
+        g_video_limits = 0x43;
+        return fails;
+    }
     if (!strcmp(name, "winpos")) {
         /* an app's window opens where it was last closed (/PREFS/WINDOWS.INI)
          */

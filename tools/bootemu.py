@@ -58,6 +58,7 @@ class CPU:
         self.seg = [Seg() for _ in range(6)]
         self.eip = 0x7C00
         self.cf = self.zf = self.sf = self.of = self.df = 0
+        self.ac = 0  # EFLAGS.AC: only a 486 or better keeps it
         self.iflag = 1
         self.pe = False
         self.gdt = (0, 0)
@@ -485,6 +486,8 @@ class CPU:
             f = self.pop(osz)
             self.cf, self.zf, self.sf = f & 1, (f >> 6) & 1, (f >> 7) & 1
             self.iflag, self.df, self.of = (f >> 9) & 1, (f >> 10) & 1, (f >> 11) & 1
+            if osz == 4:
+                self.ac = (f >> 18) & 1 if self.bios.cpu486 else 0
             return
         if 0xA0 <= op <= 0xA3:
             size = osz if op & 1 else 1
@@ -606,6 +609,7 @@ class CPU:
             | (self.iflag << 9)
             | (self.df << 10)
             | (self.of << 11)
+            | (self.ac << 18)
         )
 
     def jump_rel(self, d):
@@ -762,6 +766,8 @@ class Bios:
         kernel_entry=0x100000,
         apm=None,
         dirty=False,  # BIOS calls change what they needn't: DF, ES...
+        cpu486=True,  # False: a 386 (EFLAGS.AC can't be set)
+        svga=None,  # 800x600x16: "both", "vbe" (only 4F02h 102h), "6a" (only mode 6Ah), None
     ):
         self.disk = disk
         self.drive = drive
@@ -777,6 +783,9 @@ class Bios:
         self.apm = apm  # None, or (version, flags): APM in INT 15h
         self.apm_connected = False
         self.dirty = dirty  # INT 15h returns with DF set, high halves changed
+        self.cpu486 = cpu486
+        self.svga = svga
+        self.vmode = 0x03  # the screen mode the BIOS set last
         self.out = ""
         self.calls = []
         self.reads = 0
@@ -837,6 +846,16 @@ class Bios:
         if n == 0x10:
             if ah == 0x0E:
                 self.out += chr(al)
+            elif ah == 0x00:  # set mode (6Ah only on an SVGA BIOS)
+                if (al & 0x7F) != 0x6A or self.svga in ("6a", "both"):
+                    self.vmode = al & 0x7F
+            elif ah == 0x0F:  # get mode
+                cpu.setreg(0, 1, self.vmode)
+                cpu.setreg(4, 1, 80)
+            elif cpu.reg(0, 2) == 0x4F02:  # VESA set mode (no VBE: AX stays)
+                if self.svga in ("vbe", "both") and cpu.reg(3, 2) & 0x1FF == 0x102:
+                    self.vmode = 0x102
+                    cpu.setreg(0, 2, 0x004F)
             return
         if n == 0x15:
             if ah == 0x88:

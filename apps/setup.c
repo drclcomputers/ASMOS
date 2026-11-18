@@ -8,6 +8,7 @@
  * Pages: welcome, which disk, what to do with it (erase / keep the files)
  * and the screen mode, a last look, the install (a step a frame, with a
  * progress bar), done (restart). */
+#include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/gpu.h"
 #include "fs/fs.h"
@@ -27,7 +28,7 @@ enum { S_ERASE, S_BOOT, S_FILES, S_END };
 typedef struct {
     window *win; /* must stay first */
     int page, want;
-    control *list, *erase, *keep, *v640, *v320, *bar, *msg;
+    control *list, *erase, *keep, *vmode, *bar, *msg;
     inst_disk_t disk[2];
     int unit;
     bool keep_files;
@@ -129,7 +130,7 @@ static void act(setup_t *s, int id) {
                 return;
             }
             s->keep_files = ctl_value(s->keep) != 0;
-            s->video = ctl_value(s->v320) ? 0 : 1;
+            s->video = ctl_value(s->vmode);
             go_page(s, P_CONFIRM);
         }
         return;
@@ -160,7 +161,7 @@ static void on_list(control *c, int ev) {
 static void clear(setup_t *s) {
     while (s->win->controls)
         ctl_destroy(s->win->controls);
-    s->list = s->erase = s->keep = s->v640 = s->v320 = s->bar = s->msg = NULL;
+    s->list = s->erase = s->keep = s->vmode = s->bar = s->msg = NULL;
 }
 
 static void page_welcome(setup_t *s) {
@@ -232,13 +233,18 @@ static void page_how(setup_t *s) {
         text(s, 50, "  (an update: your files and settings stay)");
     else
         text(s, 50, "  (your files stay; ASMOS's go in SYSTEM and APPS)");
-    text(s, 68, "Screen:");
-    bool now640 = g_screen_width >= 640;
-    s->v640 = ctl_radio(s->win, 10, 80, W - 20, "640 x 400, 16 colours", 2,
-                        now640, NULL);
-    s->v320 =
-        ctl_radio(s->win, 10, 93, W - 20,
-                  "320 x 200, 256 colours (slow machines)", 2, !now640, NULL);
+    /* the screens this machine can take (config/video_cfg.h): 0 .. max */
+    text(s, 70, "Screen:");
+    s->vmode = ctl_combo(s->win, 60, 68, 176, NULL);
+    int max = video_max_mode();
+    for (int m = 0; m <= max; m++)
+        list_add(s->vmode, video_mode_name(m));
+    list_set_sel(s->vmode, g_video_mode <= max ? g_video_mode : max);
+    if (video_limit_reason()) {
+        char why[64];
+        snprintf(why, sizeof(why), "(no more: %s)", video_limit_reason());
+        text(s, 84, why);
+    }
     button(s, 10, "Back", 2, on_btn);
     control *c = button(s, W - 76, "Continue", 3, on_btn);
     ctl_style_add(c, CS_DEFAULT);
@@ -267,7 +273,7 @@ static void page_confirm(setup_t *s) {
         text(s, 58, " - copy SYSTEM\\KERNEL.SYS and the apps");
     }
     text(s, 69, " - make the disk start ASMOS");
-    snprintf(t, sizeof(t), "Screen: %s.", s->video ? "640 x 400" : "320 x 200");
+    snprintf(t, sizeof(t), "Screen: %s.", video_mode_name(s->video));
     text(s, 86, t);
     button(s, 10, "Back", 2, on_btn);
     control *c = button(s, W - 76, "Install", 4, on_btn);

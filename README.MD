@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.0.2
+Version 3.0.5
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -40,8 +40,9 @@ Features
 - **Desktop**: overlapping windows, a menu bar, desktop icons, a Trash, an
   Apps menu built from the /APPS folder, and a busy hourglass. Alt+Tab and
   Alt+Shift+Tab switch windows.
-- **Two screen modes**: 320x200 in 256 colours (fast, Mode 13h) and
-  640x400 in 16 colours (sharper, planar VGA).
+- **Four screen modes**: 320x200 in 256 colours (fast, Mode 13h), 640x400
+  and 640x480 in 16 colours (planar VGA), 800x600 in 16 colours (SVGA). The
+  bigger ones only where the machine can take them (see below).
 - **Files**: FAT12 floppies and FAT16 hard disks (up to 2 GB), long names
   up to 63 characters, up to 2 hard disks and 2 floppy drives.
 - **ZIP archives**: compress files and folders, extract archives (Edit menu
@@ -126,6 +127,22 @@ Optional:
 Speed: usable on a 386SX-16 at 320x200 with the frame rate at 30. Smooth on
 a 486 and up.
 
+Screen modes, by machine (the boot loader enforces it; Setup and Settings
+only offer what fits):
+
+| Machine                                     | Screens                   |
+| ------------------------------------------- | ------------------------- |
+| under 3 MB of RAM                           | 320x200                   |
+| a 386, 3 MB or more                         | 320x200, 640x400, 640x480 |
+| a 486 or better, 3 MB                       | 320x200, 640x400, 640x480 |
+| a 486 or better, 4 MB or more, an SVGA card | all, and 800x600          |
+
+The bigger screens need two frames' worth of memory (600 KB at 640x480,
+940 KB at 800x600), and 800x600 has 2.3 times the pixels of 640x400: too
+much for a 386. 800x600 also needs an SVGA card with that mode in its BIOS
+(VESA mode 102h or mode 6Ah: nearly all of them). Without it, ASMOS starts
+in 640x480 and the boot log says why.
+
 Build and run
 =============================================================================
 
@@ -175,7 +192,8 @@ The full walk-through: [docs/BOOT_AND_SETUP.md](docs/BOOT_AND_SETUP.md).
       The boot code, `SYSTEM\KERNEL.SYS` and the bundled apps are replaced.
       Your settings (ASMOS.CFG), desktop and documents stay. Shortcuts you
       deleted from /APPS come back; apps no longer bundled are not removed.
-    - Choose the screen mode, 640x400 or 320x200.
+    - Choose the screen mode (only the ones this machine can take are
+      listed).
 5. Install. Take the floppy out and press Restart.
 
 The shell can also do it: `sys hda` makes a FAT disk start ASMOS (boot code
@@ -320,9 +338,15 @@ gateway and DNS in Settings > Network (there is no DHCP).
 On an installed disk, save in Settings or shut down with Shut Down. Turning
 the power off without it loses changes since the last save.
 
-**The 640x400 screen is garbled or out of range**: some monitors and VGA
-cards don't like this mode. Install again (Keep the files) and choose
-320x200.
+**The screen is garbled or out of range**: some monitors and VGA cards don't
+like 640x400 (a tweaked mode) or 800x600. Pick another in Settings > Display
+(or install again with Keep the files and choose there). 640x480 is the
+standard VGA mode and works everywhere.
+
+**800x600 isn't offered, or it starts in 640x480**: look at the "Graphics"
+lines in the boot log and the Screen tooltip in Settings > Display. It needs
+a 486, 4 MB and an SVGA card with that mode. In 86Box, pick an SVGA card
+(Tseng ET4000, S3, Cirrus Logic...), not plain VGA.
 
 Known limitations
 =============================================================================
@@ -339,8 +363,9 @@ Known limitations
   ASMOS writes with the drive's own sector numbers (LBA). A BIOS with a
   wrong drive geometry reads other sectors (see Troubleshooting).
 - **Memory**: up to 64 MB used (the BIOS call stage 2 uses).
-- **Video**: VGA only, two modes (320x200x256, 640x400x16). No SVGA/VESA
-  modes, no higher resolutions. The UI uses 16 colours in both.
+- **Video**: 320x200x256, 640x400x16, 640x480x16, 800x600x16 (SVGA). No
+  256 colours above 320x200, nothing above 800x600, no accelerated drivers.
+  The UI uses 16 colours in all of them.
 - **Network**: NE2000 only, static IPv4, no DHCP. Ping, DNS and Gopher
   (no web browser).
 - **Keyboard**: US layout only.
@@ -359,8 +384,9 @@ Known bugs
   Biostar M5ATA in 86Box. See Troubleshooting.
 - **On a 386SX-16 the desktop can still stutter** at 60 frames a second,
   even though the counter shows 60. Set the frame rate to 30.
-- **640x400 is slower than 320x200** (planar VGA writes) and the mode set is
-  a hack. A few VGA cards or monitors may show it wrong.
+- **The planar modes are slower than 320x200** (planar VGA writes), more so
+  the bigger they are. 640x400 is a tweaked mode: a few VGA cards or
+  monitors may show it wrong.
 - **App memory protection costs some speed on a 386** (switching address
   spaces on every app call). It can be turned off in Settings > System.
 - **The setup floppy is slow to install from** on real floppy drives (about
@@ -395,7 +421,9 @@ Stage 2 (boot/stage2.asm, 2 KB)
 - Reads the FAT12/FAT16 volume and finds `SYSTEM\KERNEL.SYS`.
 - Loads it 64 KB at a time and copies each piece to 1 MB in unreal mode
   (no size limit).
-- Sets the screen mode: 320x200 (Mode 13h) or 640x400 (planar).
+- Sets the screen mode: 320x200 (Mode 13h), 640x400 (mode 12h at 400
+  lines), 640x480 (mode 12h) or 800x600 (VESA 102h / mode 6Ah), no more than
+  the machine allows (a 486 test, the RAM, whether the card took the mode).
 - Switches to 32-bit protected mode and jumps to the kernel at 1 MB.
 
 Loader (boot/loader.asm, 32-bit)
@@ -422,8 +450,8 @@ Memory map
 0x07E00 - 0x085FF  Stage 2
 0x09000 - 0x095FF  Stage 2: FAT and directory buffers
 0x10000 - 0x1FFFF  Stage 2: 64 KB of kernel at a time, copied to 1 MB
-0x10000 - ...      Kernel: the back buffer (64 KB at 320x200, 250 KB at
-                   640x400), then a small heap
+0x10000 - ...      Kernel: the back buffer (64 KB at 320x200 up to 469 KB
+                   at 800x600), then a small heap
 0x88000 - 0x97FFF  Kernel stack (64 KB)
 0xA0000 - 0xBFFFF  VGA memory
 0xC0000 - 0xFFFFF  BIOS, adapter ROMs
@@ -471,7 +499,7 @@ Disks (drivers/ata.c, fdd.c, fs/)
 
 Drivers
 
-- GPU: VGA registers, Mode 13h and planar 640x400.
+- GPU: VGA registers, Mode 13h and the planar modes (640x400 to 800x600).
 - Sound Blaster 16 (DMA), OPL2 FM, PC speaker.
 - NE2000 (ISA and PCI), PCI bus scan.
 - Parallel and serial ports, printers (text, ESC/P, PCL).

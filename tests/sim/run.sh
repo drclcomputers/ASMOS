@@ -17,15 +17,19 @@ SKIP=" tlbcost readme readme320 bootscreen showcase "
 # these check every frame against a full redraw ("+": verify mode)
 VERIFY=" lazy lazylow "
 
+# and some again in the bigger screens ("name@mode": sim.c)
+SCREENS="desktop@640x480 desktop@800 alttab@800 winpos@800 pattern@800
+         setup@640x480 setup@800 busycur@800 zipui@800 lazy@640x480 lazy@800"
+
 if [ $# -gt 0 ]; then list="$*"; else
-    list=$(grep -o '!strcmp(name, "[a-zA-Z0-9_]*")' scen.c | sed 's/.*"\(.*\)".*/\1/' | sort -u)
+    list="$(grep -o '!strcmp(name, "[a-zA-Z0-9_]*")' scen.c | sed 's/.*"\(.*\)".*/\1/' | sort -u) $SCREENS"
 fi
 
 failed=0; n=0; bad=""
 for t in $list; do
     case "$SKIP" in *" $t "*) continue ;; esac
     arg=$t
-    case "$VERIFY" in *" $t "*) arg="+$t" ;; esac
+    case "$VERIFY" in *" ${t%@*} "*) arg="+$t" ;; esac
     cp $ROOT/os_image.bin disk.img
     out=$(timeout 300 ./sim "$arg" 2>&1); rc=$?
     n=$((n + 1))

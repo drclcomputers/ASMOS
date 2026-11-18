@@ -1,6 +1,7 @@
 #include "os/error.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
+#include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/gpu.h"
 #include "drivers/lpt.h"
@@ -368,11 +369,15 @@ void boot_check_sound(void) {
 void boot_check_graphics(void) {
     boot_puts("Graphics\n", LIGHT_GRAY);
 
-    // Mode 13h or X
-    if (g_video_mode == 0)
-        boot_check_line("Resolution = 320 x 200", true, NULL);
-    else
-        boot_check_line("Resolution = 640 x 400", true, NULL);
+    char t[48];
+    snprintf(t, sizeof(t), "Resolution = %d x %d", SCREEN_WIDTH, SCREEN_HEIGHT);
+    boot_check_line(t, true, NULL);
+    /* asked for more than this machine takes (boot/stage2.asm) */
+    int want = video_cfg_get();
+    if (want > g_video_mode && video_limit_reason()) {
+        snprintf(t, sizeof(t), "%s", video_limit_reason());
+        boot_check_line("Bigger screen", true, t);
+    }
 }
 
 void boot_check_network(void) {

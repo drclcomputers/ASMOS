@@ -49,6 +49,8 @@ SECTIONS {
     }
 
     ASSERT(_kstack_top <= 0xA0000, "Stack overflows into VGA!")
-    ASSERT(0x10000 + 640 * 400 + 0x10000 <= _kstack_bottom,
-           "No room below the stack for the back buffer and the low heap")
+    /* the biggest back buffer (800x600) between 0x10000 and the stack; in
+     * the smaller modes the rest is a second heap (kernel.c) */
+    ASSERT(0x10000 + 800 * 600 + 0x1000 <= _kstack_bottom,
+           "No room below the stack for the back buffer")
 }

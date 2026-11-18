@@ -45,7 +45,8 @@ typedef void (*inst_progress_fn)(void *user, int pct, const char *what);
 
 void inst_probe(uint8_t unit, inst_disk_t *d);
 const char *inst_erase(uint8_t unit, inst_progress_fn cb, void *user);
-/* video_mode: 0 = 320x200, 1 = 640x400, -1 = what the disk had (else 1) */
+/* video_mode: config/video_cfg.h (0 = 320x200 .. 3 = 800x600), -1 = what
+ * the disk had (else 1) */
 const char *inst_write_boot(uint8_t unit, int video_mode);
 /* zip: an ASMOS.ZIP to extract into the drive's root (NULL: none), with
  * SYSTEM/KERNEL.SYS in it compressed; kernel: a KERNEL.SYS to copy if the
