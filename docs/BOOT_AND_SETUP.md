@@ -94,8 +94,13 @@ sectors 1..4   stage 2
     5. **Hand-off values.** It writes the boot drive to 0x0608, whether LBA
        reads worked to 0x0609, and the volume's start to 0x060C.
     6. **Screen mode.** It sets the mode stored in byte 4 of its own first
-       sector (0 = 320x200, 1 = 640x400). Settings > System changes that
-       byte, and so does Setup.
+       sector (0 = 320x200, 1 = 640x400, 2 = 640x480, 3 = 800x600).
+       Settings > Display changes that byte, and so does Setup. It never
+       sets more than the machine can take: under 3 MB of RAM only
+       320x200; a 386 (it can't set the AC flag) up to 640x480; 800x600
+       with a 486, 4 MB, and a card that accepts VESA mode 102h or mode
+       6Ah (else 640x480). What it allowed goes to 0x0603 for Setup and
+       Settings.
     7. **Protected mode.** It switches to 32-bit protected mode and jumps
        to the kernel at 1 MB.
 
@@ -150,8 +155,8 @@ restart.`
         - **Keep the files on it:** only possible on a disk that already has
           ASMOS, or a FAT volume with room for the loader. It updates the
           boot code, KERNEL.SYS and the apps. Your files and settings stay.
-        - Also pick the screen mode the disk will start in (640x400 or
-          320x200).
+        - Also pick the screen mode the disk will start in (only the ones
+          this machine can take are listed).
     4. **Ready to install.** This page says what will happen, and names the
        disk when it is going to be erased. Press **Install**.
     5. **Installing.** The steps are: partition and format, boot code, then

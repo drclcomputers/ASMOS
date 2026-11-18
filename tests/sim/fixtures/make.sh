@@ -21,10 +21,14 @@ python3 "$ROOT/tools/mkapp.py" --elf hello.elf --name Hello --out HELLO.APP \
     --state 64 --single --window-first >/dev/null
 rm -f hello.o hello.elf
 
-# a CD image: fixtures/cd, an app from the build, a big file, a folder with
-# many files (its directory spans sectors)
+# a CD image: two small text files, an app from the build, a big file, a
+# folder with many files (its directory spans sectors)
 rm -rf cdbuild && mkdir -p cdbuild/APPS/Games cdbuild/Many
-cp -r cd/. cdbuild/
+# (made here, not kept in git: CRLF endings exactly, and a name with
+# spaces in a folder with a space)
+mkdir -p "cdbuild/Read me"
+printf 'short\r\n' > cdbuild/SHORT.TXT
+printf 'hello CD\r\n' > "cdbuild/Read me/A long file name.txt"
 cp "$ROOT/build/extapps/sudoku.APP" cdbuild/APPS/Games/SUDOKU.APP
 python3 - <<'PY'
 with open("cdbuild/BIG.BIN", "wb") as f:
