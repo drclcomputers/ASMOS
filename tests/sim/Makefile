@@ -16,7 +16,17 @@ o/sim.o: sim.c sys.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/scen.o: scen.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/stubs.o: stubs.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/start.o: start.S ; @mkdir -p o; gcc -m32 -c $< -o $@
-clean: ; rm -rf o sim rtcfg.c simguard.c out
+# the kernel's drivers/gpu.c on a model of the VGA planes (gputest.c)
+gputest: o/gputest.o o/gpu_real.o o/lib/mem.o o/lib/string.o o/start.o
+	ld -m elf_i386 -static --defsym=_backbuf=0x100000 -o $@ $^ 2>&1 | grep -v 'missing .note\|NOTE: This' ; true
+o/gputest.o: gputest.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/gpu_real.o: $(R)/drivers/gpu.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+# the kernel's drivers/ata.c (its CD-ROM part) on a model drive (atapitest.c)
+atapitest: o/atapitest.o o/ata_real.o o/lib/mem.o o/lib/string.o o/start.o
+	ld -m elf_i386 -static -o $@ $^ 2>&1 | grep -v 'missing .note\|NOTE: This' ; true
+o/atapitest.o: atapitest.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/ata_real.o: $(R)/drivers/ata.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+clean: ; rm -rf o sim gputest atapitest rtcfg.c simguard.c out
 o/rtcfg.o: $(R)/config/runtime_config.c
 	@mkdir -p o; sed 's/^.*0x0602.*$$//' $< > rtcfg.c; gcc $(CFLAGS) -c rtcfg.c -o $@
 o/simvmm.o: simvmm.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@

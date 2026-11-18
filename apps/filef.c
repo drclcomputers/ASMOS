@@ -1,6 +1,8 @@
 /* FileF - file manager. The icon view is a custom control; toolbar, path
  * box, scrollbar and dialogs come from the toolkit. */
 #include "config/runtime_config.h"
+#include "drivers/cdrom.h"
+#include "drivers/fdd.h"
 #include "lib/wav.h"
 #include "os/api.h"
 #include "os/clipboard.h"
@@ -31,18 +33,20 @@
 #define MAX_HISTORY 16
 
 /* ── Virtual root drive entries ─────────────────────────────── */
+enum { VD_HDD, VD_FDD, VD_CD };
 typedef struct {
     const char *vpath;
     const char *label;
     uint8_t drive_id;
-    bool is_hdd;
+    uint8_t kind; /* VD_ */
 } vdrive_t;
 
 static const vdrive_t k_vdrives[] = {
-    {"/HDA", "HDA", DRIVE_HDA, true},
-    {"/HDB", "HDB", DRIVE_HDB, true},
-    {"/FDD0", "FDD0", DRIVE_FDD0, false},
-    {"/FDD1", "FDD1", DRIVE_FDD1, false},
+    {"/HDA", "HDA", DRIVE_HDA, VD_HDD},
+    {"/HDB", "HDB", DRIVE_HDB, VD_HDD},
+    {"/FDD0", "FDD0", DRIVE_FDD0, VD_FDD},
+    {"/FDD1", "FDD1", DRIVE_FDD1, VD_FDD},
+    {"/CD0", "CD0", DRIVE_CD0, VD_CD},
 };
 #define VDRIVE_COUNT ((int)(sizeof(k_vdrives) / sizeof(k_vdrives[0])))
 
@@ -54,7 +58,7 @@ typedef struct {
     bool is_vdrive;
     uint8_t vdrive_id;
     char vdrive_path[12];
-    bool vdrive_hdd;
+    uint8_t vdrive_kind; /* VD_ */
     int icon_x, icon_y;
     bool selected;
     bool dragging;
@@ -74,6 +78,7 @@ typedef struct {
     uint16_t dir_cluster;
     char path[FS_PATH_SZ];
     uint8_t drive_id;
+    uint8_t mount_gen[DRIVE_COUNT]; /* g_mount_gen as last seen */
     bool at_vroot;
 
     ff_item_t items[MAX_ENTRIES];
@@ -134,6 +139,14 @@ static const char *shown_path(const ff_inst_t *s) {
     if (s->at_vroot)
         return "Drives";
     return fo_is_trash(s->path) ? "Trash" : s->path;
+}
+
+/* a drive with a disk in it, or a floppy drive (empty or not: opening it
+ * reads the disk) */
+static bool vdrive_shown(const vdrive_t *v) {
+    return fs_drive_mounted(v->drive_id) ||
+           (v->kind == VD_FDD &&
+            fdd_is_present(v->drive_id == DRIVE_FDD0 ? 0 : 1));
 }
 
 static bool resolve_vpath(const char *path, uint8_t *out_drive, char *out_sub,
@@ -351,7 +364,7 @@ static void ff_reload(ff_inst_t *s) {
     s->item_count = 0;
     if (s->at_vroot) {
         for (int i = 0; i < VDRIVE_COUNT; i++) {
-            if (!fs_drive_mounted(k_vdrives[i].drive_id))
+            if (!vdrive_shown(&k_vdrives[i]))
                 continue;
             if (s->item_count >= MAX_ENTRIES)
                 break;
@@ -359,7 +372,7 @@ static void ff_reload(ff_inst_t *s) {
             memset(it, 0, sizeof(ff_item_t));
             it->is_vdrive = true;
             it->vdrive_id = k_vdrives[i].drive_id;
-            it->vdrive_hdd = k_vdrives[i].is_hdd;
+            it->vdrive_kind = k_vdrives[i].kind;
             strncpy(it->vdrive_path, k_vdrives[i].vpath, 11);
             strncpy(it->name, k_vdrives[i].label, FS_NAME_MAX);
         }
@@ -522,9 +535,12 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     int ax = base_x + it->icon_x + (ICON_CELL_W - ICON_W) / 2;
     int ay = base_y + it->icon_y;
 
-    if (it->is_vdrive)
-        it->vdrive_hdd ? draw_hdd_icon(ax, ay, it->selected)
-                       : draw_floppy_icon(ax, ay, it->selected);
+    if (it->is_vdrive && it->vdrive_kind == VD_HDD)
+        draw_hdd_icon(ax, ay, it->selected);
+    else if (it->is_vdrive && it->vdrive_kind == VD_CD)
+        draw_cd_icon(ax, ay, it->selected);
+    else if (it->is_vdrive)
+        draw_floppy_icon(ax, ay, it->selected);
     else if (it->is_dotdot)
         draw_dotdot_icon(ax, ay, it->selected);
     else if (it->entry.attr & ATTR_DIRECTORY)
@@ -970,22 +986,28 @@ static void menu_close(void) {
         os_close_own_instance(s->win);
 }
 
+/* the selected floppy drive, or the one shown, or the one with a disk */
 static void menu_eject_fdd(void) {
     ff_inst_t *s = active_finder();
     if (!s)
         return;
-    int sel = -1;
-    for (int i = 0; i < s->item_count; i++)
+    uint8_t d = DRIVE_COUNT;
+    for (int i = 0; i < s->item_count && d == DRIVE_COUNT; i++)
         if (s->items[i].selected && s->items[i].is_vdrive &&
-            !s->items[i].vdrive_hdd) {
-            sel = i;
-            break;
-        }
-    if (sel < 0) {
-        strcpy(s->status, "Select a floppy first.");
+            s->items[i].vdrive_kind == VD_FDD &&
+            fs_drive_mounted(s->items[i].vdrive_id))
+            d = s->items[i].vdrive_id;
+    if (d == DRIVE_COUNT && !s->at_vroot &&
+        (s->drive_id == DRIVE_FDD0 || s->drive_id == DRIVE_FDD1))
+        d = s->drive_id;
+    for (uint8_t i = DRIVE_FDD0; i <= DRIVE_FDD1 && d == DRIVE_COUNT; i++)
+        if (fs_drive_mounted(i))
+            d = i;
+    if (d == DRIVE_COUNT) {
+        strcpy(s->status, "No floppy disk in the drive.");
         return;
     }
-    if (fdd_eject(s->items[sel].vdrive_id)) {
+    if (fdd_eject(d)) {
         ff_refresh_all();
         strcpy(s->status, "Floppy ejected.");
     } else {
@@ -993,18 +1015,14 @@ static void menu_eject_fdd(void) {
     }
 }
 
-static void menu_insert_fdd(void) {
+static void menu_eject_cd(void) {
     ff_inst_t *s = active_finder();
-    if (!s)
-        return;
-    bool a = fdd_insert(DRIVE_FDD0), b = fdd_insert(DRIVE_FDD1); /* both */
-    if (a || b) {
-        ff_refresh_all();
-        strcpy(s->status, "Floppy mounted.");
-    } else {
-        dlg_message(s->win, "Insert Floppy",
-                    "No floppy found or already mounted.");
-    }
+    bool out = cd_eject();
+    fs_unmount(DRIVE_CD0);
+    desktop_cd_links(); /* its apps go */
+    ff_refresh_all();
+    if (s)
+        strcpy(s->status, out ? "CD ejected." : "The CD drive did not open.");
 }
 
 static bool over_desktop(int mx, int my) {
@@ -1039,11 +1057,14 @@ static void ff_drop_into(ff_inst_t *src, int idx, const char *dst_dir) {
 static void ff_open_item(ff_inst_t *s, int idx) {
     ff_item_t *it = &s->items[idx];
     if (it->is_vdrive) {
-        if (fs_drive_mounted(it->vdrive_id)) {
+        if (!fs_drive_mounted(it->vdrive_id) && it->vdrive_kind == VD_FDD &&
+            fdd_insert(it->vdrive_id)) /* an empty-looking drive: read it */
+            ff_refresh_all();
+        if (fs_drive_mounted(it->vdrive_id))
             ff_navigate(s, 0, it->vdrive_path, it->vdrive_id);
-        } else {
-            dlg_message(s->win, "Drive", "Drive not mounted.");
-        }
+        else
+            dlg_message(s->win, it->name,
+                        "There is no disk in the drive, or it can't be read.");
     } else if (it->is_dotdot) {
         uint8_t drv;
         char sub[FS_PATH_SZ];
@@ -1292,9 +1313,13 @@ static void view_context_menu(ff_inst_t *s, control *c) {
         menu_add_item(m, "Open", ctx_open);
         if (it->is_vdrive) {
             menu_add_item(m, "Get Info", menu_get_info);
-            if (it->vdrive_path[1] == 'F') { /* /FDD0, /FDD1 */
+            if (it->vdrive_kind == VD_FDD) {
                 menu_add_separator(m);
                 menu_add_item(m, "Eject Floppy", menu_eject_fdd);
+                menu_enable_last(m, fs_drive_mounted(it->vdrive_id));
+            } else if (it->vdrive_kind == VD_CD) {
+                menu_add_separator(m);
+                menu_add_item(m, "Eject CD", menu_eject_cd);
             }
         }
     } else if (it) {
@@ -1325,7 +1350,6 @@ static void view_context_menu(ff_inst_t *s, control *c) {
         menu_add_separator(m);
         menu_add_item(m, "Get Info", menu_get_info);
     } else if (s->at_vroot) {
-        menu_add_item(m, "Insert Floppy", menu_insert_fdd);
         menu_add_item(m, "Reload", menu_reload);
     } else {
         menu_add_item(m, "New File", menu_new_file);
@@ -1615,10 +1639,12 @@ static void ff_init(void *state) {
     menu_add_item(m, "Show Hidden", menu_show_hidden_toggle);
     menu_add_item(m, "Folder Tree", menu_toggle_tree);
     m = window_add_menu(w, "Drive");
-    menu_add_item(m, "Insert Floppy", menu_insert_fdd);
     menu_add_item(m, "Eject Floppy", menu_eject_fdd);
+    menu_add_item(m, "Eject CD", menu_eject_cd);
+    menu_enable_last(m, cd_present());
 
     s->drive_id = DRIVE_HDA;
+    memcpy(s->mount_gen, g_mount_gen, sizeof(g_mount_gen));
     s->sort = SORT_NAME;
     s->drag_idx = -1;
     s->press_idx = -1;
@@ -1642,6 +1668,24 @@ static void ff_on_frame(void *state) {
         return;
     if (wm_focused_window() == s->win)
         s_last_active = s;
+    if (memcmp(s->mount_gen, g_mount_gen, sizeof(g_mount_gen))) {
+        /* a drive came or went (a CD, a floppy): the drive list and the
+         * tree; a window on a disk that was taken out or swapped goes to
+         * Drives, or to the new disk's top folder */
+        bool mine = s->mount_gen[s->drive_id] != g_mount_gen[s->drive_id];
+        memcpy(s->mount_gen, g_mount_gen, sizeof(g_mount_gen));
+        if (s->tree_shown)
+            tree_fill_roots(s);
+        if (s->at_vroot) {
+            ff_reload(s);
+        } else if (mine && !fs_drive_mounted(s->drive_id)) {
+            ff_go_vroot(s);
+        } else if (mine) {
+            char root[FS_PATH_SZ];
+            build_vpath(s->drive_id, "/", root, sizeof(root));
+            ff_navigate(s, 0, root, s->drive_id);
+        }
+    }
     if (!s->at_vroot && desktop_fs_is_dirty()) {
         char dp[FS_PATH_SZ];
         build_vpath(DRIVE_HDA, "/DESKTOP", dp, sizeof(dp));

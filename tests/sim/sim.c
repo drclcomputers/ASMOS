@@ -128,6 +128,21 @@ void gpu_blit_skip(void) {
         gpu_blit();
 }
 void gpu_invalidate(void) { s_sfull = 1; }
+/* 2x zoom (drivers/gpu.c): the screen model here stays in logical pixels;
+ * only the sizes change, as in the kernel */
+int g_zoom = 1;
+void gpu_set_zoom(int z) {
+    if (g_video_mode == 0 || (z != 1 && z != 2))
+        z = 1;
+    if (z == g_zoom)
+        return;
+    int pw = g_screen_width * g_zoom, ph = g_screen_height * g_zoom;
+    g_zoom = z;
+    g_screen_width = pw / z;
+    g_screen_height = ph / z;
+    g_backbuf_size = g_screen_width * g_screen_height;
+    s_sfull = 1;
+}
 /* no timer interrupt here: input is polled, the frame moves the pointer */
 void ps2_irq_mode(bool on) { (void)on; }
 bool ps2_irq_active(void) { return false; }
@@ -187,6 +202,51 @@ void ata_park(bool spin_down) {
     (void)spin_down;
     g_ata_parks++;
 }
+/* ── the CD drive (drivers/cdrom.h): an ISO image, put in and taken out by
+ * the scenarios (sim_cd_insert / sim_cd_eject). A disc put in reports
+ * "changed" once, as a real drive does. */
+#include "drivers/cdrom.h"
+static void *map(uint32_t addr, uint32_t len);
+bool load_file(const char *path, uint8_t *dst, uint32_t max, uint32_t *got);
+static uint8_t *s_cd;
+static uint32_t s_cd_sectors;
+static int s_cd_state = CD_EMPTY;
+int g_cd_reads; /* sectors read */
+bool cd_present(void) { return true; }
+const char *cd_model(void) { return "SIM CD-ROM"; }
+cd_state_t cd_check(void) {
+    int st = s_cd_state;
+    if (st == CD_CHANGED)
+        s_cd_state = CD_READY;
+    return (cd_state_t)st;
+}
+bool cd_read(uint32_t lba, uint32_t count, void *buf) {
+    if (s_cd_state != CD_READY || !count || count > 16 ||
+        lba + count > s_cd_sectors)
+        return false;
+    memcpy(buf, s_cd + lba * CD_SECTOR, count * CD_SECTOR);
+    g_cd_reads += (int)count;
+    return true;
+}
+bool cd_capacity(uint32_t *n) {
+    *n = s_cd_sectors;
+    return s_cd_state == CD_READY;
+}
+bool cd_eject(void) {
+    s_cd_state = CD_EMPTY;
+    return true;
+}
+bool sim_cd_insert(const char *path) {
+    if (!s_cd)
+        s_cd = (uint8_t *)map(0x50000000, 64 * 1024 * 1024);
+    uint32_t got = 0;
+    if (!load_file(path, s_cd, 64 * 1024 * 1024, &got))
+        return false;
+    s_cd_sectors = got / CD_SECTOR;
+    s_cd_state = CD_CHANGED;
+    return true;
+}
+void sim_cd_eject(void) { s_cd_state = CD_EMPTY; }
 bool ata_read_sectors(uint8_t d, uint32_t l, uint8_t c, void *b) {
     for (int i = 0; i < c; i++)
         if (!ata_read_sector(d, l + i, (uint8_t *)b + i * 512))
@@ -577,6 +637,7 @@ void simvmm_on(void);
 const char *sim_arg2;
 /* "scenario@800" / "@640x480" / "@640" / "@320": run it in that screen mode
  * (the kernel's numbers: config/video_cfg.h) */
+static int s_sim_zoom = 1;
 static void sim_screen_from_name(char *name) {
     char *at = strchr(name, '@');
     if (!at)
@@ -589,6 +650,12 @@ static void sim_screen_from_name(char *name) {
              {"640", 1, 640, 400},
              {"640x480", 2, 640, 480},
              {"800", 3, 800, 600}};
+    int z = 1, n = (int)strlen(at);
+    if (n > 2 && !strcmp(at + n - 2, "x2")) {
+        z = 2;
+        at[n - 2] = 0;
+    } /* "@800x2" */
+    s_sim_zoom = z;
     for (unsigned i = 0; i < sizeof m / sizeof m[0]; i++)
         if (!strcmp(at, m[i].n)) {
             g_video_mode = m[i].mode;
@@ -635,6 +702,12 @@ int sim_main(int argc, char **argv) {
     g_cfg.reduce_motion = 1;
     g_cfg.sound_enabled = 0;
     g_cfg.networking_enabled = 0;
+    g_cfg.ui_zoom2 = s_sim_zoom == 2;
+    gpu_set_zoom(g_cfg.ui_zoom2 ? 2 : 1); /* as kmain */
+    if (mouse.x >= SCREEN_WIDTH)
+        mouse.x = SCREEN_WIDTH - 1;
+    if (mouse.y >= SCREEN_HEIGHT)
+        mouse.y = SCREEN_HEIGHT - 1;
     desktop_fs_init();
     wm_init();
     desktop_init();
@@ -646,8 +719,8 @@ int sim_main(int argc, char **argv) {
         extern app_descriptor setup_app;
         os_launch_app(&setup_app);
     }
-    mouse.x = 600;
-    mouse.y = 380;
+    mouse.x = SCREEN_WIDTH - 40;
+    mouse.y = SCREEN_HEIGHT - 20;
     sim_frames(3);
     const char *sc = argc > 1 ? argv[1] : "desktop";
     if (sc[0] == '+') {

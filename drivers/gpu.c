@@ -33,8 +33,42 @@ static uint32_t s_spread[16]; /* colour bit p -> bit 8*p */
 static uint32_t s_frames, s_fps, s_fps_t0;
 static uint32_t s_last_blocks; /* 32-pixel blocks sent by the last blit */
 
+/* The 16 colours, set by us rather than left to the BIOS: some video BIOSes
+ * set a planar mode without its palette (QEMU's for VESA 800x600 leaves the
+ * screen black). Attribute controller: colour i -> DAC entry i; DAC: the
+ * usual EGA/VGA colours (6 bits each), the same ones mode 13h starts with. */
+static const uint8_t k_dac16[16][3] = {
+    {0, 0, 0},    {0, 0, 42},   {0, 42, 0},   {0, 42, 42},
+    {42, 0, 0},   {42, 0, 42},  {42, 21, 0},  {42, 42, 42},
+    {21, 21, 21}, {21, 21, 63}, {21, 63, 21}, {21, 63, 63},
+    {63, 21, 21}, {63, 21, 63}, {63, 63, 21}, {63, 63, 63}};
+
+static void planar_palette(void) {
+    (void)inb(0x3DA); /* the attribute controller: back to "index" */
+    for (uint8_t i = 0; i < 16; i++) {
+        outb(0x3C0, i);
+        outb(0x3C0, i);
+    }
+    static const uint8_t ac[][2] = {{0x10, 0x01}, /* graphics, no blink */
+                                    {0x11, 0x00}, /* border black */
+                                    {0x12, 0x0F}, /* all 4 planes shown */
+                                    {0x13, 0x00}, /* no panning */
+                                    {0x14, 0x00}};
+    for (unsigned i = 0; i < sizeof(ac) / sizeof(ac[0]); i++) {
+        outb(0x3C0, ac[i][0]);
+        outb(0x3C0, ac[i][1]);
+    }
+    outb(0x3C0, 0x20); /* palette set: the screen back on */
+    outb(0x3C8, 0);
+    for (int i = 0; i < 16; i++)
+        for (int k = 0; k < 3; k++)
+            outb(0x3C9, k_dac16[i][k]);
+}
+
 void gpu_init(void) {
     g_vesa_fb = MODEX_FB;
+    if (g_video_mode != 0)
+        planar_palette();
     for (int c = 0; c < 16; c++)
         s_spread[c] = (uint32_t)(c & 1) | ((uint32_t)((c >> 1) & 1) << 8) |
                       ((uint32_t)((c >> 2) & 1) << 16) |
@@ -63,16 +97,48 @@ static inline bool same32(const uint8_t *a, const uint8_t *b) {
 
 static int s_y0, s_y1 = 399; /* rows to look at in this blit */
 
+/* ── 2x zoom (Settings > System, the planar modes) ───────────────────────
+ * The back buffer, the shadow and every coordinate are in "logical" pixels
+ * (half the screen each way); each one goes out as a 2x2 square. A screen
+ * block of 32 pixels is then 16 logical ones. */
+int g_zoom = 1;
+
+void gpu_set_zoom(int z) {
+    if (g_video_mode == 0 || (z != 1 && z != 2))
+        z = 1; /* not 320x200 */
+    if (z == g_zoom)
+        return;
+    int pw = SCREEN_WIDTH * g_zoom, ph = SCREEN_HEIGHT * g_zoom;
+    g_zoom = z;
+    g_screen_width = pw / z;
+    g_screen_height = ph / z;
+    g_backbuf_size = g_screen_width * g_screen_height;
+    s_full = true;
+}
+
+/* 32 screen pixels from a block of logical ones */
+static inline const uint8_t *screen_px(const uint8_t *lpx, uint8_t *tmp) {
+    if (g_zoom == 1)
+        return lpx;
+    for (int i = 0; i < 16; i++)
+        tmp[2 * i] = tmp[2 * i + 1] = lpx[i];
+    return tmp;
+}
+
+static inline bool same_n(const uint8_t *a, const uint8_t *b, int n) {
+    return n == 32 ? same32(a, b) : !memcmp(a, b, (uint32_t)n);
+}
+
 static void blit_planar(void) {
-    const int w = SCREEN_WIDTH, h = SCREEN_HEIGHT;
-    const int blocks = w / 32; /* 32 pixels = 1 dword/plane */
+    const int w = SCREEN_WIDTH, z = g_zoom;
+    const int lb = 32 / z;     /* logical pixels in a 32-pixel block */
+    const int blocks = w / lb; /* 32 pixels = 1 dword/plane */
     uint32_t *fb = (uint32_t *)MODEX_FB;
     bool full = s_full || !s_shadow;
     uint32_t planes[4][25]; /* one row, <= 800 px */
-    uint8_t dirty[25];
+    uint8_t dirty[25], tmp[32];
     uint32_t sent = 0;
 
-    (void)h;
     for (int y = s_y0; y <= s_y1; y++) {
         const uint8_t *row = BACKBUF + y * w;
         uint8_t *shadow = s_shadow ? s_shadow + y * w : NULL;
@@ -82,9 +148,10 @@ static void blit_planar(void) {
                          (uint32_t)w / 4) == (uint32_t)w / 4)
             continue; /* whole row unchanged: one repe cmpsd */
         for (int b = 0; b < blocks; b++) {
-            const uint8_t *px = row + b * 32;
-            if (!full && same32(px, shadow + b * 32))
+            const uint8_t *lpx = row + b * lb;
+            if (!full && same_n(lpx, shadow + b * lb, lb))
                 continue;
+            const uint8_t *px = screen_px(lpx, tmp);
             uint32_t g0 = pack8(px), g1 = pack8(px + 8), g2 = pack8(px + 16),
                      g3 = pack8(px + 24);
             for (int p = 0; p < 4; p++) {
@@ -95,17 +162,19 @@ static void blit_planar(void) {
             }
             dirty[n++] = (uint8_t)b;
             if (shadow)
-                memcpy(shadow + b * 32, px, 32);
+                memcpy(shadow + b * lb, lpx, (uint32_t)lb);
         }
         if (!n)
             continue;
         sent += (uint32_t)n;
-        uint32_t *dst = fb + y * blocks;
         for (int p = 0; p < 4; p++) {
             outb(VGA_SEQ_ADDR, SEQ_MAP_MASK);
             outb(VGA_SEQ_DATA, (uint8_t)(1u << p));
-            for (int i = 0; i < n; i++)
-                dst[dirty[i]] = planes[p][i];
+            for (int r = 0; r < z; r++) { /* zoomed: the row twice */
+                uint32_t *dst = fb + (y * z + r) * blocks;
+                for (int i = 0; i < n; i++)
+                    dst[dirty[i]] = planes[p][i];
+            }
         }
     }
     outb(VGA_SEQ_ADDR, SEQ_MAP_MASK);
@@ -226,28 +295,32 @@ void gpu_put(int x, int y, int w, int h, const uint8_t *pix) {
                 fb[yy * sw + xx] = c;
             }
     } else {
+        /* in logical pixels; zoomed, each goes out as 2x2 (blit_planar) */
         uint32_t *fb = (uint32_t *)MODEX_FB;
-        const int blocks = sw / 32;
+        const int z = g_zoom, lb = 32 / z, blocks = sw / lb;
         for (int yy = y0; yy < y1; yy++) {
-            for (int b = x0 / 32; b <= (x1 - 1) / 32; b++) {
-                uint8_t px[32];
-                memcpy(px, s_shadow + yy * sw + b * 32, 32);
+            for (int b = x0 / lb; b <= (x1 - 1) / lb; b++) {
+                uint8_t lpx[32], tmp[32];
+                memcpy(lpx, s_shadow + yy * sw + b * lb, (uint32_t)lb);
                 if (pix)
-                    for (int i = 0; i < 32; i++) {
-                        int xx = b * 32 + i;
+                    for (int i = 0; i < lb; i++) {
+                        int xx = b * lb + i;
                         if (xx >= x0 && xx < x1 &&
                             pix[(yy - y) * w + (xx - x)] != 0xFF)
-                            px[i] = pix[(yy - y) * w + (xx - x)];
+                            lpx[i] = pix[(yy - y) * w + (xx - x)];
                     }
+                const uint8_t *px = screen_px(lpx, tmp);
                 uint32_t g0 = pack8(px), g1 = pack8(px + 8),
                          g2 = pack8(px + 16), g3 = pack8(px + 24);
                 for (int p = 0; p < 4; p++) {
                     int sh = p * 8;
+                    uint32_t v = ((g0 >> sh) & 0xFF) |
+                                 (((g1 >> sh) & 0xFF) << 8) |
+                                 (((g2 >> sh) & 0xFF) << 16) |
+                                 (((g3 >> sh) & 0xFF) << 24);
                     outb(VGA_SEQ_DATA, (uint8_t)(1u << p));
-                    fb[yy * blocks + b] = ((g0 >> sh) & 0xFF) |
-                                          (((g1 >> sh) & 0xFF) << 8) |
-                                          (((g2 >> sh) & 0xFF) << 16) |
-                                          (((g3 >> sh) & 0xFF) << 24);
+                    for (int r = 0; r < z; r++)
+                        fb[(yy * z + r) * blocks + b] = v;
                 }
             }
         }

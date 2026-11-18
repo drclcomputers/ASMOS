@@ -125,6 +125,22 @@ qemu: all
 qemu-fdd: all
 	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=setup.img,if=floppy
 
+# with a CD in the drive (secondary master, ATAPI). By default cd.iso: the
+# bundled apps in APPS\ (they show in Apps > CDROM) and a long-named file.
+# Any other disc: make qemu-cd CD_ISO=my.iso
+CD_ISO ?= cd.iso
+CD_DIR  = $(BUILD_DIR)/cd
+
+cd.iso: $(EXT_PKGS) tools/mkiso.py
+	rm -rf $(CD_DIR)
+	mkdir -p $(CD_DIR)/APPS
+	cp $(EXT_PKGS) $(CD_DIR)/APPS/
+	printf 'This file is on the ASMOS test CD.\r\n' > "$(CD_DIR)/A file with a long name.txt"
+	python3 tools/mkiso.py $(CD_DIR) $@ --label "ASMOS apps"
+
+qemu-cd: all $(CD_ISO)
+	qemu-system-i386 $(QEMU_FLAGS) -cdrom $(CD_ISO)
+
 # Setup on a new, empty 100 MB disk, from the setup floppy
 qemu-setup: setup.img
 	@[ -f blank.img ] || dd if=/dev/zero of=blank.img bs=1M count=100 2>/dev/null
@@ -142,7 +158,7 @@ boottest: os_image.bin setup.img
 # ── Misc ─────────────────────────────────────────────────────────────────────
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f *.bin *.log *.map qemulog.txt floppy.img setup.img
+	rm -f *.bin *.log *.map qemulog.txt floppy.img setup.img cd.iso
 
 kernelmap: $(OBJ)
 	$(LD) $(LDFLAGS) -Map=kernel.map -o kernel.bin $^
@@ -150,4 +166,4 @@ kernelmap: $(OBJ)
 bloat: $(OBJ)
 	$(NM) --print-size --size-sort --radix=d $(OBJ) | awk '$$3 ~ /[bBcC]/' | sort -k2 -n -r | head -30
 
-.PHONY: all apps qemu qemu-fdd qemu-setup boottest bochs clean kernelmap bloat
+.PHONY: all apps qemu qemu-fdd qemu-cd qemu-setup boottest bochs clean kernelmap bloat

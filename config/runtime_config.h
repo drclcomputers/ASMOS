@@ -43,7 +43,8 @@ typedef struct __attribute__((packed)) {
     uint8_t printer_type;  /* PRN_TEXT, PRN_ESCP, PRN_PCL */
     uint8_t printer_port;  /* 0 = LPT1 */
     uint8_t printer_no_ff; /* 1 = no form feed after a job */
-    uint8_t _reserved[22];
+    uint8_t ui_zoom2;      /* 1 = everything 2x (640x400 and up; restart) */
+    uint8_t _reserved[21];
     /* version 3: the desktop pattern drawn in Settings (WALLPAPER_CUSTOM):
      * 8x8 pixels, row by row, two to a byte (left one in the high nibble).
      * Older files end before it: they load with the default one. */

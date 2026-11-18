@@ -145,6 +145,17 @@ bool fdformat_begin(fdformat_t *f, uint8_t drive_id, int media,
         f->err = "This drive cannot format that size.";
         return false;
     }
+    if (fdd_disk_in(f->unit) == 0) {
+        f->err =
+            f->unit ? "There is no disk in FDD1." : "There is no disk in FDD0.";
+        fdd_motor_off(f->unit);
+        return false;
+    }
+    if (fdd_write_protected(f->unit)) {
+        f->err = "The disk is write-protected.";
+        fdd_motor_off(f->unit);
+        return false;
+    }
     if (fs_drive_mounted(drive_id))
         fdd_eject(drive_id); /* the old file system is about to go */
     fdd_set_media(f->unit, media);

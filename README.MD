@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.0.5
+Version 3.1.8
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -42,9 +42,18 @@ Features
   Alt+Shift+Tab switch windows.
 - **Four screen modes**: 320x200 in 256 colours (fast, Mode 13h), 640x400
   and 640x480 in 16 colours (planar VGA), 800x600 in 16 colours (SVGA). The
-  bigger ones only where the machine can take them (see below).
+  bigger ones only where the machine can take them (see below). Settings >
+  System > "Large display: 2x" draws everything twice the size in the
+  16-colour modes (800x600 then looks like 400x300, sharp and chunky).
 - **Files**: FAT12 floppies and FAT16 hard disks (up to 2 GB), long names
   up to 63 characters, up to 2 hard disks and 2 floppy drives.
+- **CD-ROM** (read only): an ATAPI CD drive on IDE shows a disc icon with
+  the disc's name, as /CD0. ISO 9660 with Joliet long names. Apps on the
+  disc show up under Apps > CDROM while it is in, and go away when it is
+  taken out. Right-click the icon to eject.
+- **Floppies**: a disk read shows on the desktop. Taking it out is noticed
+  by itself (its icon goes); to read one put in, open its drive in FileF's
+  Drives. Eject writes what is waiting first.
 - **ZIP archives**: compress files and folders, extract archives (Edit menu
   and right-click).
 - **Installer**: a 1.44 MB setup floppy installs ASMOS on any IDE disk or
@@ -123,6 +132,7 @@ Optional:
   PCI NE2000 clone like the Realtek RTL8029)
 - A printer on LPT1-LPT3
 - A BIOS with APM and an ATX power supply, to switch off by itself
+- An ATAPI (IDE) CD-ROM drive
 
 Speed: usable on a 386SX-16 at 320x200 with the frame rate at 30. Smooth on
 a 486 and up.
@@ -153,6 +163,8 @@ make              build kernel.bin, os_image.bin (hard disk), setup.img (floppy)
 make HDD_MB=200   the hard disk image in another size (up to 2 GB; default 64)
 make qemu         run the hard disk image in QEMU
 make qemu-fdd     the same, with the setup floppy in drive A:
+make qemu-cd      the same, with a CD of the bundled apps (cd.iso) in the
+                  CD drive; make qemu-cd CD_ISO=my.iso for another disc
 make qemu-setup   run Setup on a new, empty 100 MB disk
 make bochs        run in Bochs
 make boottest     boot both images in an emulated BIOS, many kinds (see below)
@@ -226,7 +238,7 @@ The bundled apps:
 | Settings                                                           | Display, Sound, Clock, Network, Printers, System          |
 | ASMTerm                                                            | the shell in a window                                     |
 | Monitor                                                            | running apps, End Task, memory, CPU                       |
-| Format Disk                                                        | format a floppy (720 KB or 1.44 MB)                       |
+| Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                        | the printer's jobs                                        |
 | ASMDraw                                                            | pixel art editor                                          |
 | Calculator, Calendar (with notes), Clock (with an alarm), ClipView | accessories                                               |
@@ -334,6 +346,26 @@ is looked for at 220h-280h. Check that sound is on in Settings > Sound.
 **No network**: the "NE2000 card" lines in the boot log. Set the address,
 gateway and DNS in Settings > Network (there is no DHCP).
 
+**A floppy put in doesn't show up**: open FileF and double-click FDD0 in
+Drives (the empty drive is listed there).
+ASMOS doesn't look at an empty drive by itself: that would move the head
+(a click every few seconds). Taking a disk out is noticed without a sound.
+If ASMOS says the disk was taken out before everything was written, put
+it back and save again. Use Eject before taking a disk out.
+
+**The CD-ROM drive isn't found**: the boot log has a "CD-ROM" line with the
+drive's model, or "none". Only ATAPI drives on the IDE cables are used (not
+SCSI, not drives on a sound card's own port). In 86Box, add the CD drive in
+Settings > Storage devices on an IDE channel, as ATAPI.
+
+**The disc doesn't show up**: a new disc is looked for every half second,
+after the drive has spun it up (a few seconds). It must be ISO 9660 (data
+CD). Audio CDs and other file systems (UDF only, HFS) are not read.
+
+**Making a CD with apps**: `python3 tools/mkiso.py FOLDER disc.iso --label
+"My apps"`. .APP files in the disc's root, or in APPS\ and its subfolders,
+get shortcuts in Apps > CDROM.
+
 **Settings are not kept**: on the setup floppy (live mode) nothing is saved.
 On an installed disk, save in Settings or shut down with Shut Down. Turning
 the power off without it loses changes since the last save.
@@ -342,6 +374,9 @@ the power off without it loses changes since the last save.
 like 640x400 (a tweaked mode) or 800x600. Pick another in Settings > Display
 (or install again with Keep the files and choose there). 640x480 is the
 standard VGA mode and works everywhere.
+
+**Everything is too small at 800x600**: Settings > System > "Large display:
+2x", then restart. It also makes drawing faster (a quarter of the pixels).
 
 **800x600 isn't offered, or it starts in 640x480**: look at the "Graphics"
 lines in the boot log and the Screen tooltip in Settings > Display. It needs
@@ -358,7 +393,17 @@ Known limitations
 - **File systems**: FAT12 and FAT16 only. No FAT32, NTFS or ext2. One
   partition of up to 2 GB per disk. Setup puts it at sector 63.
 - **Disks**: IDE/ATA hard disks only (PIO, no DMA), at most 2 used (HDA,
-  HDB). No CD-ROM, SCSI, SATA (AHCI) or USB. Floppies: 720 KB and 1.44 MB.
+  HDB). No SCSI, SATA (AHCI) or USB. Floppies: 160 KB to 2.88 MB (5.25"
+  160/180/320/360 KB, 1.2 MB and 720 KB; 3.5" 720 KB, 1.44 MB, 2.88 MB),
+  no DMF or XDF. A
+  floppy put in is read when its drive is opened, not by itself; drives
+  without a disk change line (some old 5.25" ones) don't notice a disk
+  taken out either.
+- **CD-ROM**: read only (no burning), the first ATAPI drive only, data
+  discs in ISO 9660 / Joliet (no audio CDs, no UDF, no Rock Ridge, no
+  multisession: the first session only). Long names up to 63 characters
+  (longer ones are cut). A disc with more than 512 folders in all: the
+  folders past that can't be opened.
 - **The disk must be read the same way by the BIOS and by ASMOS**:
   ASMOS writes with the drive's own sector numbers (LBA). A BIOS with a
   wrong drive geometry reads other sectors (see Troubleshooting).
@@ -491,6 +536,10 @@ Disks (drivers/ata.c, fdd.c, fs/)
 
 - ATA in PIO mode with LBA (CHS on old drives). Floppies through the floppy
   controller with DMA and a track cache.
+- CD-ROM: ATAPI packet commands, polled PIO (drivers/ata.c). fs/iso9660.c
+  reads the disc (Joliet first, else the plain ISO names) and shows it to
+  the rest of the system like a read-only FAT volume. The desktop checks
+  the drive every half second and makes /APPS/CDROM from the disc's apps.
 - FAT12/16 with a FAT sector cache. Hard disk writes go to the disk at once;
   floppy writes wait in a track cache for up to half a second (and are
   written out at Shut Down).
@@ -523,8 +572,8 @@ Testing:
   reads, BIOSes that change registers they shouldn't, APM. It also checks
   the error messages on broken disks.
 - `tests/sim/run.sh` runs the simulator: the kernel's C code built for Linux
-  with a fake screen, disks, floppy controller and timer, through 82
-  scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
+  with a fake screen, disks, floppy controller, CD drive and timer, through
+  92 scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
   about 20 seconds. `tests/sim/run.sh setup zipui` runs only those.
 - GitHub Actions does the build, `make boottest` and the simulator on every
   push (.github/workflows/ci.yml).
@@ -552,7 +601,8 @@ os/          Core OS: apps, scheduler, app guard, watchdog, errors
 interrupts/  IDT setup and interrupt handlers
 drivers/     GPU, pointer, sound, NIC, ATA, floppy, PS/2 keyboard/mouse,
              serial mouse, PC speaker, ports, PCI
-fs/          FAT file system, floppy mount/eject, formatting, ZIP, installer
+fs/          FAT file system, ISO 9660 (CD), floppy mount/eject, formatting,
+             ZIP, installer
 ui/          Window manager, desktop, widgets, dialogs, cursor, screen saver
 shell/       Shell, commands, built-in assembler
 apps/        Built-in apps (FileF, TEditor, Settings, Setup...)
@@ -562,7 +612,8 @@ lib/         Freestanding libs: memory, strings, math, time, graphics,
 config/      Compile-time and saved settings (ASMOS.CFG)
 fonts/       Fonts
 network/     IPv4, DNS, Gopher client
-tools/       mkdisk.py (disk images), bootemu.py / boottest.py (boot tests)
+tools/       mkdisk.py (disk images), mkiso.py (CD images),
+             bootemu.py / boottest.py (boot tests)
 docs/        Boot and setup, apps, the UI toolkit
 ```
 

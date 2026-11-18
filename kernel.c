@@ -280,6 +280,10 @@ void kmain(void) {
         cli_run();
     }
 
+    /* Settings > System: everything twice the size (drivers/gpu.h) */
+    gpu_set_zoom(g_cfg.ui_zoom2 ? 2 : 1);
+    mouse_apply(0, 0, false, false, false); /* the pointer on the smaller one */
+
     desktop_fs_init();
 
     wm_init();

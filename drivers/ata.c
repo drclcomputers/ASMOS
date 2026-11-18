@@ -1,4 +1,5 @@
 #include "drivers/ata.h"
+#include "drivers/cdrom.h"
 #include "drivers/pci.h"
 #include "lib/io.h"
 #include "lib/memory.h"
@@ -164,7 +165,8 @@ static bool identify(int ch, int slave, ata_disk_t *d) {
     delay400(c);
     if (status(c) == 0 || !wait_not_busy(c, 0x400000))
         return false;
-    /* ATAPI / SATA signatures: not a hard disk we can use */
+    /* ATAPI / SATA signatures: not a hard disk we can use (a CD drive is
+     * looked at by atapi_identify) */
     if (inb(c->base + ATA_REG_LBA_MID) || inb(c->base + ATA_REG_LBA_HI))
         return false;
     if (!wait_drq(c))
@@ -223,6 +225,8 @@ static bool is_asmos_disk(int idx) {
     return ok;
 }
 
+static bool atapi_identify(int ch, int slave);
+
 int ata_init(uint8_t bios_boot_drive) {
     find_controller();
     for (int ch = 0; ch < 2; ch++)
@@ -231,8 +235,10 @@ int ata_init(uint8_t bios_boot_drive) {
     for (int i = 0; i < ATA_MAX_DISKS; i++)
         if (identify(i / 2, i % 2, &s_disks[i]))
             found++;
-        else
+        else {
             s_disks[i].present = false;
+            atapi_identify(i / 2, i % 2); /* a CD drive? */
+        }
 
     /* HDA = the disk we booted from: one carrying our boot sector. If
      * several do, the BIOS drive number picks (0x80 = first disk the BIOS
@@ -363,4 +369,174 @@ void ata_park(bool spin_down) {
         if (spin_down && !disk_cmd(d, 0xE0, 10000)) /* STANDBY IMMEDIATE */
             disk_cmd(d, 0x94, 10000); /* the pre-ATA-2 code for it */
     }
+}
+
+/* ── the CD-ROM drive (ATAPI; drivers/cdrom.h) ─────────────────────────────
+ * Commands go as 12-byte SCSI packets: PACKET (A0h), then the packet as 6
+ * words, then the data in pieces whose size the drive puts in the cylinder
+ * registers. All polled; the waits are timed (a disc spins up for
+ * seconds). */
+
+static struct {
+    bool present;
+    uint8_t channel, slave;
+    char model[41];
+} s_cd;
+
+/* BSY clear within ms (other bits are valid then) */
+static bool cd_wait(const ata_channel_t *c, uint32_t ms, uint8_t *st) {
+    uint32_t t0 = time_millis();
+    do {
+        uint8_t s = status(c);
+        if (s == 0xFF)
+            return false;
+        if (!(s & ATA_SR_BSY)) {
+            *st = s;
+            return true;
+        }
+    } while (time_millis() - t0 < ms);
+    return false;
+}
+
+static bool atapi_identify(int ch, int slave) {
+    if (s_cd.present)
+        return false; /* the first one found */
+    const ata_channel_t *c = &s_chan[ch];
+    outb(c->base + ATA_REG_DRIVE, slave ? 0xB0 : 0xA0);
+    delay400(c);
+    /* after the failed IDENTIFY (or a reset) an ATAPI drive shows
+     * 14h EBh in the cylinder registers */
+    if (inb(c->base + ATA_REG_LBA_MID) != 0x14 ||
+        inb(c->base + ATA_REG_LBA_HI) != 0xEB)
+        return false;
+    outb(c->base + ATA_REG_COMMAND, 0xA1); /* IDENTIFY PACKET DEVICE */
+    delay400(c);
+    uint8_t st;
+    if (!cd_wait(c, 2000, &st) || !(st & ATA_SR_DRQ))
+        return false;
+    uint16_t id[256];
+    for (int i = 0; i < 256; i++)
+        id[i] = inw(c->base + ATA_REG_DATA);
+    if (((id[0] >> 8) & 0x1F) != 5) /* device type 5: CD/DVD */
+        return false;
+    s_cd.present = true;
+    s_cd.channel = (uint8_t)ch;
+    s_cd.slave = (uint8_t)slave;
+    copy_model(s_cd.model, id);
+    return true;
+}
+
+bool cd_present(void) { return s_cd.present; }
+const char *cd_model(void) { return s_cd.model; }
+
+/* one packet command; data in to buf (up to len bytes, the rest dropped).
+ * Returns the bytes read, or -1 (the drive said no: see REQUEST SENSE) */
+static int cd_packet(const uint8_t pkt[12], void *buf, uint32_t len,
+                     uint32_t ms) {
+    if (!s_cd.present)
+        return -1;
+    const ata_channel_t *c = &s_chan[s_cd.channel];
+    uint8_t st;
+    outb(c->base + ATA_REG_DRIVE, s_cd.slave ? 0xB0 : 0xA0);
+    delay400(c);
+    if (!cd_wait(c, 1000, &st))
+        return -1;
+    uint32_t limit = len > 0xF800 ? 0xF800 : (len ? len : 2);
+    outb(c->base + ATA_REG_FEATURES, 0); /* PIO */
+    outb(c->base + ATA_REG_LBA_MID, (uint8_t)(limit & 0xFF));
+    outb(c->base + ATA_REG_LBA_HI, (uint8_t)(limit >> 8));
+    outb(c->base + ATA_REG_COMMAND, 0xA0); /* PACKET */
+    delay400(c);
+    if (!cd_wait(c, 1000, &st) || (st & ATA_SR_ERR) || !(st & ATA_SR_DRQ))
+        return -1;
+    for (int i = 0; i < 6; i++)
+        outw(c->base + ATA_REG_DATA,
+             (uint16_t)(pkt[2 * i] | (uint16_t)pkt[2 * i + 1] << 8));
+    uint8_t *out = buf;
+    uint32_t got = 0;
+    while (true) {
+        delay400(c);
+        if (!cd_wait(c, ms, &st))
+            return -1;
+        if (st & ATA_SR_ERR)
+            return -1;
+        if (!(st & ATA_SR_DRQ))
+            break; /* done */
+        uint32_t n = inb(c->base + ATA_REG_LBA_MID) |
+                     (uint32_t)inb(c->base + ATA_REG_LBA_HI) << 8;
+        if (!n)
+            return -1;
+        for (uint32_t i = 0; i < (n + 1) / 2; i++) {
+            uint16_t w = inw(c->base + ATA_REG_DATA);
+            if (got < len)
+                out[got] = (uint8_t)w;
+            if (got + 1 < len)
+                out[got + 1] = (uint8_t)(w >> 8);
+            got += 2;
+        }
+    }
+    return (int)(got < len ? got : len);
+}
+
+static bool cd_sense(uint8_t *key, uint8_t *asc) {
+    uint8_t pkt[12] = {0x03, 0, 0, 0, 18, 0}, b[18];
+    if (cd_packet(pkt, b, sizeof(b), 1000) < 14)
+        return false;
+    *key = b[2] & 0x0F;
+    *asc = b[12];
+    return true;
+}
+
+cd_state_t cd_check(void) {
+    if (!s_cd.present)
+        return CD_NONE;
+    uint8_t pkt[12] = {0}; /* TEST UNIT READY */
+    if (cd_packet(pkt, NULL, 0, 1000) >= 0)
+        return CD_READY;
+    uint8_t key = 0, asc = 0;
+    if (!cd_sense(&key, &asc))
+        return CD_EMPTY;
+    if (key == 6) /* UNIT ATTENTION: a disc went in, or was swapped */
+        return CD_CHANGED;
+    if (key == 2 && asc == 0x04) /* NOT READY, becoming ready */
+        return CD_SPINNING;
+    return CD_EMPTY; /* 3Ah: no medium */
+}
+
+bool cd_read(uint32_t lba, uint32_t count, void *buf) {
+    if (!count || count > 16)
+        return false;
+    for (int tries = 0; tries < 3; tries++) {
+        uint8_t pkt[12] = {0x28,
+                           0, /* READ (10) */
+                           (uint8_t)(lba >> 24),
+                           (uint8_t)(lba >> 16),
+                           (uint8_t)(lba >> 8),
+                           (uint8_t)lba,
+                           0,
+                           (uint8_t)(count >> 8),
+                           (uint8_t)count,
+                           0};
+        if (cd_packet(pkt, buf, count * CD_SECTOR, 10000) ==
+            (int)(count * CD_SECTOR))
+            return true;
+        uint8_t key, asc;
+        cd_sense(&key, &asc); /* clears it */
+    }
+    return false;
+}
+
+bool cd_capacity(uint32_t *sectors) {
+    uint8_t pkt[12] = {0x25}, b[8]; /* READ CAPACITY */
+    if (cd_packet(pkt, b, 8, 5000) != 8)
+        return false;
+    *sectors = ((uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 |
+                (uint32_t)b[2] << 8 | b[3]) +
+               1;
+    return true;
+}
+
+bool cd_eject(void) {
+    uint8_t pkt[12] = {0x1B, 0, 0, 0, 0x02}; /* START STOP UNIT: eject */
+    return cd_packet(pkt, NULL, 0, 5000) >= 0;
 }

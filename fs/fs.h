@@ -73,7 +73,8 @@ typedef struct __attribute__((packed)) {
 #define DRIVE_HDB 1
 #define DRIVE_FDD0 2
 #define DRIVE_FDD1 3
-#define DRIVE_COUNT 4
+#define DRIVE_CD0 4 /* the CD-ROM: ISO 9660, read only (fs/iso9660.h) */
+#define DRIVE_COUNT 5
 
 typedef enum {
     FAT_TYPE_FAT12 = 12,
@@ -119,10 +120,10 @@ typedef struct {
 
 extern const char *g_drive_paths[DRIVE_COUNT];
 
-#define VFS_MOUNT_COUNT 3
+#define VFS_MOUNT_COUNT 4
 extern vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT];
 
-#define PROTECTED_PATH_COUNT 7
+#define PROTECTED_PATH_COUNT 8
 extern const char *g_protected_paths[PROTECTED_PATH_COUNT];
 
 extern fat_vol_t g_drives[DRIVE_COUNT];
@@ -136,10 +137,19 @@ bool fs_mount_drive(uint8_t drive_id);
 /* goes up whenever a file or folder is made, deleted or renamed, or a disk
  * is mounted: for views that list folders (the Apps menu) */
 extern uint32_t g_fs_rev;
+/* one count per drive, up on every mount and unmount: a window showing a
+ * drive sees it was taken out, or put back with another disk */
+extern uint8_t g_mount_gen[DRIVE_COUNT];
 bool fs_select_drive(uint8_t drive_id);
 uint8_t fs_current_drive(void);
 const char *fs_drive_label(uint8_t drive_id);
 bool fs_drive_mounted(uint8_t drive_id);
+/* the CD drive: look whether a disc went in or out (a few times a second at
+ * most); true if /CD0 came or went */
+bool fs_cd_poll(void);
+/* a floppy taken out: unmounted (twice a second; silent). true if one
+ * went; *lost: a drive whose last writes never got to it, or DRIVE_COUNT */
+bool fs_fdd_poll(uint8_t *lost);
 bool fs_resolve_dir(const char *path, uint8_t *out_drive,
                     uint16_t *out_cluster);
 bool fs_get_usage(uint32_t *total_bytes, uint32_t *used_bytes);
@@ -227,8 +237,8 @@ bool fs_part_is_fat(uint8_t type);
 /* the FAT partition to use in an MBR (sector 0): the one starting at
  * prefer_lba if there is one (the one booted from), else the active one,
  * else the first. false: no FAT partition (or no partition table). */
-bool fs_pick_partition(const uint8_t *mbr, uint32_t prefer_lba,
-                       uint32_t *lba, uint32_t *sectors);
+bool fs_pick_partition(const uint8_t *mbr, uint32_t prefer_lba, uint32_t *lba,
+                       uint32_t *sectors);
 /* kmain: the volume the loader started (bootdefs.inc 0x060C), so that
  * one is HDA's when a disk has several */
 void fs_set_boot_volume(uint32_t lba);

@@ -1,5 +1,6 @@
 #include "ui/desktop.h"
 #include "drivers/ata.h"
+#include "drivers/cdrom.h"
 #include "drivers/fdd.h"
 #include "drivers/gpu.h"
 #include "os/watchdog.h"
@@ -199,7 +200,10 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
         break;
     }
     case DESKTOP_ITEM_FDD:
-        draw_floppy_icon(ax, ay, it->selected);
+        if (it->drive_id == DRIVE_CD0)
+            draw_cd_icon(ax, ay, it->selected);
+        else
+            draw_floppy_icon(ax, ay, it->selected);
         break;
     case DESKTOP_ITEM_TRASH:
         draw_trash_icon(ax, ay, it->selected, it->full);
@@ -438,32 +442,34 @@ static void menu_restart(void) {
                 (void *)do_restart);
 }
 
+/* the selected floppy, or else the one with a disk in */
 static void menu_eject_fdd(void) {
+    uint8_t d = DRIVE_COUNT;
     int sel = selected_idx();
-    if (sel >= 0) {
-        desktop_item_t *it = &desktop_fs_items()[sel];
-        if (it->kind == DESKTOP_ITEM_FDD) {
-            if (fdd_eject(it->drive_id)) {
-                desktop_fs_set_dirty();
-                return;
-            }
-        }
+    if (sel >= 0 && desktop_fs_items()[sel].kind == DESKTOP_ITEM_FDD &&
+        fs_drive_mounted(desktop_fs_items()[sel].drive_id))
+        d = desktop_fs_items()[sel].drive_id;
+    for (uint8_t i = DRIVE_FDD0; i <= DRIVE_FDD1 && d == DRIVE_COUNT; i++)
+        if (fs_drive_mounted(i))
+            d = i;
+    if (d != DRIVE_COUNT && fdd_eject(d)) {
+        desktop_fs_set_dirty();
+        return;
     }
-    dlg_message(NULL, "Eject", "No floppy selected or mounted.");
+    dlg_message(NULL, "Eject", "There is no floppy disk in the drive.");
+}
+
+/* opens the tray; the disc's icon and apps go at once */
+static void menu_eject_cd(void) {
+    if (!cd_eject())
+        dlg_message(NULL, "Eject", "The CD drive did not open.");
+    fs_unmount(DRIVE_CD0);
+    desktop_cd_links();
+    desktop_fs_set_dirty();
 }
 
 extern app_descriptor fdformat_app;
-static void menu_format_fdd(void) { os_launch_app(&fdformat_app); }
-
-static void menu_insert_fdd(void) {
-    bool a = fdd_insert(DRIVE_FDD0), b = fdd_insert(DRIVE_FDD1); /* both */
-    if (a || b) {
-        desktop_fs_set_dirty();
-    } else {
-        dlg_message(NULL, "Insert Floppy",
-                    "No floppy found or already mounted.");
-    }
-}
+static void menu_format_disk(void) { os_launch_app(&fdformat_app); }
 
 /* ── the Apps menu ──────────────────────────────────────────────────────── */
 static menu *s_apps_menu;
@@ -740,6 +746,178 @@ void desktop_refresh_apps_menu(void) {
     add_folder_apps(s_apps_menu, APPS_DIR); /* the ones in /APPS itself */
 }
 
+/* ── the CD's apps: /APPS/CDROM ─────────────────────────────────────────
+ * While a CD is in, /APPS/CDROM holds a shortcut for each .APP on it (in
+ * its root, its /APPS and the folders in /APPS), so they are in the Apps
+ * menu under "CDROM". The folder goes when the disc does (and at boot if
+ * no disc is in: left from last time). */
+/* The CD's apps: shortcuts in /APPS/CDROM, made when a disc goes in and
+ * deleted when it comes out. Only what was made here is deleted: the
+ * files made are listed in CDLINKS.LST (hidden) in the folder, and the
+ * folder goes only if nothing else is left in it. A CDROM folder of your
+ * own keeps everything you put in it. */
+#define CD_APPS_DIR APPS_DIR "/CDROM"
+#define CD_LIST CD_APPS_DIR "/CDLINKS.LST"
+#define CD_APPS_MAX 32
+#define CD_LIST_SZ ((CD_APPS_MAX + 1) * 64) /* short names: < 64 a line */
+
+typedef struct {
+    int made;
+    char *list; /* the paths made, a line each */
+    int len;
+} cd_links_ctx;
+
+static void cd_made(cd_links_ctx *c, const char *path) {
+    if ((int)strlen(path) + 3 > CD_LIST_SZ - c->len)
+        return;
+    c->len += snprintf(c->list + c->len, CD_LIST_SZ - c->len, "%s\r\n", path);
+    if (c->len > CD_LIST_SZ - 1)
+        c->len = CD_LIST_SZ - 1;
+}
+
+/* the files the last disc's list names (in the folder only), the list,
+ * then the folder if it is empty */
+static void cd_links_remove(void) {
+    static char t[CD_LIST_SZ];
+    fat_file_t f;
+    int n = 0;
+    if (fs_open(CD_LIST, &f)) {
+        n = fs_read(&f, t, sizeof(t) - 1);
+        fs_close(&f);
+    }
+    t[n > 0 ? n : 0] = 0;
+    const int dl = (int)strlen(CD_APPS_DIR "/");
+    char *p = t;
+    while (*p) {
+        char *e = p;
+        while (*e && *e != '\r' && *e != '\n')
+            e++;
+        char end = *e;
+        *e = 0;
+        if (!strncmp(p, CD_APPS_DIR "/", dl) && !strchr(p + dl, '/'))
+            fs_delete(p);
+        p = end ? e + 1 : e;
+    }
+    fs_delete(CD_LIST);
+    uint8_t drive;
+    uint16_t cl;
+    if (fs_resolve_dir(CD_APPS_DIR, &drive, &cl) && fs_is_dir_empty(drive, cl))
+        fs_rmdir(CD_APPS_DIR);
+}
+
+static void cd_link(const char *app_path, cd_links_ctx *c) {
+    char label[24], name[FS_NAME_SZ], path[FS_PATH_SZ], text[FS_PATH_SZ + 32];
+    if (c->made >= CD_APPS_MAX ||
+        !appload_peek_name(app_path, label, sizeof(label)))
+        return;
+    int k = 0; /* the label, as a file name */
+    for (const char *p = label; *p && k < 24; p++)
+        name[k++] = fs_long_char_ok(*p) && *p != '/' ? *p : '_';
+    name[k] = 0;
+    const char *err;
+    if (!k || !fs_validate_name(name, false, &err))
+        snprintf(name, sizeof(name), "CDAPP%d", c->made + 1);
+    snprintf(path, sizeof(path), "%s/%s.LNK", CD_APPS_DIR, name);
+    for (int n = 2; n < 10; n++) { /* two apps with one name */
+        dir_entry_t de;
+        if (!fs_find(path, &de))
+            break;
+        snprintf(path, sizeof(path), "%s/%s %d.LNK", CD_APPS_DIR, name, n);
+    }
+    dir_entry_t de;
+    if (fs_find(path, &de))
+        return; /* never over a file that is there */
+    int len = snprintf(text, sizeof(text), "%s\r\n%s\r\n", app_path, label);
+    fat_file_t f;
+    if (fs_create(path, &f)) {
+        fs_write(&f, text, len);
+        fs_close(&f);
+        c->made++;
+        cd_made(c, path);
+    }
+}
+
+typedef struct {
+    const char *dir;
+    cd_links_ctx *c;
+    bool sub; /* also the folders in it */
+} cd_scan_ctx;
+
+static void cd_scan(const char *dir, cd_links_ctx *c, bool sub);
+
+static bool cd_scan_cb(const dir_entry_t *e, const char *name, void *user) {
+    cd_scan_ctx *s = user;
+    char p[FS_PATH_SZ];
+    snprintf(p, sizeof(p), "%s/%s", s->dir, name);
+    if ((e->attr & ATTR_DIRECTORY) && s->sub)
+        cd_scan(p, s->c, false);
+    else if (is_ext(e, "app"))
+        cd_link(p, s->c);
+    return s->c->made < CD_APPS_MAX;
+}
+
+static void cd_scan(const char *dir, cd_links_ctx *c, bool sub) {
+    uint8_t drive;
+    uint16_t cluster;
+    if (!fs_resolve_dir(dir, &drive, &cluster))
+        return;
+    cd_scan_ctx s = {dir, c, sub};
+    fs_walk_dir(drive, cluster, cd_scan_cb, &s);
+}
+
+void desktop_cd_links(void) {
+    if (g_setup_mode)
+        return; /* nothing is written to the hard disk from the floppy */
+    dir_entry_t de;
+    if (fs_find(CD_APPS_DIR, &de) && (de.attr & ATTR_DIRECTORY))
+        cd_links_remove();
+    if (!fs_drive_mounted(DRIVE_CD0) || !fs_find(APPS_DIR, &de))
+        return;
+    static char list[CD_LIST_SZ];
+    cd_links_ctx c = {0, list, 0};
+    bool had = fs_find(CD_APPS_DIR, &de); /* yours: kept as it is */
+    if (had && !(de.attr & ATTR_DIRECTORY))
+        return; /* a file with that name */
+    if (!had && !fs_mkdir(CD_APPS_DIR))
+        return;
+    cd_scan("/CD0", &c, false);
+    cd_scan("/CD0/APPS", &c, true);
+    fat_file_t f;
+    if (c.made && !fs_find(CD_APPS_DIR "/GROUP.TXT", &de) &&
+        fs_create(CD_APPS_DIR "/GROUP.TXT", &f)) { /* its name in the menu */
+        fs_write(&f, "CDROM\r\n", 7);
+        fs_close(&f);
+        cd_made(&c, CD_APPS_DIR "/GROUP.TXT");
+    }
+    if (c.made && fs_create(CD_LIST, &f)) {
+        fs_write(&f, list, c.len);
+        fs_close(&f);
+        fs_set_attr(CD_LIST, ATTR_HIDDEN);
+    }
+    if (!c.made && !had)
+        fs_rmdir(CD_APPS_DIR); /* a disc without apps: no empty group */
+}
+
+/* a disc in or out: its drive icon, its apps */
+static void cd_follow(void) {
+    if (!fs_cd_poll())
+        return;
+    desktop_cd_links();
+    desktop_fs_set_dirty();
+}
+
+/* a floppy taken out without Eject */
+static void fdd_follow(void) {
+    uint8_t lost;
+    if (!fs_fdd_poll(&lost))
+        return;
+    desktop_fs_set_dirty();
+    if (lost != DRIVE_COUNT)
+        dlg_message(NULL, lost == DRIVE_FDD0 ? "FDD0" : "FDD1",
+                    "The disk was taken out before everything was "
+                    "written to it. Put it back and save again.");
+}
+
 /* files changed: rebuild, once a second at most, never under an open menu */
 static void apps_menu_follow(void) {
     if (g_fs_rev == s_apps_rev || g_menubar.open_index >= 0 ||
@@ -770,6 +948,7 @@ void desktop_init(void) {
 
     s_apps_menu = window_add_menu(win, "Apps");
     apps_dir_defaults();         /* only if /APPS is missing */
+    desktop_cd_links();          /* the disc's apps (or none left over) */
     desktop_refresh_apps_menu(); /* built from /APPS: see above */
 
     menu *file_menu = window_add_menu(win, "File");
@@ -792,9 +971,10 @@ void desktop_init(void) {
     menu_add_item(edit_menu, "Extract...", menu_extract);
 
     menu *action_menu = window_add_menu(win, "Action");
-    menu_add_item(action_menu, "Insert Floppy", menu_insert_fdd);
     menu_add_item(action_menu, "Eject Floppy", menu_eject_fdd);
-    menu_add_item(action_menu, "Format Floppy...", menu_format_fdd);
+    menu_add_item(action_menu, "Eject CD", menu_eject_cd);
+    menu_enable_last(action_menu, cd_present());
+    menu_add_item(action_menu, "Format Disk...", menu_format_disk);
     menu_add_separator(action_menu);
     menu_add_item(action_menu, "Restart", menu_restart);
     menu_add_item(action_menu, "Shut Down", menu_shutdown);
@@ -873,9 +1053,12 @@ static void context_menu(int hit, int x, int y) {
         menu_enable_last(m, items[hit].full);
     } else if (items[hit].kind == DESKTOP_ITEM_FDD) {
         menu_add_item(m, "Open", ctx_open);
-        if (items[hit].drive_id == DRIVE_FDD0) {
+        if (items[hit].drive_id != DRIVE_CD0) { /* FDD0, FDD1 */
             menu_add_separator(m);
             menu_add_item(m, "Eject Floppy", menu_eject_fdd);
+        } else if (items[hit].drive_id == DRIVE_CD0) {
+            menu_add_separator(m);
+            menu_add_item(m, "Eject CD", menu_eject_cd);
         }
     } else {
         menu_add_item(m, "Open", ctx_open);
@@ -942,6 +1125,8 @@ void desktop_draw(void) {
 }
 
 void desktop_on_frame(void) {
+    cd_follow();
+    fdd_follow();
     apps_menu_follow();
     if (desktop_fs_is_dirty())
         desktop_fs_reload();

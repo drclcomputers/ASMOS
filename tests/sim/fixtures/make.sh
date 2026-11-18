@@ -20,3 +20,17 @@ $LD -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs -e init -o hello.elf hello.o
 python3 "$ROOT/tools/mkapp.py" --elf hello.elf --name Hello --out HELLO.APP \
     --state 64 --single --window-first >/dev/null
 rm -f hello.o hello.elf
+
+# a CD image: fixtures/cd, an app from the build, a big file, a folder with
+# many files (its directory spans sectors)
+rm -rf cdbuild && mkdir -p cdbuild/APPS/Games cdbuild/Many
+cp -r cd/. cdbuild/
+cp "$ROOT/build/extapps/sudoku.APP" cdbuild/APPS/Games/SUDOKU.APP
+python3 - <<'PY'
+with open("cdbuild/BIG.BIN", "wb") as f:
+    f.write(bytes((i * 7 + i // 2048) & 255 for i in range(150000)))
+for i in range(60):
+    open("cdbuild/Many/File number %02d.txt" % i, "w").write("file %d\n" % i)
+PY
+python3 "$ROOT/tools/mkiso.py" cdbuild cd.iso --label "Test CD" >/dev/null
+python3 "$ROOT/tools/mkiso.py" cdbuild cd83.iso --label "Test CD" --no-joliet >/dev/null

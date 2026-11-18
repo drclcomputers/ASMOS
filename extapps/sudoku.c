@@ -13,8 +13,9 @@
  */
 #include "extapps/shim.h"
 
-/* cell size, pixels: 15 (board 149 px), 11 on a 200-line screen (113) */
-static int s_cs = 15;
+/* cell size, pixels: the same on every screen (board 113 px, fits 320x200;
+ * Settings > System > Large display makes it bigger) */
+static int s_cs = 11;
 #define CS s_cs
 #define OFF(i) (2 + (i) * (CS + 1) + (i) / 3)
 #define BOARD OFF(9) /* cells + thin and thick lines */
@@ -550,10 +551,8 @@ static void sd_init(void *state) {
     sudoku_t *s = state;
     const os_api_t *api = s->api = A;
     const ui_api_t *ui = api->ui;
-    s_cs = g_screen_height < 300 ? 11 : 15; /* fits 320x200 */
     int cw = BOARD + 8, ch = BOARD + 8 + STATUS_H;
-    s->win = ui->app_window(s, "Sudoku", s_cs < 15 ? 20 : 40, 13, cw + 2,
-                            ch + 10, DARK_GRAY, 0);
+    s->win = ui->app_window(s, "Sudoku", 20, 13, cw + 2, ch + 10, DARK_GRAY, 0);
     if (!s->win)
         return;
     s->view = ui->custom(s->win, 0, 0, cw, BOARD + 8, paint, on_view,

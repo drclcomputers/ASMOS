@@ -17,3 +17,4 @@ apps/asmusic.c
 /tools/legacy
 /tools/music
 /build
+*.iso

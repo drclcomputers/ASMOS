@@ -1009,6 +1009,298 @@ int scen2(const char *name) {
         g_video_limits = 0x43;
         return fails;
     }
+    if (!strcmp(name, "zoom")) {
+        /* Settings > System > "Large display: 2x": only from 640x400 up; with
+         * it on (kmain: gpu_set_zoom) the desktop is half the screen each way
+         */
+        int fails = 0;
+        char b[300];
+        extern int g_zoom;
+        snprintf(b, sizeof b, "    screen mode %d, zoom %d: %dx%d\n",
+                 g_video_mode, g_zoom, SCREEN_WIDTH, SCREEN_HEIGHT);
+        wr(1, b);
+        sim_launch("Settings");
+        sim_frames(3);
+        window *w = wm_focused_window();
+        control *zc = NULL;
+        for (control *c = w ? w->controls : NULL; c; c = c->next)
+            if (c->type == CTL_CHECK && c->text &&
+                strstr(c->text, "Large display"))
+                zc = c;
+        T("the switch is there", zc != NULL);
+        if (!zc)
+            return fails;
+        T("offered only from 640x400 up", zc->enabled == (g_video_mode != 0));
+        if (g_zoom == 2) {
+            T("on: half the screen each way",
+              SCREEN_WIDTH * 2 == (g_video_mode == 3 ? 800 : 640));
+            T("the switch shows it on", ctl_value(zc) == 1);
+            snprintf(b, sizeof b, "    mouse %d,%d\n", mouse.x, mouse.y);
+            wr(1, b);
+            T("the desktop fits",
+              mouse.x < SCREEN_WIDTH && mouse.y < SCREEN_HEIGHT);
+            window *f = NULL;
+            sim_launch("CALCULATOR");
+            sim_frames(3);
+            f = wm_focused_window();
+            T("a window fits on it",
+              f && f->x + f->w <= SCREEN_WIDTH &&
+                  f->y + f->h <= SCREEN_HEIGHT - MENUBAR_H);
+        } else if (zc->enabled) {
+            for (control *c = w->controls; c; c = c->next)
+                if (c->type == CTL_TABS) {
+                    ctl_set_value(c, 5);
+                } /* System */
+            sim_frames(2);
+            sim_click(zc->ax + 4, zc->ay + 4);
+            sim_frames(1);
+            snprintf(b, sizeof b, "    clicked %d,%d visible %d\n", zc->ax,
+                     zc->ay, zc->visible);
+            wr(1, b);
+            T("ticking it sets it", g_cfg.ui_zoom2 == 1);
+            T("takes effect at restart, not now", g_zoom == 1);
+#define CTL_WITH(T_, TXT)                                                      \
+    ({                                                                         \
+        control *r_ = NULL;                                                    \
+        for (control *c_ = w->controls; c_; c_ = c_->next)                     \
+            if (c_->type == T_ && c_->text &&                                  \
+                !strncmp(c_->text, TXT, strlen(TXT)))                          \
+                r_ = c_;                                                       \
+        r_;                                                                    \
+    })
+            control *save = CTL_WITH(CTL_BUTTON, "Save");
+            if (save) {
+                sim_click(save->ax + 4, save->ay + 4);
+                sim_frames(2);
+            }
+            control *st = CTL_WITH(CTL_LABEL, "Saved");
+            snprintf(b, sizeof b, "    status: '%s'\n", st ? st->text : "-");
+            wr(1, b);
+            T("Save: restart to apply",
+              st && !strcmp(st->text, "Saved. Restart to apply."));
+            /* something that applies at once: just "Saved." */
+            for (control *c = w->controls; c; c = c->next)
+                if (c->type == CTL_TABS)
+                    ctl_set_value(c, 0); /* Display */
+            sim_frames(2);
+            g_cfg.wallpaper_pattern = g_cfg.wallpaper_pattern ? 0 : 1;
+            sim_click(save->ax + 4, save->ay + 4);
+            sim_frames(2);
+            st = CTL_WITH(CTL_LABEL, "Saved");
+            snprintf(b, sizeof b, "    status: '%s'\n", st ? st->text : "-");
+            wr(1, b);
+            T("Save, nothing for a restart: just Saved.",
+              st && !strcmp(st->text, "Saved."));
+        }
+        return fails;
+    }
+    if (!strcmp(name, "cdrom")) {
+        /* a CD put in: /CD0, its apps in /APPS/CDROM (and the Apps menu),
+         * read only; taken out: all gone */
+        int fails = 0;
+        char b[300];
+        extern bool sim_cd_insert(const char *);
+        extern void sim_cd_eject(void);
+        extern bool desktop_open_shortcut(const char *);
+        extern int g_cd_reads;
+        dir_entry_t de;
+        fat_file_t f;
+#define CD_FRAMES() sim_frames(40) /* the drive is looked at twice a second */
+        T("no disc: no /CD0", !fs_drive_mounted(DRIVE_CD0));
+        T("no disc: no /APPS/CDROM", !fs_find("/APPS/CDROM", &de));
+        T("the disc image is there", sim_cd_insert(FIXDIR "cd.iso"));
+        CD_FRAMES();
+        T("put in: /CD0", fs_drive_mounted(DRIVE_CD0));
+        snprintf(b, sizeof b, "    label '%s'\n", fs_drive_label(DRIVE_CD0));
+        wr(1, b);
+        T("its label (Joliet)", !strcmp(fs_drive_label(DRIVE_CD0), "Test CD"));
+        bool icon = false;
+        for (int i = 0; i < desktop_fs_count(); i++)
+            if (desktop_fs_items()[i].drive_id == DRIVE_CD0 &&
+                desktop_fs_items()[i].kind == DESKTOP_ITEM_FDD)
+                icon = true;
+        T("a CD icon on the desktop", icon);
+        T("its app: /APPS/CDROM/Sudoku.LNK",
+          fs_find("/APPS/CDROM/Sudoku.LNK", &de));
+        sim_frames(70); /* the Apps menu follows /APPS (once a second) */
+        sim_click(60, 4);
+        sim_frames(2);
+        sim_shot("cd_apps");
+        sim_click(60, 4);
+        sim_frames(2); /* (closes it) */
+        /* long names, any case, 8.3 names */
+        char t[64] = {0};
+        bool ok = fs_open("/CD0/Read me/A long file name.txt", &f);
+        if (ok) {
+            fs_read(&f, t, sizeof t - 1);
+            fs_close(&f);
+        }
+        T("a long name in a long-named folder",
+          ok && !strncmp(t, "hello CD", 8));
+        T("any case", fs_find("/cd0/read ME/a LONG file name.TXT", &de));
+        T("an 8.3 name", fs_find("/CD0/SHORT.TXT", &de) && de.file_size == 7);
+        /* a big file, in pieces of odd sizes and in whole sectors */
+        static uint8_t big[150000];
+        int got = 0, n;
+        ok = fs_open("/CD0/BIG.BIN", &f);
+        static const int piece[] = {1, 2047, 2049, 4096, 10000, 300, 65536};
+        for (int k = 0; ok && (n = fs_read(&f, big + got, piece[k % 7])) > 0;
+             k++)
+            got += n;
+        if (ok)
+            fs_close(&f);
+        int bad = 0;
+        for (int i = 0; i < 150000; i++)
+            bad += big[i] != (uint8_t)((i * 7 + i / 2048) & 255);
+        snprintf(b, sizeof b, "    BIG.BIN: %d bytes, %d wrong\n", got, bad);
+        wr(1, b);
+        T("a big file reads right", got == 150000 && bad == 0);
+        ok = fs_open("/CD0/BIG.BIN", &f) && fs_seek(&f, 100001) &&
+             fs_read(&f, t, 3) == 3;
+        T("seek",
+          ok && (uint8_t)t[0] == (uint8_t)((100001 * 7 + 100001 / 2048) & 255));
+        if (ok)
+            fs_close(&f);
+        /* a folder whose entries fill more than one sector */
+        uint8_t drv;
+        uint16_t cl;
+        int cnt = 0;
+        static dir_entry_t ents[80];
+        static char names[80][FS_NAME_SZ];
+        ok = fs_resolve_dir("/CD0/Many", &drv, &cl) &&
+             fs_list_dir_names(drv, cl, ents, names, 80, &cnt);
+        int files = 0;
+        bool f59 = false;
+        for (int i = 0; i < cnt; i++) {
+            if (names[i][0] != '.')
+                files++;
+            if (!strcmp(names[i], "File number 59.txt"))
+                f59 = true;
+        }
+        snprintf(b, sizeof b, "    /CD0/Many: %d files\n", files);
+        wr(1, b);
+        T("60 files over 2 sectors of folder", ok && files == 60 && f59);
+        /* read only */
+        T("no new file", !fs_create("/CD0/NEW.TXT", &f));
+        T("no new folder", !fs_mkdir("/CD0/NEWDIR"));
+        T("no delete",
+          !fs_delete("/CD0/SHORT.TXT") && fs_find("/CD0/SHORT.TXT", &de));
+        T("no rename", !fs_rename("/CD0/SHORT.TXT", "X.TXT"));
+        ok = fs_open("/CD0/SHORT.TXT", &f);
+        T("no writing to a file on it", ok && fs_write(&f, "x", 1) < 0);
+        if (ok)
+            fs_close(&f);
+        /* copied to the hard disk: writable there */
+        T("copy a file to the hard disk",
+          fs_copy_file("/CD0/BIG.BIN", "/BIG.BIN"));
+        ok = fs_open("/BIG.BIN", &f);
+        got = ok ? fs_read(&f, big, sizeof big) : 0;
+        if (ok)
+            fs_close(&f);
+        bad = 0;
+        for (int i = 0; i < got; i++)
+            bad += big[i] != (uint8_t)((i * 7 + i / 2048) & 255);
+        T("the copy is the same", got == 150000 && bad == 0);
+        T("copy a folder", fs_copy_dir("/CD0/Read me", "/RM") &&
+                               fs_find("/RM/A long file name.txt", &de));
+        T("the copy is not read only",
+          !(de.attr & ATTR_READ_ONLY) && fs_delete("/RM/A long file name.txt"));
+        /* its app from the Apps menu's shortcut */
+        T("the app starts from the CD",
+          desktop_open_shortcut("/APPS/CDROM/Sudoku.LNK"));
+        sim_frames(3);
+        window *w = wm_focused_window();
+        T("its window", w && w->title && !strcmp(w->title, "Sudoku"));
+        if (w)
+            wm_close(w);
+        sim_frames(3);
+        sim_shot("cd1");
+        /* in FileF: a CD0 drive; a window on the disc goes back to Drives
+         * when it is taken out */
+        extern void ff_open_dir_pub(uint16_t, const char *);
+        sim_launch("FILEF");
+        sim_frames(3);
+        window *drives = wm_focused_window();
+        sim_shot("cd_filef");
+        ff_open_dir_pub(0, "/CD0");
+        sim_frames(3);
+        window *onit = wm_focused_window();
+        T("FileF: the disc open",
+          onit && onit->title && !strcmp(onit->title, "/CD0"));
+        sim_shot("cd_filef2");
+        /* out */
+        sim_cd_eject();
+        CD_FRAMES();
+        T("taken out: FileF back at Drives",
+          onit && onit->title && !strcmp(onit->title, "Drives"));
+        sim_shot("cd_filef3");
+        if (onit && onit != drives)
+            wm_close(onit);
+        if (drives)
+            wm_close(drives);
+        sim_frames(3);
+        T("taken out: no /CD0", !fs_drive_mounted(DRIVE_CD0));
+        T("taken out: /APPS/CDROM gone", !fs_find("/APPS/CDROM", &de));
+        icon = false;
+        for (int i = 0; i < desktop_fs_count(); i++)
+            if (desktop_fs_items()[i].drive_id == DRIVE_CD0 &&
+                desktop_fs_items()[i].kind == DESKTOP_ITEM_FDD)
+                icon = true;
+        T("taken out: no icon", !icon);
+        T("taken out: the files are gone", !fs_find("/CD0/SHORT.TXT", &de));
+        /* in again */
+        sim_cd_insert(FIXDIR "cd.iso");
+        CD_FRAMES();
+        T("in again: back", fs_drive_mounted(DRIVE_CD0) &&
+                                fs_find("/APPS/CDROM/Sudoku.LNK", &de));
+        snprintf(b, sizeof b, "    %d CD sectors read\n", g_cd_reads);
+        wr(1, b);
+        /* a plain ISO 9660 disc (no Joliet): 8.3 names in capitals */
+        sim_cd_eject();
+        CD_FRAMES();
+        sim_cd_insert(FIXDIR "cd83.iso");
+        CD_FRAMES();
+        snprintf(b, sizeof b, "    plain disc: label '%s'\n",
+                 fs_drive_label(DRIVE_CD0));
+        wr(1, b);
+        T("plain ISO: mounted, its label",
+          fs_drive_mounted(DRIVE_CD0) &&
+              !strcmp(fs_drive_label(DRIVE_CD0), "TEST_CD"));
+        T("plain ISO: 8.3 names", fs_find("/CD0/SHORT.TXT", &de) &&
+                                      fs_find("/CD0/BIG.BIN", &de) &&
+                                      de.file_size == 150000);
+        T("plain ISO: a folder's made-up 8.3 name",
+          fs_find("/CD0/READ_ME", &de) && (de.attr & ATTR_DIRECTORY));
+        T("plain ISO: its app", fs_find("/APPS/CDROM/Sudoku.LNK", &de));
+        /* a CDROM folder of your own: what is in it stays */
+        sim_cd_eject();
+        CD_FRAMES();
+        T("out: the made folder gone", !fs_find("/APPS/CDROM", &de));
+        T("mine",
+          fs_mkdir("/APPS/CDROM") && fs_create("/APPS/CDROM/MINE.TXT", &f));
+        fs_write(&f, "mine", 4);
+        fs_close(&f);
+        T("my own Sudoku.LNK", fs_create("/APPS/CDROM/Sudoku.LNK", &f));
+        fs_write(&f, "/APPS/Games/SUDOKU.APP\r\nSudoku\r\n", 32);
+        fs_close(&f);
+        sim_cd_insert(FIXDIR "cd.iso");
+        CD_FRAMES();
+        T("in: its link next to mine (Sudoku 2)",
+          fs_find("/APPS/CDROM/Sudoku 2.LNK", &de));
+        ok = fs_open("/APPS/CDROM/Sudoku.LNK", &f);
+        n = ok ? fs_read(&f, t, 30) : 0;
+        if (ok)
+            fs_close(&f);
+        T("mine not written over", n > 6 && !strncmp(t, "/APPS/", 6));
+        sim_cd_eject();
+        CD_FRAMES();
+        T("out: its link gone", !fs_find("/APPS/CDROM/Sudoku 2.LNK", &de) &&
+                                    !fs_find("/APPS/CDROM/CDLINKS.LST", &de));
+        T("out: my folder and files stay",
+          fs_find("/APPS/CDROM/MINE.TXT", &de) &&
+              fs_find("/APPS/CDROM/Sudoku.LNK", &de));
+        return fails;
+    }
     if (!strcmp(name, "winpos")) {
         /* an app's window opens where it was last closed (/PREFS/WINDOWS.INI)
          */
@@ -2083,6 +2375,8 @@ int scen2(const char *name) {
             window *win;
             control *drive, *size, *label, *quick, *start, *bar, *msg;
             int sizes[6], nsizes;
+            uint8_t ids[3];
+            int nids;
             bool running;
         } fs_t;
         fs_t *st = a->state;
@@ -2102,6 +2396,129 @@ int scen2(const char *name) {
         T("done, 720K",
           !st->running && strstr(ctl_text(st->msg), "730112") != NULL);
         sim_shot("fmt3");
+        /* no disk in the drive: refused at once, nothing formatted */
+        extern void fdc_insert_unit(int, int);
+        extern bool g_fdc_wp;
+        extern int g_fdc_formats;
+        fdc_insert_unit(0, 0);
+        int fm0 = g_fdc_formats;
+        o[0] = 0;
+        cli_execute_command("format fdd0 1440", o, sizeof o);
+        wr(1, o);
+        T("no disk: format refused",
+          strstr(o, "no disk in FDD0") != NULL && g_fdc_formats == fm0);
+        o[0] = 0;
+        cli_execute_command("format fdd0 /q", o, sizeof o);
+        T("no disk: quick refused", strstr(o, "no disk in FDD0") != NULL);
+        st->start->handler(st->start, EV_CLICK);
+        sim_frames(3);
+        sim_key(0x1C);
+        sim_frames(5);
+        window *mw = wm_focused_window();
+        T("no disk: the window says so, not running",
+          !st->running && mw && mw != st->win);
+        sim_shot("fmt4");
+        if (mw && mw != st->win)
+            wm_close(mw);
+        /* write-protected */
+        fdc_insert_unit(0, 1440);
+        g_fdc_wp = true;
+        o[0] = 0;
+        cli_execute_command("format fdd0 1440", o, sizeof o);
+        T("write-protected: refused",
+          strstr(o, "write-protected") != NULL && g_fdc_formats == fm0);
+        g_fdc_wp = false;
+        fdc_insert_unit(0, 1440); /* (the tab is moved with the disk out) */
+        o[0] = 0;
+        cli_execute_command("format fdd0 /q BACK", o, sizeof o);
+        wr(1, o);
+        T("disk back: formats",
+          fs_drive_mounted(DRIVE_FDD0) &&
+              !strcmp(fs_drive_label(DRIVE_FDD0), "BACK"));
+        return fails;
+    }
+    if (!strcmp(name, "formathdb")) {
+        /* Format Disk: FDD0 and HDB in the list (never HDA); HDB erased
+         * into one empty, labelled volume, the files on it gone */
+        int fails = 0;
+        char b[300];
+        extern void sim_disk_blank(int, uint32_t, const char *);
+        sim_disk_blank(1, 40 * 2048, "CONNER CP3044");
+        const char *e = inst_erase_label(1, "OLD", NULL, NULL);
+        T("HDB with files on it",
+          !e && fs_mount_drive(DRIVE_HDB) && fs_mkdir("/HDB/STUFF") &&
+              !strcmp(fs_drive_label(DRIVE_HDB), "OLD"));
+        desktop_fs_set_dirty();
+        app_instance_t *a = sim_launch("FORMAT");
+        sim_frames(5);
+        typedef struct {
+            window *win;
+            control *drive, *size, *label, *quick, *start, *bar, *msg;
+            int sizes[6], nsizes;
+            uint8_t ids[3];
+            int nids;
+            bool running;
+        } fs_t;
+        fs_t *st = a->state;
+        bool hda = false;
+        for (int i = 0; i < st->nids; i++)
+            hda |= st->ids[i] == DRIVE_HDA;
+        snprintf(b, sizeof b, "    drives: %d (%s ...)\n", st->nids,
+                 list_get(st->drive, 0));
+        wr(1, b);
+        T("FDD0 and HDB listed, not HDA",
+          st->nids == 2 && st->ids[0] == DRIVE_FDD0 &&
+              st->ids[1] == DRIVE_HDB && !hda &&
+              !strcmp(list_get(st->drive, 0), "FDD0"));
+        ctl_set_value(st->drive, 1);
+        st->drive->handler(st->drive, EV_CHANGE);
+        sim_frames(2);
+        snprintf(b, sizeof b, "    size '%s', msg '%s'\n",
+                 list_get(st->size, 0), ctl_text(st->msg));
+        wr(1, b);
+        T("HDB: its size, quick only",
+          !strcmp(list_get(st->size, 0), "39 MB") && !st->quick->enabled);
+        ctl_set_text(st->label, "Data");
+        st->start->handler(st->start, EV_CLICK);
+        sim_frames(3);
+        sim_shot("fmthdb1");
+        window *cw = wm_focused_window();
+        T("asks first, naming the disk", cw && cw != st->win);
+        sim_key(0x1C); /* Yes */
+        sim_frames(5);
+        dir_entry_t de;
+        snprintf(b, sizeof b, "    msg '%s', label '%s'\n", ctl_text(st->msg),
+                 fs_drive_label(DRIVE_HDB));
+        wr(1, b);
+        T("HDB erased and mounted",
+          fs_drive_mounted(DRIVE_HDB) && !fs_find("/HDB/STUFF", &de));
+        T("its new label", !strcmp(fs_drive_label(DRIVE_HDB), "DATA"));
+        T("said done", strstr(ctl_text(st->msg), "Done") != NULL);
+        T("HDA untouched", fs_find("/SYSTEM/KERNEL.SYS", &de));
+        T("writable", fs_mkdir("/HDB/NEW"));
+        sim_shot("fmthdb2");
+        wm_close(st->win);
+        sim_frames(3);
+        /* no floppy drive at all: not offered */
+        extern int g_fdc_drive_type, g_fdcb_drive_type;
+        extern void fdc_setup(void);
+        g_fdc_drive_type = 0;
+        g_fdcb_drive_type = 0;
+        fdc_setup();
+        fdd_init(0);
+        fdd_init(1);
+        a = sim_launch("FORMAT");
+        sim_frames(5);
+        st = a->state;
+        T("no floppy drive: only HDB",
+          st->nids == 1 && st->ids[0] == DRIVE_HDB &&
+              !strcmp(list_get(st->drive, 0), "HDB"));
+        static char o[512];
+        extern int cli_execute_command(const char *, char *, size_t);
+        o[0] = 0;
+        cli_execute_command("format fdd0 /q", o, sizeof o);
+        T("format fdd0: no such drive",
+          strstr(o, "no such floppy drive") != NULL);
         return fails;
     }
     if (!strcmp(name, "printdlg")) {
@@ -3301,6 +3718,175 @@ int scen2(const char *name) {
         sim_shot("dl1");
         return fails;
     }
+    if (!strcmp(name, "fddauto")) {
+        /* a floppy taken out is seen by itself (silently: the head does
+         * not move) and its desktop icon goes; one put in is read when its
+         * drive is opened in FileF's Drives */
+        int fails = 0;
+        char b[300];
+        extern int g_fdc_drive_type, g_fdcb_drive_type, g_fdc_seeks;
+        extern void fdc_insert_unit(int, int), fdc_setup(void);
+        static char o[2048];
+        extern int cli_execute_command(const char *, char *, size_t);
+        g_fdc_drive_type = 4;
+        g_fdcb_drive_type = 0;
+        fdc_setup();
+        fdc_insert_unit(0, 1440);
+        T("A: found", fdd_init(0));
+        cli_execute_command("format fdd0 /q AUTO", o, sizeof o);
+        fdd_eject(DRIVE_FDD0);
+        T("mounted", fdd_insert(DRIVE_FDD0));
+        desktop_fs_set_dirty();
+        sim_frames(3);
+#define FDD_ICON()                                                             \
+    ({                                                                         \
+        int ic_ = -1;                                                          \
+        for (int i = 0; i < desktop_fs_count(); i++)                           \
+            if (desktop_fs_items()[i].drive_id == DRIVE_FDD0 &&                \
+                desktop_fs_items()[i].kind == DESKTOP_ITEM_FDD)                \
+                ic_ = i;                                                       \
+        ic_;                                                                   \
+    })
+        int ic = FDD_ICON();
+        T("its icon, its label",
+          ic >= 0 && !strcmp(desktop_fs_items()[ic].name, "AUTO"));
+        /* taken out, nothing waiting */
+        fdc_insert_unit(0, 0);
+        int seeks = g_fdc_seeks;
+        sim_frames(40);
+        T("taken out: unmounted by itself", !fs_drive_mounted(DRIVE_FDD0));
+        T("taken out: no icon on the desktop", FDD_ICON() < 0);
+        window *fw = wm_focused_window();
+        T("no message (nothing was lost)",
+          !(fw && fw->title && !strcmp(fw->title, "FDD0")));
+        sim_frames(400);
+        T("empty: never a step (silent)", g_fdc_seeks == seeks);
+        /* put in: not seen until the drive is opened (FileF, Drives) */
+        fdc_insert_unit(0, 1440);
+        sim_frames(40);
+        T("put in: not looked at",
+          !fs_drive_mounted(DRIVE_FDD0) && FDD_ICON() < 0);
+        sim_launch("FILEF");
+        sim_frames(3);
+        window *w = wm_focused_window();
+        sim_shot("fddauto1");
+        int fx = w->x + 154, fy = w->y + 50; /* Drives: HDA, FDD0 */
+        sim_dblclick(fx, fy);
+        sim_frames(4);
+        snprintf(b, sizeof b, "    window '%s'\n", w->title);
+        wr(1, b);
+        T("opened in FileF: mounted, shown",
+          fs_drive_mounted(DRIVE_FDD0) && !strcmp(w->title, "/FDD0"));
+        T("and on the desktop", FDD_ICON() >= 0);
+        sim_shot("fddauto2");
+        /* taken out with a write waiting: said so */
+        fat_file_t f;
+        T("a write (waits in memory)",
+          fs_create("/FDD0/NEW.TXT", &f) && fs_write(&f, "x", 1) == 1);
+        fs_close(&f);
+        fdc_insert_unit(0, 0);
+        sim_frames(40);
+        T("taken out: unmounted", !fs_drive_mounted(DRIVE_FDD0));
+        T("the FileF window back at Drives", !strcmp(w->title, "Drives"));
+        window *m = wm_focused_window();
+        T("a message: the write was lost",
+          m && m->title && !strcmp(m->title, "FDD0"));
+        sim_shot("fddauto3");
+        if (m && m->title && !strcmp(m->title, "FDD0"))
+            wm_close(m);
+        /* opening the empty drive */
+        sim_frames(3);
+        wm_focus(w);
+        sim_frames(2);
+        sim_dblclick(fx, fy);
+        sim_frames(4);
+        m = wm_focused_window();
+        T("opening it empty: a message", !fs_drive_mounted(DRIVE_FDD0) && m &&
+                                             m->title &&
+                                             !strcmp(m->title, "FDD0"));
+        sim_shot("fddauto4");
+#undef FDD_ICON
+        return fails;
+    }
+    if (!strcmp(name, "fdd525")) {
+        /* a 1.2 MB 5.25" drive: 720 KB disks (80 tracks, double density,
+         * 300 kbps) besides 1.2 MB and the 40-track ones */
+        int fails = 0;
+        char b[300];
+        extern int g_fdc_drive_type, g_fdcb_drive_type, g_fdc_formats,
+            g_fdc_errors;
+        extern void fdc_insert_unit(int, int), fdc_setup(void);
+        static char o[2048];
+        extern int cli_execute_command(const char *, char *, size_t);
+        g_fdc_drive_type = 2; /* 1.2 MB */
+        g_fdcb_drive_type = 0;
+        fdc_setup();
+        T("1.2 MB drive found", fdd_init(0));
+        int sz[FDD_MAX_FORMATS], n = fdd_drive_formats(0, sz);
+        T("720 KB offered, last",
+          n == 6 && sz[0] == FDD_MEDIA_1200K && sz[5] == FDD_MEDIA_720K);
+        /* a 360 KB disk is still 360 KB (track 0 looks the same) */
+        fdc_insert_unit(0, 360);
+        o[0] = 0;
+        cli_execute_command("format fdd0 360 FORTY", o, sizeof o);
+        wr(1, o);
+        fdd_eject(DRIVE_FDD0);
+        T("360 KB: mounts as 360 KB",
+          fdd_insert(DRIVE_FDD0) && fdd_media(0) == FDD_MEDIA_360K);
+        fdd_eject(DRIVE_FDD0);
+        /* 720 KB formatted in it */
+        fdc_insert_unit(0, 720);
+        int f0 = g_fdc_formats;
+        o[0] = 0;
+        cli_execute_command("format fdd0 720 DD525", o, sizeof o);
+        wr(1, o);
+        T("720 KB formatted: 160 tracks", g_fdc_formats - f0 == 160);
+        T("mounted as 720 KB",
+          fs_drive_mounted(DRIVE_FDD0) && fdd_media(0) == FDD_MEDIA_720K &&
+              !strcmp(fs_drive_label(DRIVE_FDD0), "DD525"));
+        static uint8_t big[300000], rb[300000];
+        for (int i = 0; i < (int)sizeof big; i++)
+            big[i] = (uint8_t)(i * 13 + i / 4096);
+        fat_file_t f;
+        bool ok = fs_create("/FDD0/BIG.BIN", &f) &&
+                  fs_write(&f, big, sizeof big) == (int)sizeof big;
+        fs_close(&f);
+        T("300 KB written (past track 40)", ok);
+        fdd_eject(DRIVE_FDD0);
+        int errs = g_fdc_errors;
+        T("put in again: 720 KB",
+          fdd_insert(DRIVE_FDD0) && fdd_media(0) == FDD_MEDIA_720K);
+        int got = 0;
+        if (fs_open("/FDD0/BIG.BIN", &f)) {
+            got = fs_read(&f, rb, sizeof rb);
+            fs_close(&f);
+        }
+        snprintf(b, sizeof b, "    read %d bytes, %d controller errors\n", got,
+                 g_fdc_errors - errs);
+        wr(1, b);
+        T("read back the same",
+          got == (int)sizeof big && !memcmp(big, rb, sizeof big));
+        fdd_eject(DRIVE_FDD0);
+        /* the same disk in a 360 KB drive (40 tracks): refused */
+        g_fdc_drive_type = 1;
+        fdc_setup();
+        fdd_init(0);
+        fdc_insert_unit(0, 720);
+        T("720 KB in a 360 KB drive: not mounted", !fdd_insert(DRIVE_FDD0));
+        /* and in a 3.5" 720 KB drive: the same format */
+        g_fdc_drive_type = 3;
+        fdc_setup();
+        fdd_init(0);
+        fdc_insert_unit(0, 720);
+        got = 0;
+        if (fdd_insert(DRIVE_FDD0) && fs_open("/FDD0/BIG.BIN", &f)) {
+            got = fs_read(&f, rb, sizeof rb);
+            fs_close(&f);
+        }
+        T("read in a 720 KB drive too",
+          got == (int)sizeof big && !memcmp(big, rb, sizeof big));
+        return fails;
+    }
     if (!strcmp(name, "twofdd")) {
         int fails = 0;
         char b[300];
@@ -3320,7 +3906,7 @@ int scen2(const char *name) {
         cli_execute_command("format a: /q DISKA", o, sizeof o);
         wr(1, o);
         o[0] = 0;
-        cli_execute_command("format b: /q DISKB", o, sizeof o);
+        cli_execute_command("format fdd1: /q DISKB", o, sizeof o);
         wr(1, o);
         fdd_eject(DRIVE_FDD0);
         fdd_eject(DRIVE_FDD1);

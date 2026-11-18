@@ -1,10 +1,10 @@
-#include "os/os.h"
 #include "ui/desktop_fs.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
 #include "fs/fs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
+#include "os/os.h"
 #include "ui/fileops.h"
 #include "ui/icons.h"
 
@@ -138,8 +138,9 @@ void desktop_fs_reload(void) {
         s_count++;
     }
 
-    for (uint8_t d = DRIVE_FDD0; d <= DRIVE_FDD1 && s_count < DESKTOP_MAX_ITEMS;
-         d++) {
+    for (uint8_t d = DRIVE_FDD0; d <= DRIVE_CD0 && s_count < DESKTOP_MAX_ITEMS;
+         d++) { /* the floppies, the CD: only with a disk in (an empty
+                   floppy drive is in FileF's Drives, to read a disk) */
         if (!fs_drive_mounted(d))
             continue;
         desktop_item_t *it = &s_items[s_count];

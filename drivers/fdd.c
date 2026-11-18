@@ -115,6 +115,11 @@ int fdd_drive_formats(uint8_t drive_id, int out[FDD_MAX_FORMATS]) {
         out[n++] = FDD_MEDIA_320K;
         out[n++] = FDD_MEDIA_180K;
         out[n++] = FDD_MEDIA_160K;
+        /* a 1.2 MB drive also does 720 KB, 80 tracks of double density
+         * (DOS: FORMAT /T:80 /N:9); last, so that a 40-track disk is
+         * tried first (its track 0 looks the same) */
+        if (fdd_drive_kind(drive_id) == FDD_MEDIA_1200K)
+            out[n++] = FDD_MEDIA_720K;
         break;
     }
     return n;
@@ -376,8 +381,13 @@ static void lba_to_chs(uint8_t d, uint32_t lba, uint8_t *cyl, uint8_t *head,
 
 /* the controller's data rate for this disk (shared by both drives); a
  * double-density disk in a 1.2 MB drive spins at 360 rpm: 300 kbps */
+/* double density (250 kbps at 300 rpm) is 300 kbps in a 1.2 MB drive,
+ * which turns at 360 rpm: the 40-track disks and 720 KB */
 static void set_rate(uint8_t d) {
-    outb(FDD_CCR, s_dstep[d] ? 1 : FDD_FORMATS[s_media[d]].rate);
+    int r = FDD_FORMATS[s_media[d]].rate;
+    if (r == 2 && fdd_drive_kind(d) == FDD_MEDIA_1200K)
+        r = 1;
+    outb(FDD_CCR, (uint8_t)r);
 }
 
 /* ── transfers ──────────────────────────────────────────────────────────
@@ -573,18 +583,22 @@ bool fdd_flush(uint8_t d) {
     return ok;
 }
 
+static bool tc_dirty(uint8_t d) { /* writes still waiting */
+    tc_init();
+    bool dirty = false;
+    for (int i = 0; i < TC_LINES; i++)
+        if (s_tc[i].drive == d)
+            for (int k = 0; k < s_tc_spt; k++)
+                dirty |= (s_tc[i].flag[k] & TC_D) != 0;
+    return dirty;
+}
+
 /* main loop: write what has waited 1/2 s, stop motors idle for 2 s */
 void fdd_poll(void) {
-    tc_init();
-    for (uint8_t d = 0; d < 2; d++) {
-        bool dirty = false;
-        for (int i = 0; i < TC_LINES; i++)
-            if (s_tc[i].drive == d)
-                for (int k = 0; k < s_tc_spt; k++)
-                    dirty |= (s_tc[i].flag[k] & TC_D) != 0;
-        if (dirty && (int32_t)(pit_ticks - s_last_write[d]) >= FLUSH_AFTER_MS)
+    for (uint8_t d = 0; d < 2; d++)
+        if (tc_dirty(d) &&
+            (int32_t)(pit_ticks - s_last_write[d]) >= FLUSH_AFTER_MS)
             fdd_flush(d);
-    }
     for (uint8_t d = 0; d < 2; d++)
         if (s_motor_on[d] &&
             (int32_t)(pit_ticks - s_last_use[d]) >= MOTOR_IDLE_MS)
@@ -619,6 +633,22 @@ static bool disk_changed(uint8_t d) {
     return true;
 }
 
+/* Only reads the change line: the head does not move, so it is silent
+ * (lowering the line takes a step, done when the next disk is read). */
+bool fdd_door_opened(uint8_t d, bool *lost) {
+    *lost = false;
+    if (d > 1 || !s_present[d] || s_no_changeline[d])
+        return false;
+    write_dor(d); /* the line is the selected drive's */
+    if (!(inb(FDD_DIR) & 0x80))
+        return false;
+    *lost = tc_dirty(d);
+    tc_drop(d, true); /* that disk is gone */
+    s_media[d] = FDD_MEDIA_NONE;
+    s_wp[d] = -1;
+    return true;
+}
+
 bool fdd_take_change(uint8_t d) {
     if (d > 1 || !s_changed[d])
         return false;
@@ -635,6 +665,24 @@ static bool write_protected(uint8_t d) {
         s_wp[d] = st3 >= 0 && (st3 & 0x40) ? 1 : 0;
     }
     return s_wp[d] == 1;
+}
+
+/* Is there a disk? The change line, lowered first if it is up (a step: the
+ * drive clicks once). An unformatted disk counts as one. */
+int fdd_disk_in(uint8_t d) {
+    if (d > 1 || !s_present[d])
+        return 0;
+    if (s_no_changeline[d])
+        return -1;
+    disk_changed(d); /* (up: drops what was kept, steps the head) */
+    if (s_no_changeline[d])
+        return 1; /* it just read one */
+    write_dor(d);
+    return (inb(FDD_DIR) & 0x80) ? 0 : 1;
+}
+
+bool fdd_write_protected(uint8_t d) {
+    return d < 2 && s_present[d] && write_protected(d);
 }
 
 /* ── read/write sector ──────────────────────────────────────────────────── */
@@ -747,13 +795,34 @@ int fdd_detect(uint8_t d) {
         bool bpb =
             bps == 512 && spt >= 8 && spt <= 36 && heads >= 1 && heads <= 2;
         int found = FDD_MEDIA_NONE;
-        if (bpb)
-            found = media_for(spt, heads, FDD_FORMATS[m].tracks);
-        else if (is40 && read_raw(d, 1, sec, 1)) /* C0 H0 S2: the FAT */
+        if (bpb) {
+            /* the tracks from its size: 40 and 80 share track 0 (a 720 KB
+             * disk reads as 360 KB at first in a 1.2 MB drive) */
+            uint32_t total = (uint32_t)(sec[19] | sec[20] << 8);
+            if (!total)
+                total = (uint32_t)sec[32] | (uint32_t)sec[33] << 8 |
+                        (uint32_t)sec[34] << 16 | (uint32_t)sec[35] << 24;
+            uint32_t tr = total / (spt * heads);
+            if ((tr == 40 || tr == 80) && total == tr * spt * heads) {
+                found = media_for(spt, heads, (int)tr);
+                bool here = false; /* a size this drive takes */
+                for (int k = 0; k < n; k++)
+                    here |= cand[k] == found;
+                if (found && !here) { /* (80 tracks in a 40-track drive) */
+                    s_media[d] = FDD_MEDIA_NONE;
+                    fdd_motor_off(d);
+                    return FDD_MEDIA_NONE;
+                }
+            }
+            if (!found)
+                found = media_for(spt, heads, FDD_FORMATS[m].tracks);
+        } else if (is40 && read_raw(d, 1, sec, 1)) /* C0 H0 S2: the FAT */
             found = fdd_media_from_byte(sec[0]);
         if (!found)
             found = m;
         use_media(d, found, bpb ? spt : 0, bpb ? heads : 0);
+        if (found != m)
+            s_current_track[d] = -1; /* (other stepping: recalibrate) */
         return found;
     }
     s_media[d] = FDD_MEDIA_NONE;

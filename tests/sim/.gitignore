@@ -1,6 +1,8 @@
 # built / made by run.sh
 /o/
 /sim
+/gputest
+/atapitest
 /rtcfg.c
 /simguard.c
 /out/

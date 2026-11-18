@@ -100,7 +100,7 @@ static const help_topic_t HELP[] = {
      "  cp <src> <dst>   Copy a file or directory\n"
      "  mv <src> <dst>   Move or rename\n"
      "  rm [-r] <f>      Delete a file or directory\n"
-     "  format a: [720|1440] [/q] [label]  Format a floppy\n"
+     "  format fdd0 [720|1440] [/q] [label]  Format a floppy\n"
      "  sys hda|hdb      Make a hard disk start ASMOS: boot code and\n"
      "                   SYSTEM\\KERNEL.SYS (files kept). Setup: new disks\n"
      "Names: up to 63 characters, spaces allowed. Quote them\n"
@@ -875,7 +875,7 @@ void cmd_sys(const char *args, char *out, size_t max) {
         if (src)
             err = inst_copy_files((uint8_t)unit, src, NULL, true, NULL, NULL);
         else if (!fs_find(own, &de))
-            err = "no KERNEL.SYS to copy (put the setup floppy in A:)";
+            err = "no KERNEL.SYS to copy (put the setup floppy in FDD0)";
     }
     if (err) {
         snprintf(b, sizeof(b), "sys: %s\n\n", err);
@@ -891,25 +891,31 @@ void cmd_sys(const char *args, char *out, size_t max) {
     append(out, max, b);
 }
 
-/* format a: [360|720|1200|1440|2880] [/q] [label] */
+/* format fdd0 [360|720|1200|1440|2880] [/q] [label] (fdd1; a: and b: too) */
 void cmd_format(const char *args, char *out, size_t max) {
     const char *p = args ? args : "";
     while (*p == ' ')
         p++;
-    int unit = -1;
-    if ((p[0] == 'a' || p[0] == 'A') && p[1] == ':')
-        unit = 0;
-    else if ((p[0] == 'b' || p[0] == 'B') && p[1] == ':')
-        unit = 1;
+    int unit = -1, len = 0;
+    char c0 = (char)(p[0] | 0x20);
+    if ((c0 == 'a' || c0 == 'b') && p[1] == ':') {
+        unit = c0 == 'b', len = 2;
+    } else if (c0 == 'f' && (p[1] | 0x20) == 'd' && (p[2] | 0x20) == 'd' &&
+               (p[3] == '0' || p[3] == '1')) {
+        unit = p[3] - '0', len = p[4] == ':' ? 5 : 4;
+    }
+    if (unit >= 0 && p[len] && p[len] != ' ')
+        unit = -1; /* (fdd0x) */
     if (unit < 0) {
         append(out, max,
-               "Usage: format a: [160|180|320|360|720|1200|1440|2880] [/q] "
+               "Usage: format fdd0|fdd1 [160|180|320|360|720|1200|1440|2880] "
+               "[/q] "
                "[label]\n"
                "  /q  quick: only a new file system (disk already "
                "formatted)\n  Erases everything on the disk.\n\n");
         return;
     }
-    p += 2;
+    p += len;
     int kb = 0;
     bool quick = false;
     char label[12] = "";
@@ -935,7 +941,7 @@ void cmd_format(const char *args, char *out, size_t max) {
     }
     int ok[FDD_MAX_FORMATS], n = fdd_drive_formats((uint8_t)unit, ok),
                              media = -1;
-    if (!n) {
+    if (!n || !fdd_is_present((uint8_t)unit)) {
         append(out, max, "format: no such floppy drive\n\n");
         return;
     }
@@ -966,8 +972,8 @@ void cmd_format(const char *args, char *out, size_t max) {
         const fdd_format_t *fm = &FDD_FORMATS[media];
         uint32_t data = (uint32_t)(fm->spt * fm->heads * fm->tracks) - 1 -
                         2u * fm->fat_sectors - fm->root_entries / 16;
-        snprintf(b, sizeof(b), "Formatted %c: as %s. %u bytes free.\n\n",
-                 'A' + unit, fm->name, data * 512);
+        snprintf(b, sizeof(b), "Formatted FDD%d as %s. %u bytes free.\n\n",
+                 unit, fm->name, data * 512);
     }
     append(out, max, b);
 }

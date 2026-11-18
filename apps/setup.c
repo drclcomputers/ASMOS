@@ -3,7 +3,7 @@
  * Starts by itself when the computer boots from the setup floppy
  * (g_setup_mode). On an installed system it is not in the Apps menu;
  * "app run Setup" in ASMTerm starts it, to install on another disk (or over
- * this one) from a setup floppy in drive A:.
+ * this one) from a setup floppy in FDD0.
  *
  * Pages: welcome, which disk, what to do with it (erase / keep the files)
  * and the screen mode, a last look, the install (a step a frame, with a
@@ -105,7 +105,7 @@ static void act(setup_t *s, int id) {
         if (s->page == P_WELCOME) {
             if (!source_ok()) {
                 dlg_message(s->win, "Setup",
-                            "Put the ASMOS setup floppy in drive A:, "
+                            "Put the ASMOS setup floppy in FDD0, "
                             "then press Continue.");
                 return;
             }
@@ -172,7 +172,7 @@ static void page_welcome(setup_t *s) {
     text(s, 63, "is on it now. Nothing is written before you press");
     text(s, 74, "Install on the last page.");
     if (!source_ok())
-        text(s, 92, "Put the ASMOS setup floppy in drive A: first.");
+        text(s, 92, "Put the ASMOS setup floppy in FDD0 first.");
     button(s, 10, "Exit", 1, on_btn);
     control *c = button(s, W - 76, "Continue", 3, on_btn);
     ctl_style_add(c, CS_DEFAULT);
@@ -293,7 +293,7 @@ static void page_done(setup_t *s) {
     snprintf(t, sizeof(t), "ASMOS is on %s.", s->unit ? "HDB" : "HDA");
     text(s, 24, t);
     if (g_setup_mode) {
-        text(s, 40, "Take the floppy out of drive A:, then press");
+        text(s, 40, "Take the floppy out of FDD0, then press");
         text(s, 51, "Restart. The computer starts from the hard disk.");
     } else {
         text(s, 40, "It starts ASMOS the next time the computer starts");

@@ -27,4 +27,10 @@ void gpu_put(int x, int y, int w, int h, const uint8_t *pix);
 uint32_t gpu_lock(void);
 void gpu_unlock(uint32_t flags);
 
+/* 2 = every pixel drawn as 2x2 (the planar modes only): SCREEN_WIDTH and
+ * SCREEN_HEIGHT become half the screen. kmain, before the desktop starts
+ * (g_cfg.ui_zoom2). */
+extern int g_zoom;
+void gpu_set_zoom(int z);
+
 #endif

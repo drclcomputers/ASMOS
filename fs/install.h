@@ -45,6 +45,9 @@ typedef void (*inst_progress_fn)(void *user, int pct, const char *what);
 
 void inst_probe(uint8_t unit, inst_disk_t *d);
 const char *inst_erase(uint8_t unit, inst_progress_fn cb, void *user);
+/* the same, with a volume label (NULL or "": ASMOS's own, "ASMOS") */
+const char *inst_erase_label(uint8_t unit, const char *label,
+                             inst_progress_fn cb, void *user);
 /* video_mode: config/video_cfg.h (0 = 320x200 .. 3 = 800x600), -1 = what
  * the disk had (else 1) */
 const char *inst_write_boot(uint8_t unit, int video_mode);

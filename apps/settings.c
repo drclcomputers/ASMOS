@@ -37,7 +37,28 @@ typedef struct {
     int pat_lx, pat_ly; /* last cell painted while dragging */
     uint32_t p_rev, p_tick;
     bool dirty;
+    /* what only a restart applies, as last saved: Save says "restart" only
+     * when one of these changed */
+    uint8_t boot_sig[24];
 } settings_state_t;
+
+/* the settings that take effect at the next start */
+static void boot_settings(uint8_t *out) {
+    uint8_t *o = out;
+    *o++ = g_cfg.ui_zoom2;
+    *o++ = g_cfg.no_paging;
+    *o++ = g_cfg.fpu_emulate;
+    *o++ = g_cfg.networking_enabled;
+    *o++ = g_cfg.start_in_gui;
+    const uint8_t *ip[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
+                            g_cfg.dns_server};
+    for (int i = 0; i < 4; i++)
+        for (int k = 0; k < 4; k++)
+            *o++ = ip[i][k];
+    *o++ = 0;
+    *o++ = 0;
+    *o++ = 0;
+}
 
 app_descriptor settings_app;
 
@@ -191,9 +212,12 @@ static void on_save(control *c, int ev) {
     }
     if (cfg_save()) {
         set_dirty(s, false);
-        ctl_set_text(s->status, screen_changed
-                                    ? "Saved. Restart for the new screen."
-                                    : "Saved. Network: applies on restart.");
+        uint8_t now[24];
+        boot_settings(now);
+        bool restart = screen_changed || memcmp(now, s->boot_sig, 24) != 0;
+        memcpy(s->boot_sig, now, 24);
+        ctl_set_text(s->status,
+                     restart ? "Saved. Restart to apply." : "Saved.");
     } else {
         dlg_message(s->win, "Settings", "Could not write ASMOS.CFG.");
     }
@@ -812,6 +836,7 @@ static void settings_frame(void *state) {
 }
 
 static void build(settings_state_t *s) {
+    boot_settings(s->boot_sig); /* as they are now */
     window *w = s->win;
     s->tabs = ctl_tabs(w, 4, 3, 250,
                        "Display|Sound|Clock|Network|Printers|System", NULL);
@@ -921,6 +946,13 @@ static void build(settings_state_t *s) {
     control *fe = flag(s, P_SYSTEM, 10, 108, "Emulate the maths chip (restart)",
                        &g_cfg.fpu_emulate);
     ctl_set_tooltip(fe, "Test the FPU emulator on a machine that has an FPU");
+    control *zm = flag(s, P_SYSTEM, 10, 120, "Large display: 2x (restart)",
+                       &g_cfg.ui_zoom2);
+    ctl_enable(zm, g_video_mode != 0); /* 640x400 and up */
+    ctl_set_tooltip(zm, g_video_mode != 0
+                            ? "Everything twice the size: 800x600 looks "
+                              "like 400x300"
+                            : "Only at 640x400 and up");
     ctl_set_tooltip(np, "Paging keeps apps out of each other's memory");
 
     /* Network */

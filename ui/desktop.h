@@ -13,4 +13,7 @@ uint32_t desktop_sig(void);
 
 void power_anim_run(bool is_restart);
 
+/* /APPS/CDROM: shortcuts to the apps on the CD in the drive (none: gone) */
+void desktop_cd_links(void);
+
 #endif

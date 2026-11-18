@@ -3,6 +3,7 @@
 #include "config/runtime_config.h"
 #include "config/video_cfg.h"
 #include "drivers/ata.h"
+#include "drivers/cdrom.h"
 #include "drivers/gpu.h"
 #include "drivers/lpt.h"
 #include "drivers/mouse.h"
@@ -185,6 +186,13 @@ void boot_check_ata(void) {
                      d->lba ? "LBA" : "CHS");
         boot_check_line(u ? "HDB" : "HDA (boot)", d || u,
                         d ? det : "not found");
+    }
+    if (cd_present()) { /* the CD drive (drivers/cdrom.h) */
+        char det[64];
+        snprintf(det, sizeof(det), "%.30s, %s", cd_model(),
+                 fs_drive_mounted(DRIVE_CD0) ? fs_drive_label(DRIVE_CD0)
+                                             : "no disc");
+        boot_check_line("CD-ROM", true, det);
     }
 
     if (g_setup_mode) /* the disk may be new: Setup looks at it */

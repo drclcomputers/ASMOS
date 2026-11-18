@@ -108,5 +108,13 @@ void fdd_poll(void);
 bool fdd_flush(uint8_t drive_id);
 /* the disk was changed (door opened) since the last call: mount again */
 bool fdd_take_change(uint8_t drive_id);
+/* the door was opened (a disk taken out), seen without moving the head;
+ * what was kept of the disk is dropped, *lost: writes it never got */
+bool fdd_door_opened(uint8_t drive_id, bool *lost);
+/* a disk in the drive: 1 yes (formatted or not), 0 no, -1 can't tell (a
+ * drive without a change line); may step the head once */
+int fdd_disk_in(uint8_t drive_id);
+/* the disk in it has its write-protect tab open */
+bool fdd_write_protected(uint8_t drive_id);
 
 #endif

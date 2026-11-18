@@ -31,7 +31,7 @@ extern unsigned char g_cmos[128];
 
 /* sim_low stands in for the fixed low addresses (0x7000..) fdd.c uses */
 __attribute__((aligned(65536))) uint8_t sim_low[0x6000]; /* 0x7000..0xD000 */
-int g_fdc_ms;        /* time the drive would take: seeks, turns of the disk */
+int g_fdc_ms; /* time the drive would take: seeks, turns of the disk */
 static bool s_chg[2] = {true, true}; /* the disk change line, per drive */
 
 typedef struct {
@@ -39,8 +39,8 @@ typedef struct {
     int density; /* 0 DD, 1 HD, 2 ED */
 } geo_t;
 static const geo_t GEOS[] = {
-    {160, 8, 1, 40, 0},   {180, 9, 1, 40, 0},    {320, 8, 2, 40, 0},
-    {360, 9, 2, 40, 0},   {720, 9, 2, 80, 0},    {1200, 15, 2, 80, 1},
+    {160, 8, 1, 40, 0},   {180, 9, 1, 40, 0},   {320, 8, 2, 40, 0},
+    {360, 9, 2, 40, 0},   {720, 9, 2, 80, 0},   {1200, 15, 2, 80, 1},
     {1440, 18, 2, 80, 1}, {2880, 36, 2, 80, 2},
 };
 static geo_t s_disks[2];
@@ -77,7 +77,8 @@ static int needed_rate(void) {
         return 3;
     if (s_disk.density == 1)
         return 0;
-    return drive_525() && g_fdc_drive_type == 2 ? 1 : 2; /* DD in a 1.2M: 300k */
+    return drive_525() && g_fdc_drive_type == 2 ? 1
+                                                : 2; /* DD in a 1.2M: 300k */
 }
 
 /* ── controller state ── */
@@ -85,7 +86,7 @@ static uint8_t s_dor, s_ccr, s_pcns[2];
 #define s_pcn s_pcns[s_u]
 static uint8_t s_cmd[9], s_ncmd, s_need;
 static uint8_t s_res[7], s_nres, s_rpos;
-static int s_reset_ints;              /* pending after a reset */
+static int s_reset_ints;                 /* pending after a reset */
 static int s_seek_int = -1, s_seek_wait; /* st0, polls left */
 static int s_seek_u;
 /* DMA channel 2 */
@@ -101,19 +102,28 @@ static uint8_t *dma_ptr(void) {
 
 static int params_for(uint8_t c) {
     switch (c & 0x1F) {
-    case 0x03: return 3; /* SPECIFY */
-    case 0x07: return 2; /* RECALIBRATE */
-    case 0x0F: return 3; /* SEEK */
-    case 0x08: return 1; /* SENSE INTERRUPT */
-    case 0x06: case 0x05: return 9; /* READ / WRITE */
-    case 0x04: return 2; /* SENSE DRIVE STATUS */
-    case 0x0D: return 6; /* FORMAT */
-    default: return 1;
+    case 0x03:
+        return 3; /* SPECIFY */
+    case 0x07:
+        return 2; /* RECALIBRATE */
+    case 0x0F:
+        return 3; /* SEEK */
+    case 0x08:
+        return 1; /* SENSE INTERRUPT */
+    case 0x06:
+    case 0x05:
+        return 9; /* READ / WRITE */
+    case 0x04:
+        return 2; /* SENSE DRIVE STATUS */
+    case 0x0D:
+        return 6; /* FORMAT */
+    default:
+        return 1;
     }
 }
 
-static void result7(uint8_t st0, uint8_t st1, uint8_t st2, uint8_t c,
-                    uint8_t h, uint8_t r) {
+static void result7(uint8_t st0, uint8_t st1, uint8_t st2, uint8_t c, uint8_t h,
+                    uint8_t r) {
     s_res[0] = st0, s_res[1] = st1, s_res[2] = st2;
     s_res[3] = c, s_res[4] = h, s_res[5] = r, s_res[6] = 2;
     s_nres = 7;
@@ -162,7 +172,8 @@ static void do_rw(bool write) {
     }
     uint32_t n = (uint32_t)s_dma_count + 1;
     uint8_t *mem = dma_ptr();
-    g_fdc_ms += 100 + (int)(n / 512) * 200 / s_disk.spt; /* half a turn, then the sectors */
+    g_fdc_ms += 100 + (int)(n / 512) * 200 /
+                          s_disk.spt; /* half a turn, then the sectors */
     while (n >= 512 && r <= s_disk.spt) {
         uint32_t lba = ((uint32_t)c * s_disk.heads + h) * s_disk.spt + (r - 1);
         if (write)
@@ -188,18 +199,23 @@ static void do_format(void) {
     }
     const uint8_t *ids = dma_ptr();
     int cyl = ids[0];
-    /* the disk takes the layout being written: tracks from the stepping,
-     * density from the rate */
+    /* the disk takes the layout being written: density from the rate,
+     * tracks from the stepping (in an 80-track drive: 80 until cylinder 1
+     * comes at head position 2, double stepping; 300 kbps in a 1.2 MB
+     * drive is both 360 KB and 720 KB) */
     if (s_pcn == 0 && head == 0) {
-        bool dstep = drive_tracks() == 80 && drive_525() && s_ccr == 1;
         s_disk.spt = sc;
         s_disk.heads = 1;
-        s_disk.tracks = dstep || drive_tracks() == 40 ? 40 : 80;
+        s_disk.tracks = drive_tracks();
         s_disk.density = s_ccr == 3 ? 2 : s_ccr == 0 ? 1 : 0;
     }
+    if (s_disk.tracks == 80 && drive_tracks() == 80 && cyl > 0 &&
+        s_pcn == cyl * 2)
+        s_disk.tracks = 40;
     if (head == 1)
         s_disk.heads = 2;
-    if (cyl != (s_disk.tracks == 40 && drive_tracks() == 80 ? s_pcn / 2 : s_pcn)) {
+    if (cyl !=
+        (s_disk.tracks == 40 && drive_tracks() == 80 ? s_pcn / 2 : s_pcn)) {
         result7(st0 | 0x40, 0x04, 0x10, 0, 0, 0);
         return;
     }
@@ -239,7 +255,8 @@ static void execute(void) {
         break;
     case 0x0F: {
         int max = drive_tracks() - 1;
-        g_fdc_ms += (s_cmd[2] > s_pcn ? s_cmd[2] - s_pcn : s_pcn - s_cmd[2]) * 3 + 15;
+        g_fdc_ms +=
+            (s_cmd[2] > s_pcn ? s_cmd[2] - s_pcn : s_pcn - s_cmd[2]) * 3 + 15;
         if (g_fdc_disk_kb && s_cmd[2] != s_pcn)
             s_chg[s_u] = false;
         s_pcn = s_cmd[2] > max ? (uint8_t)max : s_cmd[2];
@@ -272,9 +289,15 @@ static void execute(void) {
                              (s_pcn == 0 ? 0x10 : 0) | (s_cmd[1] & 7));
         s_nres = 1;
         break;
-    case 0x06: do_rw(false); break;
-    case 0x05: do_rw(true); break;
-    case 0x0D: do_format(); break;
+    case 0x06:
+        do_rw(false);
+        break;
+    case 0x05:
+        do_rw(true);
+        break;
+    case 0x0D:
+        do_format();
+        break;
     default:
         s_res[0] = 0x80;
         s_nres = 1;
@@ -308,7 +331,9 @@ bool fdc_port_out(uint16_t p, uint8_t v) {
     case 0x3F7:
         s_ccr = v & 3;
         return true;
-    case 0x0C: s_ff = false; return true;
+    case 0x0C:
+        s_ff = false;
+        return true;
     case 0x04:
         s_dma_addr = s_ff ? (uint16_t)((s_dma_addr & 0xFF) | v << 8)
                           : (uint16_t)((s_dma_addr & 0xFF00) | v);
@@ -319,8 +344,12 @@ bool fdc_port_out(uint16_t p, uint8_t v) {
                            : (uint16_t)((s_dma_count & 0xFF00) | v);
         s_ff = !s_ff;
         return true;
-    case 0x81: s_dma_page = v; return true;
-    case 0x0A: case 0x0B: return true;
+    case 0x81:
+        s_dma_page = v;
+        return true;
+    case 0x0A:
+    case 0x0B:
+        return true;
     }
     return false;
 }

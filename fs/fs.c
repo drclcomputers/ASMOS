@@ -1,7 +1,9 @@
 #include "fs/fs.h"
 #include "drivers/ata.h"
+#include "drivers/cdrom.h"
 #include "drivers/fdd.h"
 #include "fs/fat_io.h"
+#include "fs/iso9660.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -15,17 +17,16 @@ vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT] = {
     {"/HDB", DRIVE_HDB},
     {"/FDD0", DRIVE_FDD0},
     {"/FDD1", DRIVE_FDD1},
+    {"/CD0", DRIVE_CD0},
 };
 
 const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
-    "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1", "TRASH", "/TRASH",
+    "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1", "TRASH", "/TRASH", "CD0",
 };
 
 const char *g_drive_paths[DRIVE_COUNT] = {
-    [DRIVE_HDA] = "/HDA",
-    [DRIVE_HDB] = "/HDB",
-    [DRIVE_FDD0] = "/FDD0",
-    [DRIVE_FDD1] = "/FDD1",
+    [DRIVE_HDA] = "/HDA",   [DRIVE_HDB] = "/HDB", [DRIVE_FDD0] = "/FDD0",
+    [DRIVE_FDD1] = "/FDD1", [DRIVE_CD0] = "/CD0",
 };
 
 bool path_is_protected(const char *name_or_path) {
@@ -270,8 +271,25 @@ static int scan_sector(uint8_t drive_id, uint32_t lba, lfn_acc *a, dir_cb cb,
     return 1;
 }
 
+/* the CD: entries from fs/iso9660.c, as if from a FAT folder (no place in
+ * a sector: nothing on it is ever written) */
+typedef struct {
+    dir_cb cb;
+    void *user;
+} cd_iter;
+
+static bool cd_iter_cb(dir_entry_t *e, const char *lname, void *user) {
+    cd_iter *c = user;
+    return c->cb(DRIVE_CD0, e, lname, 0, 0, c->user);
+}
+
 static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
                         void *user) {
+    if (drive_id == DRIVE_CD0) {
+        cd_iter c = {cb, user};
+        return g_drives[DRIVE_CD0].mounted &&
+               iso_iterate(dir_cluster, cd_iter_cb, &c);
+    }
     fat_vol_t *v = vol(drive_id);
     lfn_acc a;
     lfn_reset(&a);
@@ -895,14 +913,20 @@ bool fs_pick_partition(const uint8_t *mbr, uint32_t prefer_lba, uint32_t *lba,
     return true;
 }
 
+uint8_t g_mount_gen[DRIVE_COUNT];
+
 bool fs_mount_drive(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return false;
+    g_mount_gen[drive_id]++;
     fat_vol_t *v = vol(drive_id);
     v->drive_id = drive_id;
     v->mounted = false;
     fs_usage_invalidate(drive_id);
+
+    if (drive_id == DRIVE_CD0) /* ISO 9660 */
+        return cd_check() == CD_READY && iso_mount(v);
 
     uint8_t tmp_buf[512];
     v->base_lba = 0;
@@ -1008,6 +1032,9 @@ bool fs_mount(void) {
         fs_mount_drive(DRIVE_FDD0);
     if (fdd_init(1))
         fs_mount_drive(DRIVE_FDD1);
+    if (cd_present() && cd_check() == CD_CHANGED) /* (just powered on) */
+        cd_check();
+    fs_mount_drive(DRIVE_CD0);
     s_current_drive = DRIVE_HDA;
     dir_context.drive_id = DRIVE_HDA;
     dir_context.current_cluster = 0;
@@ -1019,10 +1046,59 @@ void fs_unmount(uint8_t drive_id) {
     g_fs_rev++;
     if (drive_id >= DRIVE_COUNT)
         return;
+    g_mount_gen[drive_id]++;
     g_drives[drive_id].mounted = false;
     fs_usage_invalidate(drive_id);
     fat_cache_drop(drive_id);
+    if (drive_id == DRIVE_CD0)
+        iso_unmount();
 }
+
+/* A disc in, out or swapped: TEST UNIT READY says so (a disc put in
+ * reports "changed" once, then "ready"). */
+bool fs_cd_poll(void) {
+    static uint32_t last;
+    if (!cd_present() || pit_ticks - last < 500)
+        return false;
+    last = pit_ticks;
+    cd_state_t st = cd_check();
+    bool was = g_drives[DRIVE_CD0].mounted;
+    if (st == CD_CHANGED || st == CD_EMPTY) {
+        if (was)
+            fs_unmount(DRIVE_CD0);
+        if (st == CD_CHANGED && cd_check() == CD_READY)
+            fs_mount_drive(DRIVE_CD0); /* (it is often ready at once) */
+    } else if (st == CD_READY && !was) {
+        fs_mount_drive(DRIVE_CD0);
+    }
+    return was != g_drives[DRIVE_CD0].mounted || (st == CD_CHANGED && was);
+}
+
+/* A floppy taken out while mounted (its change line, read without moving
+ * the head: silent): unmounted. Putting one in is not seen (that would
+ * step the head of an empty drive, a click each time): opening the drive
+ * mounts it (fdd_insert). */
+bool fs_fdd_poll(uint8_t *lost) {
+    static uint32_t last;
+    *lost = DRIVE_COUNT;
+    if (pit_ticks - last < 500)
+        return false;
+    last = pit_ticks;
+    bool gone = false;
+    for (uint8_t id = DRIVE_FDD0; id <= DRIVE_FDD1; id++) {
+        bool l;
+        if (!g_drives[id].mounted ||
+            !fdd_door_opened(id == DRIVE_FDD0 ? 0 : 1, &l))
+            continue;
+        fs_unmount(id);
+        s_remount[id] = false;
+        gone = true;
+        if (l)
+            *lost = id;
+    }
+    return gone;
+}
+
 /* copy the next path component (up to '/'); one longer than any name is
  * cut so it can't match */
 static const char *next_component(const char *p, char out[FS_NAME_SZ + 2]) {
@@ -1156,6 +1232,10 @@ bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes,
                         uint32_t *used_bytes) {
     if (drive_id >= DRIVE_COUNT || !g_drives[drive_id].mounted)
         return false;
+    if (drive_id == DRIVE_CD0) { /* a CD is full */
+        *total_bytes = *used_bytes = iso_size_bytes();
+        return true;
+    }
     fat_vol_t *v = &g_drives[drive_id];
     *total_bytes = (v->bpb.total_sectors_32 ? v->bpb.total_sectors_32
                                             : v->bpb.total_sectors_16) *
@@ -1461,9 +1541,23 @@ bool fs_list_dir_names(uint8_t drive_id, uint16_t dir_cluster, dir_entry_t *buf,
     return ok;
 }
 
+static bool any_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
+                   uint32_t lba, int idx, void *user) {
+    (void)drive_id, (void)lname, (void)lba, (void)idx;
+    if (e->name[0] == '.')
+        return true;
+    *(bool *)user = true;
+    return false;
+}
+
 bool fs_is_dir_empty(uint8_t drive_id, uint16_t cluster) {
     if (cluster == 0)
         return false;
+    if (drive_id == DRIVE_CD0) {
+        bool any = false;
+        dir_iterate(drive_id, cluster, any_cb, &any);
+        return !any;
+    }
     fat_vol_t *v = vol(drive_id);
     uint16_t cur = cluster;
     uint8_t sector_buf[512];
@@ -1555,7 +1649,8 @@ bool fs_create(const char *path, fat_file_t *f) {
     uint16_t dir_cluster;
     char name83[12], leaf[FS_NAME_SZ];
     bool ex;
-    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || ex)
+    if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || ex ||
+        drive_id == DRIVE_CD0) /* read only */
         return false;
 
     uint16_t cluster = fat_alloc(drive_id);
@@ -1584,6 +1679,8 @@ bool fs_create(const char *path, fat_file_t *f) {
 int fs_read(fat_file_t *f, void *buf, int len) {
     if (!f->open)
         return -1;
+    if (f->drive_id == DRIVE_CD0)
+        return iso_read(f, buf, len);
     fat_vol_t *v = vol(f->drive_id);
     uint8_t *out = (uint8_t *)buf;
     int total = 0;
@@ -1642,7 +1739,7 @@ static int done_write(fat_file_t *f, int total, fat_vol_t *v) {
 }
 
 int fs_write(fat_file_t *f, const void *buf, int len) {
-    if (!f->open)
+    if (!f->open || f->drive_id == DRIVE_CD0)
         return -1;
     fat_vol_t *v = vol(f->drive_id);
     const uint8_t *in = (const uint8_t *)buf;
@@ -1716,6 +1813,10 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
 bool fs_seek(fat_file_t *f, uint32_t offset) {
     if (!f->open || offset > f->entry.file_size)
         return false;
+    if (f->drive_id == DRIVE_CD0) { /* one piece: just the place */
+        f->cur_offset = offset;
+        return true;
+    }
     fat_vol_t *v = vol(f->drive_id);
     f->cur_offset = offset;
     f->cur_cluster = f->entry.cluster_lo;
@@ -1741,6 +1842,10 @@ int fs_tell(fat_file_t *f) {
 bool fs_close(fat_file_t *f) {
     if (!f->open)
         return false;
+    if (f->drive_id == DRIVE_CD0) { /* nothing to write back */
+        f->open = false;
+        return true;
+    }
     uint8_t close_buf[512];
     if (!fs_read_sector(f->drive_id, f->dir_entry_lba, close_buf))
         return false;

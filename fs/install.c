@@ -174,6 +174,19 @@ static bool wr(uint8_t unit, uint32_t lba, const uint8_t *b) {
 }
 
 const char *inst_erase(uint8_t unit, inst_progress_fn cb, void *user) {
+    return inst_erase_label(unit, NULL, cb, user);
+}
+
+const char *inst_erase_label(uint8_t unit, const char *label,
+                             inst_progress_fn cb, void *user) {
+    char lab[11]; /* upper case, space padded */
+    int ln = 0;
+    for (; label && label[ln] && ln < 11; ln++)
+        lab[ln] = label[ln] >= 'a' && label[ln] <= 'z' ? (char)(label[ln] - 32)
+                                                       : label[ln];
+    bool named = ln > 0;
+    for (int i = ln; i < 11; i++)
+        lab[i] = ' ';
     const ata_disk_t *a = ata_unit(unit);
     layout_t l;
     if (!a || !a->present)
@@ -227,7 +240,7 @@ const char *inst_erase(uint8_t unit, inst_progress_fn cb, void *user) {
     b[0x25] = 0;
     b[0x26] = 0x29;
     put32(b + 0x27, time_seconds() * 2654435761u);
-    memcpy(b + 0x2B, "ASMOS      ", 11);
+    memcpy(b + 0x2B, named ? lab : "ASMOS      ", 11);
     memcpy(b + 0x36, "FAT16   ", 8);
     if (!wr(unit, PART_START, b))
         return "could not write to the disk";
@@ -242,6 +255,10 @@ const char *inst_erase(uint8_t unit, inst_progress_fn cb, void *user) {
         if (lba >= PART_START + RESERVED && f % l.spf == 0 && f < 2u * l.spf) {
             b[0] = 0xF8;
             b[1] = b[2] = b[3] = 0xFF;
+        }
+        if (named && f == 2u * l.spf) { /* the root's first entry */
+            memcpy(b, lab, 11);
+            b[11] = 0x08; /* the volume label */
         }
         if (!wr(unit, lba, b))
             return "could not write to the disk";

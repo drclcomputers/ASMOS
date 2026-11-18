@@ -154,6 +154,31 @@ void draw_floppy_icon(int ax, int ay, bool sel) {
     draw_rect(ax + 3, ay + 2, ICON_W - 10, 6, BLACK);
 }
 
+/* a disc: a round silver face, the hole, a light streak */
+void draw_cd_icon(int ax, int ay, bool sel) {
+    static const char *k[20] = {
+        /* round: drawn from a circle of radius 10 */
+        "       xxxxxx       ", "     xxssssssxx     ", "   xxssssssssssxx   ",
+        "  xsssssssssswwssx  ", "  xsssssssssswwwsx  ", " xssssssoooosswwwsx ",
+        " xssssooxxxxooswwsx ", "xsssssox    xosssssx", "xssssox      xossssx",
+        "xssssox      xossssx", "xssssox      xossssx", "xssssox      xossssx",
+        "xsssssox    xosssssx", " xssssooxxxxoossssx ", " xssssssoooossssssx ",
+        "  xssssssssssssssx  ", "  xssssssssssssssx  ", "   xxssssssssssxx   ",
+        "     xxssssssxx     ", "       xxxxxx       "};
+    for (int y = 0; y < 20; y++)
+        for (int x = 0; x < 20; x++) {
+            char c = k[y][x];
+            if (c == 'x')
+                draw_dot(ax + x, ay + y, BLACK);
+            else if (c == 's')
+                draw_dot(ax + x, ay + y, sel ? DARK_GRAY : LIGHT_GRAY);
+            else if (c == 'w')
+                draw_dot(ax + x, ay + y, sel ? LIGHT_GRAY : WHITE);
+            else if (c == 'o')
+                draw_dot(ax + x, ay + y, sel ? LIGHT_GRAY : DARK_GRAY);
+        }
+}
+
 void draw_unknown_icon(int ax, int ay, bool sel) {
     uint8_t bg = sel ? DARK_GRAY : WHITE;
     fill_rect(ax + 1, ay, ICON_W - 5, ICON_H, bg);
