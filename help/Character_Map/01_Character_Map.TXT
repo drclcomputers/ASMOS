@@ -1,0 +1,11 @@
+# Character Map
+
+Character Map shows the characters 32 to 255 of the code page in use
+(Settings > Display > Characters), in any of the fonts.
+
+- Click a character to see it large, with its code in decimal and hex,
+  the Alt keys that type it, and its Unicode number.
+- Double-click it, or press Enter, to add it to the box at the bottom.
+- Copy puts the box on the clipboard (or the character picked, when the
+  box is empty).
+- The arrow keys move around the grid.

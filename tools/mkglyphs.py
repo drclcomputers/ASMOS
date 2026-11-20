@@ -2,7 +2,7 @@
 """ASMOS: the characters past ASCII, for all four fonts, and the code pages
 that pick them.
 
-    python3 tools/mkglyphs.py > fonts/font_ext.c
+    python3 tools/mkglyphs.py > fonts/fonts_ext.c
     python3 tools/mkglyphs.py --preview sheet.png   (every glyph, 4x)
 
 The code pages: Western (Windows-1252), Central European (Windows-1250)

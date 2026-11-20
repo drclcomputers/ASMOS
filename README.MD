@@ -592,7 +592,7 @@ Drivers
 
 - GPU: VGA registers, Mode 13h and the planar modes (640x400 to 800x600).
 - Fonts: ASCII in fonts/fonts.c (8x8, 4x6) and fonts/font_prop.c (System,
-  Small; tools/fontmaker.py). Codes 128-255 in fonts/font_ext.c, made by
+  Small; tools/fontmaker.py). Codes 128-255 in fonts/fonts_ext.c, made by
   tools/mkglyphs.py: accented letters from the font's own letter and a mark,
   box drawing from the cell size, the symbols from tools/glyphart.py; and a
   table per code page from byte to glyph.
@@ -659,7 +659,7 @@ extapps/     External .APP apps, MANIFEST (what goes in /APPS), help/ (their
 lib/         Freestanding libs: memory, strings, math, time, graphics,
              paging, APM, FPU emulator
 config/      Compile-time and saved settings (ASMOS.CFG)
-fonts/       Fonts (font_ext.c: codes 128-255, made by tools/mkglyphs.py)
+fonts/       Fonts (fonts_ext.c: codes 128-255, made by tools/mkglyphs.py)
 network/     IPv4, DNS, Gopher client
 tools/       mkdisk.py (disk images), mkiso.py (CD images),
              bootemu.py / boottest.py (boot tests), fontmaker.py and

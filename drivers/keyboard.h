@@ -111,6 +111,7 @@ typedef struct {
     bool ctrl_shift_v;
     bool ctrl_shift_z;
     bool ctrl_shift_s;
+    bool down[128];
 } keyboardvar;
 
 extern keyboardvar kb;

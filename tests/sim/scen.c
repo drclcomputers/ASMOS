@@ -2964,6 +2964,25 @@ int scen2(const char *name) {
         sim_frames(2);
         const char *t = ctl_text(ed);
         T("Alt+0233 typed byte 233", ed && (unsigned char)t[0] == 233 && !t[1]);
+        /* held keys: kb.down, while the key is down (a game's arrows) */
+        kb_process_byte(0xE0);
+        kb_process_byte(0x48); /* grey Up */
+        kb_process_byte(0x1E); /* A */
+        sim_frames(3);
+        T("held: down while held, frames later",
+          kb.down[0x48] && kb.down[0x1E]);
+        kb_process_byte(0x9E); /* A up */
+        sim_frame();
+        T("up: no longer down", kb.down[0x48] && !kb.down[0x1E]);
+        kb_process_byte(0xE0);
+        kb_process_byte(0xC8);
+        kb_process_byte(0xE0);
+        kb_process_byte(0x2A); /* a fake shift */
+        sim_frame();
+        T("both up; a fake E0 2A shift isn't a key",
+          !kb.down[0x48] && !kb.down[0x2A]);
+        ctl_set_text(ed, "\xe9");
+        edit_select(ed, 1, 1); /* (A above typed an a: back as it was) */
         /* Alt + 65: 'A'; Alt + 300: byte 44 (mod 256), as DOS does */
         kb_process_byte(0x38);
         kb_process_byte(0x4D);

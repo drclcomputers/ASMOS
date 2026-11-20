@@ -136,6 +136,16 @@ files in parts), `print(owner, &doc)` (the print dialog), and three
 sub-tables: `time` (local time, calendar maths, the desktop alarm), `sound`
 (beep, one WAV/MIDI at a time, volume), `clip` (the text clipboard).
 
+## Keys held down (games)
+
+`api->kb` (`kb` in extapps/shim.h) also has `down[128]`: every key held
+down now, by scan code (drivers/keyboard.h: `UP_ARROW`, `A_KEY`, `SPACE`...).
+A game reads it each frame: `if (kb.down[UP_ARROW]) walk forward`. It stays
+set while the key is held and clears when it comes up; the grey arrows and
+the number pad share codes. `last_char` / `key_pressed` stay what they were:
+one key press, for one frame. Check `window_is_focused(s->win)` first: the
+keys are held for whichever window is in front.
+
 ## A bigger heap
 
 `mkapp.py --heap 272` (KB; header flags bits 8-15, 16 KB units): for an

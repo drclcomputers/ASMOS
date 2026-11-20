@@ -77,6 +77,8 @@ void kb_process_byte(uint8_t raw) {
 
     bool released = (raw & KEY_RELEASE) != 0;
     uint8_t sc = raw & ~KEY_RELEASE;
+    if (!(extended && (sc == LSHIFT || sc == RSHIFT))) /* (E0 2A: fake) */
+        kb.down[sc] = !released; /* (held keys repeat: still down) */
 
     bool ext = extended;
     extended = false;
