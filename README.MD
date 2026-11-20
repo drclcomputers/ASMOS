@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.1.8
+Version 3.2.7
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
