@@ -1,0 +1,13 @@
+# The tabs
+
+- Display: the screen mode, the desktop pattern and colours, the screen
+  saver, the speed options, and Characters (the code page for accents
+  and symbols).
+- Sound: sound on or off, the start-up chime, the Sound Blaster's volume.
+- Clock: the date, the time and the time zone.
+- Network: the IP address, gateway, netmask and DNS server.
+- Printers: the printer's kind and port.
+- System: start in the desktop or the text shell, FileF's windows, and
+  a few options for troubleshooting.
+
+Save keeps the settings in ASMOS.CFG. Some need a restart: Save says so.

@@ -1,0 +1,12 @@
+# Sudoku
+
+Fill the grid so that every row, every column and every 3x3 box has the
+digits 1 to 9 once each. Every puzzle has one solution.
+
+- Click a cell, or use the arrows, to pick it. Type 1-9 to fill it.
+- Shift and a digit (or N for notes mode) pencils a small note.
+- Del, Backspace, 0 or Space clears the cell. Ctrl+Z takes back a move.
+- Game > New Game: Easy, Medium or Hard. Edit > Check and Hint help when
+  you're stuck; Help > How to Play has the rules in short.
+
+The game in progress and the best times are kept for next time.

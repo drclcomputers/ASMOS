@@ -1,0 +1,7 @@
+# ClipView
+
+ClipView shows the clipboard's history: the texts copied lately, the
+newest first.
+
+- Pick one to see it in full below.
+- Double-click it, or press Copy, to put it back on the clipboard.

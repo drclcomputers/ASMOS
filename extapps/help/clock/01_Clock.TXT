@@ -1,0 +1,6 @@
+# Clock
+
+The time and the date, from the PC's clock (Settings > Clock sets them).
+
+- Alarm > Set Alarm rings at a time you choose; Clear Alarm takes it
+  away.

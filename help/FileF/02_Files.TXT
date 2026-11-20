@@ -1,0 +1,10 @@
+# Working with files
+
+- New File, New Folder: File menu, or right-click an empty spot.
+- Rename: F2, or File > Rename.
+- Delete: Del. It goes to the Trash.
+- Copy, Cut, Paste: the Edit menu (Ctrl+C, Ctrl+X, Ctrl+V), or drag
+  files to another folder or drive.
+- Get Info: the size, the dates and the DOS name.
+- Compress and Extract (Edit menu): ZIP archives.
+- Floppies and the CD: right-click the drive to eject it.

@@ -1,0 +1,13 @@
+# Browsing
+
+FileF shows the drives, folders and files. Double-click a folder to open
+it, a file to open it in its app.
+
+- Back, Forward and Up (the arrows at the top) move between folders.
+  Home shows all the drives, Desk the desktop folder.
+- Type a path in the box at the top and press Enter to go there.
+- The tree on the left shows the folders of every drive.
+- Enter opens, Backspace goes up a folder.
+
+Settings > System chooses one FileF window for each folder, or a single
+window that is reused.

@@ -1,0 +1,25 @@
+# Files and disks
+
+Every disk is a folder at the top: /HDA and /HDB (hard disks), /FDD0 and
+/FDD1 (floppy drives), /CD0 (the CD drive). FileF shows them all under
+Drives.
+
+- New names may have letters, digits, the dot and - _ # $ % & + = @ ! ~
+  ( ) [ ] { }. No spaces: use _ or - instead. Names already on a disk
+  keep what they have.
+- Long names are up to 63 characters. DOS sees a short 8.3 name too.
+- Deleting puts things in the Trash. Empty the Trash to free the space.
+
+# Floppies
+
+A floppy shows on the desktop once it has been read. To read one you
+put in, open its drive in FileF's Drives. Taking a disk out is noticed by
+itself. Use Eject before taking a disk out, so what is waiting gets
+written first.
+
+# CDs
+
+A CD shows on the desktop by itself, with its name. Apps on it appear in
+Apps > CDROM while it is in. An audio CD shows its tracks as
+Track01.cda... and Audio Player plays them. Right-click the CD to eject
+it.

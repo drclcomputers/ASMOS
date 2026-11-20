@@ -1,0 +1,13 @@
+# Formatting
+
+Format Disk prepares a floppy, or erases the second hard disk (HDB). The
+disk ASMOS runs from is never offered.
+
+- Drive: FDD0, FDD1 or HDB, the ones the machine has.
+- Size: what the floppy drive can format. Quick only makes a new, empty
+  file system on a disk that is already formatted.
+- Label: the disk's name.
+- Start asks first. Everything on the disk is erased.
+
+A floppy disk must be in the drive and not write-protected. HDB becomes
+one empty volume of up to 2 GB.

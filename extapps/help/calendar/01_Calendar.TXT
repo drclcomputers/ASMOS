@@ -1,0 +1,12 @@
+# Calendar
+
+A month at a time, with a note for any day.
+
+- Click a day to pick it. A grey day of the month before or after goes
+  to that month.
+- Double-click or Enter writes or changes the day's note; Del deletes it.
+- The arrows move a day or a week, PgUp and PgDn a month, Home goes to
+  today.
+- View chooses whether the week starts on Monday or Sunday.
+
+The notes are kept in /PREFS/CALNOTES.TXT.

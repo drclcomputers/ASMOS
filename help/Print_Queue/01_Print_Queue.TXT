@@ -1,0 +1,8 @@
+# Print Queue
+
+Print Queue shows what is waiting to be printed. Jobs print in the
+background while you work.
+
+- Pause holds all printing; Resume goes on.
+- Delete (or Del) takes the job picked out of the queue.
+- The printer's kind and port are in Settings > Printers.

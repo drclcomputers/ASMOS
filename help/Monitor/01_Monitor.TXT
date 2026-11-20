@@ -1,0 +1,9 @@
+# Monitor
+
+Monitor lists the running apps and shows the memory, the CPU and the
+disks.
+
+- Switch To brings an app to the front.
+- End Task ends an app, even one that is stuck.
+- Ctrl+Alt+Del or Ctrl+Shift+Esc opens Monitor from anywhere, also while
+  an app is not responding.

@@ -1,0 +1,8 @@
+# Drawing
+
+ASMDraw draws pictures in 16 colours: pencil, eraser, line, rectangle
+and fill.
+
+- Click a colour for the pen, Shift+click one for the background.
+- Pick a tool and a brush size on the left.
+- File: New, Open, Save, Save As, Print. Pictures are .PIC files.

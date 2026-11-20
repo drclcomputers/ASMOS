@@ -1,0 +1,11 @@
+# Audio CDs
+
+Put an audio CD in the drive and press CD (or C): its tracks replace
+the CD tracks in the list, and the first one plays.
+
+- The drive plays the music itself and sends it down its audio cable to
+  the sound card's CD input. No sound? Check that cable, or use the
+  headphone socket on the drive.
+- The volume slider turns the sound card's CD input up and down.
+- A track's file (Track01.cda) can be copied: it plays while its CD is
+  in the drive.

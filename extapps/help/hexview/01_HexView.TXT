@@ -1,0 +1,8 @@
+# HexView
+
+HexView shows a file's bytes in hex and as characters, 16 a row (8 in a
+narrow window). Files up to 64 KB.
+
+- File > Open picks the file. Go to Offset jumps to a place in it.
+- The arrows, PgUp and PgDn move; Ctrl+Home and Ctrl+End go to the
+  start and the end.

@@ -1,0 +1,11 @@
+# Editing text
+
+TEditor writes and reads plain text files.
+
+- Ctrl+N new, Ctrl+O open, Ctrl+S save.
+- Ctrl+X, Ctrl+C, Ctrl+V: cut, copy and paste.
+- Ctrl+F finds text, F3 finds the next one, Ctrl+G goes to a line.
+- File > Print prints the text.
+
+The bottom line shows the line count, the line and column of the cursor,
+and whether the text has changed since it was saved.

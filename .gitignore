@@ -18,3 +18,5 @@ apps/asmusic.c
 /tools/music
 /build
 *.iso
+!/help/**/*.TXT
+!/extapps/help/**/*.TXT

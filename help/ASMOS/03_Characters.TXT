@@ -1,0 +1,16 @@
+# Accents and symbols
+
+Codes 128 to 255 are the characters of a code page. Settings > Display >
+Characters picks one:
+
+- Western (1252): the accents of Western Europe, and symbols like the
+  euro, copyright and trademark signs.
+- Central European (1250): Romanian, Polish, Czech, Hungarian...
+- DOS (437): box drawing, shades, Greek letters and maths signs, as in
+  DOS.
+
+# Typing them
+
+Hold Alt and type the code on the number pad, then let go of Alt: Alt
+and 0233 types the character with code 233. Character Map (Apps >
+Accessories) shows every code, and copies characters for you.

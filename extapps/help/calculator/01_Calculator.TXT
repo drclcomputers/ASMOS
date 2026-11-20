@@ -1,0 +1,8 @@
+# Calculator
+
+Click the buttons, or type the digits, + - * / % and the dot on the
+keyboard. Enter (or =) works the result out.
+
+- C, or Esc, clears everything.
+- Backspace takes back the last digit.
+- +/- changes the sign.

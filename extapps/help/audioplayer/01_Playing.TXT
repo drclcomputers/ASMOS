@@ -1,0 +1,13 @@
+# Playing sounds
+
+Audio Player plays WAV files on the Sound Blaster, MIDI files on the FM
+synth, and audio CDs from the CD drive.
+
+- Open puts a file in the list and plays it; Add only puts it in the
+  list. Double-click a song in the list to play it.
+- Space plays and pauses, S stops, R goes back to the start, N plays the
+  next one, L repeats this one.
+- Click the bar to jump there (WAV and CDs).
+- + and - change the volume.
+
+The list and the volume are kept for next time.

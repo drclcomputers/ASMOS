@@ -1,0 +1,15 @@
+# Using Help
+
+Each app has a folder of pages on the left. Click a page to read it; a
+folder shows its first page. Up, Down, PgUp, PgDn and Space scroll.
+
+- An app's own Help > View Help opens its folder here.
+- Apps you add bring their own pages the first time they run.
+- File > Delete Page deletes the page or folder picked. Installing the
+  app (or ASMOS) again puts the pages back.
+
+# Writing pages
+
+The pages are text files in /HELP/<App>. A line starting with # is a
+heading, one starting with - is a point in a list, and a blank line
+starts a new paragraph. The lines of a paragraph run together.

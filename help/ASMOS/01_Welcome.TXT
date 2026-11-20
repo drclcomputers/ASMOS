@@ -1,0 +1,18 @@
+# Welcome to ASMOS
+
+ASMOS is a desktop for 386 and 486 PCs: windows, a menu bar, icons, the
+Trash, and apps in the Apps menu.
+
+- The menu bar at the top belongs to the window in front. With no window
+  in front it has the desktop's menus: Apps, File, Edit, Action and Help.
+- Apps opens the apps in the /APPS folder. Each folder there is a group.
+- Double-click an icon to open it. Drag icons to move them, or onto a
+  folder or the Trash.
+- Most apps have Help > View Help: their own pages in this Help app.
+
+# Keys
+
+- Alt+Tab, Alt+Shift+Tab: switch windows (Esc while Alt is held: stay).
+- Ctrl+Q: close the window (it asks to save).
+- Ctrl+Shift+Q: end the app at once.
+- Ctrl+Alt+Del or Ctrl+Shift+Esc: Monitor, to end an app that is stuck.

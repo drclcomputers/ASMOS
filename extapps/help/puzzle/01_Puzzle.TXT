@@ -1,0 +1,9 @@
+# Puzzle
+
+Put the 15 tiles back in order, 1 to 15, with the gap at the bottom
+right.
+
+- Click a tile in the gap's row or column: it slides into the gap, and
+  the tiles between go with it.
+- The arrow keys slide a tile too.
+- File > New Game mixes the tiles again.
