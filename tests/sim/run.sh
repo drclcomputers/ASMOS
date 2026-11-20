@@ -22,7 +22,7 @@ SCREENS="desktop@640x480 desktop@800 alttab@800 winpos@800 pattern@800
          setup@640x480 setup@800 busycur@800 zipui@800 lazy@640x480 lazy@800
          zoom@320 zoom@800 zoom@640x2 zoom@640x480x2 zoom@800x2 desktop@800x2
          alttab@800x2 zipui@640x2 setup@800x2 pattern@640x2 lazy@800x2
-         charset@320"
+         charset@320 help@320"
 
 if [ $# -gt 0 ]; then list="$*"; else
     list="$(grep -o '!strcmp(name, "[a-zA-Z0-9_]*")' scen.c | sed 's/.*"\(.*\)".*/\1/' | sort -u) $SCREENS"

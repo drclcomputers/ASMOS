@@ -2776,6 +2776,151 @@ int scen2(const char *name) {
         wr(1, o);
         return fails;
     }
+    if (!strcmp(name, "help")) {
+        /* Help: /HELP's folders; Help > View Help in an app opens its own;
+         * an .APP's pages come in the first time it runs, and again only
+         * when the .APP changes */
+        int fails = 0;
+        char b[300];
+        dir_entry_t de;
+        extern bool help_has(const char *);
+#define VIEW_HELP(win)                                                         \
+    ({                                                                         \
+        menu_item *vh_ = NULL;                                                 \
+        for (int i_ = 0; (win) && i_ < (win)->win_menu_count; i_++)            \
+            if (!strcmp((win)->win_menus[i_].title, "Help"))                   \
+                for (int k_ = 0; k_ < (win)->win_menus[i_].item_count; k_++)   \
+                    if ((win)->win_menus[i_].items[k_].label &&                \
+                        !strcmp((win)->win_menus[i_].items[k_].label,          \
+                                "View Help"))                                  \
+                        vh_ = &(win)->win_menus[i_].items[k_];                 \
+        vh_;                                                                   \
+    })
+        T("the built-in pages are on the disk",
+          fs_find("/HELP/ASMOS/01_Welcome.TXT", &de) &&
+              fs_find("/HELP/FileF", &de) &&
+              fs_find("/HELP/Character_Map", &de));
+        T("an .APP's are not, before it runs", !fs_find("/HELP/Sudoku", &de));
+        /* the Help app on its own */
+        app_instance_t *h = sim_launch("HELP");
+        sim_frames(4);
+        typedef struct {
+            window *win;
+            control *tree, *view, *sb;
+            int folders[64], nfolders;
+            char rel[200][112];
+            int nrel;
+            char shown[112];
+        } hs_t;
+        hs_t *hs = h->state;
+        snprintf(b, sizeof b, "    %d nodes, shown '%s'\n", hs->nrel,
+                 hs->shown);
+        wr(1, b);
+        T("ASMOS first, its first page",
+          !strcmp(hs->shown, "ASMOS") && hs->nfolders > 5 &&
+              !strcmp(tree_text(hs->tree, hs->folders[0]), "ASMOS"));
+        sim_shot("help1");
+        /* FileF: Help > View Help */
+        sim_launch("FILEF");
+        sim_frames(3);
+        window *fw = wm_focused_window();
+        menu_item *vh = VIEW_HELP(fw);
+        T("FileF has Help > View Help", vh != NULL);
+        if (vh)
+            vh->action();
+        sim_frames(3);
+        T("it opens Help at FileF",
+          wm_focused_window() == hs->win && !strcmp(hs->shown, "FileF"));
+        sim_shot("help2");
+        /* an app with no pages: no Help menu */
+        sim_launch("CALCULATOR");
+        sim_frames(3);
+        window *cw = wm_focused_window();
+        T("Calculator: its pages put in /HELP, its menu",
+          fs_find("/HELP/Calculator/01_Calculator.TXT", &de) &&
+              VIEW_HELP(cw) != NULL);
+        wm_close(cw);
+        sim_frames(2);
+        /* Sudoku: an .APP with pages and its own Help menu */
+        sim_launch("SUDOKU");
+        sim_frames(3);
+        window *sw = wm_focused_window();
+        T("Sudoku: its page put in /HELP",
+          fs_find("/HELP/Sudoku/01_Sudoku.TXT", &de));
+        T("View Help added to its own Help menu", VIEW_HELP(sw) != NULL);
+        int nhelp = 0;
+        for (int i = 0; i < sw->win_menu_count; i++)
+            nhelp += !strcmp(sw->win_menus[i].title, "Help");
+        T("(one Help menu)", nhelp == 1);
+        VIEW_HELP(sw)->action();
+        sim_frames(3);
+        T("Help at Sudoku", !strcmp(hs->shown, "Sudoku"));
+        sim_shot("help3");
+        /* deleted: stays deleted while it is the same .APP */
+        wm_close(sw);
+        sim_frames(2);
+        fs_rm_rf("/HELP/Sudoku");
+        sim_frames(3);
+        int sud = -1;
+        for (int i = 0; i < hs->nfolders; i++)
+            if (!strcmp(tree_text(hs->tree, hs->folders[i]), "Sudoku"))
+                sud = hs->folders[i];
+        T("Help's list follows", sud < 0 && !help_has("Sudoku"));
+        sim_launch("SUDOKU");
+        sim_frames(3);
+        sw = wm_focused_window();
+        T("run again: not put back",
+          !fs_find("/HELP/Sudoku", &de) && VIEW_HELP(sw) == NULL);
+        wm_close(sw);
+        sim_frames(3);
+        /* the .APP replaced (installed again, later): back */
+        fat_file_t f;
+        static uint8_t app[65536];
+        int n = 0;
+        if (fs_open("/APPS/Games/Sudoku.APP", &f)) {
+            n = fs_read(&f, app, sizeof app);
+            fs_close(&f);
+        }
+        extern unsigned char g_cmos[128];
+        g_cmos[2] = 0x47; /* the clock: 10:47 */
+        fs_delete("/APPS/Games/Sudoku.APP");
+        if (fs_create("/APPS/Games/Sudoku.APP", &f)) {
+            fs_write(&f, app, n);
+            fs_close(&f);
+        }
+        sim_launch("SUDOKU");
+        sim_frames(3);
+        T("installed again: its page is back",
+          fs_find("/HELP/Sudoku/01_Sudoku.TXT", &de));
+        sw = wm_focused_window();
+        if (sw)
+            wm_close(sw);
+        sim_frames(2);
+        /* Help's File > Delete Page */
+        wm_focus(hs->win);
+        int fnode = -1;
+        for (int i = 0; i < hs->nfolders; i++)
+            if (!strcmp(tree_text(hs->tree, hs->folders[i]), "Print Queue"))
+                fnode = hs->folders[i];
+        T("Print Queue in the list (shown with a space)", fnode >= 0);
+        tree_set_sel(hs->tree, fnode);
+        hs->tree->handler(hs->tree, EV_CHANGE);
+        sim_frames(2);
+        menu_item *del = NULL;
+        for (int i = 0; i < hs->win->win_menu_count; i++)
+            if (!strcmp(hs->win->win_menus[i].title, "File"))
+                del = &hs->win->win_menus[i].items[0];
+        T("File > Delete Page", del && !strcmp(del->label, "Delete Page"));
+        del->action();
+        sim_frames(2);
+        sim_key(0x1C); /* Yes */
+        sim_frames(3);
+        T("deleted: the folder and the node",
+          !fs_find("/HELP/Print_Queue", &de) && !help_has("Print Queue"));
+        sim_shot("help4");
+#undef VIEW_HELP
+        return fails;
+    }
     if (!strcmp(name, "charset")) {
         /* characters 128-255: the code page picks the glyph; Alt + the
          * number pad types one; every font draws them */

@@ -56,6 +56,10 @@ Features
 - **Audio CDs**: show as /CD0 with `Track01.cda`, `Track02.cda`... (as in
   Windows 95). Audio Player plays them from the drive (the CD button or C:
   the whole disc into the list): play, pause, seek, next, repeat.
+- **Help**: a folder of pages for each app in /HELP, read in the Help app
+  (Apps > Help). An app with pages gets Help > View Help, which opens its
+  own. Apps bring their pages inside the .APP and add them the first time
+  they run; deleted pages come back only when the app is installed again.
 - **Characters**: the fonts have every character of three code pages:
   Western (Windows-1252), Central European (Windows-1250: ă â î ş ţ ő ł...)
   and DOS (437: box drawing, blocks, Greek). Settings > Display >
@@ -251,6 +255,7 @@ The bundled apps:
 | Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                        | the printer's jobs                                        |
 | ASMDraw                                                            | pixel art editor                                          |
+| Help                                                               | the help pages of every app                               |
 | Character Map                                                      | every character of the code page, to copy                 |
 | Calculator, Calendar (with notes), Clock (with an alarm), ClipView | accessories                                               |
 | Audio Player                                                       | WAV and MIDI files, audio CDs                             |
@@ -549,6 +554,10 @@ Apps (os/, docs/DYNAMIC_APPS.md)
 
 - Built-in apps are part of the kernel. External ones are .APP files in
   /APPS, loaded when started.
+- Help (os/help.c, apps/help.c): /HELP/<App>/ pages. The built-in apps'
+  are in help/ (put on the disk and the setup floppy); an .APP carries its
+  own (mkapp.py --help-dir) and they are copied out the first time it
+  runs. os_launch_app gives an app with pages Help > View Help.
 - Each external app gets its own page tables (lib/vmm.c): it sees the kernel
   read-only and its own memory. A fault closes the app, not the system
   (os/appguard.c).
@@ -611,7 +620,7 @@ Testing:
   the error messages on broken disks.
 - `tests/sim/run.sh` runs the simulator: the kernel's C code built for Linux
   with a fake screen, disks, floppy controller, CD drive and timer, through
-  94 scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
+  95 scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
   about 20 seconds. `tests/sim/run.sh setup zipui` runs only those.
 - GitHub Actions does the build, `make boottest` and the simulator on every
   push (.github/workflows/ci.yml).
@@ -643,8 +652,10 @@ fs/          FAT file system, ISO 9660 (CD), floppy mount/eject, formatting,
              ZIP, installer
 ui/          Window manager, desktop, widgets, dialogs, cursor, screen saver
 shell/       Shell, commands, built-in assembler
-apps/        Built-in apps (FileF, TEditor, Settings, Character Map...)
-extapps/     External .APP apps, and MANIFEST (what goes in /APPS)
+apps/        Built-in apps (FileF, TEditor, Settings, Help, Character Map...)
+help/        The built-in apps' help pages (and ASMOS's), for /HELP
+extapps/     External .APP apps, MANIFEST (what goes in /APPS), help/ (their
+             help pages)
 lib/         Freestanding libs: memory, strings, math, time, graphics,
              paging, APM, FPU emulator
 config/      Compile-time and saved settings (ASMOS.CFG)

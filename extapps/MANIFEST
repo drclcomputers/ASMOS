@@ -5,6 +5,7 @@
 #                                  an .APP's name, or a path
 FileF.LNK                         | @FileF
 Settings.LNK                      | @Settings
+Help.LNK                          | @Help
 
 Accessories/ASMDraw.APP           | asmdraw
 Accessories/Calculator.APP        | calculator

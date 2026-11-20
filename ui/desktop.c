@@ -3,6 +3,7 @@
 #include "drivers/cdrom.h"
 #include "drivers/fdd.h"
 #include "drivers/gpu.h"
+#include "os/help.h"
 #include "os/watchdog.h"
 #include "ui/cursor.h"
 #include "ui/desktop_fs.h"
@@ -470,6 +471,7 @@ static void menu_eject_cd(void) {
 
 extern app_descriptor fdformat_app;
 static void menu_format_disk(void) { os_launch_app(&fdformat_app); }
+static void menu_help(void) { help_open_app("ASMOS"); }
 
 /* ── the Apps menu ──────────────────────────────────────────────────────── */
 static menu *s_apps_menu;
@@ -978,6 +980,9 @@ void desktop_init(void) {
     menu_add_separator(action_menu);
     menu_add_item(action_menu, "Restart", menu_restart);
     menu_add_item(action_menu, "Shut Down", menu_shutdown);
+
+    menu *help_menu = window_add_menu(win, "Help");
+    menu_add_item(help_menu, "ASMOS Help", menu_help);
 
     desktop_fs_init();
 

@@ -56,10 +56,16 @@ $(EXT_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(EXT_CFLAGS) $< -o $@
 
-$(EXT_DIR)/%.APP: $(EXT_DIR)/extapps/%.o $(EXT_LIB_OBJ)
+# an app's help pages, if it has any: extapps/help/<name>/ (carried in the
+# .APP, copied to /HELP the first time it runs: os/help.c)
+EXT_HELP    = $(wildcard extapps/help/*/*)
+
+$(EXT_DIR)/%.APP: $(EXT_DIR)/extapps/%.o $(EXT_LIB_OBJ) $(EXT_HELP)
 	$(LD) -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs --gc-sections \
-	      -e init -u on_frame -u destroy -u app_meta -o $(EXT_DIR)/$*.elf $^
-	python3 tools/mkapp.py --elf $(EXT_DIR)/$*.elf --meta --out $@ >/dev/null
+	      -e init -u on_frame -u destroy -u app_meta -o $(EXT_DIR)/$*.elf \
+	      $(EXT_DIR)/extapps/$*.o $(EXT_LIB_OBJ)
+	python3 tools/mkapp.py --elf $(EXT_DIR)/$*.elf --meta --out $@ \
+	      $(if $(wildcard extapps/help/$*),--help-dir extapps/help/$*) >/dev/null
 
 apps: $(EXT_PKGS)
 
@@ -94,15 +100,18 @@ $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
 MKDISK = python3 tools/mkdisk.py
-MKDISK_IN = $(BOOT_BIN) kernel.bin $(EXT_PKGS) extapps/MANIFEST tools/mkdisk.py
+# help/: the built-in apps' help pages (and ASMOS's), to /HELP
+HELP_PAGES = $(wildcard help/*/*)
+MKDISK_IN = $(BOOT_BIN) kernel.bin $(EXT_PKGS) extapps/MANIFEST tools/mkdisk.py \
+            $(HELP_PAGES)
 
 os_image.bin: $(MKDISK_IN)
 	$(MKDISK) hdd $@ --mb $(HDD_MB) --boot $(BOOT_DIR) --kernel kernel.bin \
-	          --apps extapps/MANIFEST $(EXT_DIR)
+	          --apps extapps/MANIFEST $(EXT_DIR) --help help
 
 setup.img: $(MKDISK_IN)
 	$(MKDISK) floppy $@ --boot $(BOOT_DIR) --kernel kernel.bin \
-	          --apps extapps/MANIFEST $(EXT_DIR)
+	          --apps extapps/MANIFEST $(EXT_DIR) --help help
 
 -include $(OBJ:.o=.d)
 -include $(EXT_LIB_OBJ:.o=.d) $(patsubst %,$(EXT_DIR)/extapps/%.d,$(EXT_APPS))

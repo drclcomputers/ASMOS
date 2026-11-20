@@ -8,6 +8,14 @@ mkapp.py - build an ASMOS .APP (v2) from a relocatable ELF.
   python3 tools/mkapp.py --elf app.elf --name MyApp --out MYAPP.APP \
       --state 64 --single --window-first
 
+--help DIR puts the pages in DIR (text files: "# " a heading, "- " a
+point, a blank line between paragraphs) at the end of the .APP; ASMOS
+copies them to /HELP/<App name>/ the first time the app runs (os/help.c).
+After the relocations: for each page its name's length (1 byte), the name,
+its text's length (4 bytes) and the text; then the number of pages, their
+size in bytes (4 bytes each) and "ASHP". Names: letters, digits, the dot
+and - _ # $ % & + = @ ! ~ ( ) [ ] { }, no spaces.
+
 Entry points are looked up by symbol (init / on_frame / destroy; override
 with --init-sym etc.).  v2 entry ABI:  fn(const os_api_t *api, void *state).
 Every R_386_32 inside the loaded sections is recorded so the loader can
@@ -210,6 +218,34 @@ def build(a):
     )
 
 
+NAME_OK = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_#$%&+=@!~()[]{}"
+)
+
+
+def help_pages(folder):
+    import os
+
+    out, n = b"", 0
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if name.startswith(".") or not os.path.isfile(path):
+            continue
+        if not set(name) <= NAME_OK or len(name) > 63:
+            die(
+                "help page '%s': a name of letters, digits and . - _ # $ % & "
+                "+ = @ ! ~ ( ) [ ] { } (no spaces)" % name
+            )
+        text = open(path, "rb").read().replace(b"\r\n", b"\n")
+        text = text.replace(b"\n", b"\r\n")
+        nm = name.encode("ascii")
+        out += bytes([len(nm)]) + nm + struct.pack("<I", len(text)) + text
+        n += 1
+    if len(out) > 64 * 1024:
+        die("help pages: 64 KB at most")
+    return out + struct.pack("<II", n, len(out)) + b"ASHP"
+
+
 def main():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -234,11 +270,20 @@ def main():
         help="take name/state/single/heap from the app_meta "
         "symbol (extapps/shim.h APP_META)",
     )
+    p.add_argument(
+        "--help-dir",
+        "--help-pages",
+        dest="help_dir",
+        default="",
+        help="a folder of help pages to carry (see above)",
+    )
     p.add_argument("--init-sym", default="init")
     p.add_argument("--frame-sym", default="on_frame")
     p.add_argument("--destroy-sym", default="destroy")
     a = p.parse_args()
     blob, info = build(a)
+    if a.help_dir:
+        blob += help_pages(a.help_dir)
     open(a.out, "wb").write(blob)
     print("Created %s (%d bytes)" % (a.out, len(blob)))
     print("  code=%(code)d bss=%(bss)d relocs=%(relocs)d flags=%(flags)d" % info)

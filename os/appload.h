@@ -91,6 +91,8 @@ typedef struct {
 /* The .APP in /APPS (or one of its folders) whose header name is `name`
  * (any case): its path in out. */
 bool appload_find_named(const char *name, char *out, int sz);
+/* the .APP an app was loaded from (NULL: built into the kernel) */
+const char *appload_path_of(const app_descriptor *d);
 /* Run the app called `name` from /APPS; with `file`, ask it to open that
  * file (api->open_request). False if there is no such app. */
 bool appload_run_named(const char *name, const char *file);

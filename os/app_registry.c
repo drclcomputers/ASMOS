@@ -9,6 +9,7 @@ extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 extern app_descriptor setup_app;
 extern app_descriptor charmap_app;
+extern app_descriptor help_app;
 
 const char *const APP_GROUP_NAMES[APP_GROUPS] = {"", "Accessories", "Games",
                                                  "Multimedia", "System Tools"};
@@ -16,6 +17,7 @@ const char *const APP_GROUP_NAMES[APP_GROUPS] = {"", "Accessories", "Games",
 registered_app_t app_registry[] = {
     {&filef_app, "FileF", APP_TOP, false},
     {&settings_app, "Settings", APP_TOP, false},
+    {&help_app, "Help", APP_TOP, false},
 
     {&teditor_app, "TEditor", APP_ACCESSORIES, false},
     {&charmap_app, "Character Map", APP_ACCESSORIES, false},

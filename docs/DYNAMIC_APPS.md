@@ -24,6 +24,21 @@ or `testapps/build_hello.sh`.
 single-instance focus, Task Monitor switch/end-task, window close.
 Without it the state is opaque (never dereferenced by the OS).
 
+## Help pages
+
+`--help-dir DIR` packs the text files in DIR into the .APP (after the
+relocations, with a trailer: page count, size, `ASHP`). The first time the
+app runs, ASMOS copies them to `/HELP/<App name>/` (spaces in the name
+become `_`) and the app's window gets **Help > View Help** (added to its
+own Help menu if it has one). They are copied again only when the .APP
+file changes (installed again, updated), so pages the user deleted stay
+deleted. The bundled apps take theirs from `extapps/help/<name>/`.
+
+A page: `# ` starts a heading, `- ` a point in a list, a blank line a new
+paragraph; the lines of a paragraph run together. Name pages like
+`01_Getting_started.TXT` (shown as "Getting started", in that order):
+letters, digits and `. - _ # $ % & + = @ ! ~ ( ) [ ] { }`, no spaces.
+
 ## Loader guarantees
 
 - Header/size/offset checks use 64-bit math (no overflow).

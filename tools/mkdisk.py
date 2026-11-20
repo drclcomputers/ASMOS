@@ -418,6 +418,27 @@ def manifest_files(manifest, appdir):
     return out
 
 
+def help_files(folder):
+    """[(path under HELP, data)]: help/<App>/<page>, to /HELP (os/help.h)"""
+    import os
+
+    out = []
+    for app in sorted(os.listdir(folder)):
+        d = os.path.join(folder, app)
+        if app.startswith(".") or not os.path.isdir(d):
+            continue
+        for page in sorted(os.listdir(d)):
+            p = os.path.join(d, page)
+            if page.startswith(".") or not os.path.isfile(p):
+                continue
+            for part in (app, page):
+                if " " in part or len(part) > 63 or any(c in '\\:*?"<>|' for c in part):
+                    die("help/%s/%s: bad name '%s'" % (app, page, part))
+            data = open(p, "rb").read().replace(b"\r\n", b"\n")
+            out.append(("HELP/%s/%s" % (app, page), data.replace(b"\n", b"\r\n")))
+    return out
+
+
 def read_boot(bootdir):
     mbr = open(bootdir + "/mbr.bin", "rb").read()
     vbr = open(bootdir + "/vbr.bin", "rb").read()
@@ -550,7 +571,8 @@ def main():
     if len(a) < 2 or a[0] not in ("hdd", "floppy"):
         die(
             "usage: mkdisk.py hdd|floppy OUT --boot DIR --kernel FILE "
-            "--apps MANIFEST APPDIR [--mb N] [--video 0-3] [--fragment]"
+            "--apps MANIFEST APPDIR [--help DIR] [--mb N] [--video 0-3] "
+            "[--fragment]"
         )
 
     def opt(name, n=1, default=None):
@@ -564,6 +586,8 @@ def main():
     kernel = open(opt("--kernel", default="kernel.bin"), "rb").read()
     apps = opt("--apps", 2)
     files = manifest_files(*apps) if apps else []
+    if opt("--help"):
+        files += help_files(opt("--help"))
     video = int(opt("--video", default="0"))
     frag = "--fragment" in a
     if kind == "hdd":

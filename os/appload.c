@@ -45,6 +45,11 @@ static loaded_app_t *find_by_desc(const app_descriptor *d) {
     return NULL;
 }
 
+const char *appload_path_of(const app_descriptor *d) {
+    loaded_app_t *la = find_by_desc(d);
+    return la ? la->path : NULL;
+}
+
 static loaded_app_t *find_by_name(const char *n) {
     for (int i = 0; i < MAX_LOADED_APPS; i++)
         if (s_loaded[i].loaded && strcmp(s_loaded[i].desc.name, n) == 0)

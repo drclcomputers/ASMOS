@@ -3,6 +3,7 @@
 #include "os/appguard.h"
 #include "os/appload.h"
 #include "os/error.h"
+#include "os/help.h"
 #include "os/scheduler.h"
 
 #include "drivers/serial.h"
@@ -132,6 +133,8 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
     if (desc->init)
         desc->init(app->state);
     wm_set_launch_key(NULL);
+    if (app->running && !app->wants_quit)
+        help_attach(app); /* its pages, Help > View Help (os/help.h) */
 
     return app;
 }
