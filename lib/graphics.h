@@ -22,6 +22,9 @@ int text_width(const char *str, int size);
 int text_width_n(const char *str, int n, int size);
 int text_fit(const char *str, int width, int size); /* chars that fit */
 int font_height(int size);                          /* rows */
+/* the bitmap of c in a font: rows (the left column in bit 7), its ink
+ * width; returns the rows (font_height) */
+int font_glyph(int size, unsigned char c, uint8_t rows[8], int *w);
 
 /* Clip rectangle for all drawing (screen coordinates). */
 void gfx_set_clip(int x, int y, int w, int h);

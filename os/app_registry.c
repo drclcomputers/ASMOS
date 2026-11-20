@@ -8,6 +8,7 @@ extern app_descriptor fdformat_app;
 extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 extern app_descriptor setup_app;
+extern app_descriptor charmap_app;
 
 const char *const APP_GROUP_NAMES[APP_GROUPS] = {"", "Accessories", "Games",
                                                  "Multimedia", "System Tools"};
@@ -17,6 +18,7 @@ registered_app_t app_registry[] = {
     {&settings_app, "Settings", APP_TOP, false},
 
     {&teditor_app, "TEditor", APP_ACCESSORIES, false},
+    {&charmap_app, "Character Map", APP_ACCESSORIES, false},
 
     {&asmterm_app, "ASMTerm", APP_SYSTEM, false},
     {&monitor_app, "Monitor", APP_SYSTEM, false},

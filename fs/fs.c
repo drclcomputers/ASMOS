@@ -2357,8 +2357,18 @@ bool fs_name_char_ok(char c) {
     return false;
 }
 
-/* a name typed by the user: up to FS_NAME_MAX characters, spaces and more
- * than one dot allowed, not \ / : * ? " < > | */
+/* what a new name may be made of: letters, digits, the dot and
+ * - _ # $ % & + = @ ! ~ ( ) [ ] { } (no spaces). Names already on a disk
+ * may have more (fs_long_char_ok): they open, and keep them until renamed. */
+bool fs_new_name_char_ok(char c) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9'))
+        return true;
+    return c && strchr(".-_#$%&+=@!~()[]{}", c) != NULL;
+}
+
+/* a name typed by the user: up to FS_NAME_MAX characters of
+ * fs_new_name_char_ok, more than one dot allowed */
 bool fs_validate_name(const char *n, bool is_dir, const char **err) {
     (void)is_dir;
     char t[FS_NAME_SZ];
@@ -2380,8 +2390,10 @@ bool fs_validate_name(const char *n, bool is_dir, const char **err) {
         return false;
     }
     for (int i = 0; n[i]; i++)
-        if (!fs_long_char_ok(n[i])) {
-            *err = "No \\ / : * ? \" < > |";
+        if (!fs_new_name_char_ok(n[i])) {
+            *err = n[i] == ' ' ? "No spaces in names (use _ or -)."
+                               : "Only letters, digits and . - _ # $ % & + "
+                                 "= @ ! ~ ( ) [ ] { }";
             return false;
         }
     return true;

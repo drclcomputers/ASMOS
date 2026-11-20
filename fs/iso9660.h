@@ -21,4 +21,11 @@ bool iso_iterate(uint16_t dir, iso_cb cb, void *user); /* "." and ".." too */
 int iso_read(fat_file_t *f, void *buf, int len);
 uint32_t iso_size_bytes(void);
 
+/* an audio CD: no file system, its tracks as Track01.cda ... (44 bytes:
+ * RIFF "CDDA", as Windows has them) */
+bool iso_is_audio(void);
+bool iso_cda_make(int track, uint8_t out[44]); /* that track's file */
+/* the track a .cda names is on the disc in the drive (serial 0: any) */
+bool iso_cda_check(uint32_t serial, uint32_t start, uint32_t len);
+
 #endif

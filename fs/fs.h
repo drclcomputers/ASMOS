@@ -163,6 +163,9 @@ bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
 
 void fs_make_83(const char *filename, char *out83);
 bool fs_name_char_ok(char c);
+/* a character a new name may have (letters, digits, . - _ # $ % & + = @ !
+ * ~ ( ) [ ] { }); fs_validate_name checks a whole name with it */
+bool fs_new_name_char_ok(char c);
 /* Validate a user-typed name (long names allowed); on failure *err gets a
  * short message. */
 bool fs_validate_name(const char *name, bool is_dir, const char **err);

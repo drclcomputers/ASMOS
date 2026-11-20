@@ -812,7 +812,7 @@ static void cd_link(const char *app_path, cd_links_ctx *c) {
         return;
     int k = 0; /* the label, as a file name */
     for (const char *p = label; *p && k < 24; p++)
-        name[k++] = fs_long_char_ok(*p) && *p != '/' ? *p : '_';
+        name[k++] = fs_new_name_char_ok(*p) ? *p : '_';
     name[k] = 0;
     const char *err;
     if (!k || !fs_validate_name(name, false, &err))
@@ -822,7 +822,7 @@ static void cd_link(const char *app_path, cd_links_ctx *c) {
         dir_entry_t de;
         if (!fs_find(path, &de))
             break;
-        snprintf(path, sizeof(path), "%s/%s %d.LNK", CD_APPS_DIR, name, n);
+        snprintf(path, sizeof(path), "%s/%s_%d.LNK", CD_APPS_DIR, name, n);
     }
     dir_entry_t de;
     if (fs_find(path, &de))

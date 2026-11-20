@@ -1,10 +1,12 @@
-/* Audio Player - WAV and MIDI (and whatever lib/audio.h learns later),
+/* Audio Player - WAV, MIDI and audio CDs (whatever lib/audio.h knows),
  * with a playlist. Space play/pause, S stop, R start, N next, L loop,
- * +/- volume, Del removes from the list. The list and volume are kept in
- * /PREFS/AUDIOPLA.INI. */
+ * +/- volume, C plays the audio CD, Del removes from the list. The list
+ * and volume are kept in /PREFS/AUDIOPLA.INI. An audio CD's tracks are
+ * /CD0/Track01.cda ...: the drive plays them itself, through its audio
+ * cable to the sound card (or its headphone socket). */
 #include "extapps/shim.h"
 
-#define MAX_LIST 16
+#define MAX_LIST 40  /* (a CD has up to 99 tracks; most have under 25) */
 #define PATH_LEN 192 /* long names */
 #define BARS 24
 #define STATUS_MS 4000
@@ -12,7 +14,7 @@
 typedef struct {
     window *win; /* must stay first */
     control *viz, *bar, *play, *stop, *rew, *next, *loop, *vol, *vol_lbl, *list,
-        *status;
+        *status, *cd;
     char paths[MAX_LIST][PATH_LEN];
     int count, cur; /* cur: playing / loaded, -1 none */
     bool looping;
@@ -20,11 +22,28 @@ typedef struct {
     uint8_t peaks[BARS];
     uint32_t frame, shown_s, status_until;
     int shown_state;
+    bool batch; /* several changes to the list: saved once, at the end */
 } ap_state_t;
 
 static const char *base_of(const char *p) {
     const char *b = strrchr(p, '/');
     return b ? b + 1 : p;
+}
+
+/* a CD track's file: Track07.cda */
+static bool is_cda(const char *p) {
+    const char *d = strrchr(p, '.');
+    return d && !strcasecmp(d, ".cda");
+}
+
+/* what the list and the display call it: "CD track 7" for a .cda */
+static const char *shown_name(const char *p, char *b, int n) {
+    const char *base = base_of(p);
+    if (is_cda(p) && !strncasecmp(base, "Track", 5)) {
+        snprintf(b, n, "CD track %d", str_to_int(base + 5));
+        return b;
+    }
+    return base;
 }
 
 static void say(ap_state_t *s, const char *msg) {
@@ -33,6 +52,8 @@ static void say(ap_state_t *s, const char *msg) {
 }
 
 static void save_prefs(ap_state_t *s) {
+    if (s->batch)
+        return;
     app_prefs_begin("AUDIOPLA");
     for (int i = 0; i < MAX_LIST; i++) {
         char k[8];
@@ -49,9 +70,9 @@ static void save_prefs(ap_state_t *s) {
 static void fill_list(ap_state_t *s) {
     list_clear(s->list);
     for (int i = 0; i < s->count; i++) {
-        char t[PATH_LEN + 8];
+        char t[PATH_LEN + 8], nb[24];
         snprintf(t, sizeof(t), "%s%s", i == s->cur ? "> " : "   ",
-                 base_of(s->paths[i]));
+                 shown_name(s->paths[i], nb, sizeof(nb)));
         list_add(s->list, t);
     }
     if (s->cur >= 0)
@@ -82,8 +103,9 @@ static bool load_item(ap_state_t *s, int i, bool play) {
     s->cur = i;
     fill_list(s);
     if (err) {
-        char m[96];
-        snprintf(m, sizeof(m), "%s: %s.", base_of(s->paths[i]), err);
+        char m[96], nb[24];
+        snprintf(m, sizeof(m), "%s: %s.",
+                 shown_name(s->paths[i], nb, sizeof(nb)), err);
         say(s, m);
         sync_ui(s);
         return false;
@@ -101,7 +123,7 @@ static int add_path(ap_state_t *s, const char *path) {
         if (!strcmp(s->paths[i], path))
             return i; /* already there */
     if (s->count >= MAX_LIST) {
-        say(s, "The list is full (16).");
+        say(s, "The list is full (40).");
         return -1;
     }
     strncpy(s->paths[s->count], path, PATH_LEN - 1);
@@ -161,6 +183,41 @@ static void act_rewind(ap_state_t *s) {
     sync_ui(s);
 }
 
+/* the audio CD in the drive: its tracks replace the CD tracks in the list
+ * (an earlier disc's), and the first one plays */
+static void act_cd(ap_state_t *s) {
+    static app_dirent_t d[99];
+    int n = A->list_dir("/CD0", d, 99);
+    if (n < 0) {
+        say(s, "No CD in the drive.");
+        return;
+    }
+    s->batch = true;
+    for (int i = s->count - 1; i >= 0; i--) /* the old disc's tracks */
+        if (is_cda(s->paths[i]))
+            remove_item(s, i);
+    int first = -1;
+    for (int i = 0; i < n; i++) {
+        if ((d[i].attr & APP_ATTR_DIR) || !is_cda(d[i].name))
+            continue;
+        char p[PATH_LEN];
+        snprintf(p, sizeof(p), "/CD0/%s", d[i].name);
+        int k = add_path(s, p);
+        if (k < 0)
+            break; /* (full) */
+        if (first < 0)
+            first = k;
+    }
+    s->batch = false;
+    save_prefs(s);
+    if (first < 0) {
+        say(s, "That CD has no audio tracks.");
+        sync_ui(s);
+        return;
+    }
+    load_item(s, first, true);
+}
+
 static void act_next(ap_state_t *s) {
     if (s->count)
         load_item(s, (s->cur + 1) % s->count, true);
@@ -180,6 +237,7 @@ static void set_volume(ap_state_t *s, int v) {
     sb16_set_volume(x, x);
     opl2_set_master_volume((uint8_t)s->volume);
     mixer_write(0x26, (uint8_t)((x & 0xF0) | (x >> 4)));
+    mixer_write(0x28, (uint8_t)((x & 0xF0) | (x >> 4))); /* the CD cable */
 }
 
 /* ── drawing ───────────────────────────────────────────────────────── */
@@ -195,12 +253,14 @@ static void paint_viz(control *c, int x, int y, int w, int h) {
     int f = UI_FONT_SMALL;
     if (audio_state() == AUDIO_EMPTY) {
         const char *t = s->count ? "Double-click a song in the list"
-                                 : "Open a WAV or MIDI file";
+                                 : "Open a WAV or MIDI file, or play a CD";
         draw_string(x + (w - text_width(t, f)) / 2, y + h / 2 - 3, t, DARK_GRAY,
                     f);
         return;
     }
-    draw_string(x + 3, y + 2, base_of(audio_file()), LIGHT_CYAN, UI_FONT_BOLD);
+    char nb[24];
+    draw_string(x + 3, y + 2, shown_name(audio_file(), nb, sizeof(nb)),
+                LIGHT_CYAN, UI_FONT_BOLD);
     char info[64];
     snprintf(info, sizeof(info), "%s, %s", audio_codec_name(), audio_info());
     draw_string(x + 3, y + 12, info, LIGHT_GRAY, f);
@@ -236,7 +296,7 @@ static void paint_bar(control *c, int x, int y, int w, int h) {
                 t, BLACK, f);
 }
 
-/* click on the bar: go there (WAV) */
+/* click on the bar: go there (WAV, CD) */
 static void on_bar(control *c, int ev) {
     ap_state_t *s = c->user;
     if (ev != EV_MOUSEDOWN || !audio_len_ms())
@@ -249,7 +309,8 @@ static void on_bar(control *c, int ev) {
     sync_ui(s);
 }
 
-/* the meter: WAV from the samples; MIDI drawn from the beat of time */
+/* the meter: WAV from the samples; MIDI and CD drawn from the beat of time
+ * (CD audio never passes through here) */
 static void update_meter(ap_state_t *s) {
     int st = audio_state();
     bool moving = false;
@@ -295,7 +356,17 @@ static void got_add(void *user, const char *path) {
     }
 }
 
-enum { B_OPEN = 1, B_REW, B_PLAY, B_STOP, B_NEXT, B_LOOP, B_ADD, B_REMOVE };
+enum {
+    B_OPEN = 1,
+    B_REW,
+    B_PLAY,
+    B_STOP,
+    B_NEXT,
+    B_LOOP,
+    B_ADD,
+    B_REMOVE,
+    B_CD
+};
 
 static void on_button(control *c, int ev) {
     ap_state_t *s = c->user;
@@ -325,6 +396,9 @@ static void on_button(control *c, int ev) {
         break;
     case B_LOOP:
         act_loop(s);
+        break;
+    case B_CD:
+        act_cd(s);
         break;
     }
 }
@@ -360,13 +434,16 @@ MENU_ACTION(m_stop, act_stop(s))
 MENU_ACTION(m_rewind, act_rewind(s))
 MENU_ACTION(m_next, act_next(s))
 MENU_ACTION(m_loop, act_loop(s))
+MENU_ACTION(m_cd, act_cd(s))
 MENU_ACTION(m_close, os_close_own_instance(s->win))
 
 static void m_about(void) {
     dlg_message(NULL, "About Audio Player",
-                "Audio Player 3.0\nWAV on the Sound Blaster, MIDI on the "
-                "FM synth.\nSpace play/pause, S stop, R start, N next,\n"
-                "L repeat, +/- volume. Click the bar to jump (WAV).");
+                "Audio Player 3.1\nWAV on the Sound Blaster, MIDI on the "
+                "FM synth,\naudio CDs from the drive (its cable to the "
+                "card).\nSpace play/pause, S stop, R start, N next,\n"
+                "L repeat, C play the CD, +/- volume.\nClick the bar to "
+                "jump (WAV, CD).");
 }
 
 static void ap_init(void *state) {
@@ -378,7 +455,7 @@ static void ap_init(void *state) {
     window *w = s->win;
     s->viz = ctl_custom(w, 4, 4, 252, 42, paint_viz, NULL, CS_BORDER);
     s->bar = ctl_custom(w, 4, 50, 252, 12, paint_bar, on_bar, 0);
-    ctl_set_tooltip(s->bar, "Click to jump there (WAV)");
+    ctl_set_tooltip(s->bar, "Click to jump there (WAV, CD)");
     s->rew = ctl_button(w, 4, 66, 22, 14, "|<", B_REW, on_button);
     s->play = ctl_button(w, 28, 66, 38, 14, "Play", B_PLAY, on_button);
     s->stop = ctl_button(w, 68, 66, 32, 14, "Stop", B_STOP, on_button);
@@ -393,14 +470,17 @@ static void ap_init(void *state) {
     s->list = ctl_list(w, 4, 84, 252, 58, 0, on_list);
     control *o = ctl_button(w, 4, 146, 44, 13, "Open...", B_OPEN, on_button);
     ctl_set_tooltip(o, "Open and play; it joins the list");
-    ctl_button(w, 50, 146, 40, 13, "Add...", B_ADD, on_button);
-    ctl_button(w, 92, 146, 44, 13, "Remove", B_REMOVE, on_button);
-    s->status = ctl_label(w, 140, 146, 116, 13, "", LS_RIGHT);
+    ctl_button(w, 50, 146, 36, 13, "Add...", B_ADD, on_button);
+    ctl_button(w, 88, 146, 40, 13, "Remove", B_REMOVE, on_button);
+    s->cd = ctl_button(w, 130, 146, 36, 13, "CD", B_CD, on_button);
+    ctl_set_tooltip(s->cd, "Play the audio CD in the drive (C)");
+    s->status = ctl_label(w, 168, 146, 88, 13, "", LS_RIGHT);
 
     menu *m = window_add_menu(w, "Player");
     menu_add_item(m, "Open...", m_open);
     menu_add_item(m, "Add to List...", m_add);
     menu_add_item(m, "Remove from List", m_remove);
+    menu_add_item(m, "Play Audio CD  C", m_cd);
     menu_add_separator(m);
     menu_add_item(m, "Play / Pause  Space", m_play);
     menu_add_item(m, "Stop  S", m_stop);
@@ -477,6 +557,10 @@ static void ap_frame(void *state) {
     case 'l':
     case 'L':
         act_loop(s);
+        break;
+    case 'c':
+    case 'C':
+        act_cd(s);
         break;
     case '+':
         set_volume(s, s->volume + 10);

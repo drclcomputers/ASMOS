@@ -1,8 +1,10 @@
 /* One sound at a time, in any format a codec knows (lib/audio.h). */
 #include "lib/audio.h"
+#include "drivers/cdrom.h"
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
 #include "fs/fs.h"
+#include "fs/iso9660.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -224,16 +226,115 @@ static void mid_close(void) { midi_player_stop(); }
 static bool mid_busy(void) { return midi_player_is_playing(); }
 static uint32_t mid_pos(void) { return m_pos; }
 
+/* ── CD audio: a .cda (Track01.cda on an audio CD) names a track; the
+ * drive plays it itself, out of its audio cable to the sound card ──── */
+
+static uint32_t c_start, c_len, c_at; /* sectors; c_at: last position seen */
+static uint32_t c_seen;               /* pit_ticks then */
+static bool c_loop, c_paused, c_on;   /* c_on: a play was started */
+static int c_status;
+
+#define CD_POLL_MS 250
+
+static bool cda_probe(const uint8_t *d, uint32_t n) {
+    return n >= 44 && !memcmp(d, "RIFF", 4) && !memcmp(d + 8, "CDDA", 4);
+}
+
+static uint32_t le32(const uint8_t *p) {
+    return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 |
+           (uint32_t)p[3] << 24;
+}
+
+static const char *cda_open(uint8_t *d, uint32_t n) {
+    (void)n;
+    if (!cd_present())
+        return "there is no CD drive";
+    uint32_t serial = le32(d + 24);
+    c_start = le32(d + 28);
+    c_len = le32(d + 32);
+    if (!iso_is_audio() || !iso_cda_check(serial, c_start, c_len))
+        return "put its audio CD in the drive";
+    c_on = c_paused = false;
+    c_at = 0;
+    s_len_ms = c_len / CD_FPS * 1000 + c_len % CD_FPS * 1000 / CD_FPS;
+    snprintf(s_info, sizeof(s_info), "track %d, from the drive", d[22]);
+    return NULL;
+}
+
+static void cda_from(uint32_t at) { /* play from `at` sectors in */
+    c_at = at;
+    c_seen = pit_ticks;
+    c_on = cd_play(c_start + at, c_start + c_len);
+    c_status = c_on ? CD_AUDIO_PLAYING : CD_AUDIO_ERROR;
+    if (c_on && c_paused)
+        cd_pause(true);
+}
+
+static void cda_play(bool loop) {
+    c_loop = loop;
+    c_paused = false;
+    cda_from(0);
+}
+static void cda_pause(bool p) {
+    c_paused = p;
+    if (c_on)
+        cd_pause(p);
+    c_seen = pit_ticks;
+}
+static void cda_stop(void) {
+    if (c_on)
+        cd_stop_audio();
+    c_on = c_paused = false;
+    c_at = 0;
+}
+
+/* where the drive is: asked 4 times a second, counted on in between */
+static void cda_poll(void) {
+    if (!c_on || pit_ticks - c_seen < CD_POLL_MS)
+        return;
+    uint32_t lba = 0;
+    c_status = cd_audio_status(&lba);
+    c_seen = pit_ticks;
+    if (c_status == CD_AUDIO_PLAYING || c_status == CD_AUDIO_PAUSED) {
+        if (lba >= c_start && lba < c_start + c_len)
+            c_at = lba - c_start;
+    } else if (c_status == CD_AUDIO_DONE && c_loop) {
+        cda_from(0); /* again */
+    }
+}
+
+static bool cda_busy(void) {
+    cda_poll();
+    return c_on &&
+           (c_status == CD_AUDIO_PLAYING || c_status == CD_AUDIO_PAUSED);
+}
+static uint32_t cda_pos(void) {
+    uint32_t ms = c_at / CD_FPS * 1000 + c_at % CD_FPS * 1000 / CD_FPS;
+    if (c_on && !c_paused && c_status == CD_AUDIO_PLAYING)
+        ms += pit_ticks - c_seen; /* (since the last look) */
+    return ms;
+}
+static bool cda_seek(uint32_t ms) {
+    uint32_t at = ms / 1000 * CD_FPS + ms % 1000 * CD_FPS / 1000;
+    if (at >= c_len)
+        at = c_len ? c_len - 1 : 0;
+    cda_from(at);
+    return c_on;
+}
+
 /* ── the codec table ───────────────────────────────────────────────── */
 
 static const char *const WAV_EXT[] = {"WAV", NULL};
 static const char *const MID_EXT[] = {"MID", "MIDI", NULL};
+static const char *const CDA_EXT[] = {"CDA", NULL};
 
 static const codec_t CODECS[] = {
     {"WAV", WAV_EXT, wav_probe, wav_open, wav_play, wav_pause, wav_stop_,
      wav_close, wav_busy, wav_pos, wav_seek, wav_level},
     {"MIDI", MID_EXT, mid_probe, mid_open, mid_play, mid_pause, mid_stop,
      mid_close, mid_busy, mid_pos, NULL, NULL},
+    {"CD audio", CDA_EXT, cda_probe, cda_open, cda_play, cda_pause, cda_stop,
+     cda_stop, cda_busy, cda_pos, cda_seek, NULL},
 };
 #define NCODECS ((int)(sizeof(CODECS) / sizeof(CODECS[0])))
 
@@ -334,6 +435,8 @@ void audio_set_loop(bool loop) {
     s_loop = loop;
     if (s_codec && s_state == AUDIO_PLAYING && s_codec == &CODECS[0])
         sb16_set_loop(loop);
+    else if (s_codec == &CODECS[2])
+        c_loop = loop;
     else if (s_state == AUDIO_PLAYING)
         midi_player_set_loop(loop);
 }

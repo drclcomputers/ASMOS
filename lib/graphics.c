@@ -149,19 +149,57 @@ static const pfont_t *pfont(int size) {
                                                      : NULL;
 }
 
+int g_codepage = CP_WESTERN;
+
+bool font_has_char(unsigned char c) {
+    if (c >= 32 && c <= 126)
+        return true;
+    return c >= 128 && g_codepage >= 0 && g_codepage < CP_COUNT &&
+           cp_glyph[g_codepage][c - 128] != 0xFF;
+}
+
+/* the glyphs past ASCII for a font size */
+static const pfont_t *ext_font(int size) {
+    return size == FONT_SYSTEM                       ? &ext_system
+           : size == FONT_SMALL || size == FONT_TERM ? &ext_small
+           : size == FONT_MONO8                      ? &ext_mono8
+                                                     : &ext_mono;
+}
+
+/* c's glyph past ASCII, or -1 (then it is drawn as '?') */
+static int ext_index(unsigned char c) {
+    if (c < 128 || g_codepage < 0 || g_codepage >= CP_COUNT)
+        return -1;
+    uint8_t g = cp_glyph[g_codepage][c - 128];
+    return g == 0xFF ? -1 : g;
+}
+
 static int glyph_index(char c) {
     unsigned char u = (unsigned char)c;
     return (u < 32 || u > 126) ? '?' - 32 : u - 32;
 }
 
+/* the rows and width of c in a proportional font (or its glyphs past
+ * ASCII) */
+static const uint8_t *pglyph(const pfont_t *f, int size, char c, int *w) {
+    int e = ext_index((unsigned char)c);
+    if (e >= 0) {
+        const pfont_t *x = ext_font(size);
+        *w = x->width[e];
+        return x->bits + e * x->h;
+    }
+    int g = glyph_index(c);
+    *w = f->width[g];
+    return f->bits + g * f->h;
+}
+
 /* one proportional glyph; returns its advance */
 static int draw_pglyph(int x, int y, char c, unsigned char color,
                        const pfont_t *f, int size) {
-    int g = glyph_index(c);
-    int w = f->width[g], h = f->h;
-    if (size == FONT_TERM) /* centred in its fixed cell */
+    int w, h = f->h;
+    const uint8_t *rows = pglyph(f, size, c, &w);
+    if (size == FONT_TERM && w < FONT_TERM_W - 1) /* centred in its cell */
         x += (FONT_TERM_W - 1 - w) / 2;
-    const uint8_t *rows = f->bits + g * h;
     bool inside = x >= clip_x0 && y >= clip_y0 && x + w <= clip_x1 &&
                   y + h <= clip_y1 && x >= 0 && y >= 0 &&
                   x + w <= SCREEN_WIDTH && y + h <= SCREEN_HEIGHT;
@@ -188,9 +226,54 @@ static int char_advance(char c, int size) {
     if (size == FONT_TERM)
         return FONT_TERM_W;
     const pfont_t *f = pfont(size);
-    if (f)
-        return f->width[glyph_index(c)] + 1;
+    if (f) {
+        int w;
+        pglyph(f, size, c, &w);
+        return w + 1;
+    }
     return size == FONT_MONO8 ? 8 : 5;
+}
+
+int font_glyph(int size, unsigned char c, uint8_t rows[8], int *w) {
+    const pfont_t *f = pfont(size);
+    int h = font_height(size);
+    for (int r = 0; r < 8; r++)
+        rows[r] = 0;
+    int e = ext_index(c);
+    if (e >= 0 || f) {
+        const uint8_t *src = e >= 0
+                                 ? ext_font(size)->bits + e * ext_font(size)->h
+                                 : f->bits + glyph_index((char)c) * f->h;
+        *w = e >= 0 ? ext_font(size)->width[e] : f->width[glyph_index((char)c)];
+        for (int r = 0; r < h && r < 8; r++)
+            rows[r] = src[r];
+        return h;
+    }
+    if (c < 32 || c > 126)
+        c = '?';
+    if (size == FONT_MONO8) {
+        for (int r = 0; r < 8; r++)
+            rows[r] = font1_data[(c - 32) * 8 + r];
+        *w = 8;
+    } else {
+        for (int r = 0; r < 6; r++)
+            rows[r] = (uint8_t)(font2_data[(c - 32) * 6 + r] << 4);
+        *w = 4;
+    }
+    return h;
+}
+
+/* a fixed font's glyph past ASCII: rows with the left column in bit 7 */
+static void draw_xglyph(int x, int y, int e, unsigned char color, int size) {
+    const pfont_t *f = ext_font(size);
+    const uint8_t *rows = f->bits + e * f->h;
+    int w = f->width[e];
+    for (int r = 0; r < f->h; r++) {
+        uint8_t bits = rows[r];
+        for (int col = 0; bits && col < w; col++, bits <<= 1)
+            if (bits & 0x80)
+                draw_dot(x + col, y + r, color);
+    }
 }
 
 int font_height(int size) {
@@ -205,8 +288,13 @@ void draw_char(int x, int y, char c, unsigned char color, int size) {
     }
     if (y < 0 || y >= SCREEN_HEIGHT)
         return;
+    int e = ext_index((unsigned char)c);
+    if (e >= 0) {
+        draw_xglyph(x, y, e, color, size);
+        return;
+    }
     if ((unsigned char)c < 32 || (unsigned char)c > 126)
-        c = '?'; /* the fonts only cover printable ASCII */
+        c = '?'; /* nothing in this code page */
     int offset, maxrow, maxcol;
     unsigned char startbit;
     if (size == 1) {

@@ -244,6 +244,8 @@ void kmain(void) {
     }
     if (g_setup_mode)
         g_cfg.start_in_gui = true;
+    g_codepage = g_cfg.codepage < CP_COUNT ? g_cfg.codepage : CP_WESTERN;
+    g_cfg.classic_fonts = 0; /* (gone from Settings: an old file had it) */
 
     /* Paging: app memory protection (lib/vmm.h). Settings > System can
      * turn it off (no_paging) should a machine misbehave with it. */

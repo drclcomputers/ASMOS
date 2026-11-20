@@ -67,8 +67,9 @@ The last argument of `draw_string` / `draw_char` / `draw_text_n` /
 
 Proportional text: measure with `text_width(s, font)`, cut with
 `text_fit(s, pixels, font)` (how many chars fit). Desktop code uses
-`UI_FONT_BOLD` / `UI_FONT_SMALL` / `UI_FONT_TERM` (ui/uifont.h), which become `FONT_MONO`
-when Settings → Display → Classic fonts is on. The glyphs are ASCII art in
+`UI_FONT_BOLD` / `UI_FONT_SMALL` / `UI_FONT_TERM` (ui/uifont.h). Codes
+128-255 come from the code page picked in Settings → Display → Characters
+(fonts/font_ext.c, made by `tools/mkglyphs.py`). The ASCII glyphs are art in
 `tools/mkfont.py`; edit them there and run
 `python3 tools/mkfont.py > fonts/font_prop.c`.
 

@@ -443,7 +443,7 @@ void cli_run(void) {
             continue;
         }
 
-        if (ch >= 32 && ch < 127) {
+        if (font_has_char((unsigned char)ch)) {
             if (s.input_len < CLI_INPUT_CAP - 1) {
                 s.input[s.input_len++] = ch;
                 s.input[s.input_len] = '\0';

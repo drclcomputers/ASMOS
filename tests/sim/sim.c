@@ -211,7 +211,11 @@ bool load_file(const char *path, uint8_t *dst, uint32_t max, uint32_t *got);
 static uint8_t *s_cd;
 static uint32_t s_cd_sectors;
 static int s_cd_state = CD_EMPTY;
-int g_cd_reads; /* sectors read */
+int g_cd_reads;        /* sectors read */
+static int s_cd_audio; /* an audio CD: its tracks */
+static uint32_t s_toc_lba[100], s_play_at, s_play_to, s_play_t0;
+static int s_play_state;
+int g_cd_plays;
 bool cd_present(void) { return true; }
 const char *cd_model(void) { return "SIM CD-ROM"; }
 cd_state_t cd_check(void) {
@@ -246,7 +250,84 @@ bool sim_cd_insert(const char *path) {
     s_cd_state = CD_CHANGED;
     return true;
 }
-void sim_cd_eject(void) { s_cd_state = CD_EMPTY; }
+void sim_cd_eject(void) {
+    s_cd_state = CD_EMPTY;
+    s_cd_audio = 0;
+}
+
+/* an audio CD: n tracks of len[i] seconds, no data on it (reads fail).
+ * The drive plays by the clock: from..to, 75 sectors a second. */
+bool sim_cd_insert_audio(int n, const int *secs) {
+    s_cd_sectors = 0;
+    s_cd_audio = n;
+    uint32_t at = 0;
+    for (int i = 0; i < n; i++) {
+        s_toc_lba[i] = at;
+        at += (uint32_t)secs[i] * CD_FPS + 150; /* (a 2 s gap) */
+    }
+    s_toc_lba[n] = at;
+    s_play_state = CD_AUDIO_NONE;
+    s_cd_state = CD_CHANGED;
+    return true;
+}
+static uint32_t play_pos(void) {
+    if (s_play_state != CD_AUDIO_PLAYING)
+        return s_play_at;
+    uint32_t p = s_play_at + (pit_ticks - s_play_t0) * CD_FPS / 1000;
+    if (p >= s_play_to) {
+        s_play_state = CD_AUDIO_DONE;
+        s_play_at = s_play_to;
+        return p;
+    }
+    return p;
+}
+bool cd_read_toc(cd_toc_t *t) {
+    memset(t, 0, sizeof(*t));
+    if (s_cd_state != CD_READY || !s_cd_audio)
+        return false;
+    t->first = 1;
+    t->last = (uint8_t)s_cd_audio;
+    for (int i = 0; i <= s_cd_audio; i++)
+        t->t[i + 1].lba = s_toc_lba[i];
+    return true;
+}
+bool cd_play(uint32_t from, uint32_t to) {
+    if (s_cd_state != CD_READY || !s_cd_audio || from >= to ||
+        to > s_toc_lba[s_cd_audio])
+        return false;
+    g_cd_plays++;
+    s_play_at = from;
+    s_play_to = to;
+    s_play_t0 = pit_ticks;
+    s_play_state = CD_AUDIO_PLAYING;
+    return true;
+}
+bool cd_pause(bool p) {
+    if (s_play_state != CD_AUDIO_PLAYING && s_play_state != CD_AUDIO_PAUSED)
+        return false;
+    if (p && s_play_state == CD_AUDIO_PLAYING) {
+        s_play_at = play_pos();
+        s_play_state = CD_AUDIO_PAUSED;
+    } else if (!p && s_play_state == CD_AUDIO_PAUSED) {
+        s_play_t0 = pit_ticks;
+        s_play_state = CD_AUDIO_PLAYING;
+    }
+    return true;
+}
+bool cd_stop_audio(void) {
+    s_play_state = CD_AUDIO_NONE;
+    return true;
+}
+cd_audio_t cd_audio_status(uint32_t *lba) {
+    uint32_t p = play_pos();
+    if (lba)
+        *lba = p;
+    return s_cd_state == CD_READY ? (cd_audio_t)s_play_state : CD_AUDIO_NONE;
+}
+int sim_cd_audio_state(void) {
+    play_pos();
+    return s_play_state;
+}
 bool ata_read_sectors(uint8_t d, uint32_t l, uint8_t c, void *b) {
     for (int i = 0; i < c; i++)
         if (!ata_read_sector(d, l + i, (uint8_t *)b + i * 512))

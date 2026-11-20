@@ -146,7 +146,7 @@ static char filter(const control *c, char ch) {
     uint32_t st = c->style;
     if (ch == '\n')
         return multi(c) ? ch : 0;
-    if ((unsigned char)ch < 32 || (unsigned char)ch > 126)
+    if (!font_has_char((unsigned char)ch)) /* ASCII, or the code page's */
         return 0;
     if (st & ES_NUMBER)
         return (ch >= '0' && ch <= '9') ? ch : 0;
@@ -154,8 +154,8 @@ static char filter(const control *c, char ch) {
         return ((ch >= '0' && ch <= '9') || ch == '.' || ch == '-') ? ch : 0;
     if ((st & ES_UPPER) && ch >= 'a' && ch <= 'z')
         ch -= 32;
-    if (st & ES_FILENAME) /* long names: case kept, spaces allowed */
-        return (fs_long_char_ok(ch) || ch == '/') ? ch : 0;
+    if (st & ES_FILENAME) /* the characters a new name may have, + '/' */
+        return (fs_new_name_char_ok(ch) || ch == '/') ? ch : 0;
     return ch;
 }
 
@@ -481,7 +481,7 @@ bool edit_key(control *c) {
     default:
         break;
     }
-    if (ch && (unsigned char)ch >= 32 && (unsigned char)ch < 127) {
+    if (ch && font_has_char((unsigned char)ch)) {
         if (ro)
             return true;
         char f = filter(c, ch);

@@ -35,6 +35,15 @@ static int s_ndirs;
 static uint32_t s_root_lba, s_root_size, s_total;
 static bool s_joliet;
 
+/* An audio CD (no file system): its tracks show as Track01.cda ... in the
+ * root, 44-byte files as Windows has them (RIFF "CDDA": the track, where
+ * it starts, how long), which lib/audio.c plays from the drive. */
+static bool s_audio;
+static cd_toc_t s_toc;
+static uint32_t s_serial;
+#define CDA_SIZE 44
+#define CDA_MARK 0xFFFF /* cluster_hi of a track's file */
+
 static uint32_t le32(const uint8_t *p) {
     return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 |
            (uint32_t)p[3] << 24;
@@ -73,10 +82,45 @@ static void cache_drop(void) {
 void iso_unmount(void) {
     cache_drop();
     s_ndirs = 0;
+    s_audio = false;
+}
+
+static void vol_fill(fat_vol_t *v, const char *label) {
+    memset(&v->bpb, 0, sizeof(v->bpb));
+    v->bpb.bytes_per_sector = 512; /* (FAT-shaped callers: unused) */
+    v->bpb.sectors_per_cluster = 4;
+    snprintf(v->label, sizeof(v->label), "%s", label);
+    v->mounted = true;
+}
+
+/* the disc's number, from its track starts (a .cda kept elsewhere says
+ * which disc it is from) */
+static uint32_t toc_serial(const cd_toc_t *t) {
+    uint32_t h = 0x41534D53;
+    for (int i = t->first; i <= t->last + 1; i++)
+        h = (h << 5 | h >> 27) ^ t->t[i].lba;
+    return h;
+}
+
+static bool audio_mount(fat_vol_t *v) {
+    if (!cd_read_toc(&s_toc))
+        return false;
+    bool any = false;
+    for (int i = s_toc.first; i <= s_toc.last; i++)
+        any |= !s_toc.t[i].data;
+    if (!any)
+        return false;
+    s_audio = true;
+    s_serial = toc_serial(&s_toc);
+    s_total = s_toc.t[s_toc.last + 1].lba;
+    vol_fill(v, "Audio CD");
+    return true;
 }
 
 bool iso_mount(fat_vol_t *v) {
     iso_unmount();
+    if (!sector(16))
+        return audio_mount(v); /* no data at sector 16: audio, maybe */
     const uint8_t *root = NULL;
     char label[33] = "";
     s_joliet = false;
@@ -114,15 +158,78 @@ bool iso_mount(fat_vol_t *v) {
     int n = (int)strlen(label);
     while (n && (label[n - 1] == ' ' || !label[n - 1]))
         label[--n] = 0;
-    memset(&v->bpb, 0, sizeof(v->bpb));
-    v->bpb.bytes_per_sector = 512; /* (FAT-shaped callers: unused) */
-    v->bpb.sectors_per_cluster = 4;
-    snprintf(v->label, sizeof(v->label), "%s", n ? label : "CD");
-    v->mounted = true;
+    vol_fill(v, n ? label : "CD");
     return true;
 }
 
-uint32_t iso_size_bytes(void) { return s_total * CD_SECTOR; }
+uint32_t iso_size_bytes(void) { /* audio: 2352 bytes a sector */
+    return s_total * (s_audio ? 2352u : CD_SECTOR);
+}
+
+bool iso_is_audio(void) { return s_audio; }
+
+/* the tracks, as files */
+static bool audio_iterate(uint16_t dir, iso_cb cb, void *user) {
+    if (dir != 0)
+        return false;
+    for (int i = s_toc.first; i <= s_toc.last; i++) {
+        if (s_toc.t[i].data)
+            continue;
+        dir_entry_t e;
+        memset(&e, 0, sizeof(e));
+        char n83[12], ln[16];
+        snprintf(ln, sizeof(ln), "Track%02d.cda", i);
+        fs_make_83(ln, n83);
+        memcpy(e.name, n83, 8);
+        memcpy(e.ext, n83 + 8, 3);
+        e.attr = ATTR_READ_ONLY;
+        e.modify_date = e.create_date = (uint16_t)(1 << 5 | 1); /* 1980 */
+        e.cluster_hi = CDA_MARK;
+        e.cluster_lo = (uint16_t)i;
+        e.file_size = CDA_SIZE;
+        if (!cb(&e, ln, user))
+            return true;
+    }
+    return true;
+}
+
+static void put32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)v, p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16), p[3] = (uint8_t)(v >> 24);
+}
+static uint32_t rb(uint32_t lba) { /* "Red Book": frame, s, min, 0 */
+    return lba % CD_FPS | (lba / CD_FPS % 60) << 8 |
+           (lba / (60 * CD_FPS)) << 16;
+}
+
+bool iso_cda_make(int track, uint8_t out[44]) {
+    if (!s_audio || track < s_toc.first || track > s_toc.last ||
+        s_toc.t[track].data)
+        return false;
+    uint32_t start = s_toc.t[track].lba, len = s_toc.t[track + 1].lba - start;
+    memcpy(out, "RIFF", 4);
+    put32(out + 4, CDA_SIZE - 8);
+    memcpy(out + 8, "CDDAfmt ", 8);
+    put32(out + 16, 24);
+    out[20] = 1, out[21] = 0; /* version */
+    out[22] = (uint8_t)track, out[23] = 0;
+    put32(out + 24, s_serial);
+    put32(out + 28, start);
+    put32(out + 32, len);
+    put32(out + 36, rb(start + 150));
+    put32(out + 40, rb(len));
+    return true;
+}
+
+bool iso_cda_check(uint32_t serial, uint32_t start, uint32_t len) {
+    if (!s_audio)
+        return false;
+    for (int i = s_toc.first; i <= s_toc.last; i++)
+        if (!s_toc.t[i].data && s_toc.t[i].lba == start &&
+            s_toc.t[i + 1].lba - start == len)
+            return serial == s_serial || serial == 0;
+    return false;
+}
 
 /* a FAT date/time from the record's 7 bytes (years since 1900, ...) */
 static void stamp(dir_entry_t *e, const uint8_t *t) {
@@ -194,6 +301,8 @@ static void alias(const char *name, int n, uint8_t out11[11]) {
 }
 
 bool iso_iterate(uint16_t dir, iso_cb cb, void *user) {
+    if (s_audio)
+        return audio_iterate(dir, cb, user);
     uint32_t lba, size;
     if (!dir_extent(dir, &lba, &size))
         return false;
@@ -261,6 +370,15 @@ bool iso_iterate(uint16_t dir, iso_cb cb, void *user) {
 }
 
 int iso_read(fat_file_t *f, void *buf, int len) {
+    if (f->entry.cluster_hi == CDA_MARK && s_audio) { /* a track's file */
+        uint8_t c[CDA_SIZE];
+        if (!iso_cda_make(f->entry.cluster_lo, c))
+            return 0;
+        int n = 0;
+        for (; n < len && f->cur_offset < CDA_SIZE; n++)
+            ((uint8_t *)buf)[n] = c[f->cur_offset++];
+        return n;
+    }
     uint32_t ext = (uint32_t)f->entry.cluster_hi << 16 | f->entry.cluster_lo;
     uint8_t *out = buf;
     int total = 0;

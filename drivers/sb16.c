@@ -45,6 +45,7 @@ static const uint8_t DMA8_PAGE[4] = {0x87, 0x83, 0x81, 0x82};
 #define MIXER_DAC_VOL 0x04
 #define MIXER_LINE_VOL 0x2E
 #define MIXER_FM_VOL 0x26
+#define MIXER_CD_VOL 0x28 /* the CD drive's audio cable (0 after a reset) */
 #define MIXER_FM_VOL_LEFT 0x34 /* SB16 only */
 #define MIXER_FM_VOL_RIGHT 0x35
 
@@ -322,6 +323,7 @@ bool sb16_init(void) {
     mixer_write(MIXER_FM_VOL, 0xFF);
     mixer_write(MIXER_DAC_VOL, 0xFF);
     mixer_write(MIXER_LINE_VOL, 0xFF);
+    mixer_write(MIXER_CD_VOL, 0xFF);
     return true;
 }
 

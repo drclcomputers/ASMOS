@@ -29,4 +29,34 @@ bool cd_read(uint32_t lba, uint32_t count, void *buf);
 bool cd_capacity(uint32_t *sectors);
 bool cd_eject(void); /* opens the tray (where it has one) */
 
+/* ── audio: the drive plays the tracks itself, out of its analogue
+ * output (to the sound card's CD input, or its headphone socket) ──── */
+
+#define CD_MAX_TRACKS 99
+#define CD_FPS 75 /* sectors (frames) a second of audio */
+
+typedef struct {
+    uint8_t first, last; /* track numbers */
+    struct {
+        uint32_t lba;       /* where it starts */
+        bool data;          /* a data track (not audio) */
+    } t[CD_MAX_TRACKS + 1]; /* by track number; t[last + 1]: the end */
+} cd_toc_t;
+
+typedef enum {
+    CD_AUDIO_NONE, /* no play going on */
+    CD_AUDIO_PLAYING,
+    CD_AUDIO_PAUSED,
+    CD_AUDIO_DONE,  /* ran to the end */
+    CD_AUDIO_ERROR, /* stopped by an error */
+} cd_audio_t;
+
+bool cd_read_toc(cd_toc_t *toc); /* READ TOC */
+/* play sectors [from, to) (PLAY AUDIO MSF) */
+bool cd_play(uint32_t from, uint32_t to);
+bool cd_pause(bool pause); /* PAUSE / RESUME */
+bool cd_stop_audio(void);
+/* where the play is (READ SUB-CHANNEL): its state, the sector */
+cd_audio_t cd_audio_status(uint32_t *lba);
+
 #endif

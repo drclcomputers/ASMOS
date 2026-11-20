@@ -31,6 +31,19 @@ static const char upper[128] = {
 
 static bool extended = false;
 
+/* Alt + digits on the number pad: the character with that code (0-255,
+ * the code page's), typed when Alt comes up, as in DOS and Windows */
+static int s_alt_code = -1;
+
+static int numpad_digit(uint8_t sc) {
+    static const uint8_t pad[10] = {0x52, 0x4F, 0x50, 0x51, 0x4B,
+                                    0x4C, 0x4D, 0x47, 0x48, 0x49};
+    for (int i = 0; i < 10; i++)
+        if (pad[i] == sc)
+            return i;
+    return -1;
+}
+
 void kb_init(void) {
     while (inb(0x64) & 0x01)
         inb(0x60);
@@ -78,6 +91,22 @@ void kb_process_byte(uint8_t raw) {
     }
     if (sc == LALT) {
         kb.alt = !released;
+        if (!released) {
+            s_alt_code = -1;
+        } else if (s_alt_code > 0) {
+            kb.last_char = (char)(s_alt_code & 0xFF);
+            kb.last_scancode = 0;
+            kb.key_pressed = true;
+            s_alt_code = -1;
+        }
+        return;
+    }
+    if (kb.alt && !ext && numpad_digit(sc) >= 0) {
+        if (!released)
+            s_alt_code =
+                (s_alt_code < 0 ? 0 : s_alt_code) * 10 + numpad_digit(sc);
+        if (s_alt_code > 999)
+            s_alt_code %= 1000;
         return;
     }
     if (ext && (sc == LWIN_KEY || sc == RWIN_KEY)) {
@@ -113,9 +142,6 @@ void kb_process_byte(uint8_t raw) {
         kb.ctrl_shift_s = (kb.shift && sc == S_KEY);
     }
 
-    /* E0-prefixed keys (arrows, Home/End, PgUp/PgDn, Ins/Del) reuse the
-     * numpad scancodes; they must not type '8','4','6','2','7','1','.'. Only
-     * keypad Enter and keypad '/' produce characters. */
     if (ext) {
         kb.last_char = (sc == ENTER) ? '\n' : (sc == SLASH) ? '/' : 0;
         return;

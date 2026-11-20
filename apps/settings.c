@@ -261,6 +261,17 @@ static void on_perf(control *c, int ev) {
     set_dirty(c->user, true);
 }
 
+/* the characters 128-255: at once, everywhere */
+static void on_codepage(control *c, int ev) {
+    int i = ctl_value(c);
+    if (ev != EV_CHANGE || i < 0 || i >= CP_COUNT)
+        return;
+    g_cfg.codepage = (uint8_t)i;
+    g_codepage = i;
+    wm_invalidate_all();
+    set_dirty(c->user, true);
+}
+
 static void on_fps(control *c, int ev) {
     int i = ctl_value(c);
     if (ev != EV_CHANGE || i < 0 || i > 2)
@@ -897,9 +908,13 @@ static void build(settings_state_t *s) {
     on_page(s, ctl_label(w, 10, 88, 60, 8, "Preview:", 0), P_WALL);
     on_page(s, ctl_custom(w, 10, 97, 238, 22, paint_preview, NULL, CS_BORDER),
             P_WALL);
-    control *cf = flag(s, P_WALL, 10, 124, "Classic fonts (the old 4x6 type)",
-                       &g_cfg.classic_fonts);
-    ctl_set_tooltip(cf, "Titles, menus and labels in the original font");
+    on_page(s, ctl_label(w, 10, 125, 64, 12, "Characters:", 0), P_WALL);
+    control *cp = on_page(s, ctl_combo(w, 76, 124, 130, on_codepage), P_WALL);
+    for (int i = 0; i < CP_COUNT; i++)
+        list_add(cp, cp_name[i]);
+    list_set_sel(cp, g_codepage);
+    ctl_set_tooltip(cp, "What codes 128-255 are: accents, symbols, box "
+                        "drawing (Character Map shows them)");
 
     /* Sound */
     flag(s, P_SOUND, 10, 24, "Sound enabled", &g_cfg.sound_enabled);

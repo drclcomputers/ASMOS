@@ -536,6 +536,89 @@ bool cd_capacity(uint32_t *sectors) {
     return true;
 }
 
+/* ── audio ── */
+
+bool cd_read_toc(cd_toc_t *toc) {
+    static uint8_t b[4 + 8 * (CD_MAX_TRACKS + 1)];
+    uint8_t pkt[12] = {0x43,
+                       0,
+                       0,
+                       0,
+                       0,
+                       0,
+                       1, /* READ TOC, from track 1 */
+                       (uint8_t)(sizeof(b) >> 8),
+                       (uint8_t)sizeof(b)};
+    memset(toc, 0, sizeof(*toc));
+    int n = cd_packet(pkt, b, sizeof(b), 5000);
+    if (n < 12 || !b[2] || b[3] < b[2] || b[3] > CD_MAX_TRACKS)
+        return false;
+    toc->first = b[2];
+    toc->last = b[3];
+    for (int p = 4; p + 8 <= n; p += 8) {
+        int no = b[p + 2] == 0xAA ? toc->last + 1 : b[p + 2];
+        if (no < 1 || no > toc->last + 1)
+            continue;
+        toc->t[no].lba = (uint32_t)b[p + 4] << 24 | (uint32_t)b[p + 5] << 16 |
+                         (uint32_t)b[p + 6] << 8 | b[p + 7];
+        toc->t[no].data = (b[p + 1] & 0x04) != 0;
+    }
+    return toc->t[toc->last + 1].lba > toc->t[toc->first].lba;
+}
+
+static void msf(uint8_t *p, uint32_t lba) { /* (MSF counts the 2 s lead-in) */
+    lba += 150;
+    p[0] = (uint8_t)(lba / (60 * CD_FPS));
+    p[1] = (uint8_t)(lba / CD_FPS % 60);
+    p[2] = (uint8_t)(lba % CD_FPS);
+}
+
+bool cd_play(uint32_t from, uint32_t to) {
+    uint8_t pkt[12] = {0x47}; /* PLAY AUDIO MSF */
+    msf(pkt + 3, from);
+    msf(pkt + 6, to);
+    if (cd_packet(pkt, NULL, 0, 5000) >= 0)
+        return true;
+    uint8_t key, asc;
+    cd_sense(&key, &asc);
+    return false;
+}
+
+bool cd_pause(bool pause) {
+    uint8_t pkt[12] = {0x4B, 0, 0, 0, 0, 0, 0, 0, pause ? 0 : 1};
+    return cd_packet(pkt, NULL, 0, 2000) >= 0;
+}
+
+bool cd_stop_audio(void) {
+    uint8_t pkt[12] = {0x4E}; /* STOP PLAY/SCAN */
+    if (cd_packet(pkt, NULL, 0, 2000) >= 0)
+        return true;
+    uint8_t key, asc; /* older drives don't have it: a pause, then */
+    cd_sense(&key, &asc);
+    return cd_pause(true);
+}
+
+cd_audio_t cd_audio_status(uint32_t *lba) {
+    uint8_t pkt[12] = {0x42, 0, 0x40, 1, 0, 0, 0, 0, 16}, b[16];
+    if (cd_packet(pkt, b, sizeof(b), 1000) < 16)
+        return CD_AUDIO_NONE;
+    if (lba)
+        *lba = (uint32_t)b[8] << 24 | (uint32_t)b[9] << 16 |
+               (uint32_t)b[10] << 8 | b[11];
+    switch (b[1]) {
+    case 0x11:
+        return CD_AUDIO_PLAYING;
+    case 0x12:
+        return CD_AUDIO_PAUSED;
+    case 0x13:
+        return CD_AUDIO_DONE;
+    case 0x14:
+        return CD_AUDIO_ERROR;
+    default:
+        return CD_AUDIO_NONE;
+    }
+}
+
 bool cd_eject(void) {
     uint8_t pkt[12] = {0x1B, 0, 0, 0, 0x02}; /* START STOP UNIT: eject */
     return cd_packet(pkt, NULL, 0, 5000) >= 0;

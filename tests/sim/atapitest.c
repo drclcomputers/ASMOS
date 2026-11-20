@@ -45,6 +45,9 @@ static int pkt_n = -1; /* -1: not taking a packet */
 static uint8_t sense_key, sense_asc;
 static bool attention;
 static uint32_t limit;
+static bool audio_disc;
+static uint32_t play_from, play_to;
+static uint8_t play_status = 0x15; /* none */
 static int reads_started;
 
 static void set_sense(uint8_t k, uint8_t a) { sense_key = k, sense_asc = a; }
@@ -117,6 +120,61 @@ static void run_packet(void) {
         memcpy(data, disc + lba * 2048, n * 2048);
         reads_started++;
         give(n * 2048);
+        return;
+    }
+    if (op == 0x43) { /* READ TOC (LBA form): the data disc, or 2 audio
+                       * tracks of 1000 and 2000 sectors */
+        int nt = audio_disc ? 2 : 1;
+        uint32_t lba[3] = {0, 1000, 3000};
+        memset(data, 0, 4 + 8 * (nt + 1));
+        data[1] = (uint8_t)(2 + 8 * (nt + 1));
+        data[2] = 1, data[3] = (uint8_t)nt;
+        for (int i = 0; i <= nt; i++) {
+            uint8_t *d = data + 4 + 8 * i;
+            d[1] = audio_disc ? 0x10 : 0x14; /* ADR 1; data: control 4 */
+            d[2] = i == nt ? 0xAA : (uint8_t)(i + 1);
+            uint32_t v = i == nt && !audio_disc ? disc_sectors : lba[i];
+            d[4] = (uint8_t)(v >> 24), d[5] = (uint8_t)(v >> 16);
+            d[6] = (uint8_t)(v >> 8), d[7] = (uint8_t)v;
+        }
+        uint32_t want = (uint32_t)pkt[7] << 8 | pkt[8], n = 4 + 8 * (nt + 1);
+        give(n < want ? n : want);
+        return;
+    }
+    if (op == 0x47) { /* PLAY AUDIO MSF */
+        uint32_t a = (pkt[3] * 60u + pkt[4]) * 75u + pkt[5] - 150,
+                 b = (pkt[6] * 60u + pkt[7]) * 75u + pkt[8] - 150;
+        if (!audio_disc || a >= b || b > 3000) {
+            fail(5, 0x64); /* ILLEGAL MODE FOR THIS TRACK */
+            return;
+        }
+        play_from = a, play_to = b, play_status = 0x11;
+        done();
+        return;
+    }
+    if (op == 0x4B) { /* PAUSE / RESUME */
+        if (play_status != 0x11 && play_status != 0x12) {
+            fail(5, 0x2C); /* sequence error */
+            return;
+        }
+        play_status = pkt[8] & 1 ? 0x11 : 0x12;
+        done();
+        return;
+    }
+    if (op == 0x4E) { /* STOP PLAY/SCAN */
+        play_status = 0x15;
+        done();
+        return;
+    }
+    if (op == 0x42) { /* READ SUB-CHANNEL, current position */
+        memset(data, 0, 16);
+        data[1] = play_status;
+        data[3] = 12;
+        data[4] = 1;
+        uint32_t at = play_from + 10; /* (it moved a little) */
+        data[8] = (uint8_t)(at >> 24), data[9] = (uint8_t)(at >> 16);
+        data[10] = (uint8_t)(at >> 8), data[11] = (uint8_t)at;
+        give(16);
         return;
     }
     if (op == 0x1B) { /* START STOP UNIT */
@@ -299,6 +357,27 @@ int sim_main(void) {
     T("reads (1 and 16 sectors, 8 KB pieces)", ok);
     T("past the end: refused", !cd_read(disc_sectors - 1, 2, buf));
     T("ready again after that", cd_check() == CD_READY);
+    /* the TOC of the data disc: one data track */
+    cd_toc_t toc;
+    T("TOC: one data track", cd_read_toc(&toc) && toc.first == 1 &&
+                                 toc.last == 1 && toc.t[1].data &&
+                                 toc.t[2].lba == disc_sectors);
+    T("play on a data disc: refused",
+      !cd_play(0, 100) && cd_check() == CD_READY);
+    /* an audio disc */
+    audio_disc = true;
+    T("TOC: 2 audio tracks", cd_read_toc(&toc) && toc.last == 2 &&
+                                 !toc.t[1].data && toc.t[2].lba == 1000 &&
+                                 toc.t[3].lba == 3000);
+    T("play track 2 (MSF)",
+      cd_play(1000, 3000) && play_from == 1000 && play_to == 3000);
+    uint32_t at = 0;
+    T("its position", cd_audio_status(&at) == CD_AUDIO_PLAYING && at == 1010);
+    T("pause", cd_pause(true) && cd_audio_status(NULL) == CD_AUDIO_PAUSED);
+    T("resume", cd_pause(false) && cd_audio_status(NULL) == CD_AUDIO_PLAYING);
+    T("stop", cd_stop_audio() && cd_audio_status(NULL) == CD_AUDIO_NONE);
+    T("past the end: refused", !cd_play(2000, 3100));
+    audio_disc = false;
     T("eject", cd_eject() && cd_check() == CD_EMPTY);
     T("reading with no disc fails", !cd_read(16, 1, buf));
     say(fails ? "SOME FAILED\n" : "all ok\n");

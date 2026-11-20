@@ -4,6 +4,7 @@
 #include "drivers/pci.h"
 #include "drivers/sb16.h"
 #include "drivers/sermouse.h"
+#include "fonts/fonts.h"
 #include "lib/wav.h"
 
 #include "fs/fs.h"
@@ -311,13 +312,31 @@ void cmd_cat(const char *arg, char *out, size_t max) {
     while ((n = fs_read(&file, buf, 512)) > 0) {
         int ti = 0;
         for (int i = 0; i < n; i++)
-            if (buf[i] == '\n' || (buf[i] >= 32 && buf[i] < 127))
+            if (buf[i] == '\n' || font_has_char((unsigned char)buf[i]))
                 tmp[ti++] = buf[i];
         tmp[ti] = '\0';
         append(out, max, tmp);
     }
     fs_close(&file);
     append(out, max, "\n\n");
+}
+
+/* a name about to be made: what it may be made of (fs_validate_name);
+ * false, with why in out, if not. One already there is left to the
+ * command (it replaces it, or says it can't). */
+static bool new_name_ok(const char *path, char *out, size_t max) {
+    dir_entry_t e;
+    if (fs_find(path, &e))
+        return true;
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    const char *err = NULL;
+    if (fs_validate_name(base, false, &err))
+        return true;
+    append(out, max, "Error: ");
+    append(out, max, err ? err : "invalid name");
+    append(out, max, "\n\n");
+    return false;
 }
 
 void cmd_write(const char *args, char *out, size_t max) {
@@ -332,6 +351,8 @@ void cmd_write(const char *args, char *out, size_t max) {
         append(out, max, "Usage: write <file> <text>\n\n");
         return;
     }
+    if (!new_name_ok(fn, out, max))
+        return;
     fs_file_t file;
     dir_entry_t entry;
     /* Replace, don't overwrite in place: file_size never shrinks, so a
@@ -361,6 +382,8 @@ void cmd_touch(const char *arg, char *out, size_t max) {
         append(out, max, "Usage: touch <filename>\n\n");
         return;
     }
+    if (!new_name_ok(filename, out, max))
+        return;
     fs_file_t file;
     if (!fs_create(filename, &file)) {
         append(out, max, "Error: exists or invalid\n\n");
@@ -409,6 +432,8 @@ void cmd_mkdir(const char *arg, char *out, size_t max) {
         append(out, max, "Usage: mkdir <dirname>\n\n");
         return;
     }
+    if (!new_name_ok(dirname, out, max))
+        return;
     if (!fs_mkdir(dirname)) {
         append(out, max, "Error: could not create '");
         append(out, max, dirname);
@@ -456,6 +481,8 @@ void cmd_cp(const char *args, char *out, size_t max) {
         append(out, max, "Error: source not found\n\n");
         return;
     }
+    if (!new_name_ok(dst, out, max))
+        return;
     bool ok = (e.attr & ATTR_DIRECTORY) ? fs_copy_dir(src, dst)
                                         : fs_copy_file(src, dst);
     if (ok) {
@@ -487,6 +514,8 @@ void cmd_mv(const char *args, char *out, size_t max) {
         append(out, max, "Error: source not found\n\n");
         return;
     }
+    if (!new_name_ok(dst, out, max))
+        return;
     bool ok = (e.attr & ATTR_DIRECTORY) ? fs_move_dir(src, dst)
                                         : fs_move_file(src, dst);
     if (ok) {

@@ -46,11 +46,21 @@ Features
   System > "Large display: 2x" draws everything twice the size in the
   16-colour modes (800x600 then looks like 400x300, sharp and chunky).
 - **Files**: FAT12 floppies and FAT16 hard disks (up to 2 GB), long names
-  up to 63 characters, up to 2 hard disks and 2 floppy drives.
+  up to 63 characters, up to 2 hard disks and 2 floppy drives. New names
+  are made of letters, digits, the dot and `- _ # $ % & + = @ ! ~ ( ) [ ]
+{ }` (no spaces); names already on a disk keep what they have.
 - **CD-ROM** (read only): an ATAPI CD drive on IDE shows a disc icon with
   the disc's name, as /CD0. ISO 9660 with Joliet long names. Apps on the
   disc show up under Apps > CDROM while it is in, and go away when it is
   taken out. Right-click the icon to eject.
+- **Audio CDs**: show as /CD0 with `Track01.cda`, `Track02.cda`... (as in
+  Windows 95). Audio Player plays them from the drive (the CD button or C:
+  the whole disc into the list): play, pause, seek, next, repeat.
+- **Characters**: the fonts have every character of three code pages:
+  Western (Windows-1252), Central European (Windows-1250: ă â î ş ţ ő ł...)
+  and DOS (437: box drawing, blocks, Greek). Settings > Display >
+  Characters picks the one in use. Character Map shows them all; Alt and a
+  code on the number pad types one anywhere (Alt+0233).
 - **Floppies**: a disk read shows on the desktop. Taking it out is noticed
   by itself (its icon goes); to read one put in, open its drive in FileF's
   Drives. Eject writes what is waiting first.
@@ -241,8 +251,9 @@ The bundled apps:
 | Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                        | the printer's jobs                                        |
 | ASMDraw                                                            | pixel art editor                                          |
+| Character Map                                                      | every character of the code page, to copy                 |
 | Calculator, Calendar (with notes), Clock (with an alarm), ClipView | accessories                                               |
-| Audio Player                                                       | WAV and MIDI files                                        |
+| Audio Player                                                       | WAV and MIDI files, audio CDs                             |
 | HexView                                                            | files in hex                                              |
 | Puzzle, Sudoku                                                     | games                                                     |
 
@@ -360,7 +371,17 @@ Settings > Storage devices on an IDE channel, as ATAPI.
 
 **The disc doesn't show up**: a new disc is looked for every half second,
 after the drive has spun it up (a few seconds). It must be ISO 9660 (data
-CD). Audio CDs and other file systems (UDF only, HFS) are not read.
+CD) or an audio CD. Other file systems (UDF only, HFS) are not read.
+
+**An audio CD plays but there's no sound**: the drive plays it itself and
+sends the sound down its audio cable to the sound card's CD input; ASMOS
+turns that input up on a Sound Blaster Pro or 16. Check the cable (or use
+the drive's headphone socket). In 86Box the CD sound goes to the sound
+card by itself: pick a Sound Blaster Pro or 16.
+
+**Accented letters or box lines look wrong**: the code page in use decides
+what codes 128-255 are (Settings > Display > Characters). A text written on
+DOS wants DOS (437); one from Windows wants Western or Central European.
 
 **Making a CD with apps**: `python3 tools/mkiso.py FOLDER disc.iso --label
 "My apps"`. .APP files in the disc's root, or in APPS\ and its subfolders,
@@ -400,8 +421,10 @@ Known limitations
   without a disk change line (some old 5.25" ones) don't notice a disk
   taken out either.
 - **CD-ROM**: read only (no burning), the first ATAPI drive only, data
-  discs in ISO 9660 / Joliet (no audio CDs, no UDF, no Rock Ridge, no
-  multisession: the first session only). Long names up to 63 characters
+  discs in ISO 9660 / Joliet (no UDF, no Rock Ridge, no multisession: the
+  first session only). Audio CDs play through the drive's audio cable
+  only (no digital audio extraction, no copying tracks to WAV). A
+  mixed-mode disc (data and music) shows its data only. Long names up to 63 characters
   (longer ones are cut). A disc with more than 512 folders in all: the
   folders past that can't be opened.
 - **The disk must be read the same way by the BIOS and by ASMOS**:
@@ -413,7 +436,13 @@ Known limitations
   The UI uses 16 colours in all of them.
 - **Network**: NE2000 only, static IPv4, no DHCP. Ping, DNS and Gopher
   (no web browser).
-- **Keyboard**: US layout only.
+- **Keyboard**: US layout only; other characters with Alt + number pad or
+  Character Map.
+- **Characters**: one code page at a time, 1 byte a character (no Unicode,
+  no mixing ş with ╔ in one text). In the small fonts (Small, 4x6) an
+  accent is one row of pixels, so a few look alike (ż/ů, č/ő: never on the
+  same letter). File names show anything past ASCII as `_`, and printing
+  prints it as `?`.
 - **ZIP**: no encryption, no ZIP64, no split archives.
 - **Switching off**: needs APM and an ATX power supply. Otherwise ASMOS
   says when it is safe to turn the power off.
@@ -540,6 +569,10 @@ Disks (drivers/ata.c, fdd.c, fs/)
   reads the disc (Joliet first, else the plain ISO names) and shows it to
   the rest of the system like a read-only FAT volume. The desktop checks
   the drive every half second and makes /APPS/CDROM from the disc's apps.
+  An audio CD (no file system, audio tracks in its table of contents) is
+  shown as Track01.cda... (44-byte RIFF "CDDA" files, Windows' format);
+  lib/audio.c plays one with PLAY AUDIO MSF and follows it with READ
+  SUB-CHANNEL.
 - FAT12/16 with a FAT sector cache. Hard disk writes go to the disk at once;
   floppy writes wait in a track cache for up to half a second (and are
   written out at Shut Down).
@@ -549,6 +582,11 @@ Disks (drivers/ata.c, fdd.c, fs/)
 Drivers
 
 - GPU: VGA registers, Mode 13h and the planar modes (640x400 to 800x600).
+- Fonts: ASCII in fonts/fonts.c (8x8, 4x6) and fonts/font_prop.c (System,
+  Small; tools/fontmaker.py). Codes 128-255 in fonts/font_ext.c, made by
+  tools/mkglyphs.py: accented letters from the font's own letter and a mark,
+  box drawing from the cell size, the symbols from tools/glyphart.py; and a
+  table per code page from byte to glyph.
 - Sound Blaster 16 (DMA), OPL2 FM, PC speaker.
 - NE2000 (ISA and PCI), PCI bus scan.
 - Parallel and serial ports, printers (text, ESC/P, PCL).
@@ -573,7 +611,7 @@ Testing:
   the error messages on broken disks.
 - `tests/sim/run.sh` runs the simulator: the kernel's C code built for Linux
   with a fake screen, disks, floppy controller, CD drive and timer, through
-  92 scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
+  94 scenarios (Setup, files, ZIP, windows, apps, the pointer...). It takes
   about 20 seconds. `tests/sim/run.sh setup zipui` runs only those.
 - GitHub Actions does the build, `make boottest` and the simulator on every
   push (.github/workflows/ci.yml).
@@ -605,15 +643,16 @@ fs/          FAT file system, ISO 9660 (CD), floppy mount/eject, formatting,
              ZIP, installer
 ui/          Window manager, desktop, widgets, dialogs, cursor, screen saver
 shell/       Shell, commands, built-in assembler
-apps/        Built-in apps (FileF, TEditor, Settings, Setup...)
+apps/        Built-in apps (FileF, TEditor, Settings, Character Map...)
 extapps/     External .APP apps, and MANIFEST (what goes in /APPS)
 lib/         Freestanding libs: memory, strings, math, time, graphics,
              paging, APM, FPU emulator
 config/      Compile-time and saved settings (ASMOS.CFG)
-fonts/       Fonts
+fonts/       Fonts (font_ext.c: codes 128-255, made by tools/mkglyphs.py)
 network/     IPv4, DNS, Gopher client
 tools/       mkdisk.py (disk images), mkiso.py (CD images),
-             bootemu.py / boottest.py (boot tests)
+             bootemu.py / boottest.py (boot tests), fontmaker.py and
+             mkglyphs.py + glyphart.py (fonts)
 docs/        Boot and setup, apps, the UI toolkit
 ```
 

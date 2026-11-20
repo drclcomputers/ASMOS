@@ -885,8 +885,20 @@ int scen2(const char *name) {
           !OK(fo_create("/DESKTOP", "A.TXT", false, false)));
         T("bad name refused",
           !OK(fo_create("/DESKTOP", "A?B.TXT", false, false)));
-        T("long name with spaces ok",
-          OK(fo_create("/DESKTOP", "A B C D.TXT", false, false)));
+        T("a space refused (new names: no spaces)",
+          !OK(fo_create("/DESKTOP", "A B C D.TXT", false, false)));
+        T("long name with _ - ( ) + = [ ] ok",
+          OK(fo_create("/DESKTOP", "A_B-C(D)+E=F[G].TXT", false, false)));
+        T("comma, semicolon, apostrophe, accents refused",
+          !OK(fo_create("/DESKTOP", "A,B.TXT", false, false)) &&
+              !OK(fo_create("/DESKTOP", "A;B.TXT", false, false)) &&
+              !OK(fo_create("/DESKTOP", "A'B.TXT", false, false)) &&
+              !OK(fo_create("/DESKTOP", "Caf\xe9.TXT", false, false)));
+        T("a name with spaces already on the disk still opens and renames",
+          fs_mkdir("/DESKTOP/Old Name") &&
+              fo_stat("/DESKTOP/Old Name", &d, NULL) && d &&
+              OK(fo_rename("/DESKTOP/Old Name", "New_Name")) &&
+              fo_stat("/DESKTOP/New_Name", NULL, NULL));
         T("rename", OK(fo_rename("/DESKTOP/A.TXT", "B.TXT")) &&
                         fo_stat("/DESKTOP/B.TXT", NULL, NULL) &&
                         !fo_stat("/DESKTOP/A.TXT", NULL, NULL));
@@ -1285,8 +1297,8 @@ int scen2(const char *name) {
         fs_close(&f);
         sim_cd_insert(FIXDIR "cd.iso");
         CD_FRAMES();
-        T("in: its link next to mine (Sudoku 2)",
-          fs_find("/APPS/CDROM/Sudoku 2.LNK", &de));
+        T("in: its link next to mine (Sudoku_2)",
+          fs_find("/APPS/CDROM/Sudoku_2.LNK", &de));
         ok = fs_open("/APPS/CDROM/Sudoku.LNK", &f);
         n = ok ? fs_read(&f, t, 30) : 0;
         if (ok)
@@ -1294,7 +1306,7 @@ int scen2(const char *name) {
         T("mine not written over", n > 6 && !strncmp(t, "/APPS/", 6));
         sim_cd_eject();
         CD_FRAMES();
-        T("out: its link gone", !fs_find("/APPS/CDROM/Sudoku 2.LNK", &de) &&
+        T("out: its link gone", !fs_find("/APPS/CDROM/Sudoku_2.LNK", &de) &&
                                     !fs_find("/APPS/CDROM/CDLINKS.LST", &de));
         T("out: my folder and files stay",
           fs_find("/APPS/CDROM/MINE.TXT", &de) &&
@@ -2707,8 +2719,8 @@ int scen2(const char *name) {
         typedef struct {
             window *win;
             control *viz, *bar, *play, *stop, *rew, *next, *loop, *vol,
-                *vol_lbl, *list, *status;
-            char paths[16][192];
+                *vol_lbl, *list, *status, *cd;
+            char paths[40][192];
             int count, cur;
         } ap_t;
         ap_t *s = w->userdata;
@@ -2764,6 +2776,300 @@ int scen2(const char *name) {
         wr(1, o);
         return fails;
     }
+    if (!strcmp(name, "charset")) {
+        /* characters 128-255: the code page picks the glyph; Alt + the
+         * number pad types one; every font draws them */
+        int fails = 0;
+        char b[300];
+        extern void kb_process_byte(uint8_t);
+        T("Western by default", g_codepage == CP_WESTERN);
+        T("1252: 0xE9 is e-acute", cp_unicode[CP_WESTERN][0xE9 - 128] == 0xE9);
+        T("1250: 0xE3 is a-breve, 0xBA s-cedilla",
+          cp_unicode[CP_CENTRAL][0xE3 - 128] == 0x103 &&
+              cp_unicode[CP_CENTRAL][0xBA - 128] == 0x15F);
+        T("437: 0xC9 is a double box corner",
+          cp_unicode[CP_DOS][0xC9 - 128] == 0x2554);
+        T("1252: 0x81 is nothing",
+          !font_has_char(0x81) && font_has_char(0x80) && font_has_char('A'));
+        /* every byte of every code page: a glyph in every font */
+        bool all = true;
+        for (int cp = 0; cp < CP_COUNT; cp++)
+            for (int c = 0; c < 128; c++)
+                if (cp_unicode[cp][c] && cp_glyph[cp][c] == 0xFF)
+                    all = false;
+        T("every character has a glyph", all);
+        /* text in each font, each code page */
+        app_instance_t *a = sim_launch("TEDITOR");
+        sim_frames(5);
+        window *w = wm_focused_window();
+        control *ed = NULL;
+        for (control *c = w->controls; c; c = c->next)
+            if (c->type == CTL_EDIT)
+                ed = c;
+        (void)a;
+        /* Alt + 0233 on the number pad: byte 233 */
+        kb_process_byte(0x38);
+        static const uint8_t d0233[] = {0x52, 0x50, 0x51, 0x51};
+        for (int i = 0; i < 4; i++) {
+            kb_process_byte(d0233[i]);
+            kb_process_byte((uint8_t)(d0233[i] | 0x80));
+        }
+        kb_process_byte(0xB8);
+        sim_frame();
+        sim_frames(2);
+        const char *t = ctl_text(ed);
+        T("Alt+0233 typed byte 233", ed && (unsigned char)t[0] == 233 && !t[1]);
+        /* Alt + 65: 'A'; Alt + 300: byte 44 (mod 256), as DOS does */
+        kb_process_byte(0x38);
+        kb_process_byte(0x4D);
+        kb_process_byte(0xCD); /* 6 */
+        kb_process_byte(0x4C);
+        kb_process_byte(0xCC); /* 5 */
+        kb_process_byte(0xB8);
+        sim_frame();
+        T("Alt+65 typed A", ed && !strcmp(ctl_text(ed) + 1, "A"));
+        static char line[600];
+        int n = 0;
+        for (int c = 128; c < 256; c++)
+            if (font_has_char((unsigned char)c) || c >= 160)
+                line[n++] = (char)c;
+        line[n] = 0;
+        static char full[1400];
+        snprintf(full, sizeof full,
+                 "%.48s\n%.48s\n%.48s\nCaf\xe9 na\xefve \xa9 \x80 \xbd", line,
+                 line + 48, line + 96);
+        ctl_set_text(ed, full);
+        sim_frames(3);
+        sim_shot("cp1252");
+        g_codepage = CP_CENTRAL;
+        wm_invalidate_all();
+        ctl_set_text(
+            ed,
+            "Rom\xe2n\xe3: \xe3 \xe2 \xee \xba \xfe \xc3 \xc2 \xce \xaa \xde\n"
+            "\x8a\x9a \x8e\x9e \xc8\xe8 \xa3\xb3 \xd5\xf5 \xd8\xf8");
+        sim_frames(3);
+        sim_shot("cp1250");
+        g_codepage = CP_DOS;
+        wm_invalidate_all();
+        ctl_set_text(
+            ed, "\xc9\xcd\xcd\xcd\xcb\xcd\xcd\xbb  \xda\xc4\xc4\xc2\xc4\xbf\n"
+                "\xba abc\xba de\xba  \xb3ab\xb3c\xb3\n"
+                "\xc8\xcd\xcd\xcd\xca\xcd\xcd\xbc  \xc0\xc4\xc4\xc1\xc4\xd9\n"
+                "\xb0\xb1\xb2\xdb\xdf\xdc \xe0\xe1\xe3\xe4\xe6 \xf1\xf2\xf3 "
+                "\xfb\xfd");
+        sim_frames(3);
+        sim_shot("cp437");
+        /* the terminal font: the box drawing joins up */
+        int tw = text_width("\xc4\xc4\xc4", FONT_TERM);
+        T("terminal: box chars a cell each", tw == 3 * FONT_TERM_W);
+        T("8x8: 8 a character", text_width("\xc4\xc4", FONT_MONO8) == 16);
+        g_codepage = CP_WESTERN;
+        wm_invalidate_all();
+        wm_close(w);
+        sim_frames(3);
+        /* Character Map */
+        app_instance_t *cm = sim_launch("CHARMAP");
+        sim_frames(4);
+        typedef struct {
+            window *win;
+            control *font, *cpl, *grid, *big, *text, *copy;
+            int sel, shown_cp;
+        } cm_t;
+        cm_t *c = cm->state;
+        T("Character Map: Western",
+          !strcmp(ctl_text(c->cpl), "Western (1252)"));
+        sim_shot("charmap1");
+        /* 0xA9 (copyright): row (0xA9-32)/16, column (0xA9-32)%16 */
+        int k = 0xA9 - 32;
+        sim_dblclick(c->grid->ax + 2 + (k % 16) * 14 + 7,
+                     c->grid->ay + 2 + (k / 16) * 9 + 4);
+        sim_frames(2);
+        T("double-click picks and gathers it",
+          c->sel == 0xA9 && (unsigned char)ctl_text(c->text)[0] == 0xA9);
+        sim_ext(0x4D);
+        sim_frames(1); /* right */
+        sim_key(0x1C);
+        sim_frames(2); /* Enter: add */
+        T("arrow, Enter: the next one",
+          c->sel == 0xAA && strlen(ctl_text(c->text)) == 2);
+        c->copy->handler(c->copy, EV_CLICK);
+        T("Copy: on the clipboard",
+          clipboard_has_text() && (unsigned char)g_clipboard.text[0] == 0xA9);
+        sim_shot("charmap2");
+        g_codepage = CP_DOS;
+        sim_frames(3);
+        T("follows the code page", !strcmp(ctl_text(c->cpl), "DOS (437)"));
+        list_set_sel(c->font, 2);
+        c->font->handler(c->font, EV_CHANGE);
+        sim_frames(3);
+        sim_shot("charmap3");
+        g_codepage = CP_CENTRAL;
+        list_set_sel(c->font, 0);
+        c->font->handler(c->font, EV_CHANGE);
+        sim_frames(3);
+        sim_shot("charmap4");
+        g_codepage = CP_WESTERN;
+        wm_close(c->win);
+        sim_frames(2);
+        /* Settings > System > Characters: at once */
+        sim_launch("Settings");
+        sim_frames(3);
+        window *sw = wm_focused_window();
+        control *cpc = NULL;
+        for (control *x = sw ? sw->controls : NULL; x; x = x->next) {
+            if (x->type == CTL_TABS)
+                ctl_set_value(x, 0); /* Display */
+            if (x->type == CTL_COMBO && list_count(x) == 3 &&
+                !strcmp(list_get(x, 2), "DOS (437)"))
+                cpc = x;
+        }
+        sim_frames(2);
+        T("Settings: the Characters choice", cpc != NULL);
+        if (cpc) {
+            list_set_sel(cpc, 1);
+            cpc->handler(cpc, EV_CHANGE);
+            sim_frames(2);
+            T("picked: in use at once",
+              g_codepage == CP_CENTRAL && g_cfg.codepage == CP_CENTRAL);
+            sim_shot("cpsettings");
+        }
+        g_codepage = CP_WESTERN;
+        g_cfg.codepage = CP_WESTERN;
+        return fails;
+    }
+    if (!strcmp(name, "cdaudio")) {
+        /* an audio CD: /CD0 with Track01.cda ..., Audio Player plays them
+         * from the drive (play, pause, seek, next, the end of a track) */
+        int fails = 0;
+        char b[300];
+        extern bool sim_cd_insert_audio(int, const int *);
+        extern bool sim_cd_insert(const char *);
+        extern void sim_cd_eject(void);
+        extern int g_cd_plays;
+        dir_entry_t de;
+        fat_file_t f;
+        static const int secs[3] = {200, 180, 240};
+        sim_cd_insert_audio(3, secs);
+        sim_frames(40);
+        T("audio CD: /CD0", fs_drive_mounted(DRIVE_CD0) &&
+                                !strcmp(fs_drive_label(DRIVE_CD0), "Audio CD"));
+        T("its tracks as files", fs_find("/CD0/Track01.cda", &de) &&
+                                     de.file_size == 44 &&
+                                     fs_find("/CD0/Track03.cda", &de) &&
+                                     !fs_find("/CD0/Track04.cda", &de));
+        uint8_t c[64] = {0};
+        int n = fs_open("/CD0/Track02.cda", &f) ? fs_read(&f, c, 64) : 0;
+        fs_close(&f);
+        uint32_t st2 =
+            (uint32_t)(c[28] | c[29] << 8 | c[30] << 16 | c[31] << 24);
+        uint32_t ln2 =
+            (uint32_t)(c[32] | c[33] << 8 | c[34] << 16 | c[35] << 24);
+        snprintf(b, sizeof b,
+                 "    Track02.cda: %d bytes, track %d, start %u, %u sectors\n",
+                 n, c[22], st2, ln2);
+        wr(1, b);
+        T("a Windows .cda (RIFF CDDA)",
+          n == 44 && !memcmp(c, "RIFF", 4) && !memcmp(c + 8, "CDDAfmt ", 8) &&
+              c[22] == 2 && st2 == 200 * 75 + 150 && ln2 == 180 * 75 + 150);
+        T("no apps folder for it", !fs_find("/APPS/CDROM", &de));
+        T("not writable", !fs_create("/CD0/X.TXT", &f));
+        sim_frames(3);
+        sim_shot("cda1");
+        /* Audio Player: C plays the disc */
+        fs_delete("/PREFS/AUDIOPLA.INI");
+        app_instance_t *a = sim_launch("AUDIOPLA");
+        sim_frames(3);
+        typedef struct {
+            window *win;
+            control *viz, *bar, *play, *stop, *rew, *next, *loop, *vol,
+                *vol_lbl, *list, *status, *cd;
+            char paths[40][192];
+            int count, cur;
+        } ap_t;
+        ap_t *s = a->state;
+        s->cd->handler(s->cd, EV_CLICK);
+        sim_frames(3);
+        snprintf(b, sizeof b, "    %d in the list, %s / %s, %u ms\n", s->count,
+                 audio_codec_name(), audio_info(), audio_len_ms());
+        wr(1, b);
+        T("the 3 tracks listed",
+          s->count == 3 && !strcmp(s->paths[0], "/CD0/Track01.cda"));
+        T("track 1 playing",
+          audio_state() == AUDIO_PLAYING &&
+              !strcmp(audio_codec_name(), "CD audio") &&
+              !strcmp(audio_info(), "track 1, from the drive") &&
+              audio_len_ms() == 202000);
+        T("shown as CD track 1", !strcmp(list_get(s->list, 0), "> CD track 1"));
+        sim_frames(190); /* ~3 s */
+        uint32_t p = audio_pos_ms();
+        snprintf(b, sizeof b, "    at %u ms\n", p);
+        wr(1, b);
+        T("the position moves", p >= 2700 && p <= 3300);
+        sim_shot("cda2");
+        sim_key(0x39);
+        sim_frames(2); /* Space: pause */
+        uint32_t p0 = audio_pos_ms();
+        sim_frames(60);
+        T("paused: the drive holds",
+          audio_state() == AUDIO_PAUSED && audio_pos_ms() - p0 < 300);
+        audio_seek_ms(100000);
+        sim_frames(20);
+        p = audio_pos_ms();
+        T("seek to 100 s (stays paused)",
+          audio_state() == AUDIO_PAUSED && p >= 99900 && p <= 100300);
+        sim_key(0x39);
+        sim_frames(2);
+        T("on again", audio_state() == AUDIO_PLAYING);
+        /* near the end: on to track 2 by itself */
+        audio_seek_ms(201000);
+        int plays = g_cd_plays;
+        sim_frames(130);
+        snprintf(b, sizeof b, "    now %s, cur %d, %d plays\n", audio_info(),
+                 s->cur, g_cd_plays - plays);
+        wr(1, b);
+        T("track 1 ran out: track 2 plays",
+          s->cur == 1 && !strcmp(audio_info(), "track 2, from the drive") &&
+              audio_state() == AUDIO_PLAYING);
+        sim_key2(0x31, 'n', false, false);
+        sim_frames(3); /* N: next */
+        T("N: track 3",
+          s->cur == 2 && !strcmp(audio_info(), "track 3, from the drive"));
+        sim_shot("cda3");
+        /* a .cda copied to the hard disk plays while its disc is in */
+        static char o[512];
+        extern int cli_execute_command(const char *, char *, size_t);
+        (void)o;
+        (void)cli_execute_command;
+        fs_delete("/T2.CDA");
+        T("copied to the hard disk",
+          fs_create("/T2.CDA", &f) && fs_write(&f, c, 44) == 44);
+        fs_close(&f);
+        T("open the copy",
+          audio_open("/T2.CDA") == NULL &&
+              !strcmp(audio_info(), "track 2, from the drive"));
+        audio_close();
+        /* taken out: the player stops, the tracks can't be opened */
+        appload_run_named("Audio Player", "/CD0/Track01.cda");
+        sim_frames(3);
+        sim_cd_eject();
+        sim_frames(60);
+        const char *e = audio_open("/T2.CDA");
+        snprintf(b, sizeof b, "    no disc: '%s', state %d\n", e ? e : "-",
+                 audio_state());
+        wr(1, b);
+        T("no disc: the copy says so", e && strstr(e, "audio CD"));
+        T("no disc: /CD0 gone", !fs_drive_mounted(DRIVE_CD0));
+        /* a data CD has no tracks */
+        sim_cd_insert(FIXDIR "cd.iso");
+        sim_frames(40);
+        s->cd->handler(s->cd, EV_CLICK);
+        sim_frames(2);
+        T("data CD: says no audio",
+          strstr(ctl_text(s->status), "no audio") != NULL);
+        T("the old tracks went from the list", s->count == 0);
+        sim_shot("cda4");
+        return fails;
+    }
     if (!strcmp(name, "submenu")) {
         int fails = 0;
         char b[300];
@@ -2795,7 +3101,7 @@ int scen2(const char *name) {
         T("hover opens the submenu", g_menubar.sub_item == 0);
         sim_shot("sm1");
         menu *acc = g_menubar.menus[ai].items[0].sub;
-        T("Accessories has 6", acc->item_count == 6);
+        T("Accessories has 7", acc->item_count == 7);
         /* diagonally: right and down across the Games row, quickly */
         for (int k = 1; k <= 10; k++) {
             sim_move(apps->bar_x + 10 + k * 11, MENUBAR_H + 3 + k);
@@ -3087,8 +3393,9 @@ int scen2(const char *name) {
         T("groups sorted: Accessories first",
           !strcmp(apps->items[0].label, "Accessories"));
         T("Accessories: bundled .APPs + TEditor shortcut",
-          acc && acc->item_count == 6 && HAS(acc, "Calculator") &&
-              HAS(acc, "TEditor") && HAS(acc, "ASMDraw"));
+          acc && acc->item_count == 7 && HAS(acc, "Calculator") &&
+              HAS(acc, "TEditor") && HAS(acc, "ASMDraw") &&
+              HAS(acc, "Character Map"));
         T("System Tools: HexView .APP + built-in shortcuts",
           sys && HAS(sys, "HexView") && HAS(sys, "Monitor") &&
               HAS(sys, "Print Queue"));
@@ -3410,14 +3717,14 @@ int scen2(const char *name) {
         T("64 chars refused", !fs_create(b, &f));
         T("bad char refused", !fs_create("/FDD0/what?.txt", &f));
         /* folders */
-        T("mkdir a long name", fs_mkdir("/FDD0/Project Files"));
+        T("mkdir a long name", fs_mkdir("/FDD0/Project_Files"));
         T("file in it",
-          fs_create("/FDD0/Project Files/Budget for next year.txt", &f) &&
+          fs_create("/FDD0/Project_Files/Budget_for_next_year.txt", &f) &&
               fs_write(&f, "money", 5) == 5 && fs_close(&f));
         int made = 0;
         for (int i = 0; i < 40; i++) {
             snprintf(b, sizeof b,
-                     "/FDD0/Project Files/Chapter number %02d of the book.txt",
+                     "/FDD0/Project_Files/Chapter number %02d of the book.txt",
                      i);
             if (fs_create(b, &f)) {
                 fs_close(&f);
@@ -3426,7 +3733,7 @@ int scen2(const char *name) {
         }
         T("40 long names in a folder (it grows)", made == 40);
         T("last one found",
-          fs_find("/FDD0/Project Files/Chapter number 39 of the book.txt", &e));
+          fs_find("/FDD0/Project_Files/Chapter number 39 of the book.txt", &e));
         /* rename */
         T("rename long -> long",
           fs_rename("/FDD0/My New Report 2026.txt", "Final Report.txt") &&
@@ -3448,8 +3755,8 @@ int scen2(const char *name) {
         T("rename onto another name refused",
           !fs_rename("/FDD0/FINAL.TXT", "Stays Here.txt"));
         T("rename a folder",
-          fs_rename("/FDD0/Project Files", "Old Projects") &&
-              fs_find("/FDD0/Old Projects/Budget for next year.txt", &e));
+          fs_rename("/FDD0/Project_Files", "Old Projects") &&
+              fs_find("/FDD0/Old Projects/Budget_for_next_year.txt", &e));
         /* copy / move */
         T("copy a long-named folder",
           fs_copy_dir("/FDD0/My Documents", "/FDD0/Copy of My Documents") &&
@@ -3475,7 +3782,7 @@ int scen2(const char *name) {
                                           "/FDD0/Old Projects/Docs Backup/x"));
         T("cd .. from the moved folder",
           fs_chdir("/FDD0/Old Projects/Docs Backup") && fs_chdir("..") &&
-              fs_find("Budget for next year.txt", &e));
+              fs_find("Budget_for_next_year.txt", &e));
         fs_chdir("/");
         T("delete", fs_delete("/FDD0/My New Report 2027.txt") &&
                         !fs_find("/FDD0/MYNEWR~2.TXT", &e));
@@ -3524,26 +3831,26 @@ int scen2(const char *name) {
         int fails = 0;
         char b[300];
         T("new file, long name",
-          fo_create("/DESKTOP", "My Long Document Name.txt", false, false) ==
+          fo_create("/DESKTOP", "My_Long_Document_Name.txt", false, false) ==
               NULL);
         T("new folder, long name",
-          fo_create("/DESKTOP", "Project Files 2026", true, false) == NULL);
+          fo_create("/DESKTOP", "Project_Files_2026", true, false) == NULL);
         T("lower-case name",
           fo_create("/DESKTOP", "notes.txt", false, false) == NULL);
-        fo_create("/DESKTOP/Project Files 2026", "Budget for next year.txt",
+        fo_create("/DESKTOP/Project_Files_2026", "Budget_for_next_year.txt",
                   false, false);
-        fo_create("/DESKTOP/Project Files 2026", "Meeting Notes (draft).txt",
+        fo_create("/DESKTOP/Project_Files_2026", "Meeting_Notes_(draft).txt",
                   false, false);
-        fo_create("/DESKTOP/Project Files 2026", "Sub Folder With Long Name",
+        fo_create("/DESKTOP/Project_Files_2026", "Sub_Folder_With_Long_Name",
                   true, false);
         desktop_fs_reload();
         sim_frames(2);
         int li = -1, fi = -1;
         for (int i = 0; i < desktop_fs_count(); i++) {
             if (!strcmp(desktop_fs_items()[i].name,
-                        "My Long Document Name.txt"))
+                        "My_Long_Document_Name.txt"))
                 li = i;
-            if (!strcmp(desktop_fs_items()[i].name, "Project Files 2026"))
+            if (!strcmp(desktop_fs_items()[i].name, "Project_Files_2026"))
                 fi = i;
         }
         T("desktop shows the long names", li >= 0 && fi >= 0);
@@ -3553,10 +3860,10 @@ int scen2(const char *name) {
         sim_shot("lu1");
         desktop_fs_items()[li].selected = false;
         /* FileF in the long-named folder */
-        fo_open(NULL, "/DESKTOP/Project Files 2026");
+        fo_open(NULL, "/DESKTOP/Project_Files_2026");
         sim_frames(3);
         window *w = wm_focused_window();
-        T("FileF opens it", w && strstr(w->title, "Project Files 2026"));
+        T("FileF opens it", w && strstr(w->title, "Project_Files_2026"));
         sim_shot("lu2");
         control *view = NULL;
         for (control *c = w->controls; c; c = c->next)
@@ -3576,12 +3883,13 @@ int scen2(const char *name) {
         snprintf(b, sizeof b, "    rename box: '%s'\n",
                  ed ? ctl_text(ed) : "?");
         wr(1, b);
-        T("rename box has the long name", ed && strchr(ctl_text(ed), ' '));
+        T("rename box has the long name",
+          ed && !strcmp(ctl_text(ed), "Sub_Folder_With_Long_Name"));
         sim_key(0x01);
         sim_frames(2);
         T("rename through fileops",
-          fo_rename("/DESKTOP/Project Files 2026/Budget for next year.txt",
-                    "Budget 2027 (final).txt") == NULL);
+          fo_rename("/DESKTOP/Project_Files_2026/Budget_for_next_year.txt",
+                    "Budget_2027_(final).txt") == NULL);
         T("case-only rename",
           fo_rename("/DESKTOP/notes.txt", "Notes.txt") == NULL);
         char nm[FS_NAME_SZ];
@@ -3591,51 +3899,58 @@ int scen2(const char *name) {
         sim_shot("lu5");
         /* Get Info: the DOS name too */
         static char info[800];
-        fo_info_text("/DESKTOP/My Long Document Name.txt", info, sizeof info);
+        fo_info_text("/DESKTOP/My_Long_Document_Name.txt", info, sizeof info);
         wr(1, info);
         wr(1, "\n");
         T("info shows the DOS name",
-          strstr(info, "DOS:    MYLONG~1.TXT") != NULL);
+          strstr(info, "DOS:    MY_LON~1.TXT") != NULL);
         /* the file dialog */
-        dlg_open_file(NULL, "Open", "/DESKTOP/Project Files 2026", NULL, NULL,
+        dlg_open_file(NULL, "Open", "/DESKTOP/Project_Files_2026", NULL, NULL,
                       NULL);
         sim_frames(3);
         sim_shot("lu6");
         sim_key(0x01);
         sim_frames(2);
         /* trash a long name, twice */
-        fo_create("/DESKTOP", "Trash Me Please.txt", false, false);
+        fo_create("/DESKTOP", "Trash_Me_Please.txt", false, false);
         T("to the Trash",
-          fo_trash("/DESKTOP/Trash Me Please.txt") == NULL &&
-              fo_stat("/TRASH/Trash Me Please.txt", NULL, NULL));
-        fo_create("/DESKTOP", "Trash Me Please.txt", false, false);
+          fo_trash("/DESKTOP/Trash_Me_Please.txt") == NULL &&
+              fo_stat("/TRASH/Trash_Me_Please.txt", NULL, NULL));
+        fo_create("/DESKTOP", "Trash_Me_Please.txt", false, false);
         T("again: (2)",
-          fo_trash("/DESKTOP/Trash Me Please.txt") == NULL &&
-              fo_stat("/TRASH/Trash Me Please (2).txt", NULL, NULL));
+          fo_trash("/DESKTOP/Trash_Me_Please.txt") == NULL &&
+              fo_stat("/TRASH/Trash_Me_Please(2).txt", NULL, NULL));
         T("put back (2) under its own name",
-          fo_put_back("/TRASH/Trash Me Please (2).txt") == NULL &&
-              fo_stat("/DESKTOP/Trash Me Please.txt", NULL, NULL));
+          fo_put_back("/TRASH/Trash_Me_Please(2).txt") == NULL &&
+              fo_stat("/DESKTOP/Trash_Me_Please.txt", NULL, NULL));
         /* the CLI */
         static char o[2048];
         extern int cli_execute_command(const char *, char *, size_t);
         o[0] = 0;
-        cli_execute_command("cd /DESKTOP/Project Files 2026", o, sizeof o);
+        cli_execute_command("cd /DESKTOP/Project_Files_2026", o, sizeof o);
         T("cd with spaces, no quotes",
-          !strcmp(dir_context.path, "/DESKTOP/Project Files 2026"));
+          !strcmp(dir_context.path, "/DESKTOP/Project_Files_2026"));
         o[0] = 0;
         cli_execute_command("ls", o, sizeof o);
         wr(1, o);
-        T("ls long names", strstr(o, "Budget 2027 (final).txt") != NULL);
+        T("ls long names", strstr(o, "Budget_2027_(final).txt") != NULL);
         o[0] = 0;
         cli_execute_command(
-            "cp \"Budget 2027 (final).txt\" \"A Copy Of It.txt\"", o, sizeof o);
+            "cp \"Budget_2027_(final).txt\" \"A Copy Of It.txt\"", o, sizeof o);
         wr(1, o);
-        T("cp with quotes",
-          fo_stat("/DESKTOP/Project Files 2026/A Copy Of It.txt", NULL, NULL));
+        T("cp to a name with spaces: refused",
+          strstr(o, "No spaces") &&
+              !fo_stat("/DESKTOP/Project_Files_2026/A Copy Of It.txt", NULL,
+                       NULL));
         o[0] = 0;
-        cli_execute_command("cd \"Sub Folder With Long Name\"", o, sizeof o);
+        cli_execute_command("cp \"Budget_2027_(final).txt\" A_Copy_Of_It.txt",
+                            o, sizeof o);
+        T("cp with quotes",
+          fo_stat("/DESKTOP/Project_Files_2026/A_Copy_Of_It.txt", NULL, NULL));
+        o[0] = 0;
+        cli_execute_command("cd \"Sub_Folder_With_Long_Name\"", o, sizeof o);
         T("cd with quotes",
-          strstr(dir_context.path, "Sub Folder With Long Name") != NULL);
+          strstr(dir_context.path, "Sub_Folder_With_Long_Name") != NULL);
         o[0] = 0;
         cli_execute_command("cd ..", o, sizeof o);
         fs_chdir("/");
@@ -3656,9 +3971,9 @@ int scen2(const char *name) {
         fs_create("/DIRLIST.APP", &f);
         fs_write(&f, buf, n);
         fs_close(&f);
-        fo_create("/DESKTOP", "A Folder With A Long Name", true, false);
-        fo_create("/DESKTOP/A Folder With A Long Name",
-                  "Saved Game Number One.sav", false, false);
+        fo_create("/DESKTOP", "A_Folder_With_A_Long_Name", true, false);
+        fo_create("/DESKTOP/A_Folder_With_A_Long_Name",
+                  "Saved_Game_Number_One.sav", false, false);
         if (!appload_launch("/DIRLIST.APP")) {
             wr(2, appload_last_error());
             return 1;
@@ -3684,9 +3999,9 @@ int scen2(const char *name) {
         int got = api->list_dir("/DESKTOP", e, 16);
         bool seen = false;
         for (int i = 0; i < got; i++)
-            if (!strcmp(e[i].name, "A Folder With A Long Name") &&
+            if (!strcmp(e[i].name, "A_Folder_With_A_Long_Name") &&
                 (e[i].attr & APP_ATTR_DIR) &&
-                !strcmp(e[i].dos_name, "AFOLDE~1"))
+                !strcmp(e[i].dos_name, "A_FOLD~1"))
                 seen = true;
         T("count == listed", cnt == got);
         T("long folder name + DOS name", seen);
@@ -3695,26 +4010,26 @@ int scen2(const char *name) {
         app_dirent_t fi;
         T("file_info",
           api->file_info(
-              "/DESKTOP/A Folder With A Long Name/Saved Game Number One.sav",
+              "/DESKTOP/A_Folder_With_A_Long_Name/Saved_Game_Number_One.sav",
               &fi) &&
-              !strcmp(fi.name, "Saved Game Number One.sav") &&
+              !strcmp(fi.name, "Saved_Game_Number_One.sav") &&
               !(fi.attr & APP_ATTR_DIR));
         T("make_dir",
-          api->make_dir("/DESKTOP/A Folder With A Long Name/Level Packs"));
+          api->make_dir("/DESKTOP/A_Folder_With_A_Long_Name/Level_Packs"));
         T("rename",
-          api->rename("/DESKTOP/A Folder With A Long Name/Level Packs",
-                      "More Level Packs"));
+          api->rename("/DESKTOP/A_Folder_With_A_Long_Name/Level_Packs",
+                      "More_Level_Packs"));
         T("remove (empty folder)",
-          api->remove("/DESKTOP/A Folder With A Long Name/More Level Packs"));
+          api->remove("/DESKTOP/A_Folder_With_A_Long_Name/More_Level_Packs"));
         T("remove refuses a full folder",
-          !api->remove("/DESKTOP/A Folder With A Long Name"));
+          !api->remove("/DESKTOP/A_Folder_With_A_Long_Name"));
         T("remove refuses protected", !api->remove("/DESKTOP"));
         /* through the window: type a path, Enter */
-        api->ui->set_text(st->path, "/DESKTOP/A Folder With A Long Name");
+        api->ui->set_text(st->path, "/DESKTOP/A_Folder_With_A_Long_Name");
         ctl_invoke(st->path, EV_SUBMIT);
         sim_frames(2);
         T("window lists it",
-          st->n == 1 && !strcmp(st->ents[0].name, "Saved Game Number One.sav"));
+          st->n == 1 && !strcmp(st->ents[0].name, "Saved_Game_Number_One.sav"));
         sim_shot("dl1");
         return fails;
     }
@@ -4370,23 +4685,23 @@ int scen2(const char *name) {
         int fails = 0;
         char b[300];
         extern void menu_item_run(const menu_item *);
-        fo_create("/DESKTOP", "Project Files", true, false);
-        fo_create("/DESKTOP/Project Files", "Sub", true, false);
+        fo_create("/DESKTOP", "Project_Files", true, false);
+        fo_create("/DESKTOP/Project_Files", "Sub", true, false);
         fat_file_t f;
         static char txt[20000];
         for (int i = 0; i < 20000; i++)
             txt[i] = "the quick brown fox jumps over the lazy dog\n"[i % 44];
-        fs_create("/DESKTOP/Project Files/Notes about things.txt", &f);
+        fs_create("/DESKTOP/Project_Files/Notes about things.txt", &f);
         fs_write(&f, txt, 20000);
         fs_close(&f);
-        fs_create("/DESKTOP/Project Files/Sub/more.txt", &f);
+        fs_create("/DESKTOP/Project_Files/Sub/more.txt", &f);
         fs_write(&f, txt, 5000);
         fs_close(&f);
         desktop_fs_reload();
         sim_frames(2);
         int fi = -1;
         for (int i = 0; i < desktop_fs_count(); i++)
-            if (!strcmp(desktop_fs_items()[i].name, "Project Files"))
+            if (!strcmp(desktop_fs_items()[i].name, "Project_Files"))
                 fi = i;
         desktop_item_t *it = &desktop_fs_items()[fi];
         sim_rclick(it->x + 16, it->y + 12);
@@ -4411,7 +4726,7 @@ int scen2(const char *name) {
                  name_ed ? ctl_text(name_ed) : "?");
         wr(1, b);
         T("dialog with the name",
-          name_ed && !strcmp(ctl_text(name_ed), "Project Files.zip"));
+          name_ed && !strcmp(ctl_text(name_ed), "Project_Files.zip"));
         sim_click(combo->ax + 5, combo->ay + 5);
         sim_frames(2);
         sim_shot("zu3");
@@ -4422,7 +4737,7 @@ int scen2(const char *name) {
         sim_shot("zu4");
         dir_entry_t de;
         T("zip on the desktop",
-          fs_find("/DESKTOP/Project Files.zip", &de) && de.file_size > 100);
+          fs_find("/DESKTOP/Project_Files.zip", &de) && de.file_size > 100);
         window *msg = wm_focused_window();
         for (control *c = msg->controls; c; c = c->next)
             if (c->type == CTL_LABEL) {
@@ -4433,7 +4748,7 @@ int scen2(const char *name) {
         sim_key(0x1C);
         sim_frames(3);
         /* again: asks to replace */
-        fo_ask_compress(NULL, "/DESKTOP/Project Files", NULL, NULL);
+        fo_ask_compress(NULL, "/DESKTOP/Project_Files", NULL, NULL);
         sim_frames(3);
         w = wm_focused_window();
         for (control *c = w->controls; c; c = c->next)
@@ -4456,10 +4771,10 @@ int scen2(const char *name) {
         sim_frames(2);
         int zi = -1;
         for (int i = 0; i < desktop_fs_count(); i++)
-            if (!strcmp(desktop_fs_items()[i].name, "Project Files.zip"))
+            if (!strcmp(desktop_fs_items()[i].name, "Project_Files.zip"))
                 zi = i;
         T("zip icon", zi >= 0);
-        fo_ask_extract(fw, "/DESKTOP/Project Files.zip", NULL, NULL);
+        fo_ask_extract(fw, "/DESKTOP/Project_Files.zip", NULL, NULL);
         sim_frames(3);
         sim_shot("zu6");
         w = wm_focused_window();
@@ -4484,7 +4799,7 @@ int scen2(const char *name) {
         sim_frames(3);
         sim_shot("zu8");
         T("extracted",
-          fs_find("/DESKTOP/Unpacked/Project Files/Sub/more.txt", &de) &&
+          fs_find("/DESKTOP/Unpacked/Project_Files/Sub/more.txt", &de) &&
               de.file_size == 5000);
         sim_key(0x1C);
         sim_frames(3);
@@ -5538,9 +5853,9 @@ int scen2(const char *name) {
           wm_focused_window() == NULL ||
               strcmp(wm_focused_window()->title, "Delete"));
         fo_create("/HDA/DESKTOP", "A.TXT", false, false);
-        T("second A.TXT -> A (2).TXT",
+        T("second A.TXT -> A(2).TXT",
           !fo_trash("/HDA/DESKTOP/A.TXT") &&
-              fo_stat("/TRASH/A (2).TXT", NULL, NULL));
+              fo_stat("/TRASH/A(2).TXT", NULL, NULL));
         T("folder dropped on the Trash",
           !fo_move("/HDA/DESKTOP/DIR", "/TRASH") &&
               fo_stat("/TRASH/DIR/IN.TXT", &d, NULL));
@@ -5551,10 +5866,10 @@ int scen2(const char *name) {
         T("no new files in the Trash",
           fo_create("/TRASH", "X.TXT", false, false) != NULL);
         T("no cut from the Trash", fo_clip("/TRASH/A.TXT", true) != NULL);
-        T("put back A (2) -> /DESKTOP/A.TXT",
-          !fo_put_back("/HDA/TRASH/A (2).TXT") &&
+        T("put back A(2) -> /DESKTOP/A.TXT",
+          !fo_put_back("/HDA/TRASH/A(2).TXT") &&
               fo_stat("/DESKTOP/A.TXT", NULL, NULL) &&
-              !fo_stat("/TRASH/A (2).TXT", NULL, NULL));
+              !fo_stat("/TRASH/A(2).TXT", NULL, NULL));
         T("put back DIR", !fo_put_back("/TRASH/DIR") &&
                               fo_stat("/DESKTOP/DIR/IN.TXT", NULL, NULL));
         desktop_fs_reload();

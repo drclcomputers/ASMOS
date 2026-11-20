@@ -371,9 +371,11 @@ static const char *type_name(const char *name, bool is_dir) {
     const char *dot = strrchr(name, '.');
     const char *e = dot ? dot + 1 : "";
     static const char *const map[][2] = {
-        {"TXT", "Text file"},       {"APP", "Application"}, {"PIC", "Picture"},
-        {"WAV", "Sound"},           {"MID", "MIDI music"},  {"CFG", "Settings"},
+        {"TXT", "Text file"},       {"APP", "Application"},
+        {"PIC", "Picture"},         {"WAV", "Sound"},
+        {"MID", "MIDI music"},      {"CFG", "Settings"},
         {"ASM", "Assembly source"}, {"BIN", "Binary"},
+        {"CDA", "CD audio track"},
     };
     for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
         if (!strcasecmp(e, map[i][0]))
@@ -790,7 +792,7 @@ static bool ensure_trash(void) {
     return true;
 }
 
-/* its own name, or "Name (2).ext" ... if taken */
+/* its own name, or "Name(2).ext" ... if taken */
 static bool trash_name(const char *base, char *out, int sz) {
     const char *dot = strrchr(base, '.');
     int sl = dot && dot != base ? (int)(dot - base) : (int)strlen(base);
@@ -801,7 +803,7 @@ static bool trash_name(const char *base, char *out, int sz) {
             snprintf(nm, sizeof(nm), "%s", base);
         } else {
             char tail[8];
-            int tl = snprintf(tail, sizeof(tail), " (%d)", k);
+            int tl = snprintf(tail, sizeof(tail), "(%d)", k);
             int keep = sl;
             if (keep + tl + (int)strlen(ext) > FS_NAME_MAX)
                 keep = FS_NAME_MAX - tl - (int)strlen(ext);
@@ -859,16 +861,16 @@ const char *fo_put_back(const char *trash_path) {
     bool is_dir;
     if (!fo_stat(dir, &is_dir, NULL) || !is_dir)
         snprintf(dir, sizeof(dir), "%s", DESKTOP_PATH); /* folder is gone */
-    /* back under its own name when we renamed it ("Name (2).ext") */
+    /* back under its own name when we renamed it ("Name(2).ext") */
     char orig[FS_NAME_SZ];
     snprintf(orig, sizeof(orig), "%s", nm);
     char *t = strrchr(orig, '(');
-    if (t && t > orig && t[-1] == ' ') {
+    if (t && t > orig) {
         char *c = t + 1;
         while (*c >= '0' && *c <= '9')
             c++;
         if (*c == ')' && c > t + 1)
-            memmove(t - 1, c + 1, strlen(c + 1) + 1);
+            memmove(t, c + 1, strlen(c + 1) + 1);
     }
     fo_join(dir, orig, dst, sizeof(dst));
     if (fo_stat(dst, NULL, NULL))
