@@ -1,19 +1,29 @@
 # The simulator: the kernel's C code built for Linux (32-bit), with a fake
 # screen, disks, floppy controller and timer (sim.c, stubs.c, simfdc.c...).
-# run.sh builds it and runs every scenario in scen.c.
+# run.sh builds it and runs every scenario in scen*.c (scen.c runs them).
 R ?= ../..
 RA := $(abspath $(R))
 CFLAGS = -m32 -std=gnu11 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -nostdlib -O1 -g -fno-builtin -w -MMD -MP -I$(R) -I. -DROOT=\"$(RA)/\" -DFIXDIR=\"fixtures/\" -DOUTDIR=\"out/\"
 EXCL = $(R)/lib/apm.c $(R)/lib/cpu.c $(R)/config/runtime_config.c $(R)/lib/io.c $(R)/lib/libc_compat.c $(R)/apps/asmusic.c $(R)/os/scheduler.c $(R)/lib/vmm.c
 DIRS = lib ui apps fonts fs config shell network
 SRCS = $(filter-out $(EXCL),$(foreach d,$(DIRS),$(wildcard $(R)/$(d)/*.c))) $(R)/os/os.c $(R)/os/app_registry.c $(R)/os/clipboard.c $(R)/os/error.c $(R)/os/appload.c $(R)/os/prefs.c $(R)/os/help.c $(R)/os/watchdog.c $(R)/drivers/pointer.c $(R)/drivers/keyboard.c $(R)/drivers/lpt.c $(R)/os/print.c
-OBJS = $(patsubst $(R)/%.c,o/%.o,$(SRCS)) o/rtcfg.o o/sim.o o/scen.o o/start.o o/stubs.o o/simvmm.o o/simguard.o o/simtask.o o/task_switch.o o/simfdc.o o/drivers/fdd.o o/bootcode.o
+OBJS = $(patsubst $(R)/%.c,o/%.o,$(SRCS)) o/rtcfg.o o/sim.o o/scen.o o/scen_apps1.o o/scen_apps2.o o/scen_storage.o o/scen_help.o o/scen_menu.o o/scen_fs.o o/scen_zip.o o/scen_setup.o o/scen_misc1.o o/scen_misc2.o o/start.o o/stubs.o o/simvmm.o o/simguard.o o/simtask.o o/task_switch.o o/simfdc.o o/drivers/fdd.o o/bootcode.o
 sim: $(OBJS)
 	ld -m elf_i386 -static --defsym=_backbuf=0x100000 -o $@ $(OBJS) 2>&1 | grep -v 'missing .note\|NOTE: This' ; true
 o/%.o: $(R)/%.c
 	@mkdir -p $(dir $@); gcc $(CFLAGS) -c $< -o $@
 o/sim.o: sim.c sys.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/scen.o: scen.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_apps1.o: scen_apps1.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_apps2.o: scen_apps2.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_storage.o: scen_storage.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_help.o: scen_help.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_menu.o: scen_menu.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_fs.o: scen_fs.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_zip.o: scen_zip.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_setup.o: scen_setup.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_misc1.o: scen_misc1.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_misc2.o: scen_misc2.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/stubs.o: stubs.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/start.o: start.S ; @mkdir -p o; gcc -m32 -c $< -o $@
 # the kernel's drivers/gpu.c on a model of the VGA planes (gputest.c)

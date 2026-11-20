@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the simulator and run the scenarios in scen.c against the kernel
+# Build the simulator and run the scenarios in scen*.c against the kernel
 # built in the repo root (make first). Each scenario gets a fresh copy of
 # os_image.bin as its hard disk.
 #   tests/sim/run.sh             all of them
@@ -25,7 +25,7 @@ SCREENS="desktop@640x480 desktop@800 alttab@800 winpos@800 pattern@800
          charset@320 help@320"
 
 if [ $# -gt 0 ]; then list="$*"; else
-    list="$(grep -o '!strcmp(name, "[a-zA-Z0-9_]*")' scen.c | sed 's/.*"\(.*\)".*/\1/' | sort -u) $SCREENS"
+    list="$(grep -ho '!strcmp(name, "[a-zA-Z0-9_]*")' scen*.c | sed 's/.*"\(.*\)".*/\1/' | sort -u) $SCREENS"
 fi
 
 failed=0; n=0; bad=""
