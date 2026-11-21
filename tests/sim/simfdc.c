@@ -1,16 +1,6 @@
-/* Sim: an emulated floppy controller (NEC 765 / 82077 subset), DMA channel
- * 2 and drives A: and B:, so the real drivers/fdd.c runs against it.
- *
- * Drive: g_fdc_drive_type = CMOS type (1 360K, 2 1.2M, 3 720K, 4 1.44M,
- * 5 2.88M). Disk: g_fdc_disk_kb (0 = none) with its geometry; it holds
- * its data in g_fdc_img. What a real one does, and the driver must cope
- * with:
- *   - a seek takes a few SENSE INTERRUPT polls (0x80 until then);
- *   - after a reset, four pending "ready changed" interrupts;
- *   - reading needs the disk's data rate (CCR), the head on a track the
- *     disk has, and the C/H/R of an existing sector; a 40-track disk in an
- *     80-track drive is only at even head positions (double stepping);
- *   - FORMAT TRACK rewrites a track: the disk takes the new layout. */
+/* NEC 765/82077 + DMA2 model for drives A/B. CMOS type sets drive geometry;
+ * g_fdc_disk_kb/g_fdc_img describe disks. Models seek delays, four change
+ * interrupts after reset, rate/sector checks, double stepping, and formatting. */
 #include "lib/core.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -81,7 +71,7 @@ static int needed_rate(void) {
                                                 : 2; /* DD in a 1.2M: 300k */
 }
 
-/* ── controller state ── */
+// controller state
 static uint8_t s_dor, s_ccr, s_pcns[2];
 #define s_pcn s_pcns[s_u]
 static uint8_t s_cmd[9], s_ncmd, s_need;
@@ -199,10 +189,8 @@ static void do_format(void) {
     }
     const uint8_t *ids = dma_ptr();
     int cyl = ids[0];
-    /* the disk takes the layout being written: density from the rate,
-     * tracks from the stepping (in an 80-track drive: 80 until cylinder 1
-     * comes at head position 2, double stepping; 300 kbps in a 1.2 MB
-     * drive is both 360 KB and 720 KB) */
+    /* Infer density from the rate and track count from stepping. A 1.2 MB
+     * drive at 300 kbps can format either 360 KB or 720 KB. */
     if (s_pcn == 0 && head == 0) {
         s_disk.spt = sc;
         s_disk.heads = 1;
@@ -223,8 +211,7 @@ static void do_format(void) {
         uint32_t lba = ((uint32_t)cyl * 2 + head) * sc + (ids[i * 4 + 2] - 1);
         (void)lba; /* the image is re-laid at the end (by heads) */
     }
-    /* data of this track = filler (layout: heads known by the end; the
-     * image is addressed with the final head count, so fill both) */
+    /* Fill the track; the final head count may not be known yet. */
     for (int hh = head; hh <= head; hh++) {
         uint32_t base = ((uint32_t)cyl * 2 + hh) * sc;
         if ((base + sc) * 512 <= sizeof(g_fdc_img))

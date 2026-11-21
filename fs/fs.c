@@ -44,15 +44,11 @@ bool path_is_protected(const char *name_or_path) {
     return false;
 }
 
-/* Floppies: drivers/fdd.c keeps recent tracks in memory (and writes
- * them back a little later). When it sees that the disk was changed (the
- * door was opened, no Eject), the drive is unmounted here and mounted
- * again on the next path that goes to it (drive_ready): the open files
- * and the folders seen were the old disk's. */
+/* On a disk change, unmount immediately and remount on next access; open
+ * files and directories still refer to the old disk. */
 static bool s_remount[DRIVE_COUNT];
 
-/* after a failed floppy access: true to try again (the disk was changed,
- * nothing of the old one is in use: mounting, or not mounted) */
+/* Retry after a failed access only if the disk changed while unmounted. */
 static bool fdd_check_change(uint8_t drive_id) {
     if (!fdd_take_change(drive_id == DRIVE_FDD0 ? 0 : 1))
         return false;
@@ -138,14 +134,12 @@ static void zero_cluster(uint8_t drive_id, uint16_t cluster) {
         fs_write_sector(drive_id, lba + s, zero);
 }
 
-/* ── directory walking, with long file names (Windows 95 and later) ──────
- * Before its 8.3 entry, a file with a long name has entries with attr 0x0F
- * holding the name in 13-character pieces, last piece first, each with a
- * checksum of the 8.3 name. DOS skips them and sees only the 8.3 name (the
- * "alias", like LONGFI~1.TXT); we read them, find files by either name, and
- * write them for names that don't fit 8.3. Names are kept up to FS_NAME_MAX
- * characters: a longer one on a disk from elsewhere shows as its alias.
- * Characters outside ASCII show as '_'. */
+// directory walking, with long file names (Windows 95 and later)
+/*
+ * VFAT names use checksum-linked, 13-character entries before the 8.3 alias.
+ * Read and write both names; overlong names fall back to the alias, and
+ * non-ASCII characters display as '_'.
+ */
 #define ATTR_LFN 0x0F
 #define LFN_MAX 20 /* 20 x 13 = 260 characters: the longest name on disk */
 #define CASE_LOWER_BASE 0x08 /* Windows NT: the 8.3 name is lower case */
@@ -398,7 +392,7 @@ static void lfn_clear(uint8_t drive_id, uint16_t dir_cluster,
     }
 }
 
-/* ── names ───────────────────────────────────────────────────────────── */
+// names
 
 /* a long name may hold anything but these (and control characters) */
 bool fs_long_char_ok(char c) {
@@ -579,7 +573,7 @@ static bool make_alias(uint8_t drive_id, uint16_t dir_cluster, const char *n,
     return false;
 }
 
-/* ── adding entries ──────────────────────────────────────────────────── */
+// adding entries
 
 /* Put e (and, if lname, its long-name pieces before it) into a run of free
  * slots, growing the folder when it's full (not the root: it has a fixed
@@ -1074,10 +1068,9 @@ bool fs_cd_poll(void) {
     return was != g_drives[DRIVE_CD0].mounted || (st == CD_CHANGED && was);
 }
 
-/* A floppy taken out while mounted (its change line, read without moving
- * the head: silent): unmounted. Putting one in is not seen (that would
- * step the head of an empty drive, a click each time): opening the drive
- * mounts it (fdd_insert). */
+/* Ejection raises the change line without moving the head, so unmount then.
+ * Insertion is detected when the drive is opened (fdd_insert), avoiding a
+ * head step and click on an empty drive. */
 bool fs_fdd_poll(uint8_t *lost) {
     static uint32_t last;
     *lost = DRIVE_COUNT;
@@ -1340,7 +1333,7 @@ static bool resolve_ex(const char *path, uint8_t *out_drive,
             return make_alias(cur_drive, cur_cluster, leaf, out_name83);
         }
 
-        // ── Handle drive‑prefix components ─────────────────────
+        // Handle drive-prefix components
         if (cur_drive == DRIVE_HDA && cur_cluster == 0) {
             if (strcmp(component, "HDA") == 0)
                 continue;
@@ -2345,7 +2338,7 @@ bool fs_is_hidden(const char *path) {
     return (de.attr & ATTR_HIDDEN) != 0;
 }
 
-/* ── name checks (used by the desktop, file dialogs and the shell) ───── */
+// name checks (used by the desktop, file dialogs and the shell)
 bool fs_name_char_ok(char c) {
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
         (c >= '0' && c <= '9'))

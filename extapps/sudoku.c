@@ -1,16 +1,7 @@
-/* Sudoku - a bundled ASMOS app (/APPS/Games/Sudoku.APP).
- *
- * Fill the grid so every row, column and 3x3 box has 1 to 9 once.
- *   click / arrows   select a cell
- *   1-9              enter a digit       Shift+1-9  pencil a note
- *   N                notes mode on/off   Del / Backspace / 0 / Space  clear
- *   Ctrl+Z           undo
- * Each puzzle has exactly one solution. The game in progress, the best
- * times and the last difficulty are kept in /PREFS/SUDOKU.INI.
- *
- * Built by make (EXT_APPS, extapps/MANIFEST); the stand-alone version,
- * built with fddmaker, is testapps/sudoku.c.
- */
+/* Bundled Sudoku app. Arrows/click select; 1-9 enter digits, Shift+1-9
+ * adds notes, N toggles notes, Delete/Backspace/0/Space clears, Ctrl+Z
+ * undoes. Puzzles have one solution; progress and best times are saved in
+ * /PREFS/SUDOKU.INI. */
 #include "extapps/shim.h"
 
 /* cell size, pixels: the same on every screen (board 113 px, fits 320x200;
@@ -54,7 +45,7 @@ typedef struct {
     uint32_t rng;
 } sudoku_t;
 
-/* ── random numbers (xorshift32) ── */
+// random numbers (xorshift32)
 static uint32_t rnd(sudoku_t *s) {
     uint32_t x = s->rng ? s->rng : 0x2545F491u;
     x ^= x << 13;
@@ -74,7 +65,7 @@ static void shuffle9(sudoku_t *s, uint8_t *d) {
     }
 }
 
-/* ── solver: bitmasks + fewest-candidates-first ── */
+// solver: bitmasks + fewest-candidates-first
 typedef struct {
     uint8_t g[81];
     uint16_t row[9], col[9], box[9]; /* bit d = digit d used */
@@ -160,7 +151,7 @@ static int count_solutions(const uint8_t *p, int limit) {
     return solve(&g, limit, NULL);
 }
 
-/* ── game state ── */
+// game state
 static uint32_t now_secs(sudoku_t *s) {
     uint32_t ms = s->elapsed_ms;
     if (s->playing && !s->solved)
@@ -341,7 +332,7 @@ static void undo(sudoku_t *s) {
     redraw(s);
 }
 
-/* ── drawing ── */
+// drawing
 static void paint(control *c, int x, int y, int w, int h) {
     sudoku_t *s = c->user;
     const os_api_t *api = s->api;
@@ -384,7 +375,7 @@ static void paint(control *c, int x, int y, int w, int h) {
     }
 }
 
-/* ── input ── */
+// input
 static void on_view(control *c, int ev) {
     sudoku_t *s = c->user;
     const keyboardvar *kbd = &kb; /* shim.h: the API's */
@@ -453,7 +444,7 @@ static void on_view(control *c, int ev) {
     s->api->invalidate(s->win);
 }
 
-/* ── menus ── */
+// menus
 static void m_easy(void *st) { new_game(st, EASY); }
 static void m_medium(void *st) { new_game(st, MEDIUM); }
 static void m_hard(void *st) { new_game(st, HARD); }
@@ -546,7 +537,7 @@ static void m_about(void *st) {
                         "Every puzzle has one solution.");
 }
 
-/* ── entry points (shim.c calls them; A is the API) ── */
+// entry points (shim.c calls them; A is the API)
 static void sd_init(void *state) {
     sudoku_t *s = state;
     const os_api_t *api = s->api = A;

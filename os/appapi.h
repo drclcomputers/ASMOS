@@ -1,11 +1,9 @@
 #ifndef OS_APPAPI_H
 #define OS_APPAPI_H
 
-/* For DYNAMIC .APP packages only (built-in apps use os/api.h).
- * Stable function table handed to v2 .APP packages as arg 0 of
- * init/on_frame/destroy.  Apps must NOT reference kernel symbols directly
- * (the flat binary has no linker access to them) – go through this table.
- * Only ever append new members; bump `size`, not `version`. */
+/* Stable API table passed to v2 .APP callbacks; built-ins use os/api.h.
+ * Packages must call through this table, not kernel symbols. Append members
+ * only and update size rather than version. */
 
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
@@ -101,7 +99,7 @@ typedef struct ui_api {
     void (*input_check)(window *, const char *, const char *, const char *, int,
                         uint32_t, const char *, bool *, dlg_text_cb, void *);
 
-    /* ── appended in ui size 2 (check api->ui->size) ── */
+    // appended in ui size 2 (check api->ui->size)
 
     /* context menus: on EV_MENU, fill popup_menu() with menu_item /
      * menu_separator, then popup_show_for(c). Labels must stay valid
@@ -135,7 +133,7 @@ typedef struct ui_api {
 
     void (*edit_select_all)(control *);
 
-    /* ── appended in ui size 3 ── */
+    // appended in ui size 3
     control *(*status)(window *, const char *); /* status bar, see ctl_status */
 } ui_api_t;
 
@@ -151,7 +149,7 @@ typedef struct {
     uint16_t time;     /* FAT: hour<<11 | min<<5 | sec/2 */
 } app_dirent_t;
 
-/* ── API size 7 sub-tables (each starts with its own size) ── */
+// API size 7 sub-tables (each starts with its own size)
 
 /* date and time: the clock is local time (Settings > Clock) */
 typedef struct {
@@ -229,7 +227,7 @@ typedef struct os_api {
     /* Ask the OS to close this app instance (pass your own state ptr). */
     void (*quit_self)(void *state);
 
-    /* ── appended in API size 2 (check api->size) ── */
+    // appended in API size 2 (check api->size)
     const ui_api_t *ui;
     const keyboardvar *kb;
     /* whole-file helpers: return bytes read / success */
@@ -237,7 +235,7 @@ typedef struct os_api {
     bool (*file_write)(const char *path, const void *buf, int len);
     int (*snprintf)(char *dst, size_t n, const char *fmt, ...);
 
-    /* ── appended in API size 3 ── */
+    // appended in API size 3
     /* Saved settings of this app (os/prefs.h; file /PREFS/<NAME>.INI).
      * Read in init, write when they change or in destroy. */
     bool (*prefs_get)(const char *key, char *out, int sz);
@@ -245,13 +243,9 @@ typedef struct os_api {
     bool (*prefs_set)(const char *key, const char *value);
     bool (*prefs_set_int)(const char *key, int value);
 
-    /* ── appended in API size 4: speed ── */
-    /* Lazy redraw (docs/UI_TOOLKIT.md "Lazy redraw"). A window with custom
-     * drawing (ui->custom painters, an on_draw) is drawn every frame. Call
-     * set_lazy(w, true) when that drawing only changes in your handlers,
-     * menu commands or dialogs: then it is drawn only when it changes, after
-     * input, or after invalidate(w). Changing it from on_frame or a timer?
-     * Call invalidate(w) then, or the window shows old content. */
+    // appended in API size 4: speed
+    /* Custom drawing redraws every frame by default. set_lazy() redraws on
+     * changes; call invalidate() for updates from on_frame or timers. */
     void (*set_lazy)(window *w, bool on); /* your own windows only */
     void (*invalidate)(window *w);        /* draw w again next frame */
     /* fast drawing: rep movsd / stosd, row copies, clipped */
@@ -267,14 +261,12 @@ typedef struct os_api {
     uint32_t (*speed_flags)(void); /* SPEED_* bits */
     int (*frame_ms)(void);         /* ms per frame: 16, 33 or 50 */
 
-    /* ── appended in API size 5: submenus ── */
-    /* An item of `m` (from ui->add_menu) that opens a submenu to the side,
-     * with an arrow, like the groups of the Apps menu. Fill it with
-     * ui->menu_item / ui->menu_separator. One level: NULL for a submenu
-     * inside a submenu, in a context menu, or when `m` is full (16). */
+    // appended in API size 5: submenus
+    /* Adds a side submenu to m; fill it with menu_item/menu_separator. Only one
+     * level is supported. Returns NULL for nested/context submenus or full menus. */
     menu *(*submenu)(menu *m, const char *label);
 
-    /* ── appended in API size 6: files and folders (long names) ── */
+    // appended in API size 6: files and folders (long names)
     /* Entries of a folder ("/FDD0/My Games"), not . and .., in disk order;
      * returns how many were put in out (up to max), -1 if no such folder.
      * Pass max 0 (out NULL) to just count them. */
@@ -284,7 +276,7 @@ typedef struct os_api {
     bool (*remove)(const char *path);   /* a file, or an empty folder */
     bool (*rename)(const char *path, const char *new_name); /* name only */
 
-    /* ── appended in API size 7 ── */
+    // appended in API size 7
     /* the state of the app whose window has the focus (menu commands of a
      * multi-instance app use it to know which window they are for) */
     void *(*active_state)(void);

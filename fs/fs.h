@@ -225,12 +225,12 @@ bool fs_set_hidden(const char *path, bool hidden);
 /* the entry's attribute byte (ATTR_*; the folder bit is kept as it was) */
 bool fs_set_attr(const char *path, uint8_t attr);
 
-/* ── disks and partitions (fs/fs.c, fs/install.c) ──────────────────────
- * A hard disk is either partitioned (an MBR in sector 0: the volume is a
- * FAT partition in its table) or one volume from sector 0 (a "superfloppy",
- * like the old 32 MB ASMOS image). fs_read_sector / fs_write_sector add
- * the volume's start (base_lba): sector 0 is always the volume's own boot
- * sector. */
+// disks and partitions (fs/fs.c, fs/install.c)
+/*
+ * A disk uses either an MBR FAT partition or a volume starting at sector 0
+ * ("superfloppy"). fs_read_sector()/fs_write_sector() add base_lba, so
+ * volume sector 0 always means its boot sector.
+ */
 #define PART_TYPE_FAT12 0x01
 #define PART_TYPE_FAT16_SMALL 0x04 /* under 32 MB */
 #define PART_TYPE_FAT16 0x06

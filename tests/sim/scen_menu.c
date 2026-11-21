@@ -549,9 +549,8 @@ int scen_menu(const char *name) {
         return fails;
     }
     if (!strcmp(name, "fddauto")) {
-        /* a floppy taken out is seen by itself (silently: the head does
-         * not move) and its desktop icon goes; one put in is read when its
-         * drive is opened in FileF's Drives */
+        /* Ejection is detected without seeking; insertion is detected when
+         * FileF opens the drive. */
         int fails = 0;
         char b[300];
         extern int g_fdc_drive_type, g_fdcb_drive_type, g_fdc_seeks;

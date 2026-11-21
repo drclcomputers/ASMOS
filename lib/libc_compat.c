@@ -279,7 +279,7 @@ int getchar(void) { return EOF; }
 
 int vprintf(const char *fmt, va_list ap) { return vfprintf(stdout, fmt, ap); }
 
-/* ── stdlib ───────────────────────────────────────────────────────────── */
+// stdlib
 
 void exit(int code) {
     (void)code;

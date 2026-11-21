@@ -2,16 +2,10 @@
 #define OS_HELP_H
 
 /*
- * Help pages: /HELP/<App>/<page>.TXT, a folder per app (its name with
- * anything a file name can't have as '_': /HELP/Audio_Player). The Help
- * app (apps/help.c) shows them.
- *
- * The built-in apps' pages come with ASMOS (help/ in the source, put on
- * the disk by tools/mkdisk.py, back again when ASMOS is installed again).
- * An .APP can carry its own (tools/mkapp.py --help DIR): they are copied
- * to /HELP the first time it runs, and again only when the .APP file
- * changes (installed again, updated): pages deleted stay deleted until
- * then. An app with a /HELP folder gets a Help menu with View Help.
+ * Help lives in /HELP/<App>/<page>.TXT; unsupported app-name characters
+ * become '_'. Built-in pages ship with ASMOS. .APP pages are installed on
+ * first run and refreshed when the package changes; apps with help get a
+ * View Help menu item.
  */
 
 #include "os/os.h"

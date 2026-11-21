@@ -2,16 +2,9 @@
 #define UI_DIALOGS_H
 
 /*
- * Common dialogs (non-blocking, like everything in ASMOS: they call you
- * back). `owner` may be NULL; when given, the owner window is blocked while
- * the dialog is open and the dialog disappears with it.
- *
- *   static void got_name(void *user, const char *text) {
- *       if (!text) return;                        // cancelled
- *       ...
- *   }
- *   dlg_input(s->win, "Rename", "New name:", "OLD.TXT", 12, ES_FILENAME,
- *             got_name, s);
+ * Non-blocking dialogs report results through callbacks. owner may be NULL;
+ * otherwise it is blocked while the dialog is open and closing it also
+ * closes the dialog. A NULL callback text indicates cancellation.
  */
 
 #include "lib/core.h"
@@ -53,10 +46,9 @@ void dlg_save_file(window *owner, const char *title, const char *dir,
 void dlg_choose_folder(window *owner, const char *title, const char *dir,
                        dlg_text_cb cb, void *user);
 
-/* A dialog of your own: an empty window that blocks owner, with state_size
- * zeroed bytes (dlg_form_state) freed when it closes: by the close box,
- * Esc on a CS_CANCEL button you add, dlg_form_close, or the owner going.
- * Put your controls on it; their c->user is yours. */
+/* Creates a custom dialog with zeroed, freed-on-close state. It closes via
+ * its close box, owner destruction, dlg_form_close(), or an Esc cancel
+ * button; controls may use c->user for app data. */
 window *dlg_form(window *owner, const char *title, int w, int h,
                  uint32_t state_size);
 void *dlg_form_state(window *form);

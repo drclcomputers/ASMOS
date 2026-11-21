@@ -6,7 +6,7 @@ static int s_mech;
 static pci_dev_t s_devs[PCI_MAX_DEVICES];
 static int s_count;
 
-/* ── config space access ───────────────────────────────────────────────── */
+// config space access
 
 uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t off) {
     off &= 0xFC;
@@ -42,7 +42,7 @@ void pci_write32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t off,
     }
 }
 
-/* ── detection (same checks as Linux's pci_direct_probe) ───────────────── */
+// detection (same checks as Linux's pci_direct_probe)
 
 /* Does bus 0 hold something that looks like a host bridge or VGA? Guards
  * against chipsets that echo the address register without being PCI. */
@@ -85,7 +85,7 @@ static int detect(void) {
     return 0;
 }
 
-/* ── scan ──────────────────────────────────────────────────────────────── */
+// scan
 
 static void scan_bus(uint8_t bus, int depth);
 

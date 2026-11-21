@@ -4,14 +4,9 @@
 #include "lib/core.h"
 
 /*
- * APM (Advanced Power Management): lets the BIOS switch the PC off.
- * Stage 2 connects the BIOS's 32-bit interface while still in real mode
- * (boot/stage2.asm) and leaves its segments at 0x0610 (bootdefs.inc);
- * apm_init() makes GDT entries 0x18/0x20/0x28 from them.
- *
- * Needs a BIOS with APM 1.0+ (most from 1993 on) and a power supply the
- * board can switch (ATX); a 386 board with an AT supply has neither, and
- * ASMOS then says it is safe to turn off.
+ * BIOS APM power control. Stage 2 connects the 32-bit interface in real mode;
+ * apm_init() installs its GDT entries. Power-off requires APM 1.0+ and a
+ * board/power supply that supports it.
  */
 
 void apm_init(void); /* kmain, after the IDT */

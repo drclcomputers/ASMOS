@@ -1,7 +1,6 @@
-/* Format Disk - format a floppy for DOS, Windows and ASMOS (fs/fdformat.h),
- * one track a frame so the window keeps moving while it works; or erase
- * the second hard disk, HDB, into one empty FAT16 volume (fs/install.h).
- * HDA, the disk ASMOS runs from, is never offered. */
+/* Format Disk formats floppies for DOS, Windows, and ASMOS one track per
+ * frame to keep progress responsive. It can also erase HDB as FAT16; HDA is
+ * never offered. */
 #include "drivers/ata.h"
 #include "drivers/fdd.h"
 #include "fs/fdformat.h"

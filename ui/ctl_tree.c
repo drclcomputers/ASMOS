@@ -1,16 +1,7 @@
 /*
- * Tree view control (CTL_TREE).
- *
- * Nodes live in a growable array; each knows its parent, first child and
- * next sibling. Children can be added on demand: a node created with
- * can_expand shows a [+]; the first time it opens the handler receives
- * EV_EXPAND (tree_event_node() says which node) and adds the children. A
- * node that is still childless afterwards loses its [+].
- *
- * Mouse: click [+]/[-] toggles, click selects, double-click toggles and
- * sends EV_SUBMIT. Keys: Up/Down/PgUp/PgDn/Home/End move, Right opens or
- * goes to the first child, Left closes or goes to the parent, Enter sends
- * EV_SUBMIT, a letter jumps to the next visible node starting with it.
+ * Growable tree nodes store parent/child/sibling indices. Expandable nodes
+ * send EV_EXPAND on first open so handlers can add children. Mouse and
+ * keyboard navigation update selection; double-click and Enter submit.
  */
 #include "drivers/keyboard.h"
 #include "lib/graphics.h"
@@ -56,7 +47,7 @@ static tree_t *T(const control *c) {
     return (c && c->type == CTL_TREE) ? (tree_t *)c->ext : NULL;
 }
 
-/* ── storage ───────────────────────────────────────────────────────────── */
+// storage
 
 static int alloc_node(tree_t *t) {
     for (int i = 0; i < t->used; i++)
@@ -145,7 +136,7 @@ static void ensure_visible(control *c) {
         c->top = 0;
 }
 
-/* ── public API ────────────────────────────────────────────────────────── */
+// public API
 
 control *ctl_tree(window *w, int x, int y, int cw, int ch, uint32_t style,
                   ctl_handler h) {
@@ -327,9 +318,9 @@ void tree_set_text(control *c, int node, const char *text) {
         strncpy(t->n[node].text, text, sizeof(t->n[node].text) - 1);
 }
 
-/* ── drawing ───────────────────────────────────────────────────────────── */
+// drawing
 
-/* ── path helpers (node texts as path components) ─────────────────────── */
+// path helpers (node texts as path components)
 
 void tree_path(const control *c, int node, char *out, int sz) {
     const char *parts[48];
@@ -462,7 +453,7 @@ void tree_draw(control *c) {
         th_focus(c->ax + 2, c->ay + 2, iw, c->ah - 4);
 }
 
-/* ── input ─────────────────────────────────────────────────────────────── */
+// input
 
 static void select_node(control *c, int node) {
     if (node == c->sel)

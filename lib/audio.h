@@ -4,15 +4,9 @@
 #include "lib/core.h"
 
 /*
- * One sound at a time, whatever its format. Each format is a codec in a
- * table (lib/audio.c): it recognises its files by their first bytes and
- * plays them; adding a format (VOC, MOD...) means adding a codec there.
- *
- *   WAV   PCM 8/16-bit, mono/stereo, any rate, on the Sound Blaster
- *   MIDI  type 0/1 .MID through the OPL2 FM synth
- *
- * audio_update() must run every frame (the scheduler and the text shell
- * call it): MIDI is played from there.
+ * A codec table in lib/audio.c detects and plays supported formats, one at
+ * a time. WAV supports PCM 8/16-bit mono/stereo; MIDI type 0/1 uses OPL2.
+ * Call audio_update() every frame for playback.
  */
 
 enum { AUDIO_EMPTY, AUDIO_STOPPED, AUDIO_PLAYING, AUDIO_PAUSED };

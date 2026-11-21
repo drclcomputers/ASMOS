@@ -1,26 +1,9 @@
 #ifndef UI_CONTROLS_H
 #define UI_CONTROLS_H
 
-/*
- * ASMOS controls — a small Win32-style UI toolkit.
- *
- *   window  *w = app_window(s, "Notes", 40, 30, 200, 120, BLUE, AW_RESIZABLE);
- *   control *e = ctl_edit(w, 4, 4, 192, 12, "", 64, 0, on_edit);
- *   control *b = ctl_button(w, 140, 20, 56, 13, "OK", ID_OK, on_btn);
- *   ctl_style_add(b, CS_DEFAULT);                 // Enter clicks it
- *
- *   static void on_btn(control *c, int ev) {
- *       app_state *s = c->user;                   // = the window's userdata
- *       if (ev == EV_CLICK) ...
- *   }
- *
- * Controls are created once and live until their window is destroyed. The
- * window manager draws them, routes mouse/keyboard to them, keeps keyboard
- * focus (Tab / Shift+Tab), clicks the default button on Enter and the cancel
- * button on Esc. Coordinates are relative to the window's client area (below
- * the title bar). Anchor styles keep controls glued to the right/bottom edge
- * or stretch them when the window is resized.
- */
+/* Win32-style toolkit: windows own/draw controls, route input, and manage
+ * focus. Coordinates are client-relative; anchor styles resize controls.
+ * Enter/Esc invoke default/cancel buttons; handlers use c->user. */
 
 #include "lib/core.h"
 
@@ -68,7 +51,8 @@ typedef enum {
     CTL_STATUS,
 } ctl_type;
 
-/* ── styles ──────────────────────────────────────────────────────────────
+// styles
+/*
  * Common (any control) */
 #define CS_ANCHOR_RIGHT (1u << 0)  /* keep distance to the right edge     */
 #define CS_ANCHOR_BOTTOM (1u << 1) /* keep distance to the bottom edge    */
@@ -151,7 +135,7 @@ struct control {
     uint32_t rev; /* bumped when an edit's text changes (lazy redraw) */
 };
 
-/* ── top-level app windows ─────────────────────────────────────────────── */
+// top-level app windows
 #define AW_RESIZABLE (1u << 0)
 #define AW_HIDDEN (1u << 1)
 #define AW_NO_ANIM (1u << 2)
@@ -175,7 +159,7 @@ bool ctl_menu_from_key(void);
 void ctl_set_tooltip(control *c, const char *text);
 void ctl_draw_tooltip(void); /* main loop, after everything else */
 
-/* ── creating controls ─────────────────────────────────────────────────── */
+// creating controls
 control *ctl_create(window *w, ctl_type type, int x, int y, int cw, int ch,
                     const char *text, uint32_t style, ctl_handler h);
 control *ctl_label(window *w, int x, int y, int cw, int ch, const char *text,
@@ -211,7 +195,7 @@ control *ctl_tabs(window *w, int x, int y, int cw, const char *pages,
 control *ctl_custom(window *w, int x, int y, int cw, int ch, ctl_painter p,
                     ctl_handler h, uint32_t style);
 
-/* ── common operations ─────────────────────────────────────────────────── */
+// common operations
 void ctl_destroy(control *c);
 void ctl_set_text(control *c, const char *text);
 const char *ctl_text(const control *c);
@@ -229,7 +213,7 @@ void ctl_on_page(control *c, control *tabs, int page);
 control *ctl_by_id(window *w, int id);
 control *ctl_focused(window *w);
 
-/* ── lists and combo boxes ─────────────────────────────────────────────── */
+// lists and combo boxes
 int list_add(control *c, const char *text); /* returns index */
 int list_add_data(control *c, const char *text, uint32_t data);
 void list_set(control *c, int i, const char *text);
@@ -243,11 +227,10 @@ void list_set_sel(control *c, int i);
 /* columns: item text is split on '\t'; widths in pixels */
 void list_set_columns(control *c, const int *widths, int n);
 
-/* ── tree view ─────────────────────────────────────────────────────────────
- * Nodes are ints. parent -1 = top level. can_expand shows [+] before the
- * children are known: on first open the handler gets EV_EXPAND with
- * tree_event_node() = that node and may tree_add() children then.
- * EV_CHANGE = selection moved, EV_SUBMIT = Enter / double-click. */
+// tree view
+/* Nodes are integer indices; parent -1 means root. Expandable nodes send
+ * EV_EXPAND on first open. EV_CHANGE reports selection; EV_SUBMIT reports
+ * Enter or double-click. */
 int tree_add(control *c, int parent, const char *text, uint32_t data,
              bool can_expand);
 void tree_clear(control *c);
@@ -268,7 +251,7 @@ int tree_event_node(const control *c);
 void tree_path(const control *c, int node, char *out, int sz);
 int tree_find_path(control *c, const char *path);
 
-/* ── edits ─────────────────────────────────────────────────────────────── */
+// edits
 void edit_select(control *c, int from, int to);
 void edit_select_all(control *c);
 void edit_insert(control *c, const char *s); /* at cursor, replaces sel */
@@ -283,7 +266,7 @@ void edit_paste(control *c); /* clipboard text at the cursor */
 void edit_delete_sel(control *c);
 bool edit_has_sel(const control *c);
 
-/* ── called by the system ──────────────────────────────────────────────── */
+// called by the system
 void ctl_dispatch(void);      /* before apps run, every frame */
 void ctl_draw_all(window *w); /* from window_draw            */
 /* lazy redraw (window.h): a checksum of everything the window's controls

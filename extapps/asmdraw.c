@@ -250,7 +250,7 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
     draw_set_status(s, "Opened.");
 }
 
-/* ── canvas control ────────────────────────────────────────────────────── */
+// canvas control
 
 static void paint_canvas(control *c, int x, int y, int w, int h) {
     asmdraw_state_t *s = c->user;
@@ -316,7 +316,7 @@ static void on_canvas(control *c, int ev) {
     }
 }
 
-/* ── palette control ───────────────────────────────────────────────────── */
+// palette control
 
 static void paint_palette(control *c, int x, int y, int w, int h) {
     asmdraw_state_t *s = c->user;
@@ -346,7 +346,7 @@ static void on_palette(control *c, int ev) {
         s->fg_color = PALETTE_COLORS[i];
 }
 
-/* ── tool buttons ──────────────────────────────────────────────────────── */
+// tool buttons
 
 static void select_tool(asmdraw_state_t *s, int t, int b) {
     if (t >= 0)
@@ -367,7 +367,7 @@ static void on_tool(control *c, int ev) {
         select_tool(c->user, -1, c->id - 10);
 }
 
-/* ── files ─────────────────────────────────────────────────────────────── */
+// files
 
 /* remember the folder for the next file dialog */
 static void note_dir(asmdraw_state_t *s) {

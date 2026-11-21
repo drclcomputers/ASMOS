@@ -50,10 +50,9 @@ enum {
     FDD_MEDIA_2880K, /* 3.5" ED: 80 tracks, 36 sectors, 1 Mbps */
     FDD_MEDIA_COUNT
 };
-/* The 40-track disks (160K-360K) work in a 360K drive at 250 kbps, and in
- * a 1.2 MB drive too: its head then steps twice a track, at 300 kbps
- * (the drive spins faster). Disks from DOS 1.x have no BPB: their size
- * comes from the media byte at the start of the FAT. */
+/* 40-track 160-360K disks work in 360K drives at 250 kbps or 1.2 MB drives
+ * with double stepping at 300 kbps. DOS 1.x disks lack a BPB; use the FAT's
+ * media byte to determine their size. */
 
 typedef struct {
     const char *name; /* "1.44 MB" */

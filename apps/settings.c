@@ -77,7 +77,7 @@ static void set_dirty(settings_state_t *s, bool d) {
     ctl_set_colors(s->status, d ? RED : DARK_GRAY, 0xFF);
 }
 
-/* ── wallpaper preview ─────────────────────────────────────────────────── */
+// wallpaper preview
 
 static void paint_preview(control *c, int x, int y, int w, int h) {
     (void)c;
@@ -117,7 +117,7 @@ static void paint_preview(control *c, int x, int y, int w, int h) {
     }
 }
 
-/* ── handlers ──────────────────────────────────────────────────────────── */
+// handlers
 
 static void on_wall(control *c, int ev) {
     settings_state_t *s = c->user;
@@ -223,7 +223,7 @@ static void on_save(control *c, int ev) {
     }
 }
 
-/* ── building the pages ────────────────────────────────────────────────── */
+// building the pages
 
 static control *on_page(settings_state_t *s, control *c, int page) {
     ctl_on_page(c, s->tabs, page);
@@ -333,7 +333,7 @@ static void on_saver_test(control *c, int ev) {
         saver_start();
 }
 
-/* ── Screen Saver and Speed: small windows over Settings ─────────────── */
+// Screen Saver and Speed: small windows over Settings
 
 static void close_sub(settings_state_t *s) {
     if (!s->sub)
@@ -438,7 +438,7 @@ static void open_speed(settings_state_t *s) {
     ctl_focus(ok);
 }
 
-/* ── desktop pattern editor ─────────────────────────────────────────── */
+// desktop pattern editor
 
 #define PAT_CELL 11 /* a pixel of the pattern, in the grid */
 
@@ -649,7 +649,7 @@ static void on_open_sub(control *c, int ev) {
         open_pattern(c->user);
 }
 
-/* ── Printers tab ──────────────────────────────────────────────────── */
+// Printers tab
 
 static void prn_status(settings_state_t *s) {
     char b[80];
@@ -728,7 +728,7 @@ static void on_prn_test(control *c, int ev) {
     prn_status(s);
 }
 
-/* ── Clock tab ─────────────────────────────────────────────────────── */
+// Clock tab
 
 static int field_num(control *c) {
     const char *t = ctl_text(c);

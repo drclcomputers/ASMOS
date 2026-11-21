@@ -4,14 +4,10 @@
 #include "lib/core.h"
 
 /*
- * The mouse pointer, drawn straight onto the screen (like a hardware
- * cursor): it is never in the back buffer, so moving it needs no frame.
- * The timer interrupt moves it as the mouse bytes come in (drivers/ps2.c);
- * the main loop only picks the shape. What it covers comes back from the
- * copy of the last frame the blit keeps (drivers/gpu.c).
- *
- * Everything here may be called from the timer interrupt; from the main
- * loop the calls keep interrupts off while they touch the screen.
+ * Draws the pointer directly on screen, outside the back buffer. The timer
+ * moves it as mouse input arrives; the main loop selects its shape. The last
+ * frame restores the area beneath it. IRQ calls are safe; main-loop calls
+ * disable interrupts while drawing.
  */
 
 /* w*h pixels, 0xFF = see-through; (hx, hy) = the hot spot */

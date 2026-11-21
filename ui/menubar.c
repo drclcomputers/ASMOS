@@ -216,7 +216,7 @@ void menubar_clock_text(char *out) {
     out[8] = '\0';
 }
 
-/* ── dropdowns ─────────────────────────────────────────────────────── */
+// dropdowns
 
 #define ARROW_W 8 /* room for the submenu arrow */
 

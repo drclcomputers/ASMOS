@@ -35,7 +35,7 @@ void vmm_load_context(const vmm_ctx_t *ctx) {
 
 void vmm_load_kernel(void) { vmm_switch(g_kernel_pd_phys); }
 
-/* ── kernel address space ─────────────────────────────────────────────── */
+// kernel address space
 
 bool vmm_init(uint32_t map_top) {
     if (vmm_enabled() || !pmm_total())
@@ -77,7 +77,7 @@ bool vmm_init(uint32_t map_top) {
     return true;
 }
 
-/* ── contexts ─────────────────────────────────────────────────────────── */
+// contexts
 
 static uint32_t *pt_of(const vmm_ctx_t *ctx, uint32_t virt) {
     uint32_t pde = (*ctx->pd)[virt >> 22];

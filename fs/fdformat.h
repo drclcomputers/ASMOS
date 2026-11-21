@@ -4,16 +4,10 @@
 #include "lib/core.h"
 
 /*
- * Formatting floppies the way DOS does: a low-level format of every track
- * (unless "quick"), then a boot sector, two FATs and an empty root
- * directory with the standard layout for the size, so the disk works in
- * real DOS and Windows machines.
- *
- * It runs a track at a time so a window can show progress:
- *   fdformat_t f;
- *   if (fdformat_begin(&f, DRIVE_FDD0, FDD_MEDIA_720K, "WORK", false))
- *       while ((pct = fdformat_step(&f)) >= 0 && pct < 100) ...;
- *   pct < 0: f.err says why. The drive is mounted again at the end.
+ * Creates a DOS-compatible floppy layout; quick mode skips track formatting.
+ * fdformat_begin() starts the job;
+ * fdformat_step() formats one track per call, returns progress, and reports
+ * errors through f.err. The drive is remounted when complete.
  */
 
 typedef struct {

@@ -115,7 +115,7 @@ bool fdformat_write_fat(int media, const char *label, uint32_t serial,
     return true;
 }
 
-/* ── the real drive ───────────────────────────────────────────────── */
+// the real drive
 
 static bool wr_drive(uint32_t lba, const void *sector, void *u) {
     return fdd_write_sector(*(uint8_t *)u, lba, sector);

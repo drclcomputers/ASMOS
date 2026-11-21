@@ -242,7 +242,7 @@ window *wm_register(const window_spec_t *spec) {
     return win;
 }
 
-/* ── remembered positions: /PREFS/WINDOWS.INI, "<app name>=x,y" ────────── */
+// remembered positions: /PREFS/WINDOWS.INI, "<app name>=x,y"
 
 #define POS_FILE "WINDOWS"
 static const char *s_launch_key;
@@ -907,7 +907,7 @@ menu *window_add_menu(window *win, const char *title) {
     return m;
 }
 
-/* ── lazy redraw (see window.h) ────────────────────────────────────────── */
+// lazy redraw (see window.h)
 
 uint32_t g_wm_frames[3];
 
@@ -937,10 +937,8 @@ void wm_invalidate_app(window *win) {
     }
 }
 
-/* Clicks, releases and keys can change anything (and apps read them on
- * their own), so those frames are drawn in full, plus two more for work
- * an app does a frame later. Only time and plain mouse movement go the
- * lazy way. */
+/* Input may change app-owned drawing, so redraw those frames fully plus two
+ * follow-up frames. Time updates and plain mouse movement use lazy redraw. */
 void wm_frame_begin(void) {
     s_button = mouse.left || mouse.right || mouse.middle;
     if (mouse.left_clicked || mouse.right_clicked || kb.key_pressed ||
@@ -1039,7 +1037,8 @@ static window *window_under_mouse(void) {
     return NULL;
 }
 
-/* ── the outline frame (outline move/resize) ─────────────────────────────
+// the outline frame (outline move/resize)
+/*
  * XORed into the back buffer, so drawing it again takes it away: no
  * redraw of what is under it while it moves. */
 static bool s_band_on; /* drawn in the back buffer now */
@@ -1096,7 +1095,8 @@ static void xor_frame(int x, int y, int w, int h) {
     }
 }
 
-/* ── Alt+Tab ─────────────────────────────────────────────────────────────
+// Alt+Tab
+/*
  * Hold Alt, press Tab (Shift+Tab backwards) to walk the windows, most
  * recently used first; let go of Alt to switch, Esc to stay. A box in the
  * middle of the screen lists them. Dialogs go with their window. */

@@ -27,7 +27,7 @@ static int rnd(int n) { /* 0..n-1, xorshift */
 static int s_x, s_y, s_w, s_h, s_effect = -1;
 static uint32_t s_t; /* time of the last step */
 
-/* ── Starfield: flying forward through stars ────────────────────────────── */
+// Starfield: flying forward through stars
 
 #define MAX_STARS 160
 static struct {
@@ -83,7 +83,7 @@ static void stars_draw(void) {
     }
 }
 
-/* ── Mystic lines: two bouncing quadrilaterals leaving echoes ───────────── */
+// Mystic lines: two bouncing quadrilaterals leaving echoes
 
 #define POLYS 2
 #define CORNERS 4
@@ -171,7 +171,7 @@ static void lines_draw(void) {
     }
 }
 
-/* ── Rain: drops falling into a dark pond, rings where they land ────────── */
+// Rain: drops falling into a dark pond, rings where they land
 
 #define MAX_DROPS 100
 static struct {
@@ -236,7 +236,7 @@ static void rain_draw(void) {
     }
 }
 
-/* ── driving it ────────────────────────────────────────────────────────── */
+// driving it
 
 static int s_random_pick = SAVER_STARS;
 

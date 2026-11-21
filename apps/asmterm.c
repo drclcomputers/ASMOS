@@ -138,7 +138,7 @@ static void term_clear(asmterm_state_t *s) {
     wm_invalidate(s->win);
 }
 
-/* ── term_context for shell programs ───────────────────────────────────── */
+// term_context for shell programs
 
 static void tctx_print(term_context_t *ctx, const char *str) {
     asmterm_state_t *s = (asmterm_state_t *)ctx->userdata;
@@ -214,7 +214,7 @@ void asmterm_set_gopher_mode(term_context_t *ctx, bool on) {
         ((asmterm_state_t *)ctx->userdata)->gopher_mode = on;
 }
 
-/* ── command line ──────────────────────────────────────────────────────── */
+// command line
 
 static void history_add(asmterm_state_t *s, const char *line) {
     if (s->hist_count > 0 &&
@@ -315,7 +315,7 @@ static void on_input(control *c, int ev) {
     }
 }
 
-/* ── output pane (also takes raw keys while a program waits) ───────────── */
+// output pane (also takes raw keys while a program waits)
 
 static void paint_out(control *c, int x, int y, int w, int h) {
     asmterm_state_t *s = c->user;
@@ -406,7 +406,7 @@ static void on_sb(control *c, int ev) {
         term_scroll_to(c->user, ctl_value(c));
 }
 
-/* ── window ────────────────────────────────────────────────────────────── */
+// window
 
 static void menu_paste(void) {
     asmterm_state_t *s = ui_active_state();

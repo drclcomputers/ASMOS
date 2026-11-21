@@ -4,19 +4,9 @@
 #include "lib/core.h"
 
 /*
- * Printing: a queue of jobs fed to the parallel port in the background.
- *
- * The parallel port only carries bytes; what they mean is up to the
- * printer. Text works on nearly every printer as plain ASCII, so "Text
- * only" is always safe. Pictures need the printer's own language, so a
- * printer type picks one of these "drivers":
- *   PRN_TEXT  plain text; pictures print as characters (. : - = + * # @)
- *   PRN_ESCP  Epson ESC/P dot matrix (9/24-pin, most home printers)
- *   PRN_PCL   HP PCL (LaserJet / DeskJet)
- *
- * Jobs are turned into printer bytes when submitted, then print_pump()
- * (called every frame by the scheduler and the text shell) sends what the
- * printer will take without waiting, so printing never stops the machine.
+ * Jobs are queued and print_pump() sends bytes to the parallel port without
+ * blocking. PRN_TEXT supports plain text, PRN_ESCP Epson dot-matrix, and
+ * PRN_PCL HP printers; graphics require the printer's own language.
  */
 
 enum { PRN_TEXT, PRN_ESCP, PRN_PCL, PRN_TYPES };

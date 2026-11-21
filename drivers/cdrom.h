@@ -3,13 +3,8 @@
 
 #include "lib/core.h"
 
-/*
- * The CD-ROM drive: an ATAPI device on the IDE cables (drivers/ata.c finds
- * it with the hard disks). Read only, PIO, polled. The first CD drive found
- * is the one used. Sectors are 2048 bytes.
- *
- * The file system on it is fs/iso9660.c; it shows as /CD0 (fs/fs.c).
- */
+/* Read-only, polled PIO for the first ATAPI CD-ROM found by drivers/ata.c.
+ * Sectors are 2048 bytes; fs/iso9660.c exposes it as /CD0. */
 
 #define CD_SECTOR 2048
 
@@ -29,8 +24,9 @@ bool cd_read(uint32_t lba, uint32_t count, void *buf);
 bool cd_capacity(uint32_t *sectors);
 bool cd_eject(void); /* opens the tray (where it has one) */
 
-/* ── audio: the drive plays the tracks itself, out of its analogue
- * output (to the sound card's CD input, or its headphone socket) ──── */
+// Audio CD
+/* The drive plays tracks itself through its analogue output (to the sound
+ * card's CD input or its headphone socket). */
 
 #define CD_MAX_TRACKS 99
 #define CD_FPS 75 /* sectors (frames) a second of audio */

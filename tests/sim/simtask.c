@@ -88,10 +88,8 @@ void scheduler_reap(void) {
         }
 }
 
-/* ── scripted keyboard: ps2_update() hands out one key per 40 calls ──
- * bytes: printable, '\n' Enter, '\b' Backspace, 0x80.. TERM_KEY_* style
- * arrows (0x80 up 0x81 down 0x86 Esc), '\x01'<c> = screenshot "cli<c>",
- * '\x02' = wait 2000 calls, '\x03' = end of the run */
+/* One scripted key per 40 calls: text, Enter/Backspace, TERM_KEY_* arrows,
+ * '\x01'<c> screenshot, '\x02' wait, '\x03' end. */
 extern volatile uint32_t pit_ticks, pit_seconds;
 const char *g_sim_script;
 static int s_calls;
@@ -127,7 +125,7 @@ void ps2_update(void) {
     kb.key_pressed = true;
 }
 
-/* ── fake NIC ── */
+// fake NIC
 static ne2000_rx_cb s_rx;
 static uint8_t s_q[4][1600];
 static uint16_t s_qlen[4];

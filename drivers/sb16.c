@@ -1,16 +1,7 @@
 /*
- * Sound Blaster family, 8-bit mono PCM via ISA DMA.
- *
- *   DSP 1.x  Sound Blaster 1.0/1.5      time constant + 0x14, <= ~22 kHz
- *   DSP 2.x  Sound Blaster 2.0          same
- *   DSP 3.x  Sound Blaster Pro / Pro 2  same, + mixer (0x04/0x22/0x26/0x2E)
- *   DSP 4.x  Sound Blaster 16 / AWE     0x41 rate + 0xC0, <= 44.1 kHz,
- *                                       IRQ/DMA readable from the mixer
- *
- * Pre-SB16 cards are jumpered: the IRQ is found by asking the DSP to raise
- * one (0xF2) and watching the PIC request lines; the DMA channel by a tiny
- * test transfer on 1, 3, 0 (the IRQ only arrives if the channel is right).
- * Sources faster than the card can play are decimated while copying.
+ * 8-bit mono PCM via ISA DMA. DSP 1.x/2.x support time-constant playback;
+ * DSP 3.x adds a mixer; DSP 4.x supports rate+DMA playback up to 44.1 kHz.
+ * Older cards' IRQ/DMA channels are probed, and fast sources are decimated.
  */
 #include "drivers/sb16.h"
 #include "interrupts/idt.h"
@@ -76,7 +67,7 @@ static uint32_t s_block_end, s_block_pit; /* its end, and when it started */
 
 extern void isr_sb16(void);
 
-/* ── DSP / mixer ───────────────────────────────────────────────────────── */
+// DSP / mixer
 
 static bool dsp_reset(void) {
     outb(DSP_RESET, 1);
@@ -119,7 +110,7 @@ static uint8_t mixer_read(uint8_t reg) {
     return inb(MIXER_DATA);
 }
 
-/* ── DMA / IRQ ─────────────────────────────────────────────────────────── */
+// DMA / IRQ
 
 static void dma8_setup(uint32_t phys_addr, uint32_t byte_count) {
     uint8_t ch = (uint8_t)s_dma;
@@ -209,7 +200,7 @@ static bool dma_works(int ch) {
     return ok;
 }
 
-/* ── playback ──────────────────────────────────────────────────────────── */
+// playback
 
 /* Copy the next block (decimated by s_step) into the DMA buffer; returns
  * samples written, 0 at the end. */
@@ -268,7 +259,7 @@ void sb16_irq_handler(void) {
     eoi();
 }
 
-/* ── public API ────────────────────────────────────────────────────────── */
+// public API
 
 bool sb16_init(void) {
     static const uint16_t ports[] = {0x220, 0x240, 0x260, 0x280};

@@ -22,7 +22,7 @@ heap_t g_kheap;
 
 #define FIRST(h) ((block_header_t *)(h)->first)
 
-// ── Heaps ─────────────────────────────────────────────────────────────
+// Heaps
 bool heap_init(heap_t *h, uint32_t start, uint32_t end) {
     if (!h)
         return false;
@@ -162,7 +162,7 @@ bool heap_check(const heap_t *h) {
     return true;
 }
 
-// ── Kernel heap ───────────────────────────────────────────────────────
+// Kernel heap
 void alloc_set_range(uint32_t start, uint32_t end) {
     if (start < (uint32_t)&_heap_start)
         start = (uint32_t)&_heap_start;
@@ -254,7 +254,7 @@ uint32_t heap_remaining(void) {
            (g_kheap_low.first ? heap_free_in(&g_kheap_low) : 0);
 }
 
-// ── Pool allocator ─────────────────────────────────────────
+// Pool allocator
 bool pool_init(pool_t *pool, void *slab, uint32_t capacity,
                uint32_t block_size) {
     if (!pool || !slab || capacity == 0 || block_size == 0)

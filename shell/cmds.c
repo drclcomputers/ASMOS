@@ -247,7 +247,7 @@ void cmd_ls(const char *arg, char *out, size_t max) {
     append(out, max, "\n");
 }
 
-/* ── find ── */
+// find
 
 typedef struct {
     char *out;
@@ -578,7 +578,7 @@ void cmd_echo(const char *text, char *out, size_t max) {
     append(out, max, "\n\n");
 }
 
-/* ── date, time, cal ─────────────────────────────────────────────── */
+// date, time, cal
 
 static void show_now(char *out, size_t max) {
     time_full_t t = time_rtc_local();
@@ -855,10 +855,8 @@ void cmd_print(const char *args, char *out, size_t max) {
     append(out, max, buf);
 }
 
-/* sys hda|hdb (c: / d:): like DOS's SYS. The disk's FAT16 volume gets the
- * ASMOS boot code (fs/install.c, keeping the partition table and the BPB)
- * and SYSTEM\KERNEL.SYS, from this system or from the setup floppy. Its
- * files stay; a new or wiped disk is Setup's job. */
+/* SYS HDA|HDB installs ASMOS boot code and SYSTEM\KERNEL.SYS while preserving
+ * the partition table, BPB, and existing files. Setup handles new/erased disks. */
 void cmd_sys(const char *args, char *out, size_t max) {
     char a[16];
     snprintf(a, sizeof(a), "%s", args ? args : "");

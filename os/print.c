@@ -15,7 +15,7 @@ static bool s_paused;
 static uint32_t s_rev;
 static lpt_status_t s_last = LPT_READY; /* the printer's last answer */
 
-/* ── output buffer ─────────────────────────────────────────────────── */
+// output buffer
 
 typedef struct {
     uint8_t *p;
@@ -44,7 +44,7 @@ static void put(buf_t *b, const void *d, uint32_t n) {
 static void puts_(buf_t *b, const char *s) { put(b, s, (uint32_t)strlen(s)); }
 static void putc_(buf_t *b, uint8_t c) { put(b, &c, 1); }
 
-/* ── text layout ───────────────────────────────────────────────────── */
+// text layout
 
 typedef struct {
     const char *t;
@@ -178,7 +178,7 @@ static bool emit_line(void *u, int page, int line, const char *s) {
     return true;
 }
 
-/* ── pictures ──────────────────────────────────────────────────────── */
+// pictures
 
 /* the standard 16 colours, as luminance */
 static const uint8_t GREY[16] = {0,  20,  100, 120, 51,  71,  91,  170,
@@ -287,7 +287,7 @@ static void image_text(buf_t *b, const uint8_t *pix, int w, int h, int stride) {
     }
 }
 
-/* ── queue ─────────────────────────────────────────────────────────── */
+// queue
 
 bool print_available(void) { return lpt_base(g_cfg.printer_port) != 0; }
 

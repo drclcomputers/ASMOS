@@ -1,20 +1,13 @@
-/*
- * ZIP archives (fs/zip.h): deflate to make them, inflate to read them.
- *
- * Deflate here: a 16 KB window (any decoder handles it: the format allows
- * up to 32 KB back), hash chains, lazy matching like zlib's, and for each
- * block the cheapest of stored / fixed / dynamic Huffman codes. A block
- * ends before the window slides, so its bytes are always there to be
- * stored as they are: a file that won't compress grows by only a few bytes
- * per 16 KB. Memory: about 100 KB while compressing, 34 KB extracting.
- */
+/* Deflate uses a 16 KB window, lazy hash matching, and the cheapest stored,
+ * fixed, or dynamic block. Incompressible data grows only a few bytes per
+ * window; memory use is ~100 KB to compress and 34 KB to extract. */
 #include "fs/zip.h"
 #include "fs/fs.h"
 #include "lib/alloc.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 
-/* ── CRC-32 ─────────────────────────────────────────────────────────── */
+// CRC-32
 
 static uint32_t s_crc_tab[256];
 
@@ -33,7 +26,7 @@ uint32_t crc32_update(uint32_t crc, const void *p, uint32_t n) {
     return ~crc;
 }
 
-/* ── little helpers ─────────────────────────────────────────────────── */
+// little helpers
 
 static void put16(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)v;
@@ -73,7 +66,7 @@ static const uint8_t DIST_EXTRA[30] = {0, 0, 0,  0,  1,  1,  2,  2,  3,  3,
 static const uint8_t CL_ORDER[19] = {16, 17, 18, 0, 8,  7, 9,  6, 10, 5,
                                      11, 4,  12, 3, 13, 2, 14, 1, 15};
 
-/* ══ output: a buffered writer for the zip being made ══════════════════ */
+// Output: buffered ZIP writer
 
 typedef struct {
     fat_file_t f;
@@ -112,7 +105,7 @@ static void zo_byte(zout_t *o, uint8_t v) {
         zo_flush(o);
 }
 
-/* ══ deflate ═════════════════════════════════════════════════════════════ */
+// Deflate
 
 #define WBITS 14
 #define WSIZE (1u << WBITS)
@@ -598,7 +591,7 @@ static void deflate_file(dfl_t *s) {
     flush_block(s, s->strstart, true);
 }
 
-/* ══ making a zip ════════════════════════════════════════════════════════ */
+// Create ZIP
 
 typedef struct {
     uint32_t usize, csize, crc, off;
@@ -895,7 +888,7 @@ const char *zip_create(const char *src, const char *zip_path, int level,
     return err;
 }
 
-/* ══ inflate ═════════════════════════════════════════════════════════════ */
+// Inflate
 
 #define FAST_BITS 9
 typedef struct {
@@ -1176,7 +1169,7 @@ static bool inflate_stream(inf_t *s) {
     return !s->err;
 }
 
-/* ══ taking a zip apart ══════════════════════════════════════════════════ */
+// Extract ZIP
 
 bool zip_is_zip(const char *path) {
     fat_file_t f;

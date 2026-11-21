@@ -35,7 +35,7 @@ static int s_drag_part;
 #define SB_W 8 /* built-in scrollbar width */
 #define POPUP_ROWS 8
 
-/* ── small helpers ─────────────────────────────────────────────────────── */
+// small helpers
 
 void win_client_rect(const window *w, int *x, int *y, int *cw, int *ch) {
     *x = w->x + 1;
@@ -162,7 +162,7 @@ bool ctl_text_reserve(control *c, int need) {
     return true;
 }
 
-/* ── drawing primitives ────────────────────────────────────────────────── */
+// drawing primitives
 
 static int cl_x, cl_y, cl_w, cl_h;
 void clip_push(int x, int y, int w, int h) {
@@ -255,7 +255,7 @@ static void text_in(int x, int y, int w, int h, const char *t, uint8_t col,
     draw_string(tx, y + (h - 6) / 2, t, col, CF);
 }
 
-/* ── scrollbar geometry (shared by lists, edits, standalone bars) ──────── */
+// scrollbar geometry (shared by lists, edits, standalone bars)
 
 typedef struct {
     int pos, len; /* thumb along the track */
@@ -355,7 +355,7 @@ int sb_mouse(int along, int len, int value, int max, int page, bool down,
     return v;
 }
 
-/* ── creation / destruction ────────────────────────────────────────────── */
+// creation / destruction
 
 control *ctl_create(window *w, ctl_type type, int x, int y, int cw, int ch,
                     const char *text, uint32_t style, ctl_handler h) {
@@ -575,7 +575,7 @@ void ctl_window_destroyed(window *w) {
     w->focus = NULL;
 }
 
-/* ── setters / getters ─────────────────────────────────────────────────── */
+// setters / getters
 
 void ctl_set_text(control *c, const char *text) {
     if (!c)
@@ -756,7 +756,7 @@ control *ctl_by_id(window *w, int id) {
 
 control *ctl_focused(window *w) { return w ? w->focus : NULL; }
 
-/* ── lists ─────────────────────────────────────────────────────────────── */
+// lists
 
 static char *dupstr(const char *s) {
     int n = (int)strlen(s);
@@ -915,7 +915,7 @@ static void list_row(const control *c, int x, int y, int w, const char *t,
     }
 }
 
-/* ── drawing ───────────────────────────────────────────────────────────── */
+// drawing
 
 static void draw_label(control *c) {
     int big = (c->style & LS_BIG)    ? 1
@@ -1320,7 +1320,7 @@ void ctl_draw_all(window *w) {
     gfx_reset_clip();
 }
 
-/* ── input ─────────────────────────────────────────────────────────────── */
+// input
 
 bool ctl_mouse_captured(void) { return s_capture != NULL; }
 
@@ -1856,7 +1856,7 @@ static control *find_style(window *w, uint32_t st) {
     return NULL;
 }
 
-/* ── tooltips ──────────────────────────────────────────────────────────── */
+// tooltips
 
 #define TIP_DELAY_MS 600
 #define TIP_SHOW_MS 6000
@@ -1927,7 +1927,7 @@ static void hover_cursor(void) {
     }
 }
 
-/* ── context menus ─────────────────────────────────────────────────────── */
+// context menus
 
 /* s_menu_ctl (declared above): edit control the built-in menu acts on */
 static bool s_menu_key; /* current EV_MENU came from the keyboard */
@@ -2193,7 +2193,7 @@ void ctl_dispatch(void) {
     }
 }
 
-/* ── app windows ───────────────────────────────────────────────────────── */
+// app windows
 
 void *ui_active_state(void) {
     window *w = wm_focused_window();
@@ -2250,7 +2250,7 @@ window *app_window(void *state, const char *title, int x, int y, int w, int h,
     return win;
 }
 
-/* ── lazy redraw (ui/window.h) ─────────────────────────────────────────── */
+// lazy redraw (ui/window.h)
 
 #define MIX(v) (h = h * 33u ^ (uint32_t)(v))
 

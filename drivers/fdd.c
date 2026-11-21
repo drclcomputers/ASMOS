@@ -219,11 +219,9 @@ static void fdc_reset(void) {
     }
 }
 
-/* A seek or recalibrate only starts the head moving: the command phase
- * ends at once and the controller interrupts when the head arrives. Poll
- * SENSE INTERRUPT until this drive reports "seek end". (QEMU and Bochs
- * finish seeks instantly, so sensing straight away worked there; 86Box
- * and real drives take milliseconds per step.) */
+/* Seek/recalibrate completes asynchronously: poll SENSE INTERRUPT until
+ * "seek end". QEMU and Bochs finish instantly; real drives and 86Box take
+ * milliseconds per step. */
 static bool fdc_wait_seek(uint8_t drive_id, uint8_t *st0, uint8_t *cyl) {
     fdd_deadline_t d = fdd_deadline(3000);
     while (!fdd_expired(&d)) {
@@ -235,12 +233,12 @@ static bool fdc_wait_seek(uint8_t drive_id, uint8_t *st0, uint8_t *cyl) {
     return false;
 }
 
-/* ── motor control ──────────────────────────────────────────────────────
- * The DOR holds both drives' motor bits and selects one drive. Writing it
- * for one drive must keep the other's motor bit, or using B: stops A:'s
- * motor behind the driver's back (and A: then never reads). A motor stays
- * on between accesses (no 0.5 s spin-up per sector) and stops after 2 s
- * idle: fdd_poll(), from the main loop. */
+// motor control
+/*
+ * The DOR selects a drive and controls both motors, so preserve the other
+ * drive's motor bit (otherwise using B: can stop A:). Keep motors on between
+ * accesses; fdd_poll() stops them after 2 seconds idle.
+ */
 #define MOTOR_IDLE_MS 2000
 
 static uint8_t motor_bit(uint8_t d) {
@@ -276,7 +274,7 @@ bool fdd_motor_running(uint8_t drive_id) {
     return drive_id <= 1 && s_motor_on[drive_id];
 }
 
-/* ── recalibrate (seek to track 0) ─────────────────────────────────────── */
+// recalibrate (seek to track 0)
 static bool fdd_recalibrate(uint8_t drive_id) {
     fdd_motor_start(drive_id);
     /* one recalibrate steps at most 77 times: an 80-track drive may need
@@ -293,7 +291,7 @@ static bool fdd_recalibrate(uint8_t drive_id) {
     return false;
 }
 
-/* ── seek ───────────────────────────────────────────────────────────────── */
+// seek
 static bool fdd_seek(uint8_t drive_id, uint8_t track) {
     if (s_current_track[drive_id] == (int)track)
         return true;
@@ -329,7 +327,7 @@ static bool fdc_wait_result(void) {
     return false;
 }
 
-/* ── DMA setup ──────────────────────────────────────────────────────────── */
+// DMA setup
 static void dma_setup_read(void *buf, uint16_t count) {
     uint32_t addr = (uint32_t)buf;
     uint8_t page = (addr >> 16) & 0xFF;
@@ -371,7 +369,7 @@ static void dma_setup_write(const void *buf, uint16_t count) {
     outb(DMA_UNMASK, 0x02);
 }
 
-/* ── LBA to CHS ─────────────────────────────────────────────────────────── */
+// LBA to CHS
 static void lba_to_chs(uint8_t d, uint32_t lba, uint8_t *cyl, uint8_t *head,
                        uint8_t *sector) {
     *cyl = (uint8_t)(lba / (s_heads[d] * s_spt[d]));
@@ -390,7 +388,8 @@ static void set_rate(uint8_t d) {
     outb(FDD_CCR, (uint8_t)r);
 }
 
-/* ── transfers ──────────────────────────────────────────────────────────
+// transfers
+/*
  * n sectors from (cyl, head, sector) on, through the DMA buffer: a whole
  * track in one command takes one turn of the disk; sector by sector, each
  * one waits most of a turn for the next to come round. */
@@ -450,14 +449,12 @@ static bool read_raw(uint8_t drive_id, uint32_t lba, void *buf, int tries) {
     return true;
 }
 
-/* ── the track cache ────────────────────────────────────────────────────
- * The last few tracks (one side of a cylinder each) are kept in memory. A
- * read that misses reads its whole track; writes stay in memory (dirty)
- * and go to the disk a track at a time: when the line is needed for
- * another track, 1/2 s after the last write (fdd_poll), on fdd_flush
- * (eject, shut down). The FAT, the folder and the data of a file being
- * saved then cost a few turns of the disk instead of several per sector.
- * Lines are allocated on the first use, sized for the disk's track. */
+// the track cache
+/*
+ * Cache several tracks, one side per line. Reads load a whole track on a
+ * miss; writes stay dirty until eviction, 1/2 s idle (fdd_poll), or
+ * fdd_flush (eject/shutdown). Lines are allocated on first use to fit the
+ * disk's track size. */
 #define TC_LINES 4
 #define TC_V 1 /* sector valid */
 #define TC_D 2 /* sector dirty */
@@ -605,12 +602,12 @@ void fdd_poll(void) {
             fdd_motor_off(d);
 }
 
-/* ── the disk change line ───────────────────────────────────────────────
- * The drive raises it when its door opens; a step with a disk in it
- * lowers it. Seen on: the cached tracks and the disk's size are dropped,
- * and the file system is told (fdd_take_change) to mount it again. A
- * drive that has no change line (always on, even with a disk read) is
- * then not asked again. */
+// the disk change line
+/*
+ * Door opening raises the change line; stepping with a disk lowers it.
+ * On change, discard cached tracks and geometry and tell the file system to
+ * remount. Drives without a change line are not polled again after reads.
+ */
 static bool disk_changed(uint8_t d) {
     if (s_no_changeline[d])
         return false;
@@ -685,7 +682,7 @@ bool fdd_write_protected(uint8_t d) {
     return d < 2 && s_present[d] && write_protected(d);
 }
 
-/* ── read/write sector ──────────────────────────────────────────────────── */
+// read/write sector
 static bool ready(uint8_t d, uint32_t lba) {
     if (d > 1 || !s_present[d])
         return false;
@@ -745,7 +742,8 @@ bool fdd_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
     return true;
 }
 
-/* ── what disk is in the drive ─────────────────────────────────────────
+// what disk is in the drive
+/*
  * Each format the drive can hold is tried at its data rate: reading the
  * boot sector only works at the right one. Its BPB then gives the real
  * sectors per track and heads. */
@@ -874,7 +872,7 @@ bool fdd_format_track(uint8_t d, uint8_t cyl, uint8_t head) {
     return false;
 }
 
-/* ── init / detect ──────────────────────────────────────────────────────── */
+// init / detect
 bool fdd_is_present(uint8_t drive_id) {
     if (drive_id > 1)
         return false;

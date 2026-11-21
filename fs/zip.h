@@ -2,21 +2,10 @@
 #define FS_ZIP_H
 
 /*
- * ZIP archives: make one from a file or folder, and take one apart.
- *
- * Standard PKZIP 2.0 files (method 0 "stored" and 8 "deflate"), so they
- * open in Windows, Info-ZIP, PKUNZIP 2.04g, 7-Zip... and their zips open
- * here. Not handled: encrypted entries, ZIP64 (files over 4 GB), and other
- * methods (shrink, implode, bzip2...): those entries are skipped and
- * counted.
- *
- * Paths are the usual absolute ones ("/HDA/DOCS", "/FDD0/A.ZIP"). Long
- * names go into the archive as they are; names coming out are made safe
- * for FAT (bad characters become '_', ".." parts are dropped, so nothing
- * lands outside the folder you extract into).
- *
- * Both run to the end before returning (a floppy job takes a while: the
- * progress callback is the place to draw something).
+ * Supports PKZIP 2.0 stored/deflate archives; skips and counts encrypted,
+ * ZIP64, and other methods. Paths are absolute, and extracted names are
+ * sanitized to stay in the target folder. Operations are synchronous and
+ * report progress through a callback.
  */
 
 #include "lib/core.h"

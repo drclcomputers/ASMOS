@@ -4,13 +4,9 @@
 #include "fs/fs.h"
 
 /*
- * ISO 9660 CDs (read only), with Joliet long names when the disc has them.
- * fs/fs.c shows the disc as the drive /CD0 through the same calls as the
- * FAT drives: a folder is a small number (0 = the root, like FAT; the
- * others are handed out as folders are seen, iso_dir table), a file
- * carries its first sector in its entry (cluster_hi:cluster_lo). Names:
- * the 8.3 one from the disc's name ("NAME~N.EXT" if it isn't 8.3), the
- * long one as the disc has it.
+ * Read-only ISO 9660 with optional Joliet names, exposed by fs/fs.c as /CD0.
+ * Directories use small handles (0 is root); file entries store the first
+ * sector. Both the disc name and an 8.3 alias are available.
  */
 
 typedef bool (*iso_cb)(dir_entry_t *e, const char *lname, void *user);

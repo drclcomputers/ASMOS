@@ -1,9 +1,6 @@
-/* Audio Player - WAV, MIDI and audio CDs (whatever lib/audio.h knows),
- * with a playlist. Space play/pause, S stop, R start, N next, L loop,
- * +/- volume, C plays the audio CD, Del removes from the list. The list
- * and volume are kept in /PREFS/AUDIOPLA.INI. An audio CD's tracks are
- * /CD0/Track01.cda ...: the drive plays them itself, through its audio
- * cable to the sound card (or its headphone socket). */
+/* Plays supported WAV/MIDI/CD audio with a playlist. Space toggles playback;
+ * S/R/N/L control playback, +/- volume, C selects CD audio, and Delete
+ * removes tracks. Playlist and volume are saved in /PREFS/AUDIOPLA.INI. */
 #include "extapps/shim.h"
 
 #define MAX_LIST 40  /* (a CD has up to 99 tracks; most have under 25) */
@@ -65,7 +62,7 @@ static void save_prefs(ap_state_t *s) {
     app_prefs_end();
 }
 
-/* ── the list ──────────────────────────────────────────────────────── */
+// the list
 
 static void fill_list(ap_state_t *s) {
     list_clear(s->list);
@@ -151,7 +148,7 @@ static void remove_item(ap_state_t *s, int i) {
     sync_ui(s);
 }
 
-/* ── actions ───────────────────────────────────────────────────────── */
+// actions
 
 static void act_play(ap_state_t *s) {
     int st = audio_state();
@@ -240,7 +237,7 @@ static void set_volume(ap_state_t *s, int v) {
     mixer_write(0x28, (uint8_t)((x & 0xF0) | (x >> 4))); /* the CD cable */
 }
 
-/* ── drawing ───────────────────────────────────────────────────────── */
+// drawing
 
 static void fmt_time(char *b, int n, uint32_t ms) {
     uint32_t sec = ms / 1000;
@@ -337,7 +334,7 @@ static void update_meter(ap_state_t *s) {
         wm_invalidate(s->win);
 }
 
-/* ── controls and menus ────────────────────────────────────────────── */
+// controls and menus
 
 static void got_file(void *user, const char *path) {
     ap_state_t *s = user;

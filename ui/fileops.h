@@ -2,14 +2,10 @@
 #define FILEOPS_H
 
 /*
- * File operations shared by the desktop, FileF and anything else that shows
- * files. Paths are absolute: "/HDA/DIR/F.TXT", "/DESKTOP/F.TXT" (HDA is
- * implied), "/FDD0/F.TXT", "/HDB/...".
- *
- * The plain functions act immediately and return NULL on success or a short
- * reason. The fo_ask_* ones open a dialog and run `done(user)` after a
- * change was made (not on cancel). Every change notifies the desktop and
- * open FileF windows (fo_changed), so callers only refresh their own state.
+ * Shared file operations use absolute drive paths; /DESKTOP maps to HDA.
+ * Direct calls return NULL on success or an error. fo_ask_* opens a dialog
+ * and calls done(user) only after a change; fo_changed notifies the desktop
+ * and FileF windows.
  */
 
 #include "fs/fs.h"
@@ -18,7 +14,7 @@
 
 typedef void (*fo_done_cb)(void *user);
 
-/* ── paths ─────────────────────────────────────────────────────────────── */
+// paths
 void fo_join(const char *dir, const char *name, char *out, int sz);
 void fo_parent(const char *path, char *out, int sz);
 const char *fo_base(const char *path);
@@ -33,7 +29,7 @@ bool fo_protected(const char *path);
 int fo_list_dirs(const char *dir, char (*names)[FS_NAME_SZ], int max,
                  bool hidden);
 
-/* ── operations ────────────────────────────────────────────────────────── */
+// operations
 const char *fo_create(const char *dir, const char *name, bool is_dir,
                       bool hidden);
 const char *fo_rename(const char *path, const char *new_name);
@@ -54,7 +50,7 @@ bool fo_launch_app(window *owner, const char *path);
 /* Something in `dir` changed: refresh the desktop / FileF windows. */
 void fo_changed(const char *dir);
 
-/* ── dialogs ───────────────────────────────────────────────────────────── */
+// dialogs
 void fo_ask_new(window *owner, const char *dir, bool is_dir, fo_done_cb done,
                 void *user);
 void fo_ask_rename(window *owner, const char *path, fo_done_cb done,
@@ -72,7 +68,8 @@ void fo_ask_extract(window *owner, const char *zip, fo_done_cb done,
 /* Message for a failed operation (does nothing when err is NULL). */
 void fo_report(window *owner, const char *title, const char *err);
 
-/* ── Trash ──
+// Trash
+/*
  * /TRASH on HDA (hidden, protected). Deleting on HDA moves things there;
  * each item's original folder is kept (/PREFS/TRASH.INI) for Put Back.
  * Items on other drives, or already in the Trash, are deleted for good. */
@@ -87,7 +84,7 @@ bool fo_is_trash(const char *path); /* /TRASH itself */
 /* Empty the Trash after asking */
 void fo_ask_empty_trash(window *owner, fo_done_cb done, void *user);
 
-/* ── search ── */
+// search
 
 /* Name test: with * or ? a whole-name pattern (case ignored), else
  * "contains". */

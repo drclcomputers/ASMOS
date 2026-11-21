@@ -2,7 +2,8 @@
 #include "lib/fpu_emu.h"
 #include "lib/mem.h"
 
-/* ── numbers ──────────────────────────────────────────────────────────────
+// numbers
+/*
  * fx: value = m * 2^(e - 63) with m's top bit set (class NORM); e is the
  * unbiased exponent, as in IEEE. Kept at the x87's 64-bit precision. */
 
@@ -36,7 +37,7 @@ typedef struct {
 
 enum { RC_NEAR, RC_DOWN, RC_UP, RC_ZERO };
 
-/* ── state ── */
+// state
 static fx s_r[8];      /* physical registers */
 static uint8_t s_full; /* bit i: physical register i in use */
 static int s_top;
@@ -53,7 +54,7 @@ static int prec(void) { /* precision control: 24 / 53 / 64 bits */
 }
 static void flag(uint16_t f) { s_sw |= f; }
 
-/* ── 64/128-bit helpers (no libgcc: no 64-bit division) ── */
+// 64/128-bit helpers (no libgcc: no 64-bit division)
 
 static int clz64(uint64_t x) {
     uint32_t hi = (uint32_t)(x >> 32);
@@ -85,7 +86,7 @@ static uint64_t udiv64(uint64_t n, uint64_t d, uint64_t *rem) {
     return q;
 }
 
-/* ── building values ── */
+// building values
 
 static fx mk(uint8_t s, uint8_t c) {
     fx r = {0, 0, s, c};
@@ -195,7 +196,7 @@ static fx round_cur(fx a) { /* to the precision control, after a load */
     return round_pack(a.s, a.e, a.m, 0, prec(), rc());
 }
 
-/* ── arithmetic ── */
+// arithmetic
 
 static fx nan_of(fx a, fx b) { /* propagate (quieted) */
     fx n = a.c == C_NAN ? a : b;
@@ -472,7 +473,7 @@ static int64_t f_toint(fx a, int bits, int rmode) {
     return r.s ? (int64_t)(0 - v) : (int64_t)v;
 }
 
-/* ── memory formats ── */
+// memory formats
 
 /* float / double: P bits of significand, ebits of exponent */
 static fx unpack_ieee(uint64_t v, int P, int ebits) {
@@ -641,7 +642,7 @@ static void pack_bcd(fx a, uint8_t *p) {
     p[9] = r.s ? 0x80 : 0;
 }
 
-/* ── register stack ── */
+// register stack
 
 static int phys(int i) { return (s_top + i) & 7; }
 static bool empty(int i) { return !(s_full & (1 << phys(i))); }
@@ -706,7 +707,7 @@ static void finit(void) {
     s_fip = s_fdp = s_fop = 0;
 }
 
-/* ── constants ── */
+// constants
 static const fx K_ONE = {TOP_BIT, 0, 0, C_NORM};
 static const fx K_PI = {0xC90FDAA22168C235ULL, 1, 0, C_NORM};
 static const fx K_PI2 = {0xC90FDAA22168C235ULL, 0, 0, C_NORM};
@@ -728,7 +729,7 @@ static bool tiny(fx t, fx sum) { /* term no longer changes the sum */
     return t.c == C_ZERO || (sum.c == C_NORM && t.e < sum.e - 66);
 }
 
-/* ── remainder (fprem / fprem1): exact, in one step ── */
+// remainder (fprem / fprem1): exact, in one step
 
 static uint64_t s_full_quot; /* the whole quotient of the last f_rem */
 
@@ -781,7 +782,7 @@ static fx f_rem(fx a, fx b, bool nearest, uint32_t *quot) {
     return a;
 }
 
-/* ── transcendentals ── */
+// transcendentals
 
 /* sin and cos of |r| <= pi/4 by their series */
 static void sincos_small(fx r, fx *sn, fx *cs) {
@@ -935,7 +936,7 @@ static fx f_2xm1(fx x) { /* 2^x - 1, |x| <= 1 */
     return s;
 }
 
-/* ── the trap ── */
+// the trap
 
 static fpu_trap_frame_t *s_f;
 

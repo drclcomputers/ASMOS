@@ -1,14 +1,7 @@
-/* Calendar - a month at a time, with a note for any day.
- *
- *   click a day           select it (a greyed day of the month before or
- *                         after goes to that month)
- *   double-click / Enter  write or change the day's note
- *   arrows                a day / a week      PgUp / PgDn  a month
- *   Home                  today               Del          delete the note
- *
- * Notes live in /PREFS/CALNOTES.TXT, one per line: "YYYYMMDD text".
- * The week starts on Monday (ISO); View switches it to Sunday (kept in
- * /PREFS/CALENDAR.INI). Dates are proleptic Gregorian (lib/time.h). */
+/* Notes are saved in /PREFS/CALNOTES.TXT. Click/arrows select a day,
+ * Enter/double-click edits it, PgUp/PgDn change months, Home goes to today,
+ * and Delete removes notes. Weeks start Monday; View changes this in
+ * /PREFS/CALENDAR.INI. */
 #include "extapps/shim.h"
 
 #define NOTES_FILE "/PREFS/CALNOTES.TXT"
@@ -41,7 +34,7 @@ app_descriptor calendar_app;
 
 static const char *const WD2[7] = {"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"};
 
-/* ── notes ──────────────────────────────────────────────────────────── */
+// notes
 
 static int note_find(const cal_state_t *s, int32_t day) {
     for (int i = 0; i < s->nnotes; i++)
@@ -103,7 +96,7 @@ static bool notes_save(cal_state_t *s) {
     return A->file_write(NOTES_FILE, buf, n);
 }
 
-/* ── state ──────────────────────────────────────────────────────────── */
+// state
 
 static int32_t today_days(void) {
     time_full_t t = time_rtc_local();
@@ -177,7 +170,7 @@ static void move_months(cal_state_t *s, int n) {
     select_day(s, time_days_from_civil(y, m, d > dim ? dim : d));
 }
 
-/* ── drawing ────────────────────────────────────────────────────────── */
+// drawing
 
 static void paint(control *c, int x, int y, int w, int h) {
     cal_state_t *s = c->user;
@@ -224,7 +217,7 @@ static void paint(control *c, int x, int y, int w, int h) {
         }
 }
 
-/* ── notes UI ───────────────────────────────────────────────────────── */
+// notes UI
 
 static void note_done(void *user, const char *text) {
     cal_state_t *s = user;
@@ -270,7 +263,7 @@ static void delete_note(cal_state_t *s) {
         note_done(s, "");
 }
 
-/* ── input ──────────────────────────────────────────────────────────── */
+// input
 
 static void on_grid(control *c, int ev) {
     cal_state_t *s = c->user;
@@ -320,7 +313,7 @@ static void on_nav(control *c, int ev) {
         move_months(c->user, c->id);
 }
 
-/* ── menus ──────────────────────────────────────────────────────────── */
+// menus
 
 static cal_state_t *active(void) { return ui_active_state(); }
 
@@ -405,7 +398,7 @@ static void m_about(void) {
                 "Arrows, PgUp/PgDn (Ctrl: a year), Home: today.");
 }
 
-/* ── life cycle ─────────────────────────────────────────────────────── */
+// life cycle
 
 static void cal_init(void *state) {
     cal_state_t *s = state;

@@ -1,11 +1,5 @@
-/*
- * gopher.c - Gopher client (RFC 1436) for the ASMOS terminal.
- *
- * Menus, text documents (built-in pager), search (type 7), downloads that
- * stream straight to disk, gopher:// URLs, history with cursor restore,
- * "go to" and "up one level". Redraws in place when the terminal supports
- * clear(); otherwise it just prints each screen.
- */
+/* RFC 1436 Gopher client for ASMTerm: menus, text, search, downloads, URLs,
+ * history, and navigation. Redraws in place when clear() is supported. */
 #include "network/gopher.h"
 #include "fs/fs.h"
 #include "lib/core.h"
@@ -69,7 +63,7 @@ typedef struct {
     char status[96];
 } gopher_t;
 
-/* ── small helpers ─────────────────────────────────────────────────────── */
+// small helpers
 
 bool parse_ip_str(const char *str, uint8_t ip[4]) {
     uint8_t parts[4] = {0};
@@ -248,7 +242,7 @@ static bool resolve_host(gopher_t *g, const char *host, uint8_t ip[4]) {
     return false;
 }
 
-/* ── network ───────────────────────────────────────────────────────────── */
+// network
 
 /* Fetch l into g->buf (sink == NULL) or stream it into an open file.
  * Returns bytes received, or -1 on failure (g->status says why). */
@@ -353,7 +347,7 @@ static int fetch(gopher_t *g, const gopher_loc_t *l, fat_file_t *sink) {
     return failed ? -1 : total;
 }
 
-/* ── parsing ───────────────────────────────────────────────────────────── */
+// parsing
 
 static bool selectable(char t) { return t != 'i' && t != '3' && t != 0; }
 
@@ -469,7 +463,7 @@ static void layout_text(gopher_t *g) {
     }
 }
 
-/* ── drawing ───────────────────────────────────────────────────────────── */
+// drawing
 
 static const char *type_label(char t, const char *sel) {
     switch (t) {
@@ -619,7 +613,7 @@ static void help(gopher_t *g) {
     getkey(g);
 }
 
-/* ── navigation ────────────────────────────────────────────────────────── */
+// navigation
 
 static void make_save_path(const gopher_loc_t *l, char *outp, int maxlen) {
     char host8[9];
@@ -863,7 +857,7 @@ static void up_level(gopher_t *g) {
     go(g, &l, true);
 }
 
-/* ── session ───────────────────────────────────────────────────────────── */
+// session
 
 static void session(gopher_t *g, const gopher_loc_t *start) {
     if (g->ctx)

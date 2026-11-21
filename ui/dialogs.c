@@ -48,7 +48,7 @@ typedef struct {
 #define MAX_DLG 8
 static dlg_t *s_open[MAX_DLG];
 
-/* ── plumbing ──────────────────────────────────────────────────────────── */
+// plumbing
 
 static void call(window *owner, void (*fn)(void *, void *), void *user,
                  void *arg) {
@@ -333,7 +333,7 @@ void dlg_input(window *owner, const char *title, const char *prompt,
                     NULL, cb, user);
 }
 
-/* ── file dialogs ──────────────────────────────────────────────────────── */
+// file dialogs
 
 #define F_DIR 1u
 
@@ -656,7 +656,7 @@ void dlg_choose_folder(window *owner, const char *title, const char *dir,
                 NULL, cb, user);
 }
 
-/* ── forms: dialogs built by the caller ─────────────────────────────────── */
+// forms: dialogs built by the caller
 
 window *dlg_form(window *owner, const char *title, int w, int h,
                  uint32_t state_size) {
@@ -680,7 +680,7 @@ void dlg_form_close(window *form) {
         finish((dlg_t *)form->userdata, false, NULL);
 }
 
-/* ── messages from places that must not build windows ──────────────────── */
+// messages from places that must not build windows
 
 #define MAX_POSTED 4
 static struct {
@@ -733,7 +733,7 @@ void dlg_draw_now(const char *title, const char *msg) {
     }
 }
 
-/* ── Print and Print Preview ─────────────────────────────────────────── */
+// Print and Print Preview
 
 typedef struct {
     print_doc_t doc;

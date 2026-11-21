@@ -505,9 +505,7 @@ int scen_storage(const char *name) {
         return fails;
     }
     if (!strcmp(name, "help")) {
-        /* Help: /HELP's folders; Help > View Help in an app opens its own;
-         * an .APP's pages come in the first time it runs, and again only
-         * when the .APP changes */
+        /* Check /HELP folders, app-specific help, and help refresh on change. */
         int fails = 0;
         char b[300];
         dir_entry_t de;

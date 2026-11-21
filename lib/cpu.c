@@ -10,7 +10,7 @@ static uint32_t s_idle_count = 0;
 static uint32_t s_last_ms = 0;
 static bool s_measuring = false;
 
-/* ── CPU / FPU detection (safe on a 386: no CPUID until we know it exists) */
+// CPU / FPU detection (safe on a 386: no CPUID until we know it exists)
 
 static bool s_has_cpuid, s_has_fpu;
 static int s_family; /* 3 = 386, 4 = 486, 5 = Pentium, 6+ = later */

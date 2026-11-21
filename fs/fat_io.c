@@ -4,12 +4,12 @@
 
 static fat_vol_t *vol(uint8_t drive_id) { return &g_drives[drive_id]; }
 
-/* ── FAT sector cache ──────────────────────────────────────────────────
- * Every cluster looked up or allocated reads a FAT sector; without this a
- * 466 KB file written to a hard disk cost ~29000 sector reads. A few
- * sectors, kept right by fat_cache_wrote() (fs_write_sector calls it for
- * every write), dropped when a volume is mounted or unmounted (formatting
- * and Setup write FATs below the file system, then mount). */
+// FAT sector cache
+/*
+ * Cache frequently used FAT sectors to avoid repeated reads during file
+ * operations. fat_cache_wrote() tracks writes; mount/unmount clears the
+ * cache because formatting and Setup may write FATs directly.
+ */
 #define FC_N 6
 static struct {
     bool valid;

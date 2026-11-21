@@ -7,17 +7,10 @@
 #include "lib/time.h"
 
 /*
- * Back buffer (1 byte per pixel at BACKBUF) -> VGA.
- *
- * Only what changed since the last frame is sent: a shadow copy of the
- * last frame is kept and compared in 32-pixel blocks. On ISA VGA (1-3 MB/s)
- * writing video memory is the bottleneck, so an idle desktop now costs
- * almost nothing and a moving cursor only a few blocks.
- *
- * 640x400, 640x480 and 800x600 (16 colours) are planar: 4 bit planes, 1
- * bit per pixel. A lookup table
- * spreads one pixel's 4 colour bits into the 4 plane bytes at once, so 8
- * pixels take 8 lookups instead of 32 bit extractions per plane.
+ * Copies the 1-byte-per-pixel back buffer to VGA. A shadow frame detects
+ * changes in 32-pixel blocks, reducing writes on slow ISA video. The 16-color
+ * modes use four 1-bit planes; a lookup table converts eight pixels to plane
+ * bytes in eight lookups.
  */
 
 #define MODEX_FB 0x000A0000U
@@ -97,7 +90,8 @@ static inline bool same32(const uint8_t *a, const uint8_t *b) {
 
 static int s_y0, s_y1 = 399; /* rows to look at in this blit */
 
-/* ── 2x zoom (Settings > System, the planar modes) ───────────────────────
+// 2x zoom (Settings > System, the planar modes)
+/*
  * The back buffer, the shadow and every coordinate are in "logical" pixels
  * (half the screen each way); each one goes out as a 2x2 square. A screen
  * block of 32 pixels is then 16 logical ones. */
@@ -267,7 +261,7 @@ uint32_t gpu_last_blocks(void) { return s_last_blocks; }
 
 gpu_backend_t gpu_backend(void) { return GPU_BACKEND_MODEX; }
 
-/* ── straight to the screen (the pointer) ──────────────────────────────── */
+// straight to the screen (the pointer)
 
 #define VGA_SEQ_ADDR_R 0x03C4
 

@@ -4,18 +4,10 @@
 #include "lib/core.h"
 
 /*
- * Paging with 4 KB pages (works from the 386 up; no PSE/4 MB pages).
- *
- * The kernel address space maps all RAM 1:1, read/write, so kernel code
- * behaves exactly as without paging. An app context is a copy of it
- * where:
- *   - page 0 is not present (NULL pointers fault),
- *   - the frame pool (lib/pmm.h) is not present except the pages granted
- *     to that context (its image, its heap): other apps are unreachable,
- *   - kernel code and constants are read-only (486+: CR0.WP; a 386 does
- *     not check write protection in ring 0).
- * Kernel data and the kernel heap stay reachable: apps call the kernel
- * through the API and run in ring 0.
+ * 4 KB paging for 386+. App contexts leave page 0 unmapped, map only their
+ * own frame-pool image/heap, and protect kernel code/constants where CR0.WP
+ * is supported. Apps run in ring 0; kernel data remains accessible through
+ * the API.
  */
 
 #define PAGE_SIZE 4096u

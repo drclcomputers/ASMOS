@@ -140,7 +140,8 @@ __asm__(
  * error code still on the stack (garbage EIP → triple fault / reboot). */
 extern const uint32_t exc_stub_table[32];
 
-/* ── Unguarded fault fallback ───────────────────────────────────────────────
+// Unguarded fault fallback
+/*
  * Reached for CPU exceptions outside appguard_call2. A background task
  * (shell `run`, gopher, ...) is killed; the kernel task panics visibly. */
 #define PF_PRESENT (1u << 0) /* 0=not-present, 1=protection violation */

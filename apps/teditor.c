@@ -90,7 +90,7 @@ static void on_edit(control *c, int ev) {
         s->dirty = true;
 }
 
-/* ── file commands ─────────────────────────────────────────────────────── */
+// file commands
 
 static void opened(void *user, const char *path) {
     teditor_state_t *s = user;
@@ -202,7 +202,7 @@ static bool on_close(window *w) {
     return true;
 }
 
-/* ── menus (act on the focused TEditor) ────────────────────────────────── */
+// menus (act on the focused TEditor)
 #define ACTION(name, body)                                                     \
     static void name(void) {                                                   \
         teditor_state_t *s = ui_active_state();                                \

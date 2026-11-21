@@ -14,7 +14,7 @@ static bool s_dirty = false;
 static uint16_t s_cluster = 0;
 static bool s_inited = false;
 
-/* ── Internal helpers ────────────────────────────────────────────────────── */
+// Internal helpers
 static bool entry_is_app(const dir_entry_t *e) {
     if (e->attr & ATTR_DIRECTORY)
         return false;
@@ -61,7 +61,7 @@ static void create_default_shortcuts(void) {
     dir_context.current_cluster = saved_cluster;
 }
 
-/* ── Init / reload ───────────────────────────────────────────────────────── */
+// Init / reload
 void desktop_fs_init(void) {
     if (s_inited)
         return;
@@ -189,7 +189,7 @@ uint16_t desktop_fs_cluster(void) {
 }
 const char *desktop_fs_path(void) { return DESKTOP_PATH; }
 
-/* ── Mutations ───────────────────────────────────────────────────────────── */
+// Mutations
 bool desktop_fs_add_app(const char *app_name) {
     if (!app_name)
         return false;

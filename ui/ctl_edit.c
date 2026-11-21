@@ -1,7 +1,5 @@
-/* ctl_edit.c - single- and multi-line edit controls.
- * Cursor movement (arrows, Home/End, PgUp/PgDn, Ctrl = by word / document),
- * Shift+move selects, Ctrl+A/C/X/V, mouse click / drag / double-click,
- * horizontal and vertical scrolling. */
+/* Single/multiline edits support keyboard and mouse selection, clipboard
+ * shortcuts, word/document navigation, and scrolling. */
 #include "config/runtime_config.h"
 #include "ui/ctl_internal.h"
 #include "ui/uifont.h"
@@ -31,7 +29,7 @@ static int maxlen(const control *c) {
                           : (multi(c) ? MULTI_DEFAULT_MAX : SINGLE_DEFAULT_MAX);
 }
 
-/* ── positions ─────────────────────────────────────────────────────────── */
+// positions
 
 static int line_start(const control *c, int pos) {
     while (pos > 0 && c->text[pos - 1] != '\n')
@@ -119,7 +117,7 @@ void edit_fix_scroll(control *c) {
     }
 }
 
-/* ── editing primitives ────────────────────────────────────────────────── */
+// editing primitives
 
 static void sel_range(const control *c, int *a, int *b) {
     *a = c->cursor < c->anchor ? c->cursor : c->anchor;
@@ -285,7 +283,7 @@ void edit_paste(control *c) {
     ctl_invoke(c, EV_CHANGE);
 }
 
-/* ── word movement ─────────────────────────────────────────────────────── */
+// word movement
 
 static bool wordch(char ch) {
     return (ch >= '0' && ch <= '9') ||
@@ -306,7 +304,7 @@ static int word_right(const control *c, int p) {
     return p;
 }
 
-/* ── keyboard ──────────────────────────────────────────────────────────── */
+// keyboard
 
 static void moved(control *c, int np, bool keep_col) {
     c->cursor = np;
@@ -492,7 +490,7 @@ bool edit_key(control *c) {
     return false;
 }
 
-/* ── mouse ─────────────────────────────────────────────────────────────── */
+// mouse
 
 void edit_mouse(control *c, int mx, int my, bool down, bool dbl) {
     s_last_activity = time_millis();
@@ -550,7 +548,7 @@ bool edit_caret_on(const control *c) {
                           time_millis() - s_last_activity < 600);
 }
 
-/* ── drawing ───────────────────────────────────────────────────────────── */
+// drawing
 
 void edit_draw(control *c) {
     bool ro = (c->style & ES_READONLY) != 0;
@@ -618,7 +616,7 @@ void edit_draw(control *c) {
                 c->scroll_y, edit_line_count(c) - rows, rows);
 }
 
-/* ── creation ──────────────────────────────────────────────────────────── */
+// creation
 
 control *ctl_edit(window *w, int x, int y, int cw, int ch, const char *text,
                   int max_len, uint32_t style, ctl_handler h) {

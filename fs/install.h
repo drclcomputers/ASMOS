@@ -2,20 +2,9 @@
 #define FS_INSTALL_H
 
 /*
- * Putting ASMOS on a hard disk (fs/install.c): what Setup (apps/setup.c)
- * and the shell's SYS command do, step by step.
- *
- *   inst_probe        what is on a disk now
- *   inst_erase        a new partition table and an empty FAT16 volume
- *                     (the whole disk, up to 2 GB): everything on it is lost
- *   inst_write_boot   the boot code: MBR (keeping the partition table), the
- *                     volume's boot sector (keeping its BPB) and stage 2 in
- *                     its reserved sectors; the volume becomes the active one
- *   inst_copy_files   /SYSTEM/KERNEL.SYS and what is in ASMOS.ZIP (/APPS...)
- *
- * The disk layout these make, and the boot that follows from it, are in
- * boot/bootdefs.inc and tools/mkdisk.py (which builds the same thing).
- * Units are ATA units: 0 = HDA, 1 = HDB (also their DRIVE_ ids).
+ * Setup/SYS stages: probe; optionally erase as FAT16 (up to 2 GB); write boot
+ * code preserving the MBR table and BPB; copy the kernel and ASMOS.ZIP.
+ * See boot/bootdefs.inc and tools/mkdisk.py. Units 0/1 are HDA/HDB.
  */
 
 #include "lib/core.h"

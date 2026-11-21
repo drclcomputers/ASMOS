@@ -51,10 +51,8 @@ bool os_close_own_instance(window *win);
 
 void os_tick_apps(void);
 
-/* Built-in app code (on_frame, control handlers, menu commands) runs
- * guarded like .APP code: a crash, or the watchdog's "end it" key, ends
- * that app instead of the OS. culprit = the instance the code belongs to
- * (NULL if unknown: then only a message). */
+/* Built-in app callbacks run guarded: crashes or watchdog termination end
+ * the app, not the OS. culprit identifies the instance; NULL reports only. */
 app_instance_t *os_instance_of_window(window *w);
 void os_guard_call(app_instance_t *culprit, void (*fn)(void *, void *), void *a,
                    void *b, const char *what);

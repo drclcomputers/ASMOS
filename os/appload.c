@@ -34,7 +34,7 @@ static void set_err(const char *why) {
     snprintf(s_err, sizeof(s_err), "%s", why ? why : "");
 }
 
-/* ── lookup helpers ─────────────────────────────────────────────────── */
+// lookup helpers
 
 static loaded_app_t *find_by_desc(const app_descriptor *d) {
     if (!d)
@@ -87,7 +87,8 @@ static app_instance_t *instance_from_state(void *state) {
     return NULL;
 }
 
-/* ── window ownership ──────────────────────────────────────────────────
+// window ownership
+/*
  * Windows a dynamic app creates are remembered with the app's state, so
  * the close button can end the app (it used to only hide the window and
  * the app kept running, still listed in Monitor) and so leftovers are
@@ -101,13 +102,12 @@ static struct {
 } s_owned[MAX_DYN_WINDOWS];
 static void *s_calling_state; /* state of the app whose code is running */
 
-/* ── per-instance memory ───────────────────────────────────────────────
- * Each running instance of a dynamic app gets its own heap (its state is
- * the first block): api->kmalloc/kfree work there, so an overrun breaks
- * only that app, and everything is freed when it ends. The heap comes
- * from the frame pool when it can; with paging on, the instance then
- * runs in a context (lib/vmm.h) where only its own image and heap are
- * mapped from the pool: other apps' memory faults. */
+// per-instance memory
+/*
+ * Each .APP instance owns a heap, freed on exit; api->kmalloc/kfree use it.
+ * When paging is available, only that app's image and heap are mapped from
+ * the frame pool, isolating it from other apps.
+ */
 
 #define APP_HEAP_DEFAULT (64u * 1024u)
 #define APP_HEAP_MIN (16u * 1024u)
@@ -325,7 +325,7 @@ static void api_wm_unregister(window *w) {
     wm_unregister(w);
 }
 
-/* ── guarded callbacks from the UI toolkit ────────────────────────────── */
+// guarded callbacks from the UI toolkit
 
 static void on_fault(loaded_app_t *la, void *state, const char *what,
                      const appfault_t *f);
@@ -442,7 +442,7 @@ static bool api_file_write(const char *path, const void *buf, int len) {
     return n == len;
 }
 
-/* ── files and folders (API size 6) ── */
+// files and folders (API size 6)
 
 static void to_dirent(const dir_entry_t *e, const char *name, app_dirent_t *o) {
     memset(o, 0, sizeof(*o));
@@ -516,7 +516,7 @@ static bool api_rename(const char *path, const char *new_name) {
            fo_rename(path, new_name) == NULL;
 }
 
-/* ── API size 7 ── */
+// API size 7
 
 static bool api_open_request(char *path, int sz) {
     dyn_inst_t *di = inst_of(s_calling_state);
@@ -738,7 +738,7 @@ static const ui_api_t s_ui = {
     .status = ctl_status,
 };
 
-/* ── API table given to v2 apps ─────────────────────────────────────── */
+// API table given to v2 apps
 
 /* prefs of the calling app, by its name */
 static const char *calling_name(void) {
@@ -846,7 +846,7 @@ static const os_api_t s_api = {
     .clip = &s_clip,
 };
 
-/* ── guarded trampolines ────────────────────────────────────────────── */
+// guarded trampolines
 
 typedef void (*v1_fn)(void *state);
 typedef void (*v2_fn)(const os_api_t *api, void *state);
@@ -972,7 +972,7 @@ static void tramp_destroy(void *state) {
     drop_windows_of(state); /* whatever the app forgot to unregister */
 }
 
-/* ── unload ─────────────────────────────────────────────────────────── */
+// unload
 
 static void free_slot(loaded_app_t *la) {
     os_uninstall_app(&la->desc);
@@ -993,7 +993,7 @@ bool appload_unload(app_descriptor *desc) {
     return true;
 }
 
-/* ── validation ─────────────────────────────────────────────────────── */
+// validation
 
 static bool ends_with_app(const char *s) {
     size_t n = strlen(s);
@@ -1049,7 +1049,7 @@ static const char *validate(asma_header_t *h, uint32_t file_size) {
     return NULL;
 }
 
-/* ── load ───────────────────────────────────────────────────────────── */
+// load
 
 static bool read_exact(fat_file_t *f, void *buf, uint32_t n) {
     uint8_t *p = (uint8_t *)buf;
@@ -1256,7 +1256,7 @@ app_descriptor *appload_find(const char *name) {
     return la ? &la->desc : NULL;
 }
 
-/* ── apps by name, in /APPS ─────────────────────────────────────────── */
+// apps by name, in /APPS
 
 typedef struct {
     const char *name, *dir;
@@ -1345,7 +1345,7 @@ bool appload_run_named(const char *name, const char *file) {
     return a != NULL;
 }
 
-/* ── directory scan ─────────────────────────────────────────────────── */
+// directory scan
 
 /* the name in a .APP's header, without loading it (the Apps menu) */
 bool appload_peek_name(const char *path, char *out, int max) {
@@ -1406,7 +1406,7 @@ int appload_scan_dir(const char *dir_path) {
     return loaded;
 }
 
-/* ── open helpers ───────────────────────────────────────────────────── */
+// open helpers
 
 bool appload_try_open(const char *p) {
     s_err[0] = 0;

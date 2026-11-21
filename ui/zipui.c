@@ -1,9 +1,5 @@
-/*
- * Compress / Extract dialogs (ui/fileops.h: fo_ask_compress, fo_ask_extract)
- * over fs/zip.c. The job runs when the dialog's button is pressed, with a
- * progress box drawn straight to the screen (nothing else runs meanwhile,
- * as with copying a folder).
- */
+/* Compress/extract dialogs for fs/zip.c. Jobs run on submit and draw progress
+ * directly to screen while other work pauses, like folder copying. */
 #include "drivers/gpu.h"
 #include "fs/fs.h"
 #include "fs/zip.h"
@@ -21,7 +17,7 @@ bool fo_is_zip(const char *path) {
     return dot && !strcasecmp(dot, ".zip");
 }
 
-/* ── progress box ───────────────────────────────────────────────────── */
+// progress box
 
 typedef struct {
     const char *title;
@@ -79,7 +75,7 @@ static void parent_of(const char *path, char *out, int sz) {
         s[1] = 0;
 }
 
-/* ══ Compress ═══════════════════════════════════════════════════════════ */
+// Compress
 
 typedef struct {
     window *win, *owner;
@@ -274,7 +270,7 @@ void fo_ask_compress(window *owner, const char *path, fo_done_cb done,
     edit_select_all(c->name);
 }
 
-/* ══ Extract ════════════════════════════════════════════════════════════ */
+// Extract
 
 typedef struct {
     window *win, *owner;

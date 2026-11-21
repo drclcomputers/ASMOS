@@ -18,7 +18,7 @@ extern void ff_open_dir_pub(uint16_t cluster, const char *path);
 extern void ff_dir_changed_pub(const char *dir);
 extern void teditor_open_file(const char *path);
 
-/* ── paths ─────────────────────────────────────────────────────────────── */
+// paths
 
 void fo_join(const char *dir, const char *name, char *out, int sz) {
     int n = (int)strlen(dir);
@@ -191,7 +191,7 @@ int fo_list_dirs(const char *dir, char (*names)[FS_NAME_SZ], int max,
     return n;
 }
 
-/* ── change notification ───────────────────────────────────────────────── */
+// change notification
 
 void fo_changed(const char *dir) {
     char n[FS_PATH_SZ];
@@ -210,7 +210,7 @@ static void changed_at(const char *path) {
 
 static void forget_origin(const char *name);
 
-/* ── operations ────────────────────────────────────────────────────────── */
+// operations
 
 const char *fo_create(const char *dir, const char *name, bool is_dir,
                       bool hidden) {
@@ -421,7 +421,7 @@ void fo_info_text(const char *path, char *out, int sz) {
              (de.attr & ATTR_HIDDEN) ? "yes" : "no");
 }
 
-/* ── open ──────────────────────────────────────────────────────────────── */
+// open
 
 bool fo_launch_app(window *owner, const char *path) {
     char name[FS_NAME_SZ];
@@ -515,7 +515,7 @@ void fo_open(window *owner, const char *path) {
     }
 }
 
-/* ── dialogs ───────────────────────────────────────────────────────────── */
+// dialogs
 
 typedef struct {
     window *owner;
@@ -645,7 +645,7 @@ void fo_show_info(window *owner, const char *path) {
     dlg_message(owner, "Get Info", text);
 }
 
-/* ── search ────────────────────────────────────────────────────────────── */
+// search
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
 
@@ -742,7 +742,7 @@ int fo_find(const char *root, const char *pattern, bool hidden, fo_find_cb cb,
     return f.found;
 }
 
-/* ── Trash ─────────────────────────────────────────────────────────────── */
+// Trash
 
 #define ORIGINS "TRASH" /* app_prefs file: trash name -> original folder */
 

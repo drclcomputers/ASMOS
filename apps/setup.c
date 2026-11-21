@@ -1,13 +1,6 @@
-/* Setup - put ASMOS on a hard disk (fs/install.h does the work).
- *
- * Starts by itself when the computer boots from the setup floppy
- * (g_setup_mode). On an installed system it is not in the Apps menu;
- * "app run Setup" in ASMTerm starts it, to install on another disk (or over
- * this one) from a setup floppy in FDD0.
- *
- * Pages: welcome, which disk, what to do with it (erase / keep the files)
- * and the screen mode, a last look, the install (a step a frame, with a
- * progress bar), done (restart). */
+/* Setup installs ASMOS from the setup floppy (automatically at boot, or via
+ * "app run Setup" with the floppy in FDD0). It supports disk selection,
+ * erase/keep, screen mode, confirmation, progress, and restart. */
 #include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/gpu.h"
@@ -43,7 +36,7 @@ app_descriptor setup_app;
 #define W 296
 #define H 150
 
-/* ── helpers ────────────────────────────────────────────────────────────── */
+// helpers
 
 static void text(setup_t *s, int y, const char *t) {
     ctl_label(s->win, 10, y, W - 20, 10, t, 0);
@@ -91,7 +84,7 @@ static bool running_from(int unit) {
 
 static void go_page(setup_t *s, int page) { s->want = page; }
 
-/* ── buttons ────────────────────────────────────────────────────────────── */
+// buttons
 
 static void act(setup_t *s, int id) {
     switch (id) {
@@ -156,7 +149,7 @@ static void on_list(control *c, int ev) {
         act(c->user, 3);
 }
 
-/* ── pages ──────────────────────────────────────────────────────────────── */
+// pages
 
 static void clear(setup_t *s) {
     while (s->win->controls)
@@ -345,7 +338,7 @@ static void build(setup_t *s) {
     wm_invalidate(s->win);
 }
 
-/* ── the install ───────────────────────────────────────────────────────── */
+// the install
 
 /* inside a long step: the bar moves on the screen now */
 static void progress(void *user, int pct, const char *what) {
@@ -392,7 +385,7 @@ static void work(setup_t *s) {
     }
 }
 
-/* ── app ───────────────────────────────────────────────────────────────── */
+// app
 
 static void setup_frame(void *state) {
     setup_t *s = state;

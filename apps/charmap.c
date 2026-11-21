@@ -35,7 +35,7 @@ static int cur_font(cm_state_t *s) {
 
 static bool usable(int c) { return c != 127 && font_has_char((uint8_t)c); }
 
-/* ── the grid ─────────────────────────────────────────────────────────── */
+// the grid
 
 static void paint_grid(control *c, int x, int y, int w, int h) {
     cm_state_t *s = c->user;
@@ -110,7 +110,7 @@ static void on_grid(control *c, int ev) {
     }
 }
 
-/* ── the large one ────────────────────────────────────────────────────── */
+// the large one
 
 static void paint_big(control *c, int x, int y, int w, int h) {
     cm_state_t *s = c->user;
@@ -147,7 +147,7 @@ static void paint_codes(control *c, int x, int y, int w, int h) {
                     f);
 }
 
-/* ── the rest ─────────────────────────────────────────────────────────── */
+// the rest
 
 static void show_cp(cm_state_t *s) {
     s->shown_cp = g_codepage;

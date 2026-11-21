@@ -2,17 +2,9 @@
 #define POPUP_H_
 
 /*
- * Context (popup) menus. One popup is open at a time.
- *
- *   menu *m = popup_menu();               // empty shared menu
- *   menu_add_item_ud(m, "Copy", do_copy, s);
- *   menu_enable_last(m, has_selection);   // grey out
- *   menu_add_separator(m);
- *   popup_show_for(c);                    // at the right-click point
- *
- * Labels are kept as pointers: pass string literals or static buffers.
- * Controls get EV_MENU on right-click, Shift+F10 or the Menu key; c->mx/my
- * hold the point (lists and trees select the row under it first).
+ * Build the shared popup_menu(), then show it with popup_show_for(c).
+ * Labels must outlive the menu. Controls send EV_MENU on right-click,
+ * Shift+F10, or Menu; lists and trees select the pointed row first.
  */
 
 #include "ui/controls.h"

@@ -23,7 +23,7 @@
 #include "os/print.h"
 #include "os/scheduler.h"
 
-/* ── tunables ─────────────────────────────────────────────── */
+// tunables
 #define CLI_INPUT_CAP 256
 #define CMD_OUTPUT_MAX 2048
 #define HISTORY_DEPTH 32
@@ -70,7 +70,7 @@ static void pend_putc(char c);
 static void aterm_input_reset(void);
 static int total_lines(void) { return term_buf_count() + (s_pend_len > 0); }
 
-/* ── helpers ───────────────────────────────────────── */
+// helpers
 static void scroll_to_bottom(void) {
     int ms = total_lines() - VISIBLE_ROWS;
     s.scroll_top = ms > 0 ? ms : 0;
@@ -87,7 +87,7 @@ static void scroll_down(int n) {
         s.scroll_top = ms > 0 ? ms : 0;
 }
 
-/* ── drawing ──────────────────────────────────────────────── */
+// drawing
 static void draw_scrollbar(void) {
     int sb_x = SCREEN_WIDTH - SCROLL_W - 1;
     fill_rect(sb_x, 0, SCROLL_W, OUTPUT_H, DARK_GRAY);
@@ -213,7 +213,7 @@ static void redraw(void) {
 /* tests (the simulator): draw the text shell as it stands */
 void cli_debug_redraw(void) { redraw(); }
 
-/* ── history ──────────────────────────────────────────────── */
+// history
 static void hist_push(const char *cmd) {
     if (s.hist_count > 0 &&
         strcmp(s.history[(s.hist_count - 1) % HISTORY_DEPTH], cmd) == 0)
@@ -234,7 +234,7 @@ static void hist_load(int pos) {
     s.input_scroll = 0;
 }
 
-/* ── execute ──────────────────────────────────────────────── */
+// execute
 static cmd_status_t s_exec_status;
 
 static void execute(void) {

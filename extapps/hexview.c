@@ -76,7 +76,7 @@ static bool load(hexview_state_t *s, const char *path) {
     return true;
 }
 
-/* ── the hex view (custom control) ─────────────────────────────────────── */
+// the hex view (custom control)
 
 static void paint(control *c, int x, int y, int w, int h) {
     hexview_state_t *s = c->user;
@@ -207,7 +207,7 @@ static void on_scroll(control *c, int ev) {
     update(s);
 }
 
-/* ── menus ─────────────────────────────────────────────────────────────── */
+// menus
 
 static void opened(void *user, const char *path) {
     hexview_state_t *s = user;

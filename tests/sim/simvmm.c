@@ -51,7 +51,7 @@ void vmm_destroy_context(vmm_ctx_t *ctx) {
 }
 bool vmm_map_page(vmm_ctx_t *c, uint32_t v, uint32_t p, uint32_t f) { (void)c; (void)v; (void)p; (void)f; return false; }
 
-/* ── a fake timer interrupt: SIGALRM aborts the running guarded call ── */
+// a fake timer interrupt: SIGALRM aborts the running guarded call
 #include "os/appguard.h"
 #define SYS_rt_sigaction 174
 #define SYS_setitimer 104

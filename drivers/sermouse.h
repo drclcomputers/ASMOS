@@ -4,13 +4,9 @@
 #include "lib/core.h"
 
 /*
- * Serial mouse on COM1 (0x3F8, IRQ 4) or COM2 (0x2F8, IRQ 3).
- * Microsoft protocol (1200 baud 7N1, 3-byte packets) with the Logitech
- * 4th byte for the middle button. Detected by toggling DTR/RTS: the mouse
- * powers up and answers 'M' ("M3" Logitech, "MZ" wheel).
- * Bytes are taken in the UART interrupt (8250/16450 UARTs have no FIFO)
- * and decoded in sermouse_poll() (from the timer interrupt while the
- * desktop runs, else once a frame).
+ * Microsoft-protocol serial mouse on COM1/COM2 (1200 baud, 7N1), with the
+ * Logitech fourth-byte middle button. Toggle DTR/RTS to detect it; read
+ * bytes in the UART IRQ and decode in sermouse_poll().
  */
 
 bool sermouse_init(void); /* probe COM1 then COM2 */

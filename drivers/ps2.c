@@ -5,15 +5,9 @@
 #include "lib/core.h"
 
 /*
- * The 8042 holds one byte at a time. Read only once a frame, a mouse that
- * sends 3-byte packets 100 times a second gets about one byte through per
- * frame: on a slow machine the pointer lags behind the hand.
- *
- * While the desktop runs, the timer interrupt reads the controller every
- * tick instead (ps2_irq_poll, 1000 times a second): mouse bytes are decoded
- * there and move the live pointer at once; key bytes wait in a ring for
- * the main loop. Outside the desktop (text shell) ps2_update reads the
- * ports itself, as before.
+ * Frame-based 8042 reads can lag behind mouse packets. In the desktop,
+ * ps2_irq_poll reads each timer tick, moves the pointer, and queues keys;
+ * the text shell continues reading through ps2_update().
  */
 
 #define KRING 64

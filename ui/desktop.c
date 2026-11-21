@@ -46,7 +46,7 @@ bool ff_folder_at(int mx, int my, char *out, int sz);
 #include "drivers/mouse.h"
 #include "interrupts/idt.h"
 
-/* ── wallpaper ──────────────────────────────────────────────────────────── */
+// wallpaper
 void draw_wallpaper_pattern(void) {
     uint8_t main_col = g_cfg.wallpaper_main_color;
     uint8_t sec_col = g_cfg.wallpaper_secondary_color;
@@ -95,7 +95,7 @@ void draw_wallpaper_pattern(void) {
     }
 }
 
-/* ── desktop state ──────────────────────────────────────────────────────── */
+// desktop state
 #define DESK_ORIGIN_X 0
 #define DESK_ORIGIN_Y MENUBAR_H
 
@@ -106,12 +106,10 @@ static int s_drag_off_y = 0;
 static int s_last_click_idx = -1;
 static uint32_t s_last_click_tick = 0;
 
-/* ── shut down / restart ────────────────────────────────────────────────── */
+// shut down / restart
 
-/* One line on a black screen while everything is put away: the settings
- * (ASMOS.CFG) saved, the floppy writes still in memory written, the
- * floppy motors stopped and the hard disks done (and, shutting down,
- * spun down). Then the caller turns off or restarts. */
+/* Show a final status while saving settings, flushing floppies, and stopping
+ * drives; the caller then powers off or restarts. */
 void power_anim_run(bool is_restart) {
     wd_stop(); /* no pointer from here on */
     const char *msg = is_restart ? "Restarting..." : "Shutting down...";
@@ -139,7 +137,7 @@ void power_anim_run(bool is_restart) {
         sleep_ms(1000 - took);
 }
 
-/* ── open item ──────────────────────────────────────────────────────────── */
+// open item
 
 static void launch_app_ud(void *userdata) {
     os_launch_app((app_descriptor *)userdata);
@@ -163,7 +161,7 @@ static void open_item(int idx) {
         fo_open(NULL, path);
 }
 
-/* ── drawing ────────────────────────────────────────────────────────────── */
+// drawing
 
 static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     int ax = DESK_ORIGIN_X + it->x;
@@ -281,7 +279,7 @@ static int selected_idx(void) {
     return -1;
 }
 
-/* ── menu actions: file operations go through ui/fileops ─────────────── */
+// menu actions: file operations go through ui/fileops
 
 /* Path of the selected file/folder/app; false (with a message) if none. */
 static bool sel_path(const char *title, char *out, int sz) {
@@ -473,20 +471,12 @@ extern app_descriptor fdformat_app;
 static void menu_format_disk(void) { os_launch_app(&fdformat_app); }
 static void menu_help(void) { help_open_app("ASMOS"); }
 
-/* ── the Apps menu ──────────────────────────────────────────────────────── */
+// the Apps menu
 static menu *s_apps_menu;
 
-/* The Apps menu IS the /APPS folder (.APPs and .LNK shortcuts):
- *   /APPS/X.APP or X.LNK     directly in Apps (under the groups)
- *   /APPS/Games/X.APP        in the group "Games": every folder is a group,
- *                            named as the folder (or by the first line of
- *                            its GROUP.TXT: "Acme Software")
- * The built-in apps (FileF, Settings, TEditor, the system tools) are there
- * as shortcuts, so a group can mix them with .APPs; the other apps are
- * .APP files (extapps/). Add an app by copying it in, a group by making a
- * folder; delete to remove. A missing /APPS is made again at boot with the
- * shortcuts (apps_dir_defaults). Items are sorted by name. The menu is
- * rebuilt when files change (g_fs_rev), at most once a second. */
+/* The Apps menu mirrors /APPS: .APP/.LNK files are entries, folders are
+ * groups named by folder or GROUP.TXT. Built-ins are shortcuts; defaults
+ * return at boot, and file changes rebuild the sorted menu once per second. */
 #define APPS_DIR "/APPS"
 #define MAX_EXT_APPS 64
 #define MAX_GROUPS 12
@@ -514,13 +504,12 @@ static void launch_ext(void *ud) {
         dlg_message(NULL, e->label, appload_last_error());
 }
 
-/* ── shortcuts (.LNK) ──────────────────────────────────────────────────
- * A text file: line 1 the target, line 2 (optional) the label.
- *   TEditor                a built-in app, by its name in the Apps menu
- *   Calculator             an .APP in /APPS, by the name in its header
- *   /FDD0/GAME.APP         a .APP anywhere
- * so any app can be put in any group (`write X.LNK Calculator`);
- * deleting the shortcut leaves the app. */
+// shortcuts (.LNK)
+/*
+ * A .LNK contains a target on line 1 and an optional label on line 2.
+ * Targets may be built-in names, .APP names, or absolute paths. Shortcuts
+ * can place apps in any group; deleting one does not delete its target.
+ */
 static bool read_shortcut(const char *path, ext_app_t *x) {
     char buf[256];
     fat_file_t f;
@@ -748,16 +737,11 @@ void desktop_refresh_apps_menu(void) {
     add_folder_apps(s_apps_menu, APPS_DIR); /* the ones in /APPS itself */
 }
 
-/* ── the CD's apps: /APPS/CDROM ─────────────────────────────────────────
- * While a CD is in, /APPS/CDROM holds a shortcut for each .APP on it (in
- * its root, its /APPS and the folders in /APPS), so they are in the Apps
- * menu under "CDROM". The folder goes when the disc does (and at boot if
- * no disc is in: left from last time). */
-/* The CD's apps: shortcuts in /APPS/CDROM, made when a disc goes in and
- * deleted when it comes out. Only what was made here is deleted: the
- * files made are listed in CDLINKS.LST (hidden) in the folder, and the
- * folder goes only if nothing else is left in it. A CDROM folder of your
- * own keeps everything you put in it. */
+// CD apps in /APPS/CDROM
+/*
+ * On insertion, create shortcuts for .APPs in the disc root and /APPS
+ * folders. CDLINKS.LST tracks them for cleanup on eject or boot; preserve
+ * /APPS/CDROM if it contains user files. */
 #define CD_APPS_DIR APPS_DIR "/CDROM"
 #define CD_LIST CD_APPS_DIR "/CDLINKS.LST"
 #define CD_APPS_MAX 32
@@ -929,7 +913,7 @@ static void apps_menu_follow(void) {
     desktop_refresh_apps_menu();
 }
 
-/* ── desktop init ───────────────────────────────────────────────────────── */
+// desktop init
 
 void desktop_init(void) {
     static window_spec_t spec = {
@@ -989,7 +973,7 @@ void desktop_init(void) {
     clipboard_init();
 }
 
-/* ── per-frame ──────────────────────────────────────────────────────────── */
+// per-frame
 static void draw_items(int count, desktop_item_t *items) {
     int sel = -1;
     for (int i = 0; i < count; i++) {
@@ -1009,7 +993,7 @@ static void draw_items(int count, desktop_item_t *items) {
         draw_desktop_item(&items[s_drag_idx], false);
 }
 
-/* ── context menus ─────────────────────────────────────────────────────── */
+// context menus
 
 static int s_ctx_idx = -1; /* icon the menu was opened on */
 
@@ -1139,7 +1123,7 @@ void desktop_on_frame(void) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
 
-    /* ── drag * ──────────────────────────────────────────────────────────── */
+    // drag *
     if (s_drag_idx >= 0) {
         desktop_item_t *it = &items[s_drag_idx];
         if (mouse.left) {

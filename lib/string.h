@@ -27,8 +27,7 @@ size_t strlcpy(char *dst, const char *src, size_t dstsz);
 size_t strlcat(char *dst, const char *src, size_t dstsz);
 char *strtok_r(char *str, const char *delim, char **saveptr);
 
-// ── Memory search
-// ─────────────────────────────────────────────────────────────
+// Memory search
 
 void *memchr(const void *s, int c, size_t n);
 void *memmem(const void *haystack, size_t hlen, const void *needle,

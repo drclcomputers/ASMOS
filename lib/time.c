@@ -59,7 +59,7 @@ time_full_t time_to_full(uint32_t total_seconds) {
 
 time_hms_t uptime_hms(void) { return time_to_hms(pit_seconds); }
 
-/* ── calendar arithmetic (proleptic Gregorian) ──────────────────────── */
+// calendar arithmetic (proleptic Gregorian)
 
 static const char *const MONTHS[12] = {
     "January", "February", "March",     "April",   "May",      "June",
@@ -154,11 +154,9 @@ static time_full_t shift(time_full_t t, int32_t secs) {
     return t;
 }
 
-/* ── the CMOS real-time clock ─────────────────────────────────────────
- * It keeps UTC here; the time zone of Settings is added for display.
- * Register B says how the BIOS set it up: bit 2 binary (else BCD), bit 1
- * 24-hour (else 12-hour, PM = bit 7 of the hour). Register 0x32 is the
- * century on most AT BIOSes. */
+// the CMOS real-time clock
+/* Keep RTC time in UTC; Settings applies the display zone. Register B gives
+ * binary/BCD and 24/12-hour format; register 0x32 usually holds the century. */
 
 #define CMOS_ADDR 0x70
 #define CMOS_DATA 0x71

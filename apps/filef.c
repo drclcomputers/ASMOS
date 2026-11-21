@@ -32,7 +32,7 @@
 
 #define MAX_HISTORY 16
 
-/* ── Virtual root drive entries ─────────────────────────────── */
+// Virtual root drive entries
 enum { VD_HDD, VD_FDD, VD_CD };
 typedef struct {
     const char *vpath;
@@ -50,7 +50,7 @@ static const vdrive_t k_vdrives[] = {
 };
 #define VDRIVE_COUNT ((int)(sizeof(k_vdrives) / sizeof(k_vdrives[0])))
 
-/* ── Item ────────────────────────────────────────────────────── */
+// Item
 typedef struct {
     dir_entry_t entry;
     char name[FS_NAME_SZ]; /* its long name, if it has one */
@@ -67,7 +67,7 @@ typedef struct {
     bool hidden;
 } ff_item_t;
 
-/* ── Instance ─────────────────────────────────────────────────── */
+// Instance
 typedef struct {
     window *win; /* must stay first */
     control *back, *fwd, *up, *home, *desk, *path_edit, *view, *sb, *status_lbl;
@@ -122,7 +122,7 @@ static void ff_go_vroot_internal(ff_inst_t *s);
 static void ff_navigate_internal(ff_inst_t *s, uint16_t cluster,
                                  const char *path, uint8_t drive_id);
 
-/* ── Path/drive helpers ────────────────────────────────────────── */
+// Path/drive helpers
 /* the root of everything is "/" inside; on screen it's "Drives", and
  * typing "Drives" in the path box goes there too */
 static bool is_vroot_path(const char *path) {
@@ -221,7 +221,7 @@ static bool resolve_dir(const char *path, uint8_t *out_drive,
     return true;
 }
 
-/* ── History management ────────────────────────────────────────── */
+// History management
 static void ff_history_add(ff_inst_t *s, const char *new_path) {
     if (s->history_index >= 0 && s->history_index < MAX_HISTORY - 1) {
         if (strcmp(s->history[s->history_index], new_path) == 0)
@@ -259,7 +259,7 @@ static void ff_history_go(ff_inst_t *s, int idx) {
     }
 }
 
-/* ── Instance helpers ───────────────────────────────────────────── */
+// Instance helpers
 static ff_inst_t *inst_of(window *w) {
     for (int i = 0; i < MAX_RUNNING_APPS; i++) {
         app_instance_t *a = &running_apps[i];
@@ -293,7 +293,7 @@ static ff_inst_t *active_finder(void) {
     return NULL;
 }
 
-/* ── Sort & Layout ──────────────────────────────────────────────── */
+// Sort & Layout
 static int item_sort_cmp(const ff_item_t *a, const ff_item_t *b, int sort) {
     if (a->is_dotdot || a->is_vdrive)
         return -1;
@@ -351,7 +351,7 @@ static void ff_layout(ff_inst_t *s) {
         CONTENT_TOP + (max_row >= 0 ? (max_row + 1) * ICON_CELL_H : 0);
 }
 
-/* ── Reload ─────────────────────────────────────────────────────── */
+// Reload
 static bool item_is_app(const ff_item_t *it) {
     if (it->is_dotdot || it->is_vdrive || (it->entry.attr & ATTR_DIRECTORY))
         return false;
@@ -459,7 +459,7 @@ void ff_dir_changed_pub(const char *dir) {
     }
 }
 
-/* ── Navigation (internal) ──────────────────────────────────────── */
+// Navigation (internal)
 static void ff_go_vroot_internal(ff_inst_t *s) {
     s->filter[0] = 0;
     s->at_vroot = true;
@@ -528,7 +528,7 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
     }
 }
 
-/* ── Drawing ─────────────────────────────────────────────────── */
+// Drawing
 /* base: content origin, already offset by scroll; clipped by the view */
 static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     ff_item_t *it = &s->items[i];
@@ -604,7 +604,7 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     }
 }
 
-/* ── Hit testing ─────────────────────────────────────────────────── */
+// Hit testing
 static bool in_content(ff_inst_t *s, int mx, int my) {
     control *v = s->view;
     return v && v->visible && mx >= v->ax + 2 && mx < v->ax + v->aw - 2 &&
@@ -805,7 +805,7 @@ static void ff_go_desktop(ff_inst_t *s) {
         ff_go_vroot(s);
 }
 
-/* ── File operations: all through ui/fileops (shared with the desktop) ─ */
+// File operations: all through ui/fileops (shared with the desktop) ─
 
 /* Full path of the selected real item; false (and a status) if none. */
 static bool sel_path(ff_inst_t *s, char *out, int sz) {
@@ -1105,7 +1105,7 @@ static void ff_open_item(ff_inst_t *s, int idx) {
     }
 }
 
-/* ── Icon view control ─────────────────────────────────────────────── */
+// Icon view control
 static void paint_view(control *c, int x, int y, int w, int h) {
     ff_inst_t *s = c->user;
     (void)h;
@@ -1240,7 +1240,7 @@ static void view_key(ff_inst_t *s) {
     }
 }
 
-/* ── Context menus ────────────────────────────────────────────────── */
+// Context menus
 
 static void ctx_open(void) {
     ff_inst_t *s = active_finder();
@@ -1265,7 +1265,7 @@ static void ctx_paste_into(void) {
         strcpy(s->status, "Pasted.");
 }
 
-/* ── Trash ── */
+// Trash
 static void ctx_put_back(void) {
     ff_inst_t *s = active_finder();
     char p[FS_PATH_SZ];
@@ -1418,7 +1418,7 @@ static void on_sb(control *c, int ev) {
         ((ff_inst_t *)c->user)->scroll_y = ctl_value(c);
 }
 
-/* ── Toolbar ──────────────────────────────────────────────────────── */
+// Toolbar
 static void on_nav(control *c, int ev) {
     ff_inst_t *s = c->user;
     if (ev != EV_CLICK)
@@ -1460,7 +1460,7 @@ static void on_path(control *c, int ev) {
     ctl_focus(s->view);
 }
 
-/* ── Folder tree pane ─────────────────────────────────────────────── */
+// Folder tree pane
 
 /* "/HDA/A/B" for a node: drive label at the root, then folder names. */
 static void tree_fill_roots(ff_inst_t *s) {
@@ -1570,7 +1570,7 @@ static void menu_toggle_tree(void) {
     }
 }
 
-/* ── Init / frame / destroy ───────────────────────────────────────── */
+// Init / frame / destroy
 static void ff_init(void *state) {
     ff_inst_t *s = state;
     int x = FF_DEFAULT_X + (s_cascade % 6) * FF_CASCADE;

@@ -37,7 +37,7 @@ const char *video_cfg_set(int mode) {
     return video_cfg_get() == mode ? NULL : "the boot disk did not keep it";
 }
 
-/* ── what this machine may use (boot/stage2.asm step 5) ─────────────────── */
+// what this machine may use (boot/stage2.asm step 5)
 
 #define VMAX_486 0x40
 #define VMAX_NO800 0x80

@@ -68,7 +68,8 @@ void draw_cursor(int x, int y) {
     }
 }
 
-/* ── the pointer on the screen (drivers/pointer.h) ──────────────────────
+// the pointer on the screen (drivers/pointer.h)
+/*
  * The pointer is not drawn into the frame any more: it goes straight onto
  * the screen and the timer interrupt moves it. These are the shapes. */
 #define CUR_W 9

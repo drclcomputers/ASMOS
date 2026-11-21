@@ -1,7 +1,5 @@
-/* Help - the pages in /HELP (os/help.h): a folder per app on the left, the
- * page on the right. A page is plain text: "# " a heading, "- " a point
- * in a list, a blank line between paragraphs; the lines of a paragraph
- * run together and wrap to the window. */
+/* Displays /HELP pages by app. Plain text supports "# " headings, "- " list
+ * items, blank-line paragraphs, and wrapped paragraph lines. */
 #include "os/help.h"
 #include "fs/fs.h"
 #include "os/api.h"
@@ -40,7 +38,7 @@ app_descriptor help_app;
 static char s_pending[FS_PATH_SZ]; /* help_open: where to go */
 static bool s_has_pending;
 
-/* ── names ────────────────────────────────────────────────────────────── */
+// names
 
 /* "03_Getting_started.TXT" -> "Getting started"; "Audio_Player" -> ... */
 static void shown_name(const char *n, char *out, int sz) {
@@ -60,7 +58,7 @@ static void shown_name(const char *n, char *out, int sz) {
     out[k] = 0;
 }
 
-/* ── the list of folders and pages ────────────────────────────────────── */
+// the list of folders and pages
 
 typedef struct {
     char names[64][FS_NAME_SZ];
@@ -171,7 +169,7 @@ static int node_of(help_state_t *s, const char *rel) {
     return -1;
 }
 
-/* ── the page ─────────────────────────────────────────────────────────── */
+// the page
 
 static int text_w(const char *t, int n, int f) { return text_width_n(t, n, f); }
 
@@ -454,7 +452,7 @@ static void go(help_state_t *s, const char *path) {
     show(s, s->rel[tree_data(s->tree, n)]);
 }
 
-/* ── menus ────────────────────────────────────────────────────────────── */
+// menus
 
 static help_state_t *front(void) { return ui_active_state(); }
 
@@ -512,7 +510,7 @@ static void m_about(void) {
                 "pages the first time they run.");
 }
 
-/* ── the app ──────────────────────────────────────────────────────────── */
+// the app
 
 void help_open(const char *path) {
     snprintf(s_pending, sizeof(s_pending), "%s", path ? path : "");

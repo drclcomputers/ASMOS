@@ -141,16 +141,12 @@ window *wm_focused_window(void);
 void wm_sync_menubar(menubar *mb);
 void wm_draw_all(void);
 
-/* ── lazy redraw ────────────────────────────────────────────────────────
- * The back buffer is kept between frames. A frame redraws everything only
- * when the scene changed (a window opened/moved/closed, a click, a key, a
- * menu...). Otherwise only windows whose content changed are drawn, plus
- * any window on top of them; an idle desktop draws nothing at all.
- *
- * Toolkit controls are tracked automatically. A window with custom-drawn
- * content (ctl_custom, on_draw) is drawn every frame unless it sets
- * lazy_custom and calls wm_invalidate() when that content changes outside
- * a control handler (timers, background tasks). */
+// lazy redraw
+/*
+ * Redraws changed windows and their overlaps; an idle desktop draws nothing.
+ * Controls are tracked automatically. Custom-drawn windows redraw each frame
+ * unless lazy_custom is set and wm_invalidate() marks external changes.
+ */
 void wm_invalidate(window *win);     /* redraw this window next frame */
 void wm_invalidate_all(void);        /* redraw the whole screen next frame */
 void wm_invalidate_app(window *win); /* all windows of win's app */

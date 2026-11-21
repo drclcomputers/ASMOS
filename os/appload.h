@@ -2,32 +2,16 @@
 #define APPLOAD_H
 
 /*
- * ASMOS dynamic application loader (.APP packages)
- *
- *   Off  Size  Field
- *   0    4     magic          'ASMA'
- *   4    2     version        1 (legacy) or 2
- *   6    2     flags          bit0 single_instance
- *                             bit1 state starts with a window* (v2 only)
- *                             bits 8-15 heap size in 16 KB units (0: the
- *                             default 64 KB; up to ~4 MB)
- *   8    4     header_size    68 (v1) or 80 (v2)
- *   12   4     code_offset    from file start
- *   16   4     code_size      bytes of code+data stored in the file
- *   20   4     state_size     4 .. ASMA_MAX_STATE
- *   24   32    name           NUL-terminated
- *   56   4     entry_init     offset into code (0 is valid)
- *   60   4     entry_frame    offset into code (0 is valid)
- *   64   4     entry_destroy  offset into code; v2: ASMA_NO_ENTRY = none,
- *                             v1: 0 = none
- *   --- v2 only ---
- *   68   4     reloc_offset   from file start; table of u32 code offsets
- *   72   4     reloc_count    each word at code+off gets += load base
- *   76   4     bss_size       zero-filled bytes appended after the code
- *
- * v1: entry(state).        v2: entry(const os_api_t *api, void *state).
- * Link v2 apps at address 0 (-Ttext 0 --emit-relocs); tools/mkapp.py
- * builds the relocation table from the ELF.
+ * .APP header bytes (v1=68, v2=80):
+ *   0:4 magic; 4:2 version; 6:2 flags (bit0 single-instance; bit1 v2
+ *   window-first state; bits8-15 heap in 16 KB units, 0=64 KB, max ~4 MB).
+ *   8:4 header size; 12:4 code offset; 16:4 code/data size;
+ *   20:4 state size (4..ASMA_MAX_STATE); 24:32 NUL name;
+ *   56/60/64:4 init/frame/destroy offsets (0 valid; v1 destroy 0 means none,
+ *   v2 uses ASMA_NO_ENTRY).
+ * v2 adds 68:4 relocation offset, 72:4 count, 76:4 zero-filled BSS.
+ * Callbacks receive state (v1) or (api,state) (v2). Link v2 at 0;
+ * mkapp.py builds relocations from the ELF.
  */
 
 #include "fs/fs.h"

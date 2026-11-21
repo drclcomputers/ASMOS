@@ -702,9 +702,7 @@ int scen_apps1(const char *name) {
         return fails;
     }
     if (!strcmp(name, "zoom")) {
-        /* Settings > System > "Large display: 2x": only from 640x400 up; with
-         * it on (kmain: gpu_set_zoom) the desktop is half the screen each way
-         */
+        /* 2x display zoom is available from 640x400 and halves the desktop. */
         int fails = 0;
         char b[300];
         extern int g_zoom;

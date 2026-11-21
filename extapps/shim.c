@@ -5,7 +5,7 @@
 const os_api_t *A;
 extern const app_meta_t app_meta;
 
-/* ── entry points (mkapp: init / on_frame / destroy) ── */
+// entry points (mkapp: init / on_frame / destroy)
 
 void init(const os_api_t *api, void *state) {
     A = api;
@@ -43,12 +43,12 @@ int shim_screen_h(void) {
     return h;
 }
 
-/* ── memory: the app's own heap ── */
+// memory: the app's own heap
 void *kmalloc(uint32_t size) { return A->kmalloc(size); }
 void kfree(void *p) { A->kfree(p); }
 uint32_t time_millis(void) { return A->time_millis(); }
 
-/* ── windows and controls ── */
+// windows and controls
 window *app_window(void *state, const char *title, int x, int y, int w, int h,
                    uint8_t bar, uint32_t flags) {
     return A->ui->app_window(state, title, x, y, w, h, bar, flags);
@@ -110,7 +110,7 @@ void list_set_sel(control *c, int i) { A->ui->list_set_sel(c, i); }
 int list_count(const control *c) { return A->ui->list_count(c); }
 const char *list_get(const control *c, int i) { return A->ui->list_get(c, i); }
 
-/* ── dialogs ── */
+// dialogs
 void dlg_message(window *owner, const char *title, const char *msg) {
     A->ui->message(owner, title, msg);
 }
@@ -134,7 +134,7 @@ void dlg_save_file(window *owner, const char *title, const char *dir,
 }
 void dlg_print(window *owner, const print_doc_t *doc) { A->print(owner, doc); }
 
-/* ── menus: items run fn(state); a void fn(void) ignores it ── */
+// menus: items run fn(state); a void fn(void) ignores it
 menu *window_add_menu(window *win, const char *title) {
     return A->ui->add_menu(win, title);
 }
@@ -143,7 +143,7 @@ void menu_add_item(menu *m, char *label, MenuAction action) {
 }
 void menu_add_separator(menu *m) { A->ui->menu_separator(m); }
 
-/* ── the window manager ── */
+// the window manager
 void wm_invalidate(window *w) { A->invalidate(w); }
 void wm_focus(window *w) { A->wm_focus(w); }
 bool window_is_focused(window *w) { return A->window_focused(w); }
@@ -157,7 +157,7 @@ void os_quit_app_by_desc(app_descriptor *d) {
     A->quit_self(A->active_state());
 }
 
-/* ── drawing ── */
+// drawing
 void draw_line(int x0, int y0, int x1, int y1, unsigned char c) {
     A->draw_line(x0, y0, x1, y1, c);
 }
@@ -183,7 +183,7 @@ void draw_pixels(int x, int y, int w, int h, const uint8_t *src, int stride) {
 int text_width(const char *s, int size) { return A->text_width(s, size); }
 int font_height(int size) { return A->font_height(size); }
 
-/* ── settings: /PREFS/<app name>.INI (the API picks the file) ── */
+// settings: /PREFS/<app name>.INI (the API picks the file)
 bool app_prefs_get(const char *app, const char *key, char *out, int sz) {
     (void)app;
     return A->prefs_get(key, out, sz);
@@ -203,7 +203,7 @@ bool app_prefs_set_int(const char *app, const char *key, int value) {
 void app_prefs_begin(const char *app) { (void)app; }
 bool app_prefs_end(void) { return true; }
 
-/* ── time ── */
+// time
 time_full_t time_rtc_local(void) { return A->time->now(); }
 int time_days_in_month(int m, int y) { return A->time->days_in_month(m, y); }
 bool time_date_valid(int y, int m, int d) {
@@ -220,7 +220,7 @@ int time_iso_week(int y, int m, int d) { return A->time->iso_week(y, m, d); }
 const char *time_month_name(int m) { return A->time->month_name(m); }
 const char *time_weekday_name(int wd) { return A->time->weekday_name(wd); }
 
-/* ── sound ── */
+// sound
 void speaker_beep_async(uint32_t hz, uint32_t ms) { A->sound->beep(hz, ms); }
 bool sb16_detected(void) { return A->sound->has_sb(); }
 bool opl2_detected(void) { return A->sound->has_fm(); }
@@ -251,7 +251,7 @@ int audio_level(void) { return A->sound->level(); }
 const char *const *audio_extensions(void) { return A->sound->extensions(); }
 void audio_update(void) {} /* the OS does it every frame */
 
-/* ── clipboard ── */
+// clipboard
 void clipboard_set_text(const char *t, int len) { A->clip->set_text(t, len); }
 int clipboard_history_count(void) { return A->clip->history_count(); }
 const char *clipboard_history_get_text(int i) {

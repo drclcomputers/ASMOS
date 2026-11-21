@@ -4,15 +4,9 @@
 #include "lib/core.h"
 
 /*
- * IDE/ATA disks, PIO, polled.
- *
- * ata_init() finds the controllers (PCI IDE in native mode, else the
- * legacy 0x1F0/0x170 ports), IDENTIFYs all four positions and picks:
- *   unit 0 (HDA) = the disk we booted from (ASMOS boot sector; BIOS drive
- *                  number breaks ties),
- *   unit 1 (HDB) = the next hard disk found.
- * Drives without LBA (most pre-1994 disks) are driven in CHS mode using the
- * geometry they report.
+ * Polled PIO for IDE/ATA disks. ata_init() scans PCI and legacy controllers,
+ * maps the boot disk to HDA (BIOS drive number breaks ties) and the next disk
+ * to HDB. Drives without LBA use their reported CHS geometry.
  */
 
 #define ATA_REG_DATA 0x00

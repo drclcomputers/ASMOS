@@ -2,20 +2,9 @@
 #define FPU_EMU_H
 
 /*
- * x87 emulator for machines without a maths coprocessor (386SX/DX, 486SX),
- * like Windows 3.1's WIN87EM. With CR0.EM set every x87 instruction raises
- * #NM; the handler decodes it, does the work in software and steps over it.
- *
- * Numbers are kept at the x87's own precision (64-bit mantissa, 15-bit
- * exponent), so results match a real FPU. Covered: loads/stores of all
- * formats (16/32/64-bit integers, float, double, 80-bit, BCD), arithmetic,
- * compares, control/status/environment (fnstsw, fldcw, fnstenv, fsave...),
- * fsqrt, fprem, frndint, fscale, fxtract and the transcendentals
- * (fsin, fcos, fsincos, fptan, fpatan, f2xm1, fyl2x, fyl2xp1). Exceptions
- * set their status flags but never trap (they are masked by default).
- *
- * It is slow (hundreds to thousands of cycles per instruction), as it was
- * on the real machines.
+ * Software x87 for 386/486 without an FPU. #NM handlers emulate loads/stores
+ * (integer, float, double, 80-bit, BCD), arithmetic, comparisons, and
+ * transcendental operations at x87 precision. Masked exceptions set flags.
  */
 
 #include "lib/core.h"

@@ -1,10 +1,6 @@
-/* drivers/gpu.c as the kernel has it (the simulator has its own screen):
- * the planar blit and gpu_put in every planar mode, with and without the
- * 2x zoom, against a model of the VGA's 4 planes. Built and run by run.sh.
- *
- * VGA memory is mapped at 0xA0000; the planes live in planes[] and are
- * swapped in and out whenever the map mask changes (gpu.c only writes the
- * screen, one plane at a time). */
+/* Exercises the kernel's planar blit and gpu_put in every mode, with and
+ * without 2x zoom, against a four-plane VGA model. run.sh builds and runs it.
+ * The model maps VGA memory at 0xA0000 and selects planes by map mask. */
 #include "lib/core.h"
 #include "lib/mem.h"
 #include "lib/string.h"

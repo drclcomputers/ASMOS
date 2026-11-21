@@ -16,7 +16,7 @@ static ata_disk_t s_disks[ATA_MAX_DISKS]; /* index = channel*2 + slave */
 static int8_t s_unit[2] = {-1, -1};       /* logical unit -> s_disks index */
 static char s_desc[48] = "legacy ports";
 
-/* ── low level ─────────────────────────────────────────────────────────── */
+// low level
 
 static inline uint8_t status(const ata_channel_t *c) {
     return inb(c->base + ATA_REG_STATUS);
@@ -98,7 +98,7 @@ static const ata_disk_t *disk_of(uint8_t unit) {
     return &s_disks[(int)s_unit[unit]];
 }
 
-/* ── detection ─────────────────────────────────────────────────────────── */
+// detection
 
 /* PCI IDE controller in native mode: use its BARs. Compatibility mode (the
  * norm on 386-Pentium boards, and ISA cards) keeps the legacy ports. */
@@ -270,7 +270,7 @@ int ata_init(uint8_t bios_boot_drive) {
 const ata_disk_t *ata_unit(uint8_t unit) { return disk_of(unit); }
 const char *ata_controller_desc(void) { return s_desc; }
 
-/* ── I/O ───────────────────────────────────────────────────────────────── */
+// I/O
 
 bool ata_read_sector(uint8_t unit, uint32_t lba, void *buf) {
     const ata_disk_t *d = disk_of(unit);
@@ -330,7 +330,7 @@ bool ata_write_sectors(uint8_t unit, uint32_t lba, uint8_t count,
     return true;
 }
 
-/* ── shut down ─────────────────────────────────────────────────────────── */
+// shut down
 
 /* BSY clear within ms milliseconds (the timer runs: spinning down takes
  * seconds on old drives) */
@@ -371,11 +371,9 @@ void ata_park(bool spin_down) {
     }
 }
 
-/* ── the CD-ROM drive (ATAPI; drivers/cdrom.h) ─────────────────────────────
- * Commands go as 12-byte SCSI packets: PACKET (A0h), then the packet as 6
- * words, then the data in pieces whose size the drive puts in the cylinder
- * registers. All polled; the waits are timed (a disc spins up for
- * seconds). */
+// the CD-ROM drive (ATAPI; drivers/cdrom.h)
+/* ATAPI sends a 12-byte SCSI packet after PACKET (A0h); cylinder registers
+ * report data chunk sizes. Transfers are polled with timed waits. */
 
 static struct {
     bool present;
@@ -536,7 +534,7 @@ bool cd_capacity(uint32_t *sectors) {
     return true;
 }
 
-/* ── audio ── */
+// audio
 
 bool cd_read_toc(cd_toc_t *toc) {
     static uint8_t b[4 + 8 * (CD_MAX_TRACKS + 1)];

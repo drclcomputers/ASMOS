@@ -1,22 +1,9 @@
 #ifndef VIDEO_CFG_H
 #define VIDEO_CFG_H
 
-/*
- * The screen mode is chosen in real mode by the boot loader, before the
- * kernel runs, so it is stored on the boot disk itself: "VM" + one byte at
- * offset 2 of the first stage-2 sector (sector 1 of the boot volume: the
- * partition's on a hard disk, which fs_read_sector adds; boot/stage2.asm).
- *   VIDEO_320     320x200, 256 colours (BIOS mode 13h)
- *   VIDEO_640     640x400, 16 colours (mode 12h reprogrammed to 400 lines)
- *   VIDEO_640x480 640x480, 16 colours (mode 12h)
- *   VIDEO_800     800x600, 16 colours (SVGA mode 6Ah / VESA 102h)
- * A change takes effect at the next boot.
- *
- * The boot loader also limits it to what the machine can take: under 3 MB
- * 320x200 only, a 386 up to 640x480, 800x600 with a 486 and 4 MB (and a
- * video card that has the mode). The numbers grow with the screen, so the
- * allowed ones are always 0 .. video_max_mode().
- */
+/* Stage 2 reads the mode byte after "VM" at offset 2; changes apply at boot.
+ * VIDEO_320=320x200/256, VIDEO_640=640x400/16, VIDEO_640x480=640x480/16,
+ * VIDEO_800=800x600/16. Choices depend on CPU, memory, and video hardware. */
 
 #include "lib/core.h"
 

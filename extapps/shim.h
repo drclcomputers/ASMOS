@@ -1,22 +1,9 @@
 #ifndef EXTAPPS_SHIM_H
 #define EXTAPPS_SHIM_H
-/*
- * Built-in app source, run as a .APP. The apps bundled in /APPS were built
- * into the kernel once; this header lets their code stay as it was: the
- * kernel functions they call (ctl_button, dlg_message, fill_rect,
- * time_rtc_local, audio_play...) are defined in shim.c, where each one
- * calls the app API (os/appapi.h) instead. String and number helpers
- * (lib/string.c, lib/math.c) are compiled into the app itself.
- *
- *   #include "extapps/shim.h"
- *   ...the app...
- *   APP_META("Puzzle", puzzle_state_t, true, 0, puzzle_init, NULL, NULL);
- *
- * APP_META: the name (Apps menu, prefs file), the state type (its first
- * member a window *), single instance, heap in KB (0: 64 KB) and the
- * init / on_frame / destroy functions, fn(void *state) as before.
- * tools/mkapp.py --meta reads it.
- */
+/* Compiles built-in app sources as .APPs: shim.c maps kernel calls to the
+ * app API, while string/math helpers are linked in. APP_META(name, state,
+ * single_instance, heap_kb, init, on_frame, destroy) declares metadata for
+ * tools/mkapp.py --meta. */
 #include "os/appapi.h"
 
 #include "drivers/opl2.h"

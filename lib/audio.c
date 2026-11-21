@@ -33,7 +33,7 @@ static const codec_t *s_codec;
 static int s_state = AUDIO_EMPTY;
 static bool s_loop, s_finished;
 
-/* ── WAV ────────────────────────────────────────────────────────────── */
+// WAV
 
 static uint8_t *w_pcm;
 static uint32_t w_len, w_rate;
@@ -98,7 +98,7 @@ static int wav_level(void) {
     return (int)(m * 2 > 255 ? 255 : m * 2);
 }
 
-/* ── MIDI ───────────────────────────────────────────────────────────── */
+// MIDI
 
 static uint32_t m_pos, m_last; /* ms played, pit at the last update */
 
@@ -226,8 +226,9 @@ static void mid_close(void) { midi_player_stop(); }
 static bool mid_busy(void) { return midi_player_is_playing(); }
 static uint32_t mid_pos(void) { return m_pos; }
 
-/* ── CD audio: a .cda (Track01.cda on an audio CD) names a track; the
- * drive plays it itself, out of its audio cable to the sound card ──── */
+// CD audio
+/* A .cda file (Track01.cda) names a track; the drive plays it through its
+ * audio cable to the sound card. */
 
 static uint32_t c_start, c_len, c_at; /* sectors; c_at: last position seen */
 static uint32_t c_seen;               /* pit_ticks then */
@@ -322,7 +323,7 @@ static bool cda_seek(uint32_t ms) {
     return c_on;
 }
 
-/* ── the codec table ───────────────────────────────────────────────── */
+// the codec table
 
 static const char *const WAV_EXT[] = {"WAV", NULL};
 static const char *const MID_EXT[] = {"MID", "MIDI", NULL};
@@ -348,7 +349,7 @@ const char *const *audio_extensions(void) {
     return all;
 }
 
-/* ── the player ────────────────────────────────────────────────────── */
+// the player
 
 void audio_close(void) {
     if (s_codec)

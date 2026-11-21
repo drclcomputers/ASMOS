@@ -1,14 +1,5 @@
-/* drivers/ata.c's CD-ROM part as the kernel has it (the simulator has its
- * own CD drive): against a model of an ATAPI drive on the I/O ports, with
- * the test disc fixtures/cd.iso. Built and run by run.sh.
- *
- * The model: nothing on the primary cable (a floating bus reads FFh), the
- * CD drive as secondary master (170h/376h), no slave. It answers IDENTIFY
- * with an abort and the ATAPI signature, IDENTIFY PACKET DEVICE, and the
- * packets TEST UNIT READY, REQUEST SENSE, READ (10), READ CAPACITY and
- * START STOP UNIT; data comes in pieces of at most 8 KB (several DRQ
- * phases a command), and BSY stays up for a few status reads after each
- * command. */
+/* Tests the kernel's ATAPI CD-ROM driver with fixtures/cd.iso. The secondary
+ * master model splits data into 8 KB DRQ phases and delays BSY clearing. */
 #include "drivers/ata.h"
 #include "drivers/cdrom.h"
 #include "drivers/pci.h"

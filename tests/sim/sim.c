@@ -19,14 +19,14 @@
 #include "sys.h"
 #include "ui/ui.h"
 
-/* ── globals normally in kernel.c / idt.c / scheduler.c ── */
+// globals normally in kernel.c / idt.c / scheduler.c
 int g_screen_width = 640, g_screen_height = 400, g_video_mode = 1,
     g_backbuf_size = 640 * 400;
 uint8_t _heap_start;
 volatile uint32_t pit_ticks, pit_seconds;
 mousevar mouse;
 
-/* ── hardware stubs ── */
+// hardware stubs
 /* fake CMOS clock: BCD, 24 h, 2026-11-16 10:35:00 Monday */
 static unsigned char s_cmos_idx;
 unsigned char g_cmos[128] = {
@@ -202,9 +202,7 @@ void ata_park(bool spin_down) {
     (void)spin_down;
     g_ata_parks++;
 }
-/* ── the CD drive (drivers/cdrom.h): an ISO image, put in and taken out by
- * the scenarios (sim_cd_insert / sim_cd_eject). A disc put in reports
- * "changed" once, as a real drive does. */
+/* CD-ROM model: scenarios insert/eject an ISO; insertion reports one change. */
 #include "drivers/cdrom.h"
 static void *map(uint32_t addr, uint32_t len);
 bool load_file(const char *path, uint8_t *dst, uint32_t max, uint32_t *got);
@@ -341,10 +339,10 @@ bool ata_write_sectors(uint8_t d, uint32_t l, uint8_t c, const void *b) {
     return true;
 }
 
-/* ── scheduler stubs ── */
+// scheduler stubs
 /* real cooperative tasks: simtask.c */
 
-/* ── tiny libc for the harness ── */
+// tiny libc for the harness
 void wr(int fd, const char *s) { sys3(SYS_write, fd, (int)s, strlen(s)); }
 void sim_log(const char *s) {
     wr(1, s);
@@ -384,7 +382,7 @@ bool load_file(const char *path, uint8_t *dst, uint32_t max, uint32_t *got) {
     return true;
 }
 
-/* ── VGA 16-colour palette ── */
+// VGA 16-colour palette
 static const uint8_t PAL[16][3] = {
     {0, 0, 0},     {0, 0, 170},    {0, 170, 0},    {0, 170, 170},
     {170, 0, 0},   {170, 0, 170},  {170, 85, 0},   {170, 170, 170},
@@ -420,7 +418,7 @@ void sim_shot(const char *name) {
     sys3(SYS_close, fd, 0, 0);
 }
 
-/* ── frame loop (mirrors scheduler_kernel_task) ── */
+// frame loop (mirrors scheduler_kernel_task)
 extern bool g_menubar_click_consumed;
 void desktop_on_frame(void);
 void draw_cursor(int x, int y);

@@ -1,13 +1,6 @@
-/*
- * Putting ASMOS on a hard disk: see fs/install.h.
- *
- * The layout (as tools/mkdisk.py builds it):
- *   LBA 0        MBR (boot/mbr.asm) + one active FAT16 partition
- *   LBA 1..62    zeros
- *   LBA 63       the partition: boot sector (boot/vbr.asm, real BPB),
- *                stage 2 in the 15 reserved sectors after it, 2 FATs,
- *                a 512-entry root, data
- */
+/* Disk layout (also tools/mkdisk.py): LBA 0 MBR/active FAT16 partition,
+ * LBAs 1-62 zero, LBA 63 partition VBR, then 15 stage-2 sectors, two FATs,
+ * a 512-entry root, and data. See fs/install.h for installer stages. */
 #include "fs/install.h"
 #include "drivers/ata.h"
 #include "fs/bootcode.h"
@@ -40,7 +33,7 @@ static void put16(uint8_t *p, uint32_t v) {
     p[1] = (uint8_t)(v >> 8);
 }
 
-/* ── the FAT16 volume inst_erase makes ──────────────────────────────────── */
+// the FAT16 volume inst_erase makes
 
 typedef struct {
     uint32_t sectors;
@@ -92,7 +85,7 @@ static bool plan(uint32_t disk, layout_t *l) {
     return true;
 }
 
-/* ── probe ──────────────────────────────────────────────────────────────── */
+// probe
 
 void inst_probe(uint8_t unit, inst_disk_t *d) {
     memset(d, 0, sizeof(*d));
@@ -154,7 +147,7 @@ void inst_probe(uint8_t unit, inst_disk_t *d) {
         d->can_keep = true;
 }
 
-/* ── erase: partition table + empty FAT16 ──────────────────────────────── */
+// erase: partition table + empty FAT16
 
 static void chs(uint32_t lba, uint32_t heads, uint8_t *out) {
     uint32_t c = lba / (heads * 63);
@@ -268,7 +261,7 @@ const char *inst_erase_label(uint8_t unit, const char *label,
     return NULL;
 }
 
-/* ── boot code ──────────────────────────────────────────────────────────── */
+// boot code
 
 const char *inst_write_boot(uint8_t unit, int video_mode) {
     static uint8_t b[512], v[512];
@@ -319,7 +312,7 @@ const char *inst_write_boot(uint8_t unit, int video_mode) {
     return NULL;
 }
 
-/* ── files ──────────────────────────────────────────────────────────────── */
+// files
 
 typedef struct {
     inst_progress_fn cb;
