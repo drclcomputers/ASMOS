@@ -329,7 +329,8 @@ int scen_help(const char *name) {
               HAS(acc, "Character Map"));
         T("System Tools: HexView .APP + built-in shortcuts",
           sys && HAS(sys, "HexView") && HAS(sys, "Monitor") &&
-              HAS(sys, "Print Queue"));
+              HAS(sys, "ASMTerm") && HAS(sys, "Format Disk") &&
+              !HAS(sys, "Print Queue") && !HAS(sys, "Joystick"));
         T("Games has Puzzle + Sudoku", games && games->item_count == 2 &&
                                            HAS(games, "Puzzle") &&
                                            HAS(games, "Sudoku"));
