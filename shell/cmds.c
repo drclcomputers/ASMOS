@@ -1,5 +1,6 @@
 #include "shell/cmds.h"
 #include "drivers/gpu.h"
+#include "drivers/joystick.h"
 #include "drivers/lpt.h"
 #include "drivers/pci.h"
 #include "drivers/sb16.h"
@@ -128,6 +129,7 @@ static const help_topic_t HELP[] = {
     {"devices", "Sound, printer and ports",
      "  play <f> [loop]  Play a WAV or MIDI file; play stop\n"
      "  lpt              Parallel and serial ports\n"
+     "  joy [detect]     Game port joystick: position, buttons\n"
      "  print <f> [n]    Print a text file (on LPTn); it is queued\n"
      "  Printer type and queue: Settings > Printers.\n"},
     {"programs", "Programs",
@@ -810,6 +812,33 @@ void cmd_lpt(char *out, size_t max) {
         }
 }
 
+/* joy [detect] : the game port's stick, read now */
+void cmd_joy(const char *args, char *out, size_t max) {
+    char buf[128];
+    if (!strcmp(args, "detect"))
+        joy_detect();
+    if (!joy.present) {
+        append(out, max,
+               "No joystick on the game port (201h).\n"
+               "joy detect looks again; Settings > Devices sets one up.\n");
+        return;
+    }
+    joy_update();
+    sprintf(buf, "Joystick on 201h, %s\n",
+            g_cfg.joy.calibrated ? "calibrated" : "not calibrated");
+    append(out, max, buf);
+    for (int i = 0; i < JOY_AXES; i++)
+        if (joy.axes & (1 << i)) {
+            sprintf(buf, "  axis %c  %4d  (raw %u)\n", "XYZR"[i], joy.axis[i],
+                    (unsigned)joy_raw(i));
+            append(out, max, buf);
+        }
+    sprintf(buf, "  buttons  %c %c %c %c\n", joy.buttons & 1 ? '1' : '-',
+            joy.buttons & 2 ? '2' : '-', joy.buttons & 4 ? '3' : '-',
+            joy.buttons & 8 ? '4' : '-');
+    append(out, max, buf);
+}
+
 /* print <file> [1|2|3] : text file to a parallel port */
 void cmd_print(const char *args, char *out, size_t max) {
     char path[FS_PATH_SZ], buf[128];
@@ -856,7 +885,8 @@ void cmd_print(const char *args, char *out, size_t max) {
 }
 
 /* SYS HDA|HDB installs ASMOS boot code and SYSTEM\KERNEL.SYS while preserving
- * the partition table, BPB, and existing files. Setup handles new/erased disks. */
+ * the partition table, BPB, and existing files. Setup handles new/erased disks.
+ */
 void cmd_sys(const char *args, char *out, size_t max) {
     char a[16];
     snprintf(a, sizeof(a), "%s", args ? args : "");

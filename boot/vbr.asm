@@ -1,17 +1,8 @@
 ; ─────────────────────────────────────────────────────────────────────────────
-; ASMOS volume boot record: sector 0 of an ASMOS volume (a FAT16 partition on
-; a hard disk, or a whole FAT12 floppy).
-;
-; The BPB below is a template: whoever formats the volume (tools/mkdisk.py,
-; Setup) overwrites bytes 0x0B..0x3D with the real one, so this code works
-; for every size. It runs at 0x7C00 (from the BIOS on a floppy, from the MBR
-; on a hard disk) and:
-;   1. finds out how to read the drive: INT 13h extensions (LBA), else CHS
-;      with the BIOS's geometry (AH=08h; the BPB's on a floppy);
-;   2. reads stage 2, the reserved sectors after this one, to 0x7E00
-;      (hidden_sectors in the BPB says where the volume starts on the disk);
-;   3. jumps there, leaving what it found at 0x7C3E for stage 2.
-; Stage 2 then reads the FAT itself to find /SYSTEM/KERNEL.SYS.
+; ASMOS volume boot record (sector 0 of a FAT16 partition or a FAT12 floppy).
+; Formatting writes the real BPB over the template at 0x0B..0x3D. Runs at
+; 0x7C00: picks LBA or CHS reads, loads stage 2 (the reserved sectors) to
+; 0x7E00 and jumps there, leaving the drive details at 0x7C3E.
 ; ─────────────────────────────────────────────────────────────────────────────
 [bits 16]
 [org 0x7C00]

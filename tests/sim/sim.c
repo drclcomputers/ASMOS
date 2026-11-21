@@ -39,6 +39,12 @@ unsigned char g_lpt_out[262144];
 unsigned g_lpt_n;
 int g_lpt_status = 0xD8; /* nBUSY | nACK | SELECT | nERROR */
 static unsigned char s_lpt_latch, s_lpt_ctl;
+/* fake game port (0x201) and the PIT counter it is timed with
+ * (drivers/joystick.c): an axis stays high g_sim_joy_t[i] counter units
+ * after the port is written (0 = nothing there: stays high); each counter
+ * latch is 5 units later. g_sim_joy_btn: bit n = button n+1 held. */
+unsigned g_sim_joy_t[4], g_sim_joy_btn;
+static unsigned s_gp_clock, s_gp_t0, s_gp_latch, s_gp_phase;
 extern _Bool fdc_port_in(unsigned short p, unsigned char *v);
 extern _Bool fdc_port_out(unsigned short p, unsigned char v);
 unsigned char inb(unsigned short p) {
@@ -47,6 +53,15 @@ unsigned char inb(unsigned short p) {
         return fv;
     if (p == 0x71)
         return g_cmos[s_cmos_idx & 0x7F];
+    if (p == 0x201) {
+        unsigned v = 0xF0 & ~(g_sim_joy_btn << 4);
+        for (int i = 0; i < 4; i++)
+            if (!g_sim_joy_t[i] || s_gp_clock - s_gp_t0 < g_sim_joy_t[i])
+                v |= 1u << i;
+        return (unsigned char)v;
+    }
+    if (p == 0x40)
+        return (unsigned char)(s_gp_phase++ ? s_gp_latch >> 8 : s_gp_latch);
     if (p == 0x378)
         return s_lpt_latch;
     if (p == 0x379)
@@ -64,6 +79,13 @@ uint32_t inl(unsigned short p) {
 void outb(unsigned short p, unsigned char v) {
     if (fdc_port_out(p, v))
         return;
+    if (p == 0x201)
+        s_gp_t0 = s_gp_clock;
+    if (p == 0x43 && v == 0) {
+        s_gp_clock += 5;
+        s_gp_latch = 1192 - s_gp_clock % 1193;
+        s_gp_phase = 0;
+    }
     if (p == 0x378)
         s_lpt_latch = v;
     if (p == 0x37A) {
@@ -444,6 +466,10 @@ void sim_frame(void) {
     {
         extern void fdd_poll(void);
         fdd_poll();
+    }
+    {
+        extern void joy_update(void);
+        joy_update();
     }
     mouse.left_clicked = mouse.left && !s_prev_left;
     s_prev_left = mouse.left;

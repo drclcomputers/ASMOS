@@ -739,7 +739,7 @@ int scen_apps1(const char *name) {
         } else if (zc->enabled) {
             for (control *c = w->controls; c; c = c->next)
                 if (c->type == CTL_TABS) {
-                    ctl_set_value(c, 5);
+                    ctl_set_value(c, 6);
                 } /* System */
             sim_frames(2);
             sim_click(zc->ax + 4, zc->ay + 4);

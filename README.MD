@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.2.7
+Version 3.2.9
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -65,6 +65,12 @@ Features
   and DOS (437: box drawing, blocks, Greek). Settings > Display >
   Characters picks the one in use. Character Map shows them all; Alt and a
   code on the number pad types one anywhere (Alt+0233).
+- **Joystick**: a stick on the game port (the 15-pin one, 201h): up to 4
+  axes and 4 buttons. Settings > Devices lists what is plugged in;
+  double-click the joystick to calibrate it (centre, then every edge), set
+  the dead zone and reverse axes. Apps read it through the API (see
+  docs/DYNAMIC_APPS.md). QEMU and Bochs have no game port; 86Box does
+  (Settings > Input devices > Joystick).
 - **Floppies**: a disk read shows on the desktop. Taking it out is noticed
   by itself (its icon goes); to read one put in, open its drive in FileF's
   Drives. Eject writes what is waiting first.
@@ -249,11 +255,12 @@ The bundled apps:
 | ------------------------------------------------------------------ | --------------------------------------------------------- |
 | FileF                                                              | file manager: copy, move, delete, rename, properties, zip |
 | TEditor                                                            | text editor                                               |
-| Settings                                                           | Display, Sound, Clock, Network, Printers, System          |
+| Settings                                                           | Display, Sound, Clock, Network, Printers, Devices, System |
 | ASMTerm                                                            | the shell in a window                                     |
 | Monitor                                                            | running apps, End Task, memory, CPU                       |
 | Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                        | the printer's jobs                                        |
+| Joystick                                                           | calibrate the game port's stick                           |
 | ASMDraw                                                            | pixel art editor                                          |
 | Help                                                               | the help pages of every app                               |
 | Character Map                                                      | every character of the code page, to copy                 |
@@ -273,7 +280,7 @@ files     pwd cd ls mkdir rmdir cat find touch write cp mv rm format sys
 time      date time cal
 info      sysinfo mem df lspci
 network   ping gopher netconf
-devices   play lpt print
+devices   play lpt joy print
 programs  asm (assemble .ASM to .BIN), run (a .BIN), app run|scan|list|unload
 shell     help clear echo history tee gui exit shutdown reboot
 ```
@@ -564,11 +571,17 @@ Apps (os/, docs/DYNAMIC_APPS.md)
 - The watchdog (os/watchdog.c) shows the hourglass when the main loop is
   stuck, and lets Ctrl+Shift+Q end the app.
 
-Input (drivers/ps2.c, mouse.c, sermouse.c, keyboard.c)
+Input (drivers/ps2.c, mouse.c, sermouse.c, keyboard.c, joystick.c)
 
 - While the desktop runs, the timer reads the keyboard controller 1000 times
   a second: no mouse bytes lost on slow machines. Keys wait in a queue for
   the main loop.
+- Joystick: an axis is a resistor, so the game port gives a time: writing
+  to 201h starts a timer per axis and its bit stays high until it runs out.
+  The driver measures it with the PIT (the same on any CPU speed) with
+  interrupts off for about a millisecond, once a frame, and only when a
+  stick answered at start or at Detect. The times are calibrated to -100..100
+  (the centre, the two edges and the dead zone are in ASMOS.CFG).
 
 Disks (drivers/ata.c, fdd.c, fs/)
 
@@ -647,7 +660,7 @@ boot/        Boot code: mbr.asm, vbr.asm, stage2.asm, bootdefs.inc,
 os/          Core OS: apps, scheduler, app guard, watchdog, errors
 interrupts/  IDT setup and interrupt handlers
 drivers/     GPU, pointer, sound, NIC, ATA, floppy, PS/2 keyboard/mouse,
-             serial mouse, PC speaker, ports, PCI
+             serial mouse, joystick, PC speaker, ports, PCI
 fs/          FAT file system, ISO 9660 (CD), floppy mount/eject, formatting,
              ZIP, installer
 ui/          Window manager, desktop, widgets, dialogs, cursor, screen saver

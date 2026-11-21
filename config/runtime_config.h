@@ -4,8 +4,17 @@
 #include "lib/core.h"
 
 #define CFG_MAGIC 0x4153434F
-#define CFG_VERSION 3
+#define CFG_VERSION 4
 #define CFG_PATH "/ASMOS.CFG"
+
+/* The game port's calibration (drivers/joystick.h): times in the driver's
+ * units, per axis (X, Y of stick A, then X, Y of stick B). */
+typedef struct __attribute__((packed)) {
+    uint16_t min[4], mid[4], max[4];
+    uint8_t deadzone; /* percent of the travel that counts as centred */
+    uint8_t invert;   /* bit per axis */
+    uint8_t calibrated;
+} joy_cfg_t;
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
@@ -50,6 +59,8 @@ typedef struct __attribute__((packed)) {
      * 8x8 pixels, row by row, two to a byte (left one in the high nibble).
      * Older files end before it: they load with the default one. */
     uint8_t wall_custom[32];
+    /* version 4: the joystick. Older files end before it (uncalibrated). */
+    joy_cfg_t joy;
 } os_config_t;
 
 extern os_config_t g_cfg;

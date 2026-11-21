@@ -32,6 +32,7 @@ void cfg_init_defaults(void) {
     g_cfg.wallpaper_main_color = LIGHT_BLUE;
     g_cfg.wallpaper_secondary_color = LIGHT_CYAN;
     cfg_default_pattern(g_cfg.wall_custom);
+    g_cfg.joy.deadzone = 10;
     g_cfg.filef_single_window = 0;
     g_cfg.reduce_motion = 0;
     g_cfg.classic_fonts = 0;
@@ -86,10 +87,10 @@ bool cfg_load(void) {
     int n = fs_read(&f, &tmp, sizeof(os_config_t));
     fs_close(&f);
 
-    /* version 2 files end before wall_custom */
-    if (n < (int)(sizeof(os_config_t) - sizeof(tmp.wall_custom)))
+    /* version 2 files end before wall_custom, version 3 before joy */
+    if (n < (int)__builtin_offsetof(os_config_t, wall_custom))
         return false;
-    if (n < (int)sizeof(os_config_t))
+    if (n < (int)__builtin_offsetof(os_config_t, joy))
         cfg_default_pattern(tmp.wall_custom);
     if (tmp.magic != CFG_MAGIC)
         return false;

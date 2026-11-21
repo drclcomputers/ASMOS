@@ -28,6 +28,7 @@ void cmd_sys(const char *args, char *out, size_t max);
 void cmd_sysinfo(char *out, size_t max);
 void cmd_lspci(char *out, size_t max);
 void cmd_lpt(char *out, size_t max);
+void cmd_joy(const char *args, char *out, size_t max);
 void cmd_print(const char *args, char *out, size_t max);
 void cmd_play(const char *args, char *out, size_t max);
 void cmd_shutdown(const char *args, char *out, size_t max);

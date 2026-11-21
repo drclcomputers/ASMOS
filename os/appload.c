@@ -809,6 +809,7 @@ static const os_api_t s_api = {
     .quit_self = api_quit_self,
     .ui = &s_ui,
     .kb = &kb,
+    .joy = &joy,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

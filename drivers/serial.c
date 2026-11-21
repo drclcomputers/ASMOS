@@ -3,6 +3,10 @@
 
 #define COM1_PORT 0x3F8
 
+uint16_t com_base(int n) {
+    return n >= 0 && n < 4 ? bios_data_word((uint32_t)n * 2) : 0;
+}
+
 void serial_init(void) {
     outb(COM1_PORT + 1, 0x00);
     outb(COM1_PORT + 3, 0x80);

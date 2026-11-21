@@ -2,8 +2,11 @@
  * ASMOS.CFG. */
 #include "config/runtime_config.h"
 #include "config/video_cfg.h"
+#include "drivers/joystick.h"
 #include "drivers/lpt.h"
+#include "drivers/ne2000.h"
 #include "drivers/sb16.h"
+#include "drivers/sermouse.h"
 #include "lib/time.h"
 #include "network/gopher.h" /* parse_ip_str */
 #include "os/api.h"
@@ -12,7 +15,7 @@
 #include "ui/uifont.h"
 
 /* tabs; Screen Saver and Speed open from Display */
-enum { P_WALL, P_SOUND, P_CLOCK, P_NET, P_PRINT, P_SYSTEM };
+enum { P_WALL, P_SOUND, P_CLOCK, P_NET, P_PRINT, P_DEVICES, P_SYSTEM };
 
 #define PERF_FLAGS 5
 
@@ -30,6 +33,7 @@ typedef struct {
     uint32_t clock_shown; /* second last shown */
     window *sub;          /* Screen Saver or Speed, while open */
     control *p_type, *p_port, *p_status;
+    control *dev_list; /* Devices tab */
     /* the pattern editor, while open: its copy of the pattern, the two
      * colours (left button / right button) */
     uint8_t pat[64];
@@ -728,6 +732,83 @@ static void on_prn_test(control *c, int ev) {
     prn_status(s);
 }
 
+// Devices tab: what is plugged in. A double-click sets one up.
+
+extern app_descriptor joyconf_app;
+enum { DEV_NONE, DEV_JOY, DEV_SOUND, DEV_NET, DEV_PRINT };
+
+static void dev_add(settings_state_t *s, int action, const char *fmt, ...) {
+    char t[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(t, sizeof(t), fmt, ap);
+    va_end(ap);
+    list_add_data(s->dev_list, t, (uint32_t)action);
+}
+
+static void dev_fill(settings_state_t *s) {
+    list_clear(s->dev_list);
+    list_add(s->dev_list, "Device\tConnection\tDetails");
+    dev_add(s, DEV_NONE, "Keyboard\tPS/2 port\tConnected");
+    mouse_kind_t mk = mouse_kinds();
+    if (mk & MOUSE_PS2)
+        dev_add(s, DEV_NONE, "Mouse\tPS/2 port\tConnected");
+    if (mk & MOUSE_SERIAL)
+        dev_add(s, DEV_NONE, "Mouse\tCOM%d\tSerial", sermouse_port());
+    if (joy.present) {
+        int n = 0;
+        for (int i = 0; i < JOY_AXES; i++)
+            n += (joy.axes >> i) & 1;
+        dev_add(s, DEV_JOY, "Joystick\tGame port %Xh\t%d axes%s", JOY_PORT, n,
+                g_cfg.joy.calibrated ? "" : ", uncalibrated");
+    } else {
+        dev_add(s, DEV_JOY, "Joystick\tGame port %Xh\tNot found", JOY_PORT);
+    }
+    for (int i = 0; i < 4; i++)
+        if (com_base(i) && sermouse_port() != i + 1)
+            dev_add(s, DEV_NONE, "Serial port\tCOM%d %Xh\tFree", i + 1,
+                    com_base(i));
+    for (int i = 0; i < LPT_MAX; i++)
+        if (lpt_base(i))
+            dev_add(s, DEV_PRINT, "Printer port\tLPT%d %Xh\t%s", i + 1,
+                    lpt_base(i), lpt_status_text(lpt_status(i)));
+    if (sb16_detected())
+        dev_add(s, DEV_SOUND, "%s\t%Xh IRQ %d\tDMA %d", sb_model_name(),
+                sb_port(), sb_irq(), sb_dma());
+    if (ne2000_detected())
+        dev_add(s, DEV_NET, "Network card\t%s %Xh\tNE2000", ne2000_bus(),
+                ne2000_io_base());
+    list_set_sel(s->dev_list, 1);
+}
+
+static void on_dev(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_SUBMIT || list_sel(c) < 1)
+        return;
+    switch (list_data(c, list_sel(c))) {
+    case DEV_JOY:
+        os_launch_app(&joyconf_app);
+        break;
+    case DEV_SOUND:
+        ctl_set_value(s->tabs, P_SOUND);
+        break;
+    case DEV_NET:
+        ctl_set_value(s->tabs, P_NET);
+        break;
+    case DEV_PRINT:
+        ctl_set_value(s->tabs, P_PRINT);
+        break;
+    }
+}
+
+static void on_dev_refresh(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK)
+        return;
+    joy_detect(); /* the game port has no plug-in signal */
+    dev_fill(s);
+}
+
 // Clock tab
 
 static int field_num(control *c) {
@@ -849,8 +930,9 @@ static void settings_frame(void *state) {
 static void build(settings_state_t *s) {
     boot_settings(s->boot_sig); /* as they are now */
     window *w = s->win;
-    s->tabs = ctl_tabs(w, 4, 3, 250,
-                       "Display|Sound|Clock|Network|Printers|System", NULL);
+    s->tabs =
+        ctl_tabs(w, 4, 3, 264,
+                 "Display|Sound|Clock|Network|Printers|Devices|System", NULL);
 
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
@@ -1073,9 +1155,24 @@ static void build(settings_state_t *s) {
             P_PRINT);
     prn_status(s);
 
+    /* Devices */
+    s->dev_list =
+        on_page(s, ctl_list(w, 6, 24, 260, 82, LBS_HEADER, on_dev), P_DEVICES);
+    int dcols[3] = {80, 82, 0};
+    list_set_columns(s->dev_list, dcols, 3);
+    dev_fill(s);
+    on_page(s,
+            ctl_label(w, 8, 112, 170, 18,
+                      "Double-click a device to set it up.\n"
+                      "Refresh looks for device changes.",
+                      0),
+            P_DEVICES);
+    on_page(s, ctl_button(w, 206, 114, 60, 13, "Refresh", 0, on_dev_refresh),
+            P_DEVICES);
+
     /* bottom bar */
     s->status = ctl_label(w, 6, 140, 180, 13, "", 0);
-    s->save = ctl_button(w, 200, 140, 50, 13, "Save", 1, on_save);
+    s->save = ctl_button(w, 219, 138, 50, 13, "Save", 1, on_save);
     ctl_style_add(s->save, CS_DEFAULT);
     set_dirty(s, false);
 }
@@ -1091,7 +1188,7 @@ static void settings_init(void *state) {
     settings_state_t *s = state;
     if (g_cfg.sb16_volume == 0)
         g_cfg.sb16_volume = 8;
-    s->win = app_window(s, "Settings", 30, 20, 260, 172, DARK_GRAY, 0);
+    s->win = app_window(s, "Settings", 30, 20, 275, 172, DARK_GRAY, 0);
     if (!s->win)
         return;
     s->win->lazy_custom =

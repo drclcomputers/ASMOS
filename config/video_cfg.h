@@ -3,7 +3,9 @@
 
 /* Stage 2 reads the mode byte after "VM" at offset 2; changes apply at boot.
  * VIDEO_320=320x200/256, VIDEO_640=640x400/16, VIDEO_640x480=640x480/16,
- * VIDEO_800=800x600/16. Choices depend on CPU, memory, and video hardware. */
+ * VIDEO_800=800x600/16. Limits: under 3 MB 320x200 only, a 386 up to
+ * 640x480, 800x600 needs a 486, 4 MB and the card's mode. Modes grow with
+ * the screen, so the allowed ones are 0..video_max_mode(). */
 
 #include "lib/core.h"
 

@@ -1,16 +1,7 @@
 ; ─────────────────────────────────────────────────────────────────────────────
-; ASMOS master boot record: sector 0 of a hard disk.
-;
-; The BIOS loads it to 0x7C00 and jumps here with DL = the drive. It moves
-; itself to 0x0600, finds the active partition (boot flag 0x80) in the table
-; at 0x1BE, reads that partition's first sector (its VBR) to 0x7C00 and jumps
-; to it with DL = the drive and DS:SI = the partition's table entry, as every
-; MBR since DOS 2 does. So it boots anything, and anything else's MBR boots
-; ASMOS's VBR.
-;
-; Reads: INT 13h AH=42h (LBA) when the BIOS has it, else AH=02h (CHS) with the
-; geometry from AH=08h. Setup writes the partition table (apps/setup.c);
-; this code never changes it.
+; ASMOS master boot record. Moves itself to 0x0600, loads the active
+; partition's VBR to 0x7C00 (LBA, else CHS) and jumps to it with DL = drive
+; and DS:SI = its table entry, like DOS. Never changes the partition table.
 ; ─────────────────────────────────────────────────────────────────────────────
 [bits 16]
 [org 0x0600]

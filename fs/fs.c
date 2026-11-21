@@ -48,7 +48,8 @@ bool path_is_protected(const char *name_or_path) {
  * files and directories still refer to the old disk. */
 static bool s_remount[DRIVE_COUNT];
 
-/* Retry after a failed access only if the disk changed while unmounted. */
+/* After a failed access on a changed disk: mounted, unmount it (mounted
+ * again on the next access) and fail; not mounted (mounting), retry. */
 static bool fdd_check_change(uint8_t drive_id) {
     if (!fdd_take_change(drive_id == DRIVE_FDD0 ? 0 : 1))
         return false;
@@ -1068,9 +1069,9 @@ bool fs_cd_poll(void) {
     return was != g_drives[DRIVE_CD0].mounted || (st == CD_CHANGED && was);
 }
 
-/* Ejection raises the change line without moving the head, so unmount then.
- * Insertion is detected when the drive is opened (fdd_insert), avoiding a
- * head step and click on an empty drive. */
+/* A disk taken out raises the change line; reading it doesn't move the head,
+ * so unmounting is silent. Insertion is seen when the drive is opened
+ * (fdd_insert): checking an empty drive would step the head (a click). */
 bool fs_fdd_poll(uint8_t *lost) {
     static uint32_t last;
     *lost = DRIVE_COUNT;

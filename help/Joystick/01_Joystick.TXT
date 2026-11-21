@@ -1,0 +1,20 @@
+# Joystick
+
+Joystick sets up a stick on the game port (the 15-pin port of a sound
+card). It opens from Settings > Devices: double-click the joystick.
+
+- The window shows the stick live: a dot for each pair of axes, the dead
+  zone as a blue frame, and the buttons.
+- Calibrate takes two steps. First let go of the stick and press Next (or
+  a button on the stick). Then roll it to every edge a few times and press
+  Next. Without it the stick is taken as centred when ASMOS started.
+- Dead zone: how much of the middle counts as centred. A worn stick that
+  drifts needs more.
+- Reverse turns an axis around (X, Y, then Z and R of a second stick).
+- Reset goes back to no calibration. Detect looks for the stick again; the
+  game port can't tell when one is plugged in.
+- OK keeps the settings in ASMOS.CFG; Cancel puts back the old ones.
+
+Programs read the calibrated values: -100 to 100 on each axis. In the
+shell, joy shows them. QEMU and Bochs have no game port; in 86Box add a
+joystick in Settings > Input devices.

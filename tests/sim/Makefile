@@ -7,7 +7,7 @@ CFLAGS = -m32 -std=gnu11 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -
 EXCL = $(R)/lib/apm.c $(R)/lib/cpu.c $(R)/config/runtime_config.c $(R)/lib/io.c $(R)/lib/libc_compat.c $(R)/apps/asmusic.c $(R)/os/scheduler.c $(R)/lib/vmm.c
 DIRS = lib ui apps fonts fs config shell network
 SRCS = $(filter-out $(EXCL),$(foreach d,$(DIRS),$(wildcard $(R)/$(d)/*.c))) $(R)/os/os.c $(R)/os/app_registry.c $(R)/os/clipboard.c $(R)/os/error.c $(R)/os/appload.c $(R)/os/prefs.c $(R)/os/help.c $(R)/os/watchdog.c $(R)/drivers/pointer.c $(R)/drivers/keyboard.c $(R)/drivers/lpt.c $(R)/os/print.c
-OBJS = $(patsubst $(R)/%.c,o/%.o,$(SRCS)) o/rtcfg.o o/sim.o o/scen.o o/scen_apps1.o o/scen_apps2.o o/scen_storage.o o/scen_help.o o/scen_menu.o o/scen_fs.o o/scen_zip.o o/scen_setup.o o/scen_misc1.o o/scen_misc2.o o/start.o o/stubs.o o/simvmm.o o/simguard.o o/simtask.o o/task_switch.o o/simfdc.o o/drivers/fdd.o o/bootcode.o
+OBJS = $(patsubst $(R)/%.c,o/%.o,$(SRCS)) o/drivers/joystick.o o/rtcfg.o o/sim.o o/scen.o o/scen_apps1.o o/scen_apps2.o o/scen_storage.o o/scen_help.o o/scen_menu.o o/scen_fs.o o/scen_zip.o o/scen_setup.o o/scen_misc1.o o/scen_misc2.o o/scen_joy.o o/start.o o/stubs.o o/simvmm.o o/simguard.o o/simtask.o o/task_switch.o o/simfdc.o o/drivers/fdd.o o/bootcode.o
 sim: $(OBJS)
 	ld -m elf_i386 -static --defsym=_backbuf=0x100000 -o $@ $(OBJS) 2>&1 | grep -v 'missing .note\|NOTE: This' ; true
 o/%.o: $(R)/%.c
@@ -24,6 +24,7 @@ o/scen_zip.o: scen_zip.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/scen_setup.o: scen_setup.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/scen_misc1.o: scen_misc1.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/scen_misc2.o: scen_misc2.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+o/scen_joy.o: scen_joy.c scen.h ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/stubs.o: stubs.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/start.o: start.S ; @mkdir -p o; gcc -m32 -c $< -o $@
 # the kernel's drivers/gpu.c on a model of the VGA planes (gputest.c)
@@ -45,6 +46,8 @@ o/simtask.o: simtask.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/task_switch.o: $(R)/os/task_switch.asm ; @mkdir -p o; nasm -f elf32 $< -o $@
 o/drivers/lpt.o: $(R)/drivers/lpt.c
 	@mkdir -p o/drivers; sed 's/bios_data_word(/sim_bda(/' $< > o/lpt_sim.c; gcc $(CFLAGS) -include sim_bda.h -c o/lpt_sim.c -o $@
+o/drivers/joystick.o: $(R)/drivers/joystick.c
+	@mkdir -p o/drivers; sed 's/; cli"/; nop"/' $< > o/joy_sim.c; gcc $(CFLAGS) -c o/joy_sim.c -o $@
 o/simfdc.o: simfdc.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/drivers/fdd.o: $(R)/drivers/fdd.c
 	@mkdir -p o/drivers; sed -E 's/\((uint8_t|bool|int) \*\)0x([0-9A-F]{4})\)/(\1 *)(sim_low + 0x\2 - 0x7000))/' $< > o/fdd_sim.c; gcc $(CFLAGS) -include sim_low.h -c o/fdd_sim.c -o $@

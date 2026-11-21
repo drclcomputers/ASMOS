@@ -535,6 +535,8 @@ cmd_status_t cli_execute_command(const char *cmd_str, char *out_buffer,
         cmd_lspci(out_buffer, max_len);
     else if (!strcmp(command, "lpt"))
         cmd_lpt(out_buffer, max_len);
+    else if (!strcmp(command, "joy"))
+        cmd_joy(argument, out_buffer, max_len);
     else if (!strcmp(command, "print"))
         cmd_print(argument, out_buffer, max_len);
     else if (!strcmp(command, "play"))

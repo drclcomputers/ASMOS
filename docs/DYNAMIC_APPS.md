@@ -146,6 +146,33 @@ the number pad share codes. `last_char` / `key_pressed` stay what they were:
 one key press, for one frame. Check `window_is_focused(s->win)` first: the
 keys are held for whichever window is in front.
 
+## Joystick
+
+`api->joy` (`joy` in extapps/shim.h; the kernel's `drivers/joystick.h`) is
+the stick on the game port, refreshed once a frame before the apps run:
+
+| field        | meaning                                                  |
+| ------------ | -------------------------------------------------------- |
+| `present`    | a stick answered; false when none is plugged in          |
+| `axes`       | bit mask of the axes that answer (`0x03` a plain stick)  |
+| `axis[0..3]` | X, Y, then Z, R: -100 to 100, 0 centred, calibrated      |
+| `buttons`    | bit n: button n+1 held                                   |
+| `pressed`    | bits that went down since the last frame (for one frame) |
+
+```c
+if (joy.present) {
+    if (joy.axis[0] < -30) turn_left();
+    if (joy.buttons & 1)   fire();
+}
+```
+
+The values are already calibrated (Settings > Devices > Joystick: centre,
+edges, dead zone, reversed axes), so a game only compares them. `joy` was
+added to the end of the API: an app that must also run on an older kernel
+checks that `api->size` reaches it.
+Like the keyboard, it is the same for every window: read it only when
+`window_is_focused(s->win)`.
+
 ## A bigger heap
 
 `mkapp.py --heap 272` (KB; header flags bits 8-15, 16 KB units): for an

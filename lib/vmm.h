@@ -6,8 +6,8 @@
 /*
  * 4 KB paging for 386+. App contexts leave page 0 unmapped, map only their
  * own frame-pool image/heap, and protect kernel code/constants where CR0.WP
- * is supported. Apps run in ring 0; kernel data remains accessible through
- * the API.
+ * is supported. Kernel RAM is mapped 1:1 and apps run in ring 0, so kernel
+ * data stays reachable (apps should still use only the API).
  */
 
 #define PAGE_SIZE 4096u

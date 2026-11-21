@@ -7,6 +7,9 @@
 - Clock: the date, the time and the time zone.
 - Network: the IP address, gateway, netmask and DNS server.
 - Printers: the printer's kind and port.
+- Devices: what is plugged in: keyboard, mouse, joystick, ports, sound
+  and network cards. Double-click one to set it up (the joystick opens
+  its own window). Refresh looks for a joystick again.
 - System: start in the desktop or the text shell, FileF's windows, and
   a few options for troubleshooting.
 

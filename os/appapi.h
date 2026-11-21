@@ -5,6 +5,7 @@
  * Packages must call through this table, not kernel symbols. Append members
  * only and update size rather than version. */
 
+#include "drivers/joystick.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "lib/core.h"
@@ -263,7 +264,8 @@ typedef struct os_api {
 
     // appended in API size 5: submenus
     /* Adds a side submenu to m; fill it with menu_item/menu_separator. Only one
-     * level is supported. Returns NULL for nested/context submenus or full menus. */
+     * level is supported. Returns NULL for nested/context submenus or full
+     * menus. */
     menu *(*submenu)(menu *m, const char *label);
 
     // appended in API size 6: files and folders (long names)
@@ -297,6 +299,11 @@ typedef struct os_api {
     const app_time_api_t *time;
     const app_sound_api_t *sound;
     const app_clip_api_t *clip;
+
+    // appended in API size 8: the game port (drivers/joystick.h)
+    /* The joystick, refreshed once a frame before the apps run: read it in
+     * on_frame. joy.present is false when none is plugged in. */
+    const joyvar *joy;
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */

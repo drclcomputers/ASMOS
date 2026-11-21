@@ -2,8 +2,12 @@
 #define UI_CONTROLS_H
 
 /* Win32-style toolkit: windows own/draw controls, route input, and manage
- * focus. Coordinates are client-relative; anchor styles resize controls.
- * Enter/Esc invoke default/cancel buttons; handlers use c->user. */
+ * focus (Tab/Shift+Tab). Controls live until their window is destroyed.
+ * Coordinates are client-relative; anchor styles resize controls.
+ * Enter/Esc invoke default/cancel buttons; handlers use c->user.
+ *   window *w = app_window(s, "Notes", 40, 30, 200, 120, BLUE, 0);
+ *   control *b = ctl_button(w, 140, 20, 56, 13, "OK", 1, on_btn);
+ *   static void on_btn(control *c, int ev) { if (ev == EV_CLICK) ... } */
 
 #include "lib/core.h"
 

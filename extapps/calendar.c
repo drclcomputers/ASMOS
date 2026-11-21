@@ -1,4 +1,5 @@
-/* Notes are saved in /PREFS/CALNOTES.TXT. Click/arrows select a day,
+/* Notes are saved in /PREFS/CALNOTES.TXT, one per line: "YYYYMMDD text".
+ * Click/arrows select a day,
  * Enter/double-click edits it, PgUp/PgDn change months, Home goes to today,
  * and Delete removes notes. Weeks start Monday; View changes this in
  * /PREFS/CALENDAR.INI. */

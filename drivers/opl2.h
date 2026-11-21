@@ -3,18 +3,8 @@
 
 #include "lib/core.h"
 
-// OPL2 (YM3812) FM Synthesizer — built into every SB16.
-//
-// The OPL2 has 9 channels.  Each channel has two operators (carrier +
-// modulator). We expose a simple API:
-//   opl2_init()              — reset and detect the chip
-//   opl2_note_on(ch, midi_note, volume)   — play a note (0=C-1 … 127=G9)
-//   opl2_note_off(ch)        — release a note
-//   opl2_set_instrument(ch, &inst) — load a patch
-//   opl2_update()            — advance the software sequencer (call each frame)
-//
-// For MIDI files, use the midi_player_* API below which parses a Type-0/1
-// MIDI byte stream you load into memory and drives opl2_note_on/off.
+// OPL2 (YM3812) FM synth, 9 two-operator channels. midi_player_* (below)
+// plays Type 0/1 MIDI files on it (call midi_player_update() every frame).
 
 #define OPL2_BASE_PORT 0x388
 #define OPL2_CHANNELS 9

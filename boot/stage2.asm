@@ -1,17 +1,8 @@
 ; ─────────────────────────────────────────────────────────────────────────────
-; ASMOS stage 2: the reserved sectors after the VBR, run at 0x7E00.
-;
-; The VBR (vbr.asm) read it and left at 0x7C00 the volume's BPB and how to
-; read the drive (bootdefs.inc). Stage 2:
-;   1. measures the RAM (INT 15h AH=88h)                          -> 0x0500
-;   2. turns on A20, so memory past 1 MB is really there
-;   3. finds /SYSTEM/KERNEL.SYS on the FAT12 / FAT16 volume
-;   4. reads it 64 KB at a time below 1 MB and copies each piece up to 1 MB
-;      in "unreal mode" (real mode with 4 GB segment limits), so the kernel
-;      may be any size the RAM allows; its clusters may be anywhere
-;   5. sets the screen mode kept in byte 4 of this sector         -> 0x0602
-;   6. switches to 32-bit protected mode and jumps to the kernel at 1 MB
-; Until 5 the screen is in text mode: a problem is shown as a message.
+; ASMOS stage 2, at 0x7E00 (the reserved sectors after the VBR): measures the
+; RAM, enables A20, finds /SYSTEM/KERNEL.SYS, copies it to 1 MB 64 KB at a
+; time in unreal mode, sets the screen mode (byte 4 of this sector), and
+; enters 32-bit protected mode. Errors before the mode switch are text.
 ; ─────────────────────────────────────────────────────────────────────────────
 [bits 16]
 [org 0x7E00]
@@ -329,28 +320,15 @@ entry:
 
     jmp  .video_setup_done
 
-; ── Mode X: 640×400×16 colour (EGA planar) ───────────────────────────────────
-; Strategy: use BIOS mode 0x12 (640×480×16c) as baseline — it correctly sets
-; up the sequencer, GC, AC, and palette for 16-colour planar operation.
-; We then only patch the CRTC vertical registers to get 400 lines @ 70 Hz
-; instead of 480 lines @ 60 Hz, and fix the Misc Output sync polarity.
-;
-; Memory layout per plane:
-;   640 pixels / 8 bits per byte = 80 bytes per scanline per plane
-;   80 bytes × 400 lines = 32 000 bytes per plane  (4 planes × 32 KB = 128 KB total)
-; CRTC offset register (0x13) counts in 16-bit word units:
-;   80 bytes / 2 = 40 = 0x28
+; ── 640x400x16 (planar): BIOS mode 12h sets up the sequencer, GC, AC and
+;    palette; then only the vertical timing changes, to 400 lines at 70 Hz
+;    (25.175 MHz clock). A plane is 80 bytes a line (CRTC offset 28h words).
 
 .setup_mode_x:
-; Step 1: set BIOS mode 0x12 — 640×480×16 colour planar
-;   The BIOS correctly programs: SEQ (unchained, odd/even off, all planes),
-;   GC (write mode 0, no shift256, no chain), AC (EGA palette, pan=0),
-;   and loads the default 16-colour EGA/VGA palette into the DAC.
-    mov  ax, 0x0012
+    mov  ax, 0x0012          ; 640x480x16
     int  0x10
 
-; Step 2: unlock CRTC registers 0–7 (bit 7 of reg 0x11 = write protect)
-    mov  dx, 0x03D4
+    mov  dx, 0x03D4          ; unlock CRTC 0-7 (bit 7 of reg 11h)
     mov  al, 0x11
     out  dx, al
     inc  dx
@@ -359,44 +337,12 @@ entry:
     out  dx, al
     dec  dx
 
-; Step 3: Misc Output — switch sync polarity for 640×400 @ 70 Hz
-;   0x63 = 0b_0110_0011
-;     bit7=0  negative VSYNC  (monitors use HSYNC-/VSYNC+ to identify 70 Hz 400-line)
-;     bit6=1  negative HSYNC
-;     bit3:2=00  25.175 MHz dot clock
-;     bit1=1  RAM enabled
-;     bit0=1  I/O to colour address (3Dx)
-;   IMPORTANT: write Misc Output BEFORE touching CRTC timing regs so the
-;   dot clock change takes effect before we reprogram the counters.
-    mov  dx, 0x03C2
-    mov  al, 0xA3
+    mov  dx, 0x03C2          ; Misc Output: 400-line sync polarity, before
+    mov  al, 0xA3            ; the CRTC timing
     out  dx, al
 
-; Step 4: reprogram only the CRTC vertical registers for 400 lines.
-;   Horizontal regs are unchanged from mode 0x12 (already correct for 640px).
-;   All values below are for 640×400 @ 70 Hz with a 25.175 MHz dot clock.
-;
-;   Scanline counts (0-based):
-;     Active lines    : 0 – 399      (400 lines)
-;     VBlank start    : 400  = 0x190 → low byte 0x90
-;     VRetrace start  : 412  = 0x19C → low byte 0x9C
-;     VRetrace end    : 414          → 0x8E (bits[3:0]=end, bit7=protect off)
-;     VBlank end      : 447          → 0x8F in reg 0x16
-;     VTotal          : 448  = 0x1C0 → low byte 0xC0  (one more than last line)
-;
-;   Overflow register 0x07 encodes the high bits of five counters:
-;     VTotal    bit8 → bit0,  bit9 → bit5
-;     VDisplay  bit8 → bit1,  bit9 → bit6
-;     VRetrace  bit8 → bit2,  bit9 → bit7
-;     VBlank    bit8 → bit3
-;     LineCmp   bit8 → bit4
-;   For 400-line 70 Hz:
-;     VTotal   =0x1C0: bit8=1→b0, bit9=0→b5  =  0b_0000_0001
-;     VDisplay =0x18F: bit8=1→b1, bit9=0→b6  =  0b_0000_0010
-;     VRetrace =0x19C: bit8=1→b2, bit9=0→b7  =  0b_0000_0100
-;     VBlank   =0x190: bit8=1→b3             =  0b_0000_1000
-;     LineCmp  =0x3FF: bit8=1→b4             =  0b_0001_0000
-;   Sum = 0b_0001_1111 = 0x1F
+; CRTC: total 448 lines (C0h + overflow 1Fh), display 400 (8Fh), blank from
+; 400 (90h), retrace 412-414 (9Ch, 8Eh); horizontal timing as mode 12h.
 
     mov  dx, 0x03D4
 
@@ -473,8 +419,7 @@ entry:
     out  dx, al
     dec  dx
 
-; Step 5: clear all 4 planes
-;   Enable all planes via Map Mask, then zero 80×400 = 32 000 bytes = 16 000 words
+; clear the 4 planes at once (Map Mask 0Fh)
     mov  dx, 0x03C4
     mov  al, 0x02           ; Map Mask
     out  dx, al
@@ -486,7 +431,7 @@ entry:
     mov  es, ax
     xor  di, di
     xor  ax, ax
-    mov  cx, 0x7D00         ; 32 000 words = 64 000 bytes (clears all 4 planes at once)
+    mov  cx, 0x7D00         ; 32000 words
     rep  stosw
 
 ; Store mode info

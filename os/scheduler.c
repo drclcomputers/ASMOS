@@ -2,6 +2,7 @@
 #include "config/runtime_config.h"
 #include "drivers/fdd.h"
 #include "drivers/gpu.h"
+#include "drivers/joystick.h"
 #include "lib/audio.h"
 #include "os/error.h"
 #include "os/os.h"
@@ -253,6 +254,7 @@ void scheduler_kernel_task(void) {
         wd_heartbeat(); /* before reading input: os/watchdog.h */
         g_menubar_click_consumed = false;
         ps2_update();
+        joy_update();
         net_poll();
         speaker_update();
         audio_update(); /* MIDI plays from here (lib/audio.h) */

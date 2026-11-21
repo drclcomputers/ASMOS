@@ -9,6 +9,7 @@ extern app_descriptor settings_app;
 extern app_descriptor teditor_app;
 extern app_descriptor setup_app;
 extern app_descriptor charmap_app;
+extern app_descriptor joyconf_app;
 extern app_descriptor help_app;
 
 const char *const APP_GROUP_NAMES[APP_GROUPS] = {"", "Accessories", "Games",
@@ -26,6 +27,7 @@ registered_app_t app_registry[] = {
     {&monitor_app, "Monitor", APP_SYSTEM, false},
     {&fdformat_app, "Format Disk", APP_SYSTEM, false},
     {&printq_app, "Print Queue", APP_SYSTEM, false},
+    {&joyconf_app, "Joystick", APP_SYSTEM, false},
     {&setup_app, "Setup", APP_SYSTEM, true},
 };
 

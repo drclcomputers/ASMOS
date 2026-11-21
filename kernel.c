@@ -1,5 +1,6 @@
 #include "config/video_cfg.h"
 #include "drivers/ata.h"
+#include "drivers/joystick.h"
 #include "drivers/lpt.h"
 #include "drivers/pci.h"
 #include "drivers/ps2.h"
@@ -244,6 +245,7 @@ void kmain(void) {
     }
     if (g_setup_mode)
         g_cfg.start_in_gui = true;
+    joy_init(); /* the calibration is in g_cfg now */
     g_codepage = g_cfg.codepage < CP_COUNT ? g_cfg.codepage : CP_WESTERN;
     g_cfg.classic_fonts = 0; /* (gone from Settings: an old file had it) */
 
