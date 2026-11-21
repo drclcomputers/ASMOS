@@ -26,8 +26,8 @@ registered_app_t app_registry[] = {
     {&asmterm_app, "ASMTerm", APP_SYSTEM, false},
     {&monitor_app, "Monitor", APP_SYSTEM, false},
     {&fdformat_app, "Format Disk", APP_SYSTEM, false},
-    {&printq_app, "Print Queue", APP_SYSTEM, false},
-    {&joyconf_app, "Joystick", APP_SYSTEM, false},
+    {&printq_app, "Print Queue", APP_SYSTEM, false, true},
+    {&joyconf_app, "Joystick", APP_SYSTEM, false, true},
     {&setup_app, "Setup", APP_SYSTEM, true},
 };
 

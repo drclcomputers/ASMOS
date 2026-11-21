@@ -692,7 +692,7 @@ static void apps_dir_defaults(void) {
     }
     for (int i = 0; i < app_registry_count; i++) {
         const registered_app_t *r = &app_registry[i];
-        if (!r->menu_label || r->setup_only)
+        if (!r->menu_label || r->setup_only || r->hidden)
             continue;
         if (r->group == APP_TOP)
             snprintf(path, sizeof(path), "%s/%s.LNK", APPS_DIR, r->menu_label);
@@ -720,7 +720,7 @@ void desktop_refresh_apps_menu(void) {
     dir_entry_t de;
     if (g_setup_mode || !fs_find(APPS_DIR, &de)) { /* the built-ins */
         for (int i = 0; i < app_registry_count; i++)
-            if (app_registry[i].menu_label &&
+            if (app_registry[i].menu_label && !app_registry[i].hidden &&
                 (!app_registry[i].setup_only || g_setup_mode))
                 menu_add_item_ud(s_apps_menu,
                                  (char *)app_registry[i].menu_label,

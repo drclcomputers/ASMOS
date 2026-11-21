@@ -259,8 +259,8 @@ The bundled apps:
 | ASMTerm                                                            | the shell in a window                                     |
 | Monitor                                                            | running apps, End Task, memory, CPU                       |
 | Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
-| Print Queue                                                        | the printer's jobs                                        |
-| Joystick                                                           | calibrate the game port's stick                           |
+| Print Queue                                                        | the printer's jobs (from Settings > Printers)             |
+| Joystick                                                           | calibrate the game port's stick (Settings > Devices)      |
 | ASMDraw                                                            | pixel art editor                                          |
 | Help                                                               | the help pages of every app                               |
 | Character Map                                                      | every character of the code page, to copy                 |

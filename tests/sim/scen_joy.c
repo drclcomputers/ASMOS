@@ -196,6 +196,22 @@ int scen_joy(const char *name) {
           !g_cfg.joy.calibrated && g_cfg.joy.deadzone == 10);
     }
 
+    /* no Apps-menu shortcut: /APPS made again at boot leaves it out */
+    {
+        static char o[256];
+        extern int cli_execute_command(const char *, char *, size_t);
+        extern void apps_dir_defaults_pub(void);
+        dir_entry_t de;
+        cli_execute_command("rm -r /APPS", o, sizeof o);
+        T("/APPS removed", !fs_find("/APPS", &de));
+        apps_dir_defaults_pub();
+        T("made again, with System Tools", fs_find("/APPS/System Tools", &de));
+        T("without Joystick and Print Queue",
+          !fs_find("/APPS/System Tools/Joystick.LNK", &de) &&
+              !fs_find("/APPS/System Tools/Print Queue.LNK", &de));
+        T("but with Monitor", fs_find("/APPS/System Tools/Monitor.LNK", &de));
+    }
+
     /* unplugged: it goes after a while */
     g_sim_joy_t[0] = g_sim_joy_t[1] = 0;
     sim_frames(40);

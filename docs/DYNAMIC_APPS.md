@@ -211,9 +211,11 @@ the first line of its `GROUP.TXT`; groups and items are sorted by name.
 | `Acme Software/`                         | a group of its own                         |
 
 The built-in apps (FileF, Settings, TEditor, ASMTerm, Monitor, Format
-Disk, Print Queue) are in it as shortcuts, so any group can mix them with
-.APPs, and a group is just a folder. If /APPS is deleted, it is made again
-at boot with those shortcuts (the bundled .APPs come with the disk image).
+Disk) are in it as shortcuts, so any group can mix them with .APPs, and a
+group is just a folder. If /APPS is deleted, it is made again at boot with
+those shortcuts (the bundled .APPs come with the disk image). Print Queue
+and Joystick have none: they open from Settings (Printers, Devices); `.LNK`
+files and `app run` still find them.
 
 A shortcut is a `.LNK` text file: line 1 the target, an app's name
 (`TEditor`, or `Calculator`: an .APP in /APPS by its header name) or a path

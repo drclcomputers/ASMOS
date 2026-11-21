@@ -21,6 +21,7 @@ typedef struct {
     /* only in the Apps menu when started from the setup floppy (Setup):
      * no shortcut on an installed disk; "app run Setup" still starts it */
     bool setup_only;
+    bool hidden;
 } registered_app_t;
 
 extern registered_app_t app_registry[];
