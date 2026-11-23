@@ -136,6 +136,24 @@ files in parts), `print(owner, &doc)` (the print dialog), and three
 sub-tables: `time` (local time, calendar maths, the desktop alarm), `sound`
 (beep, one WAV/MIDI at a time, volume), `clip` (the text clipboard).
 
+## API size 9: the screen's colours
+
+`screen_palette(rgb, max)` fills `rgb` with the screen's colours (6 bits
+each, 0..63) and returns how many it has: 256 in 320x200 (the BIOS's mode
+13h palette: 16..31 greys, then rings of hues, 248..255 black), 16 in the
+other modes, where an index above 15 shows as `index & 15`. A game that
+draws its own pictures maps its colours to the nearest ones once at start
+(and with 16 can dither between two of them).
+
+## What an app needs: --min-cpu, --min-ram
+
+`mkapp.py --min-cpu 486 --min-ram 4096` (KB) writes the least CPU and RAM
+into the header (4 more bytes: 80 the CPU family, 82 the RAM in 64 KB
+units). ASMOS checks them before loading anything and says what is
+missing, for example "Outpost needs a 486 and 4 MB of RAM. This computer:
+a 386, 2 MB." 256 KB less than asked still counts (some BIOSes keep it).
+An older ASMOS skips the 4 bytes and starts the app anyway.
+
 ## Keys held down (games)
 
 `api->kb` (`kb` in extapps/shim.h) also has `down[128]`: every key held

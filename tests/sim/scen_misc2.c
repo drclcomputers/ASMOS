@@ -1,6 +1,46 @@
 #include "scen.h"
 
 int scen_misc2(const char *name) {
+    if (!strcmp(name, "appneeds")) { /* mkapp.py --min-cpu / --min-ram */
+        int fails = 0;
+        char b[300];
+        static uint8_t buf[8192];
+        uint32_t n = 0;
+        extern int g_sim_cpu;
+        if (!load_file(FIXDIR "NEEDY.APP", buf, sizeof buf, &n))
+            return 1;
+        T("the header says it: 84 bytes, 486, 4 MB",
+          buf[8] == 84 && buf[80] == 4 && buf[82] + buf[83] * 256 == 64);
+        fat_file_t f;
+        fs_create("/NEEDY.APP", &f);
+        fs_write(&f, buf, n);
+        fs_close(&f);
+        g_sim_cpu = 5;
+        g_ram_bytes = 2048 * 1024;
+        T("2 MB: refused", !appload_launch("/NEEDY.APP"));
+        snprintf(b, sizeof b, "  %s\n", appload_last_error());
+        wr(1, b);
+        T("saying what it needs and what there is",
+          strstr(appload_last_error(), "Needy needs 4 MB of RAM") &&
+              strstr(appload_last_error(), "Pentium, 2 MB"));
+        g_sim_cpu = 3;
+        g_ram_bytes = 8192 * 1024;
+        T("a 386: refused", !appload_launch("/NEEDY.APP") &&
+                                strstr(appload_last_error(), "a 486 or newer"));
+        g_ram_bytes = 2048 * 1024;
+        T("a 386 with 2 MB: both said",
+          !appload_launch("/NEEDY.APP") &&
+              strstr(appload_last_error(), "a 486 and 4 MB of RAM"));
+        g_sim_cpu = 4;
+        g_ram_bytes = 3840 * 1024; /* (a BIOS keeping 256 KB) */
+        T("a 486 with 4 MB: runs", appload_launch("/NEEDY.APP") != NULL);
+        sim_frames(2);
+        T("its window",
+          wm_focused_window() && !strcmp(wm_focused_window()->title, "Hello"));
+        g_sim_cpu = 5;
+        g_ram_bytes = 2048 * 1024;
+        return fails;
+    }
     if (!strcmp(name, "dynheap")) {
         int fails = 0;
         char b[300];

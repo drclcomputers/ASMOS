@@ -3,6 +3,7 @@
 #include "drivers/opl2.h"
 #include "drivers/speaker.h"
 #include "lib/audio.h"
+#include "lib/cpu.h"
 #include "os/clipboard.h"
 
 #include "config/runtime_config.h"
@@ -1052,6 +1053,44 @@ static const char *validate(asma_header_t *h, uint32_t file_size) {
     return NULL;
 }
 
+static const char *cpu_name(int family) {
+    return family <= 3 ? "386" : family == 4 ? "486" : "Pentium";
+}
+
+/* "4 MB", or "640 KB" when it isn't whole megabytes */
+static void ram_text(char *out, int sz, uint32_t kb) {
+    if (kb % 1024 == 0)
+        snprintf(out, sz, "%u MB", kb / 1024);
+    else
+        snprintf(out, sz, "%u KB", kb);
+}
+
+/* NULL if this computer has what the app needs, else why not */
+static const char *unmet_needs(const asma_needs_t *n, const char *app) {
+    static char why[160];
+    int cpu = cpu_family();
+    uint32_t ram_kb = g_ram_bytes / 1024, need_kb = (uint32_t)n->ram_64k * 64;
+    bool cpu_ok = !n->cpu || cpu >= n->cpu;
+    /* (a BIOS may keep a little for itself: 256 KB less still counts) */
+    bool ram_ok = !need_kb || ram_kb + 256 >= need_kb;
+    if (cpu_ok && ram_ok)
+        return NULL;
+    char need_ram[16], has_ram[16];
+    ram_text(need_ram, sizeof(need_ram), need_kb);
+    ram_text(has_ram, sizeof(has_ram), (ram_kb + 63) / 64 * 64);
+    char needs[48];
+    if (!cpu_ok && !ram_ok)
+        snprintf(needs, sizeof(needs), "a %s and %s of RAM", cpu_name(n->cpu),
+                 need_ram);
+    else if (!cpu_ok)
+        snprintf(needs, sizeof(needs), "a %s or newer", cpu_name(n->cpu));
+    else
+        snprintf(needs, sizeof(needs), "%s of RAM", need_ram);
+    snprintf(why, sizeof(why), "%s needs %s.\nThis computer: a %s, %s.", app,
+             needs, cpu_name(cpu), has_ram);
+    return why;
+}
+
 // load
 
 static bool read_exact(fat_file_t *f, void *buf, uint32_t n) {
@@ -1132,6 +1171,22 @@ app_descriptor *appload_load(const char *path) {
         fs_close(&f);
         set_err(why);
         return NULL;
+    }
+
+    /* what it needs: a CPU, an amount of RAM */
+    if (h.version == ASMA_VERSION_2 && h.header_size >= ASMA_HEADER_NEEDS) {
+        asma_needs_t need;
+        if (!read_exact(&f, &need, sizeof(need))) {
+            fs_close(&f);
+            set_err("Could not read .APP header.");
+            return NULL;
+        }
+        why = unmet_needs(&need, h.name);
+        if (why) {
+            fs_close(&f);
+            set_err(why);
+            return NULL;
+        }
     }
 
     loaded_app_t *dup = find_by_name(h.name);

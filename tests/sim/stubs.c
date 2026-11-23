@@ -41,7 +41,8 @@ void speaker_update(void) {}
 #include "drivers/ata.h"
 #include "drivers/pci.h"
 bool cpu_has_fpu(void) { return true; }
-int cpu_family(void) { return 5; }
+int g_sim_cpu = 5; /* what cpu_family() says */
+int cpu_family(void) { return g_sim_cpu; }
 void cpu_model_init(void) {}
 const char *cpu_model_str(void) {
     return g_sim_hw ? "486-class CPU" : "Simulated CPU";

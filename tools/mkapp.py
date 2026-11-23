@@ -8,6 +8,10 @@ mkapp.py - build an ASMOS .APP (v2) from a relocatable ELF.
   python3 tools/mkapp.py --elf app.elf --name MyApp --out MYAPP.APP \
       --state 64 --single --window-first
 
+--min-cpu 486 --min-ram 4096 (KB): what the app needs. ASMOS won't start
+it on less and says why; the header is 4 bytes longer (80: the CPU family,
+82: the RAM in 64 KB units), which an older ASMOS skips.
+
 --help DIR puts the pages in DIR (text files: "# " a heading, "- " a
 point, a blank line between paragraphs) at the end of the .APP; ASMOS
 copies them to /HELP/<App name>/ the first time the app runs (os/help.c).
@@ -182,7 +186,18 @@ def build(a):
             die("--heap must be 1..4080 KB")
         flags |= units << 8
 
-    code_off = HDR
+    # what it needs: 4 more header bytes (an older ASMOS skips them)
+    cpus = {0: 0, 386: 3, 486: 4, 586: 5, 3: 3, 4: 4, 5: 5}
+    if a.min_cpu not in cpus:
+        die("--min-cpu: 386, 486 or 586")
+    if not (0 <= a.min_ram <= 65535 * 64):
+        die("--min-ram: KB, up to 4 GB")
+    needs = b""
+    if a.min_cpu or a.min_ram:
+        needs = struct.pack("<BBH", cpus[a.min_cpu], 0, (a.min_ram + 63) // 64)
+    hdr_size = HDR + len(needs)
+
+    code_off = hdr_size
     reloc_off = code_off + len(code)
     reloc_off = (reloc_off + 3) & ~3
     pad = reloc_off - (code_off + len(code))
@@ -191,7 +206,7 @@ def build(a):
         MAGIC,
         V2,
         flags,
-        HDR,
+        hdr_size,
         code_off,
         len(code),
         a.state,
@@ -204,6 +219,7 @@ def build(a):
         bss,
     )
     assert len(hdr) == HDR
+    hdr += needs
     blob = (
         hdr + bytes(code) + b"\0" * pad + b"".join(struct.pack("<I", r) for r in relocs)
     )
@@ -276,6 +292,18 @@ def main():
         dest="help_dir",
         default="",
         help="a folder of help pages to carry (see above)",
+    )
+    p.add_argument(
+        "--min-cpu",
+        type=int,
+        default=0,
+        help="the least CPU: 386, 486 or 586 (ASMOS won't start it on less)",
+    )
+    p.add_argument(
+        "--min-ram",
+        type=int,
+        default=0,
+        help="the least RAM in KB, e.g. 4096 (ASMOS won't start it with less)",
     )
     p.add_argument("--init-sym", default="init")
     p.add_argument("--frame-sym", default="on_frame")

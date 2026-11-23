@@ -173,6 +173,70 @@ void ps2_irq_poll(void) {}
 const mousevar *mouse_live(void) { return &mouse; }
 void gpu_init(void) {}
 
+/* the BIOS's mode 13h palette (6 bits): the 16 colours, 16 greys, then 9
+ * rings of 24 hues (3 brightnesses x 3 saturations), black */
+static uint8_t s_pal256[256][3];
+static void make_pal256(void) {
+    static const uint8_t ega[16][3] = {
+        {0, 0, 0},    {0, 0, 42},   {0, 42, 0},   {0, 42, 42},
+        {42, 0, 0},   {42, 0, 42},  {42, 21, 0},  {42, 42, 42},
+        {21, 21, 21}, {21, 21, 63}, {21, 63, 21}, {21, 63, 63},
+        {63, 21, 21}, {63, 21, 63}, {63, 63, 21}, {63, 63, 63}};
+    static const uint8_t grey[16] = {0,  5,  8,  11, 14, 17, 20, 24,
+                                     28, 32, 36, 40, 45, 50, 56, 63};
+    static const uint8_t ring[9][2] = {{63, 0}, {63, 31}, {63, 45},
+                                       {28, 0}, {28, 14}, {28, 20},
+                                       {16, 0}, {16, 8},  {16, 11}};
+    for (int i = 0; i < 16; i++) {
+        for (int k = 0; k < 3; k++)
+            s_pal256[i][k] = ega[i][k];
+        s_pal256[16 + i][0] = s_pal256[16 + i][1] = s_pal256[16 + i][2] =
+            grey[i];
+    }
+    for (int r = 0; r < 9; r++) {
+        int hi = ring[r][0], lo = ring[r][1];
+        int st[5];
+        for (int k = 0; k < 5; k++)
+            st[k] = lo + (hi - lo) * k / 4;
+        /* blue -> magenta -> red -> yellow -> green -> cyan -> blue */
+        for (int h = 0; h < 24; h++) {
+            int seg = h / 4, k = h % 4, rr, gg, bb;
+            switch (seg) {
+            case 0:
+                rr = st[k], gg = lo, bb = hi;
+                break;
+            case 1:
+                rr = hi, gg = lo, bb = st[4 - k];
+                break;
+            case 2:
+                rr = hi, gg = st[k], bb = lo;
+                break;
+            case 3:
+                rr = st[4 - k], gg = hi, bb = lo;
+                break;
+            case 4:
+                rr = lo, gg = hi, bb = st[k];
+                break;
+            default:
+                rr = lo, gg = st[4 - k], bb = hi;
+                break;
+            }
+            uint8_t *p = s_pal256[32 + r * 24 + h];
+            p[0] = (uint8_t)rr, p[1] = (uint8_t)gg, p[2] = (uint8_t)bb;
+        }
+    }
+}
+
+int gpu_palette(uint8_t (*rgb)[3], int max) {
+    if (!s_pal256[63][0])
+        make_pal256();
+    int n = g_video_mode == 0 ? 256 : 16;
+    for (int i = 0; i < n && i < max; i++)
+        for (int k = 0; k < 3; k++)
+            rgb[i][k] = s_pal256[i][k];
+    return n;
+}
+
 /* two IDE disks: HDA (the image) and HDB (absent unless a test adds it) */
 static uint8_t *g_dk[2];
 static uint32_t g_dk_sectors[2];
@@ -423,14 +487,21 @@ void sim_shot(const char *name) {
     int hl = snprintf(hdr, sizeof(hdr), "P6\n%d %d\n255\n", SCREEN_WIDTH,
                       SCREEN_HEIGHT);
     sys3(SYS_write, fd, (int)hdr, hl);
-    static uint8_t row[800 * 3];
+    static uint8_t row[800 * 3], rgb[256][3];
+    gpu_palette(rgb, 256);
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         for (int x = 0; x < SCREEN_WIDTH; x++) {
             /* the frame, and the pointer where the screen has it */
             int i_ = y * SCREEN_WIDTH + x;
-            uint8_t c = (g_sim_vram[i_] != g_sim_shadow[i_] ? g_sim_vram[i_]
-                                                            : BACKBUF[i_]) &
-                        15;
+            uint8_t c = g_sim_vram[i_] != g_sim_shadow[i_] ? g_sim_vram[i_]
+                                                           : BACKBUF[i_];
+            if (g_video_mode == 0 && c > 15) { /* 256 colours */
+                row[x * 3] = (uint8_t)(rgb[c][0] * 255 / 63);
+                row[x * 3 + 1] = (uint8_t)(rgb[c][1] * 255 / 63);
+                row[x * 3 + 2] = (uint8_t)(rgb[c][2] * 255 / 63);
+                continue;
+            }
+            c &= 15;
             row[x * 3] = PAL[c][0];
             row[x * 3 + 1] = PAL[c][1];
             row[x * 3 + 2] = PAL[c][2];

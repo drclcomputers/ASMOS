@@ -10,6 +10,9 @@
  *   56/60/64:4 init/frame/destroy offsets (0 valid; v1 destroy 0 means none,
  *   v2 uses ASMA_NO_ENTRY).
  * v2 adds 68:4 relocation offset, 72:4 count, 76:4 zero-filled BSS.
+ * A v2 header of 84 bytes or more says what the app needs (older ASMOS
+ * skips it): 80:1 the least CPU (3 386, 4 486, 5 Pentium; 0 any), 81:1 0,
+ * 82:2 the least RAM in 64 KB units (0 any).
  * Callbacks receive state (v1) or (api,state) (v2). Link v2 at 0;
  * mkapp.py builds relocations from the ELF.
  */
@@ -31,6 +34,13 @@
 #define ASMA_NAME_MAX 32
 #define ASMA_HEADER_V1 68
 #define ASMA_HEADER_V2 80
+#define ASMA_HEADER_NEEDS 84 /* v2 with the requirements */
+
+typedef struct __attribute__((packed)) {
+    uint8_t cpu; /* the least CPU family: 3, 4, 5 (0 any) */
+    uint8_t zero;
+    uint16_t ram_64k; /* the least RAM, in 64 KB (0 any) */
+} asma_needs_t;
 #define ASMA_NO_ENTRY 0xFFFFFFFFu
 
 #define ASMA_MAX_CODE_SIZE (256u * 1024u)
