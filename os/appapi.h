@@ -304,6 +304,13 @@ typedef struct os_api {
     /* The joystick, refreshed once a frame before the apps run: read it in
      * on_frame. joy.present is false when none is plugged in. */
     const joyvar *joy;
+
+    // appended in API size 9
+    /* The screen's colours, 6 bits each (0..63): 256 in 320x200 (indexes
+     * 16..255 are the BIOS's mode 13h palette), 16 in the other modes, where
+     * an index above 15 shows as index & 15. Fills up to max entries of rgb
+     * and returns how many the screen has. */
+    int (*screen_palette)(uint8_t (*rgb)[3], int max);
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */

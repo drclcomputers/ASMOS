@@ -6,6 +6,7 @@
 #include "os/clipboard.h"
 
 #include "config/runtime_config.h"
+#include "drivers/gpu.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "drivers/sb16.h"
@@ -810,6 +811,7 @@ static const os_api_t s_api = {
     .ui = &s_ui,
     .kb = &kb,
     .joy = &joy,
+    .screen_palette = gpu_palette,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

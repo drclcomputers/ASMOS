@@ -73,6 +73,26 @@ void gpu_init(void) {
 
 void gpu_invalidate(void) { s_full = true; }
 
+int gpu_palette(uint8_t (*rgb)[3], int max) {
+    int n = g_video_mode == 0 ? 256 : 16;
+    if (g_video_mode != 0) {
+        for (int i = 0; i < n && i < max; i++)
+            for (int k = 0; k < 3; k++)
+                rgb[i][k] = k_dac16[i][k];
+        return n;
+    }
+    uint32_t f = gpu_lock();
+    outb(0x3C7, 0); /* read from entry 0: R, G, B, next entry */
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < 3; k++) {
+            uint8_t v = inb(0x3C9) & 63;
+            if (i < max)
+                rgb[i][k] = v;
+        }
+    gpu_unlock(f);
+    return n;
+}
+
 /* 8 pixels -> plane bytes: byte p of the result is plane p (bit 7 = the
  * leftmost pixel). */
 static inline uint32_t pack8(const uint8_t *px) {

@@ -10,8 +10,7 @@ extern const app_meta_t app_meta;
 void init(const os_api_t *api, void *state) {
     A = api;
     if (api->size < sizeof(os_api_t)) { /* an older kernel */
-        api->ui->message(NULL, app_meta.name,
-                         "This app needs a newer ASMOS (app API 7).");
+        api->ui->message(NULL, app_meta.name, "This app needs a newer ASMOS.");
         api->quit_self(state);
         return;
     }
