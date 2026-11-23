@@ -242,6 +242,8 @@ NAME_OK = set(
 def help_pages(folder):
     import os
 
+    if not os.path.isdir(folder):
+        die("--help-dir: there is no folder '%s'" % folder)
     out, n = b"", 0
     for name in sorted(os.listdir(folder)):
         path = os.path.join(folder, name)

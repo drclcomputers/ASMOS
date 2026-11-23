@@ -16,19 +16,19 @@ const char *const APP_GROUP_NAMES[APP_GROUPS] = {"", "Accessories", "Games",
                                                  "Multimedia", "System Tools"};
 
 registered_app_t app_registry[] = {
-    {&filef_app, "FileF", APP_TOP, false},
-    {&settings_app, "Settings", APP_TOP, false},
-    {&help_app, "Help", APP_TOP, false},
+    {&filef_app, "FileF", APP_TOP, false, false},
+    {&settings_app, "Settings", APP_TOP, false, false},
+    {&help_app, "Help", APP_TOP, false, false},
 
-    {&teditor_app, "TEditor", APP_ACCESSORIES, false},
-    {&charmap_app, "Character Map", APP_ACCESSORIES, false},
+    {&teditor_app, "TEditor", APP_ACCESSORIES, false, false},
+    {&charmap_app, "Character Map", APP_ACCESSORIES, false, false},
 
-    {&asmterm_app, "ASMTerm", APP_SYSTEM, false},
-    {&monitor_app, "Monitor", APP_SYSTEM, false},
-    {&fdformat_app, "Format Disk", APP_SYSTEM, false},
+    {&asmterm_app, "ASMTerm", APP_SYSTEM, false, false},
+    {&monitor_app, "Monitor", APP_SYSTEM, false, false},
+    {&fdformat_app, "Format Disk", APP_SYSTEM, false, false},
     {&printq_app, "Print Queue", APP_SYSTEM, false, true},
     {&joyconf_app, "Joystick", APP_SYSTEM, false, true},
-    {&setup_app, "Setup", APP_SYSTEM, true},
+    {&setup_app, "Setup", APP_SYSTEM, true, false},
 };
 
 int app_registry_count = sizeof(app_registry) / sizeof(app_registry[0]);
