@@ -1,6 +1,48 @@
 #include "scen.h"
 
 int scen_misc2(const char *name) {
+    if (!strcmp(name, "sdkapp")) { /* built with the SDK alone (make sdk) */
+        int fails = 0;
+        char b[300];
+        static uint8_t buf[16384];
+        uint32_t n = 0;
+        T("the SDK built its example",
+          load_file(FIXDIR "SDKHELLO.APP", buf, sizeof buf, &n));
+        if (!n)
+            return fails;
+        fat_file_t f;
+        fs_create("/HELLO.APP", &f);
+        fs_write(&f, buf, n);
+        fs_close(&f);
+        T("it runs", appload_launch("/HELLO.APP") != NULL);
+        sim_frames(3);
+        window *w = wm_focused_window();
+        T("its window", w && !strcmp(w->title, "Hello"));
+        if (!w)
+            return fails;
+        control *edit = NULL, *btn = NULL, *greet = NULL;
+        for (control *c = w->controls; c; c = c->next) {
+            if (c->type == CTL_EDIT)
+                edit = c;
+            if (c->type == CTL_BUTTON)
+                btn = c;
+            if (c->type == CTL_LABEL && c->y == 50)
+                greet = c;
+        }
+        T("an edit box, a button, a label", edit && btn && greet);
+        if (!edit || !btn || !greet)
+            return fails;
+        ctl_set_text(edit, "Ana");
+        sim_click(btn->ax + 4, btn->ay + 4);
+        sim_frames(2);
+        snprintf(b, sizeof b, "  says: %s\n", greet->text);
+        wr(1, b);
+        T("Greet: snprintf from libasmos.a, ctl_* through the shim",
+          !strcmp(greet->text, "Hello, Ana!"));
+        dir_entry_t de;
+        T("its help page installed", fs_find("/HELP/Hello/01_Hello.TXT", &de));
+        return fails;
+    }
     if (!strcmp(name, "appneeds")) { /* mkapp.py --min-cpu / --min-ram */
         int fails = 0;
         char b[300];

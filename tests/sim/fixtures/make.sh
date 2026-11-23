@@ -19,6 +19,12 @@ $CC -m32 -march=i386 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 \
 $LD -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs -e init -o hello.elf hello.o
 python3 "$ROOT/tools/mkapp.py" --elf hello.elf --name Hello --out HELLO.APP \
     --state 64 --single --window-first >/dev/null
+# the SDK (make sdk), and an app built with nothing else (sdkapp/)
+make -s -C "$ROOT" sdk CC="$CC -m32" LD="$LD" >/dev/null
+make -s -C sdkapp SDK="$(cd "$ROOT/build/sdk/ASMOS-SDK" && pwd)" \
+    CC="$CC -m32" LD="$LD" >/dev/null 2>&1
+cp sdkapp/build/HELLO.APP SDKHELLO.APP
+rm -rf sdkapp/build
 # the same, needing a 486 and 4 MB
 python3 "$ROOT/tools/mkapp.py" --elf hello.elf --name Needy --out NEEDY.APP \
     --state 64 --single --window-first --min-cpu 486 --min-ram 4096 >/dev/null

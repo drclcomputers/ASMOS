@@ -1,0 +1,5 @@
+# Hello
+
+Type a name and press Greet: Hello says hello, and counts.
+
+- Hello > About Hello shows who made it.

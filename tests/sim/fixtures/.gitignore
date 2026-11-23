@@ -7,3 +7,5 @@ NEEDY.APP
 cdbuild/
 cd.iso
 cd83.iso
+SDKHELLO.APP
+sdkapp/build

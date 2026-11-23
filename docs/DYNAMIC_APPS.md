@@ -14,6 +14,19 @@ Entry offset 0 is valid. `destroy` absent = `ASMA_NO_ENTRY`.
 
 ## Build
 
+With the SDK (`make sdk`: build/sdk/ASMOS-SDK.zip, for developers without
+the source tree): `include $(SDK)/app.mk` from a short Makefile, see
+docs/SDK.md (the SDK's README). `tools/mksdk.py` makes it: the headers the
+bundled apps use (their kernel functions an app can't call taken out),
+`libasmos.a` (the same objects the bundled apps link: extapps/shim.c and
+shim_api.c, lib/string.c, math.c, mem.c), mkapp.py, mkiso.py, app.mk
+(written by mksdk.py) and these docs. It checks that everything the
+headers still declare links; to give apps another kernel function, wrap
+its API call in extapps/shim_api.c. A test (`sdkapp`) builds
+tests/sim/fixtures/sdkapp with the SDK alone and runs it.
+
+By hand, with the source tree:
+
     i686-elf-gcc -m32 -march=i386 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -nostdlib -I. -c app.c -o app.o
     i686-elf-ld  -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs -o app.elf app.o
     python3 tools/mkapp.py --elf app.elf --name MyApp --out MYAPP.APP --state 64 --single --window-first

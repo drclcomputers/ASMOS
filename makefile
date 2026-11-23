@@ -47,7 +47,7 @@ OBJ = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SRC)) \
 # in /APPS, and the shortcuts to the built-in apps: extapps/MANIFEST.
 EXT_APPS    = puzzle sudoku calendar clock calculator clipview hexview asmdraw audioplayer
 EXT_DIR     = $(BUILD_DIR)/extapps
-EXT_LIB_SRC = extapps/shim.c lib/string.c lib/math.c lib/mem.c
+EXT_LIB_SRC = extapps/shim.c extapps/shim_api.c lib/string.c lib/math.c lib/mem.c
 EXT_LIB_OBJ = $(patsubst %.c,$(EXT_DIR)/%.o,$(EXT_LIB_SRC))
 EXT_CFLAGS  = $(CFLAGS) -ffunction-sections -fdata-sections
 EXT_PKGS    = $(patsubst %,$(EXT_DIR)/%.APP,$(EXT_APPS))
@@ -68,6 +68,17 @@ $(EXT_DIR)/%.APP: $(EXT_DIR)/extapps/%.o $(EXT_LIB_OBJ) $(EXT_HELP)
 	      $(if $(wildcard extapps/help/$*),--help-dir extapps/help/$*) >/dev/null
 
 apps: $(EXT_PKGS)
+
+# ── SDK: building apps without the source tree (tools/mksdk.py, sdk/) ───────
+# build/sdk/ASMOS-SDK (and .zip): headers, libasmos.a (the objects above),
+# mkapp.py, mkiso.py, app.mk, an example. Not part of `all`: make sdk.
+SDK_DIR = build/sdk/ASMOS-SDK
+
+sdk: $(EXT_LIB_OBJ) tools/mksdk.py
+	python3 tools/mksdk.py --out $(SDK_DIR) --cc "$(CC)" --ld "$(LD)" \
+	      --cflags "$(EXT_CFLAGS)" $(EXT_LIB_OBJ)
+	cd build/sdk && rm -f ASMOS-SDK.zip && python3 -m zipfile -c ASMOS-SDK.zip ASMOS-SDK
+	@echo "SDK zip: build/sdk/ASMOS-SDK.zip"
 
 .DEFAULT_GOAL := all
 
@@ -175,4 +186,4 @@ kernelmap: $(OBJ)
 bloat: $(OBJ)
 	$(NM) --print-size --size-sort --radix=d $(OBJ) | awk '$$3 ~ /[bBcC]/' | sort -k2 -n -r | head -30
 
-.PHONY: all apps qemu qemu-fdd qemu-cd qemu-setup boottest bochs clean kernelmap bloat
+.PHONY: all apps sdk qemu qemu-fdd qemu-cd qemu-setup boottest bochs clean kernelmap bloat

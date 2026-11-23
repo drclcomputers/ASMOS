@@ -395,6 +395,12 @@ card by itself: pick a Sound Blaster Pro or 16.
 what codes 128-255 are (Settings > Display > Characters). A text written on
 DOS wants DOS (437); one from Windows wants Western or Central European.
 
+**Developing apps (the SDK)**: `make sdk` makes `build/sdk/ASMOS-SDK.zip`:
+the headers, `libasmos.a` (strings, numbers, and the same calls ASMOS's own
+apps use: `ctl_button`, `dlg_message`...), mkapp.py, a Makefile include
+and the docs. A developer needs only that, a cross compiler
+(i686-elf-gcc) and Python. See docs/SDK.md (its README).
+
 **Making a CD with apps**: `python3 tools/mkiso.py FOLDER disc.iso --label
 "My apps"`. .APP files in the disc's root, or in APPS\ and its subfolders,
 get shortcuts in Apps > CDROM.
@@ -674,10 +680,10 @@ lib/         Freestanding libs: memory, strings, math, time, graphics,
 config/      Compile-time and saved settings (ASMOS.CFG)
 fonts/       Fonts (fonts_ext.c: codes 128-255, made by tools/mkglyphs.py)
 network/     IPv4, DNS, Gopher client
-tools/       mkdisk.py (disk images), mkiso.py (CD images),
+tools/       mkdisk.py (disk images), mkiso.py (CD images), mksdk.py (SDK),
              bootemu.py / boottest.py (boot tests), fontmaker.py and
              mkglyphs.py + glyphart.py (fonts)
-docs/        Boot and setup, apps, the UI toolkit
+docs/        Boot and setup, apps, the UI toolkit, the SDK
 ```
 
 The makefile builds every .c in those directories automatically.

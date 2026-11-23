@@ -20,3 +20,4 @@ apps/asmusic.c
 *.iso
 !/help/**/*.TXT
 !/extapps/help/**/*.TXT
+!/sdk/**/*.TXT
