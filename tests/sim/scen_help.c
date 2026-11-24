@@ -67,8 +67,8 @@ int scen_help(const char *name) {
                 apps = &g_menubar.menus[i];
                 ai = i;
             }
-        T("Games gets Sudoku from /APPS/GAMES",
-          apps->items[1].sub->item_count == 2);
+        T("Games gets Sudoku from /APPS/GAMES (Puzzle, Solitaire, Sudoku)",
+          apps->items[1].sub->item_count == 3);
         sim_click(apps->bar_x + 4, 4);
         sim_frames(1);
         sim_move(apps->bar_x + 10, MENUBAR_H + 1 * 10 + 4);
@@ -76,7 +76,7 @@ int scen_help(const char *name) {
         sim_shot("sm3");
         sim_move(apps->bar_x + 120, MENUBAR_H + 1 * 10 + 4);
         sim_frames(1);
-        sim_move(apps->bar_x + 120, MENUBAR_H + 2 * 10 + 4);
+        sim_move(apps->bar_x + 120, MENUBAR_H + 3 * 10 + 4);
         sim_frames(1);
         mouse.left = true;
         sim_frame();
@@ -331,9 +331,9 @@ int scen_help(const char *name) {
           sys && HAS(sys, "HexView") && HAS(sys, "Monitor") &&
               HAS(sys, "ASMTerm") && HAS(sys, "Format Disk") &&
               !HAS(sys, "Print Queue") && !HAS(sys, "Joystick"));
-        T("Games has Puzzle + Sudoku", games && games->item_count == 2 &&
-                                           HAS(games, "Puzzle") &&
-                                           HAS(games, "Sudoku"));
+        T("Games has Puzzle, Solitaire, Sudoku",
+          games && games->item_count == 3 && HAS(games, "Puzzle") &&
+              HAS(games, "Solitaire") && HAS(games, "Sudoku"));
         T("Acme: 2 apps + 2 shortcuts, junk and the bad shortcut left out",
           acme && acme->item_count == 4);
         T("Calculator .APP by shortcut name; My Sudoku label from line 2",

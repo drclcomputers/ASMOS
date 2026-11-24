@@ -1,0 +1,34 @@
+# Solitaire
+
+Three games in one: Klondike, Spider and FreeCell. Game > Game Type picks
+one; the next deal is of that kind.
+
+- Drag a card, or a run of them, to where it goes. A click sends a card
+  where it fits best: up to a suit's pile first, else onto a column.
+- Click the stock (or press Space) to turn cards in Klondike, or to deal
+  a card onto every column in Spider.
+- Ctrl+Z takes back a move, H shows a move worth making, F2 deals again.
+
+# Klondike
+
+Build the four suits up from Ace to King on the top right. The columns go
+down in alternate colours, red on black; only a King goes into an empty
+column. Draw 1 turns one card at a time, Draw 3 three.
+
+# Spider
+
+Two decks, in one, two or four suits. Any card goes on one a rank higher,
+but only a run of one suit moves together. A whole suit, King down to Ace,
+leaves the table; eight of them win. Every column needs a card before the
+stock deals.
+
+# FreeCell
+
+All cards are face up. Build the suits up on the right, the columns down
+in alternate colours. Each of the four cells on the left holds one card.
+Several cards move at once when there are free cells or empty columns to
+do it through. Almost every deal can be won.
+
+Deals are numbered: Game > Select Game plays one again (FreeCell's are the
+classic ones). Statistics counts the games and the best times. A game in
+progress is kept for next time.

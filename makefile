@@ -37,7 +37,7 @@ OBJ = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SRC)) \
 # and number helpers, linked at 0 with only what is used (--gc-sections),
 # packed by tools/mkapp.py (name, state, heap from APP_META). Where each goes
 # in /APPS, and the shortcuts to the built-in apps: extapps/MANIFEST.
-EXT_APPS    = puzzle sudoku calendar clock calculator clipview hexview asmdraw audioplayer
+EXT_APPS    = puzzle sudoku solitaire calendar clock calculator clipview hexview asmdraw audioplayer
 EXT_DIR     = $(BUILD_DIR)/extapps
 EXT_LIB_SRC = extapps/shim.c extapps/shim_api.c lib/string.c lib/math.c lib/mem.c
 EXT_LIB_OBJ = $(patsubst %.c,$(EXT_DIR)/%.o,$(EXT_LIB_SRC))

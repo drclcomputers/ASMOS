@@ -64,7 +64,7 @@ void netconn_dialog(window *owner, void (*done)(void)) {
                     "See Settings > Network.");
         return;
     }
-    window *w = dlg_form(owner, "Connect to Server", 236, 114, sizeof(nc_t));
+    window *w = dlg_form(owner, "Connect to Server", 236, 128, sizeof(nc_t));
     if (!w)
         return;
     nc_t *c = dlg_form_state(w);
@@ -91,9 +91,9 @@ void netconn_dialog(window *owner, void (*done)(void)) {
     ctl_label(w, 8, 66, 50, 10, "Folder:", 0);
     c->dir = ctl_edit(w, 62, 64, 166, 12, dir, FS_PATH_MAX, 0, NULL);
     ctl_set_tooltip(c->dir, "Empty: where the server puts you");
-    c->status = ctl_label(w, 8, 82, 220, 18, "", 0);
-    control *ok = ctl_button(w, 118, 80, 54, 13, "Connect", 1, nc_ok);
-    control *ca = ctl_button(w, 176, 80, 52, 13, "Cancel", 2, nc_cancel);
+    c->status = ctl_label(w, 8, 80, 220, 10, "", 0);
+    control *ok = ctl_button(w, 118, 94, 54, 13, "Connect", 1, nc_ok);
+    control *ca = ctl_button(w, 176, 94, 52, 13, "Cancel", 2, nc_cancel);
     ok->user = ca->user = c;
     ctl_style_add(ok, CS_DEFAULT);
     ctl_style_add(ca, CS_CANCEL);
