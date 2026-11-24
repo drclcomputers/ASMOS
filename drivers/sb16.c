@@ -1,10 +1,8 @@
-/*
- * 8-bit mono PCM via ISA DMA. DSP 1.x/2.x support time-constant playback;
- * DSP 3.x adds a mixer; DSP 4.x supports rate+DMA playback up to 44.1 kHz.
- * Older cards are jumpered: the IRQ is found with DSP command F2h and the
- * PIC's request lines, the DMA channel by a test transfer on 1, 3, 0. Fast
- * sources are decimated.
- */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "drivers/sb16.h"
 #include "interrupts/idt.h"
 #include "lib/core.h"

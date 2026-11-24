@@ -1,8 +1,12 @@
-/* FileF - file manager. The icon view is a custom control; toolbar, path
- * box, scrollbar and dialogs come from the toolkit. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "config/runtime_config.h"
 #include "drivers/cdrom.h"
 #include "drivers/fdd.h"
+#include "fs/netfs.h"
 #include "lib/wav.h"
 #include "os/api.h"
 #include "os/clipboard.h"
@@ -10,6 +14,7 @@
 #include "ui/desktop.h"
 #include "ui/desktop_fs.h"
 #include "ui/fileops.h"
+#include "ui/netconn.h"
 #include "ui/uifont.h"
 
 #define FF_DEFAULT_W 300
@@ -33,7 +38,7 @@
 #define MAX_HISTORY 16
 
 // Virtual root drive entries
-enum { VD_HDD, VD_FDD, VD_CD };
+enum { VD_HDD, VD_FDD, VD_CD, VD_NET };
 typedef struct {
     const char *vpath;
     const char *label;
@@ -47,6 +52,7 @@ static const vdrive_t k_vdrives[] = {
     {"/FDD0", "FDD0", DRIVE_FDD0, VD_FDD},
     {"/FDD1", "FDD1", DRIVE_FDD1, VD_FDD},
     {"/CD0", "CD0", DRIVE_CD0, VD_CD},
+    {"/NET0", "NET0", DRIVE_NET0, VD_NET}, /* (once connected) */
 };
 #define VDRIVE_COUNT ((int)(sizeof(k_vdrives) / sizeof(k_vdrives[0])))
 
@@ -539,6 +545,8 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
         draw_hdd_icon(ax, ay, it->selected);
     else if (it->is_vdrive && it->vdrive_kind == VD_CD)
         draw_cd_icon(ax, ay, it->selected);
+    else if (it->is_vdrive && it->vdrive_kind == VD_NET)
+        draw_net_icon(ax, ay, it->selected);
     else if (it->is_vdrive)
         draw_floppy_icon(ax, ay, it->selected);
     else if (it->is_dotdot)
@@ -1025,6 +1033,26 @@ static void menu_eject_cd(void) {
         strcpy(s->status, out ? "CD ejected." : "The CD drive did not open.");
 }
 
+/* /NET0 came: the window that asked shows it */
+static void net_connected(void) {
+    ff_refresh_all();
+    ff_inst_t *s = active_finder();
+    uint8_t d;
+    uint16_t c;
+    if (s && fs_resolve_dir("/NET0", &d, &c))
+        ff_navigate(s, c, "/NET0", d);
+}
+
+static void menu_connect(void) {
+    ff_inst_t *s = active_finder();
+    netconn_dialog(s ? s->win : NULL, net_connected);
+}
+
+static void menu_disconnect(void) {
+    ff_inst_t *s = active_finder();
+    netconn_disconnect(s ? s->win : NULL, ff_refresh_all);
+}
+
 static bool over_desktop(int mx, int my) {
     if (my < MENUBAR_H || my >= SCREEN_HEIGHT - TASKBAR_H)
         return false;
@@ -1320,6 +1348,9 @@ static void view_context_menu(ff_inst_t *s, control *c) {
             } else if (it->vdrive_kind == VD_CD) {
                 menu_add_separator(m);
                 menu_add_item(m, "Eject CD", menu_eject_cd);
+            } else if (it->vdrive_kind == VD_NET) {
+                menu_add_separator(m);
+                menu_add_item(m, "Disconnect...", menu_disconnect);
             }
         }
     } else if (it) {
@@ -1642,6 +1673,9 @@ static void ff_init(void *state) {
     menu_add_item(m, "Eject Floppy", menu_eject_fdd);
     menu_add_item(m, "Eject CD", menu_eject_cd);
     menu_enable_last(m, cd_present());
+    menu_add_separator(m);
+    menu_add_item(m, "Connect to Server...", menu_connect);
+    menu_add_item(m, "Disconnect Server...", menu_disconnect);
 
     s->drive_id = DRIVE_HDA;
     memcpy(s->mount_gen, g_mount_gen, sizeof(g_mount_gen));

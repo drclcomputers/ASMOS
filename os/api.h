@@ -1,28 +1,34 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef OS_API_H
 #define OS_API_H
 
 // Header for BUILT-IN apps (linked into the kernel). Dynamic .APP packages
 // can't link against kernel symbols and use os/appapi.h instead — two headers
 // on purpose.
-// Apps include ONLY this header. It exposes everything an app legitimately needs while hiding kernel internals (ATA, PS/2 init, memory layout, etc.)
-// if it's not in this header, apps don't touch it.
+// Apps include ONLY this header. It exposes everything an app legitimately
+// needs while hiding kernel internals (ATA, PS/2 init, memory layout, etc.) if
+// it's not in this header, apps don't touch it.
 
 // Foundation Layer (Core types and utilities)
 #include "lib/core.h"
 
 // Memory & String Utilities
+#include "lib/math.h"
 #include "lib/memory.h"
 #include "lib/string.h"
-#include "lib/math.h"
 
 // Graphics & Visual
 #include "lib/graphics.h"
 
 // Device Control
-#include "lib/time.h"
 #include "drivers/serial.h"
 #include "drivers/speaker.h"
 #include "lib/cpu.h"
+#include "lib/time.h"
 
 // Drivers support
 #include "drivers/sb16.h"
@@ -35,8 +41,8 @@
 #include "ui/ui.h"
 
 // Storage & Filesystem
-#include "fs/fs.h"
 #include "fs/fdd_ctrl.h"
+#include "fs/fs.h"
 
 // OS Services
 #include "os/clipboard.h"

@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "ui/desktop.h"
 #include "drivers/ata.h"
 #include "drivers/cdrom.h"
@@ -11,6 +16,7 @@
 #include "ui/fileops.h"
 #include "ui/icons.h"
 #include "ui/menubar.h"
+#include "ui/netconn.h"
 #include "ui/popup.h"
 #include "ui/uifont.h"
 #include "ui/window.h"
@@ -201,6 +207,8 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     case DESKTOP_ITEM_FDD:
         if (it->drive_id == DRIVE_CD0)
             draw_cd_icon(ax, ay, it->selected);
+        else if (it->drive_id == DRIVE_NET0)
+            draw_net_icon(ax, ay, it->selected);
         else
             draw_floppy_icon(ax, ay, it->selected);
         break;
@@ -465,6 +473,10 @@ static void menu_eject_cd(void) {
     fs_unmount(DRIVE_CD0);
     desktop_cd_links();
     desktop_fs_set_dirty();
+}
+
+static void menu_net_disconnect(void) {
+    netconn_disconnect(NULL, desktop_fs_set_dirty);
 }
 
 extern app_descriptor fdformat_app;
@@ -892,6 +904,15 @@ static void cd_follow(void) {
     desktop_fs_set_dirty();
 }
 
+/* /NET0 connected or not (from FileF, the shell): its icon */
+static void net_follow(void) {
+    static uint8_t gen;
+    if (g_mount_gen[DRIVE_NET0] == gen)
+        return;
+    gen = g_mount_gen[DRIVE_NET0];
+    desktop_fs_set_dirty();
+}
+
 /* a floppy taken out without Eject */
 static void fdd_follow(void) {
     uint8_t lost;
@@ -1042,7 +1063,10 @@ static void context_menu(int hit, int x, int y) {
         menu_enable_last(m, items[hit].full);
     } else if (items[hit].kind == DESKTOP_ITEM_FDD) {
         menu_add_item(m, "Open", ctx_open);
-        if (items[hit].drive_id != DRIVE_CD0) { /* FDD0, FDD1 */
+        if (items[hit].drive_id == DRIVE_NET0) {
+            menu_add_separator(m);
+            menu_add_item(m, "Disconnect...", menu_net_disconnect);
+        } else if (items[hit].drive_id != DRIVE_CD0) { /* FDD0, FDD1 */
             menu_add_separator(m);
             menu_add_item(m, "Eject Floppy", menu_eject_fdd);
         } else if (items[hit].drive_id == DRIVE_CD0) {
@@ -1116,6 +1140,7 @@ void desktop_draw(void) {
 void desktop_on_frame(void) {
     cd_follow();
     fdd_follow();
+    net_follow();
     apps_menu_follow();
     if (desktop_fs_is_dirty())
         desktop_fs_reload();

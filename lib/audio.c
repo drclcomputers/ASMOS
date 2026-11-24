@@ -1,4 +1,8 @@
-/* One sound at a time, in any format a codec knows (lib/audio.h). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "lib/audio.h"
 #include "drivers/cdrom.h"
 #include "drivers/opl2.h"

@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/joystick.h"
@@ -15,6 +20,7 @@
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
 
+#include "network/dhcp.h"
 #include "network/dns.h"
 #include "network/net.h"
 
@@ -272,8 +278,11 @@ void kmain(void) {
 
     if (g_cfg.networking_enabled && ne2000_init()) {
         net_init();
-        net_set_ip(g_cfg.ip, g_cfg.gateway, g_cfg.netmask);
         dns_set_server(g_cfg.dns_server);
+        if (g_cfg.net_dhcp) /* the address comes in a moment */
+            dhcp_start();
+        else
+            net_set_ip(g_cfg.ip, g_cfg.gateway, g_cfg.netmask);
         arp_announce();
     }
 

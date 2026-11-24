@@ -1,11 +1,15 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef OS_HELP_H
 #define OS_HELP_H
 
 /*
- * Help lives in /HELP/<App>/<page>.TXT; unsupported app-name characters
- * become '_'. Built-in pages ship with ASMOS. .APP pages are installed on
- * first run and refreshed when the package changes; apps with help get a
- * View Help menu item.
+ * Help lives in /HELP/<App>/<page>.TXT; Built-in pages ship with ASMOS. .APP
+ * pages are installed on first run and refreshed when the package changes; apps
+ * with help get a View Help menu item.
  */
 
 #include "os/os.h"

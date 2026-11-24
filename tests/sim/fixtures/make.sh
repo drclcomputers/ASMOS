@@ -15,7 +15,7 @@ nasm -f bin bin/hello.asm -o bin/HELLO.BIN
 CC=${CC:-gcc}
 LD=${LD:-ld}
 $CC -m32 -march=i386 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 \
-    -nostdlib -I"$ROOT" -c "$ROOT/portable apps/hello.c" -o hello.o
+    -nostdlib -I"$ROOT" -c "$ROOT/tests/sim/portable apps/hello.c" -o hello.o
 $LD -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs -e init -o hello.elf hello.o
 python3 "$ROOT/tools/mkapp.py" --elf hello.elf --name Hello --out HELLO.APP \
     --state 64 --single --window-first >/dev/null

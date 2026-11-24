@@ -1,3 +1,8 @@
+; Copyright (c) 2026 @drclcomputers. All rights reserved.
+;
+; This work is licensed under the terms of the MIT license.
+; For a copy, see <https://opensource.org/licenses/MIT>.
+;
 ; ─────────────────────────────────────────────────────────────────────────────
 ; ASMOS volume boot record (sector 0 of a FAT16 partition or a FAT12 floppy).
 ; Formatting writes the real BPB over the template at 0x0B..0x3D. Runs at

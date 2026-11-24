@@ -1,4 +1,8 @@
-; ─────────────────────────────────────────────────────────────────────────────
+; Copyright (c) 2026 @drclcomputers. All rights reserved.
+;
+; This work is licensed under the terms of the MIT license.
+; For a copy, see <https://opensource.org/licenses/MIT>.
+;
 ; Shared by mbr.asm, vbr.asm and stage2.asm: where things are while booting.
 ;
 ;   0x0500  dword  RAM size in bytes (stage 2, INT 15h AH=88h), 0 = unknown

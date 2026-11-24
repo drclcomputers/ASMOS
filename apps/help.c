@@ -1,5 +1,8 @@
-/* Displays /HELP pages by app. Plain text supports "# " headings, "- " list
- * items, blank-line paragraphs, and wrapped paragraph lines. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "os/help.h"
 #include "fs/fs.h"
 #include "os/api.h"

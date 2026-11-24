@@ -1,7 +1,8 @@
-/* Joystick - set up the game port's stick (drivers/joystick.h): a live view,
- * calibration, dead zone and reversed axes. It opens from Settings >
- * Devices; OK keeps the settings in ASMOS.CFG, Cancel puts back the ones
- * it started with. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "drivers/joystick.h"
 #include "config/runtime_config.h"
 #include "os/api.h"

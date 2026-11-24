@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "config/runtime_config.h"
 #include "config/config.h"
 #include "fs/fs.h"
@@ -39,6 +44,7 @@ void cfg_init_defaults(void) {
     g_cfg.saver_minutes = 5;
     g_cfg.saver_effect = 0;
     g_cfg.networking_enabled = 1;
+    g_cfg.net_dhcp = 1;
     g_cfg.ip[0] = 10;
     g_cfg.ip[1] = 0;
     g_cfg.ip[2] = 2;

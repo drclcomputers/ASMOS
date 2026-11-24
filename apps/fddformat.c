@@ -1,6 +1,8 @@
-/* Format Disk formats floppies for DOS, Windows, and ASMOS one track per
- * frame to keep progress responsive. It can also erase HDB as FAT16; HDA is
- * never offered. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "drivers/ata.h"
 #include "drivers/fdd.h"
 #include "fs/fdformat.h"

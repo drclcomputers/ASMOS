@@ -1,3 +1,8 @@
+; Copyright (c) 2026 @drclcomputers. All rights reserved.
+;
+; This work is licensed under the terms of the MIT license.
+; For a copy, see <https://opensource.org/licenses/MIT>.
+;
 ; ─────────────────────────────────────────────────────────────────────────────
 ; ASMOS master boot record. Moves itself to 0x0600, loads the active
 ; partition's VBR to 0x7C00 (LBA, else CHS) and jumps to it with DL = drive

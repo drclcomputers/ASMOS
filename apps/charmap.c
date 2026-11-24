@@ -1,6 +1,8 @@
-/* Character Map - every character of the code page (Settings > Display), in
- * any of the fonts: pick one, see it large with its codes (and the
- * Alt + number pad keys that type it), gather a few, copy them. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "fonts/fonts.h"
 #include "os/api.h"
 #include "os/clipboard.h"

@@ -1,6 +1,8 @@
-/* Puzzle - the 15-tile sliding puzzle (a desk accessory, as on the first
- * Mac). Click a tile in the row or column of the gap to slide it (and any
- * tiles between) into the gap, or use the arrow keys. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 #define N 4

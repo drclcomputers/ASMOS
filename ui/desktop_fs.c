@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "ui/desktop_fs.h"
 #include "config/config.h"
 #include "config/runtime_config.h"
@@ -138,9 +143,10 @@ void desktop_fs_reload(void) {
         s_count++;
     }
 
-    for (uint8_t d = DRIVE_FDD0; d <= DRIVE_CD0 && s_count < DESKTOP_MAX_ITEMS;
-         d++) { /* the floppies, the CD: only with a disk in (an empty
-                   floppy drive is in FileF's Drives, to read a disk) */
+    for (uint8_t d = DRIVE_FDD0; d <= DRIVE_NET0 && s_count < DESKTOP_MAX_ITEMS;
+         d++) { /* the floppies, the CD, a server: only with a disk in (an
+                   empty floppy drive is in FileF's Drives, to read a disk)
+                   or connected */
         if (!fs_drive_mounted(d))
             continue;
         desktop_item_t *it = &s_items[s_count];

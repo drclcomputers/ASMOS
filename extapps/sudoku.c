@@ -1,15 +1,14 @@
-/* Bundled Sudoku app. Arrows/click select; 1-9 enter digits, Shift+1-9
- * adds notes, N toggles notes, Delete/Backspace/0/Space clears, Ctrl+Z
- * undoes. Puzzles have one solution; progress and best times are saved in
- * /PREFS/SUDOKU.INI. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
-/* cell size, pixels: the same on every screen (board 113 px, fits 320x200;
- * Settings > System > Large display makes it bigger) */
 static int s_cs = 11;
 #define CS s_cs
 #define OFF(i) (2 + (i) * (CS + 1) + (i) / 3)
-#define BOARD OFF(9) /* cells + thin and thick lines */
+#define BOARD OFF(9)
 #define STATUS_H 16
 #define UNDO_MAX 200
 

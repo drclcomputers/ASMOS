@@ -5,7 +5,9 @@
   and symbols).
 - Sound: sound on or off, the start-up chime, the Sound Blaster's volume.
 - Clock: the date, the time and the time zone.
-- Network: the IP address, gateway, netmask and DNS server.
+- Network: the address from DHCP (it shows what it got, and Renew asks
+  again), or untick it and type the IP address, gateway, netmask and DNS
+  server in. They apply at once.
 - Printers: the printer's kind and port.
 - Devices: what is plugged in: keyboard, mouse, joystick, ports, sound
   and network cards. Double-click one to set it up (the joystick opens

@@ -1,8 +1,8 @@
 # Files and disks
 
 Every disk is a folder at the top: /HDA and /HDB (hard disks), /FDD0 and
-/FDD1 (floppy drives), /CD0 (the CD drive). FileF shows them all under
-Drives.
+/FDD1 (floppy drives), /CD0 (the CD drive), /NET0 (a server). FileF shows
+them all under Drives.
 
 - New names may have letters, digits, the dot and - _ # $ % & + = @ ! ~
   ( ) [ ] { }. No spaces: use _ or - instead. Names already on a disk
@@ -23,3 +23,14 @@ A CD shows on the desktop by itself, with its name. Apps on it appear in
 Apps > CDROM while it is in. An audio CD shows its tracks as
 Track01.cda... and Audio Player plays them. Right-click the CD to eject
 it.
+
+# Servers
+
+FileF's Drive > Connect to Server makes a folder on an FTP server the
+drive NET0, with an icon on the desktop. Copy to it and from it as with
+any disk. Right-click its icon to disconnect. In the shell: ftp mount and
+ftp umount.
+
+ftp startsrv in the shell lets other computers in: they see the drives
+as folders. ftp stopsrv ends it. Anyone on the network can come in, so
+use -p and a password, or -r to let them only read.

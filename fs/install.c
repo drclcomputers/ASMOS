@@ -1,6 +1,8 @@
-/* Disk layout (also tools/mkdisk.py): LBA 0 MBR/active FAT16 partition,
- * LBAs 1-62 zero, LBA 63 partition VBR, then 15 stage-2 sectors, two FATs,
- * a 512-entry root, and data. See fs/install.h for installer stages. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "fs/install.h"
 #include "drivers/ata.h"
 #include "fs/bootcode.h"

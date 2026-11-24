@@ -1,9 +1,15 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "fs/fs.h"
 #include "drivers/ata.h"
 #include "drivers/cdrom.h"
 #include "drivers/fdd.h"
 #include "fs/fat_io.h"
 #include "fs/iso9660.h"
+#include "fs/netfs.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -14,19 +20,18 @@ fat_dir_ctx_t dir_context = {DRIVE_HDA, 0, "/"};
 static uint8_t s_current_drive = DRIVE_HDA;
 
 vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT] = {
-    {"/HDB", DRIVE_HDB},
-    {"/FDD0", DRIVE_FDD0},
-    {"/FDD1", DRIVE_FDD1},
-    {"/CD0", DRIVE_CD0},
+    {"/HDB", DRIVE_HDB}, {"/FDD0", DRIVE_FDD0}, {"/FDD1", DRIVE_FDD1},
+    {"/CD0", DRIVE_CD0}, {"/NET0", DRIVE_NET0},
 };
 
 const char *g_protected_paths[PROTECTED_PATH_COUNT] = {
-    "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1", "TRASH", "/TRASH", "CD0",
+    "DESKTOP", "/DESKTOP", "HDB", "FDD0", "FDD1",
+    "TRASH",   "/TRASH",   "CD0", "NET0",
 };
 
 const char *g_drive_paths[DRIVE_COUNT] = {
     [DRIVE_HDA] = "/HDA",   [DRIVE_HDB] = "/HDB", [DRIVE_FDD0] = "/FDD0",
-    [DRIVE_FDD1] = "/FDD1", [DRIVE_CD0] = "/CD0",
+    [DRIVE_FDD1] = "/FDD1", [DRIVE_CD0] = "/CD0", [DRIVE_NET0] = "/NET0",
 };
 
 bool path_is_protected(const char *name_or_path) {
@@ -278,12 +283,22 @@ static bool cd_iter_cb(dir_entry_t *e, const char *lname, void *user) {
     return c->cb(DRIVE_CD0, e, lname, 0, 0, c->user);
 }
 
+static bool net_iter_cb(dir_entry_t *e, const char *lname, void *user) {
+    cd_iter *c = user;
+    return c->cb(DRIVE_NET0, e, lname, 0, 0, c->user);
+}
+
 static bool dir_iterate(uint8_t drive_id, uint16_t dir_cluster, dir_cb cb,
                         void *user) {
     if (drive_id == DRIVE_CD0) {
         cd_iter c = {cb, user};
         return g_drives[DRIVE_CD0].mounted &&
                iso_iterate(dir_cluster, cd_iter_cb, &c);
+    }
+    if (drive_id == DRIVE_NET0) { /* the same, from the server */
+        cd_iter c = {cb, user};
+        return g_drives[DRIVE_NET0].mounted &&
+               netfs_iterate(dir_cluster, net_iter_cb, &c);
     }
     fat_vol_t *v = vol(drive_id);
     lfn_acc a;
@@ -922,6 +937,8 @@ bool fs_mount_drive(uint8_t drive_id) {
 
     if (drive_id == DRIVE_CD0) /* ISO 9660 */
         return cd_check() == CD_READY && iso_mount(v);
+    if (drive_id == DRIVE_NET0) /* FTP: when connected (fs/netfs.h) */
+        return netfs_mount(v);
 
     uint8_t tmp_buf[512];
     v->base_lba = 0;
@@ -1230,6 +1247,8 @@ bool fs_get_usage_drive(uint8_t drive_id, uint32_t *total_bytes,
         *total_bytes = *used_bytes = iso_size_bytes();
         return true;
     }
+    if (drive_id == DRIVE_NET0) /* (FTP doesn't say) */
+        return false;
     fat_vol_t *v = &g_drives[drive_id];
     *total_bytes = (v->bpb.total_sectors_32 ? v->bpb.total_sectors_32
                                             : v->bpb.total_sectors_16) *
@@ -1547,7 +1566,7 @@ static bool any_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
 bool fs_is_dir_empty(uint8_t drive_id, uint16_t cluster) {
     if (cluster == 0)
         return false;
-    if (drive_id == DRIVE_CD0) {
+    if (drive_id == DRIVE_CD0 || drive_id == DRIVE_NET0) {
         bool any = false;
         dir_iterate(drive_id, cluster, any_cb, &any);
         return !any;
@@ -1621,6 +1640,8 @@ bool fs_open(const char *path, fat_file_t *f) {
     bool ex;
     if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
+    if (drive_id == DRIVE_NET0)
+        return netfs_open(f, dir_cluster, name83);
     dir_entry_t entry;
     uint32_t lba;
     int idx;
@@ -1646,6 +1667,8 @@ bool fs_create(const char *path, fat_file_t *f) {
     if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || ex ||
         drive_id == DRIVE_CD0) /* read only */
         return false;
+    if (drive_id == DRIVE_NET0)
+        return netfs_create(f, dir_cluster, leaf);
 
     uint16_t cluster = fat_alloc(drive_id);
     if (cluster == 0)
@@ -1675,6 +1698,8 @@ int fs_read(fat_file_t *f, void *buf, int len) {
         return -1;
     if (f->drive_id == DRIVE_CD0)
         return iso_read(f, buf, len);
+    if (f->drive_id == DRIVE_NET0)
+        return netfs_read(f, buf, len);
     fat_vol_t *v = vol(f->drive_id);
     uint8_t *out = (uint8_t *)buf;
     int total = 0;
@@ -1735,6 +1760,8 @@ static int done_write(fat_file_t *f, int total, fat_vol_t *v) {
 int fs_write(fat_file_t *f, const void *buf, int len) {
     if (!f->open || f->drive_id == DRIVE_CD0)
         return -1;
+    if (f->drive_id == DRIVE_NET0)
+        return netfs_write(f, buf, len);
     fat_vol_t *v = vol(f->drive_id);
     const uint8_t *in = (const uint8_t *)buf;
     int total = 0;
@@ -1807,6 +1834,8 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
 bool fs_seek(fat_file_t *f, uint32_t offset) {
     if (!f->open || offset > f->entry.file_size)
         return false;
+    if (f->drive_id == DRIVE_NET0)
+        return netfs_seek(f, offset);
     if (f->drive_id == DRIVE_CD0) { /* one piece: just the place */
         f->cur_offset = offset;
         return true;
@@ -1840,6 +1869,8 @@ bool fs_close(fat_file_t *f) {
         f->open = false;
         return true;
     }
+    if (f->drive_id == DRIVE_NET0)
+        return netfs_close(f);
     uint8_t close_buf[512];
     if (!fs_read_sector(f->drive_id, f->dir_entry_lba, close_buf))
         return false;
@@ -1856,6 +1887,10 @@ bool fs_close(fat_file_t *f) {
 /* a new, empty folder called name in dir_cluster */
 static bool mkdir_in(uint8_t drive_id, uint16_t dir_cluster, const char *name,
                      uint16_t *out_cluster) {
+    if (drive_id == DRIVE_NET0)
+        return netfs_mkdir(dir_cluster, name, out_cluster);
+    if (drive_id == DRIVE_CD0)
+        return false;
     uint16_t cluster = fat_alloc(drive_id);
     if (cluster == 0)
         return false;
@@ -1922,6 +1957,10 @@ static bool rename_in(uint8_t drive_id, uint16_t dir_cluster,
         return false; /* another file has that name */
 
     g_fs_rev++;
+    if (drive_id == DRIVE_NET0)
+        return netfs_rename(dir_cluster, name83, dir_cluster, t);
+    if (drive_id == DRIVE_CD0)
+        return false;
     uint8_t cf;
     bool lfn = needs_lfn(t, &cf);
     lfn_clear(drive_id, dir_cluster, name83); /* the old long name goes */
@@ -1986,6 +2025,10 @@ bool fs_delete(const char *path) {
     bool ex;
     if (!resolve_ex(path, &drive_id, &dir_cluster, name83, leaf, &ex) || !ex)
         return false;
+    if (drive_id == DRIVE_NET0)
+        return netfs_delete(dir_cluster, name83);
+    if (drive_id == DRIVE_CD0)
+        return false;
     lfn_clear(drive_id, dir_cluster, name83);
     modify_ctx ctx = {name83, false, 0};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
@@ -2009,6 +2052,10 @@ bool fs_rmdir(const char *path) {
         return false;
     if (!fs_is_dir_empty(drive_id, entry.cluster_lo))
         return false;
+    if (drive_id == DRIVE_NET0)
+        return netfs_rmdir(dir_cluster, name83, false);
+    if (drive_id == DRIVE_CD0)
+        return false;
     lfn_clear(drive_id, dir_cluster, name83);
     modify_ctx ctx = {name83, false, 2};
     dir_iterate(drive_id, dir_cluster, modify_cb, &ctx);
@@ -2030,6 +2077,10 @@ bool fs_rm_rf(const char *path) {
         return false;
     if (!(entry.attr & ATTR_DIRECTORY))
         return false;
+    if (drive_id == DRIVE_NET0)
+        return netfs_rmdir(dir_cluster, name83, true);
+    if (drive_id == DRIVE_CD0)
+        return false;
     /* frees the folder's own clusters too: the slot then just goes */
     fs_wipe_cluster(drive_id, entry.cluster_lo);
     lfn_clear(drive_id, dir_cluster, name83);
@@ -2041,9 +2092,26 @@ bool fs_rm_rf(const char *path) {
 }
 
 /* a new file called name in dst_dir_cluster, with src's contents */
+/* the bytes of src into dst, then dst closed */
+static bool copy_bytes(fat_file_t *src, fat_file_t *dst) {
+    uint8_t buf[1024]; /* (not static: NET0 waits, another task may copy) */
+    int n;
+    bool ok = true;
+    while (ok && (n = fs_read(src, buf, sizeof(buf))) > 0)
+        ok = fs_write(dst, buf, n) == n;
+    return fs_close(dst) && ok && n == 0;
+}
+
 static bool copy_file_to(fat_file_t *src, uint8_t dst_drive,
                          uint16_t dst_dir_cluster, const char *name) {
     fs_seek(src, 0);
+    if (dst_drive == DRIVE_NET0) { /* an upload */
+        fat_file_t dst;
+        return netfs_create(&dst, dst_dir_cluster, name) &&
+               copy_bytes(src, &dst);
+    }
+    if (dst_drive == DRIVE_CD0)
+        return false;
     uint16_t cluster = fat_alloc(dst_drive);
     if (cluster == 0)
         return false;
@@ -2086,6 +2154,7 @@ typedef struct {
     uint8_t dst_drive;
     uint16_t dst_dir_cluster;
     bool ok;
+    uint16_t src_cluster;
 } copy_dir_ctx;
 
 static bool copy_entry_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
@@ -2115,16 +2184,22 @@ static bool copy_entry_cb(uint8_t drive_id, dir_entry_t *e, const char *lname,
     src.dir_entry_idx = idx;
     src.open = true;
     src.drive_id = drive_id;
-    if (!copy_file_to(&src, ctx->dst_drive, ctx->dst_dir_cluster, name)) {
+    if (drive_id == DRIVE_NET0 && /* (a download: it needs opening) */
+        !netfs_open(&src, ctx->src_cluster, (const char *)e->name)) {
         ctx->ok = false;
         return false;
     }
-    return true;
+    bool ok = copy_file_to(&src, ctx->dst_drive, ctx->dst_dir_cluster, name);
+    if (drive_id == DRIVE_NET0)
+        fs_close(&src);
+    ctx->ok = ctx->ok && ok;
+    return ok;
 }
 
 static bool copy_dir_cluster(uint8_t src_drive, uint16_t src_cluster,
                              uint8_t dst_drive, uint16_t dst_dir_cluster) {
-    copy_dir_ctx ctx = {src_drive, dst_drive, dst_dir_cluster, true};
+    copy_dir_ctx ctx = {src_drive, dst_drive, dst_dir_cluster, true,
+                        src_cluster};
     skipdot_ctx sk = {copy_entry_cb, &ctx};
     bool ok = dir_iterate(src_drive, src_cluster, skipdot_cb, &sk);
     return ok && ctx.ok;
@@ -2140,6 +2215,8 @@ bool fs_copy_file(const char *src_path, const char *dst_path) {
     bool ex;
     bool ok = resolve_ex(dst_path, &dst_drive, &dst_dir, dst83, leaf, &ex) &&
               !ex && copy_file_to(&src, dst_drive, dst_dir, leaf);
+    if (src.drive_id == DRIVE_NET0)
+        fs_close(&src);
     src.open = false; /* read only: nothing to write back */
     return ok;
 }
@@ -2149,6 +2226,8 @@ bool fs_copy_file(const char *src_path, const char *dst_path) {
 static bool move_entry(uint8_t drive, uint16_t src_dir, const char *src83,
                        uint16_t dst_dir, const char *dst_name,
                        dir_entry_t *moved) {
+    if (drive == DRIVE_NET0) /* (RNFR, RNTO) */
+        return netfs_rename(src_dir, src83, dst_dir, dst_name);
     dir_entry_t e;
     uint32_t lba, nlba;
     int idx, nidx;
@@ -2268,6 +2347,8 @@ bool fs_move_dir(const char *src_path, const char *dst_path) {
         g_fs_rev++;
         if (!move_entry(src_drive, src_dir, src83, dst_dir, dleaf, NULL))
             return false;
+        if (src_drive == DRIVE_NET0) /* (no ".." to point elsewhere) */
+            return true;
 
         uint32_t dotdot_lba =
             fat_cluster_to_lba(src_drive, src_entry.cluster_lo);

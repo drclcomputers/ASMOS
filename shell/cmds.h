@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef SHELL_CLI_CMDS_H
 #define SHELL_CLI_CMDS_H
 
@@ -39,6 +44,8 @@ void cmd_cd(const char *path, char *out, size_t max);
 void cmd_gopher(term_context_t *ctx, const char *args, char *out, size_t max);
 void cmd_ping(const char *args, char *out, size_t max);
 void cmd_netconf(const char *args, char *out, size_t max);
+void cmd_dhcp(const char *args, char *out, size_t max);
+void cmd_ftp(const char *args, char *out, size_t max);
 void cmd_app(const char *args, char *out, size_t max);
 
 #endif

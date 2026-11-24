@@ -1,3 +1,10 @@
+/*
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+*/
+
 ENTRY(_start)
 SECTIONS {
     /* The kernel runs at 1 MB. It is the file /SYSTEM/KERNEL.SYS: stage 2

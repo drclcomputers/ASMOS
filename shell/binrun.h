@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef SHELL_BINRUN_H
 #define SHELL_BINRUN_H
 
@@ -22,6 +27,5 @@ typedef struct {
 const bin_syscall_t *binrun_make_table(term_context_t *ctx);
 
 void cmd_run(term_context_t *ctx, const char *path, char *out, size_t max);
-
 
 #endif

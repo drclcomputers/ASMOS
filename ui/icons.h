@@ -1,9 +1,14 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef ICONS_H
 #define ICONS_H
 
 #include "lib/core.h"
 
-/* Icon bitmap size (shared by desktop and FileF). */
+/* Icon bitmap size */
 #define ICON_W 20
 #define ICON_H 20
 /* Desktop auto-layout grid (ui/desktop_fs.c). */
@@ -21,6 +26,7 @@ void draw_folder_icon(int ax, int ay, bool sel);
 void draw_hdd_icon(int ax, int ay, bool sel);
 void draw_floppy_icon(int ax, int ay, bool sel);
 void draw_cd_icon(int ax, int ay, bool sel);
+void draw_net_icon(int ax, int ay, bool sel);
 void draw_app_icon(int ax, int ay, bool sel);
 void draw_dotdot_icon(int ax, int ay, bool sel);
 void draw_pic_icon(int ax, int ay, bool sel);

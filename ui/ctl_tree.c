@@ -1,8 +1,8 @@
-/*
- * Growable tree nodes store parent/child/sibling indices. Expandable nodes
- * send EV_EXPAND on first open so handlers can add children. Mouse and
- * keyboard navigation update selection; double-click and Enter submit.
- */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "drivers/keyboard.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
@@ -11,7 +11,7 @@
 #include "ui/uifont.h"
 
 #define ROW_H 9
-#define SB_W 8 /* same as the list's built-in scrollbar */
+#define SB_W 8
 
 static uint8_t bgc_or(const control *c, uint8_t d) {
     return c->bg != 0xFF ? c->bg : d;

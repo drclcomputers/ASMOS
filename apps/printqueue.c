@@ -1,6 +1,8 @@
-/* Print Queue - the jobs waiting for the printer (os/print.h), like Print
- * Manager. Pause holds the queue (the job being printed stops where it
- * is); Delete takes a job out, even half printed. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "config/runtime_config.h"
 #include "os/api.h"
 #include "os/print.h"

@@ -1,6 +1,8 @@
-/* Plays supported WAV/MIDI/CD audio with a playlist. Space toggles playback;
- * S/R/N/L control playback, +/- volume, C selects CD audio, and Delete
- * removes tracks. Playlist and volume are saved in /PREFS/AUDIOPLA.INI. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 #define MAX_LIST 40  /* (a CD has up to 99 tracks; most have under 25) */

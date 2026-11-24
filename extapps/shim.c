@@ -1,5 +1,8 @@
-/* The kernel functions the bundled apps call, on top of the app API (see
- * shim.h). Unused ones are dropped at link time (--gc-sections). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 const os_api_t *A;

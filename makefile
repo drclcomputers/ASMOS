@@ -3,8 +3,6 @@ LD = i686-elf-ld
 NM = i686-elf-nm
 AS = nasm
 
-# -march=i386: runs on 386/486/Pentium (gcc's default i686 emits CMOV,
-# which faults on anything older than a Pentium Pro).
 CFLAGS  = -std=gnu11 -ffreestanding -m32 -march=i386 -mtune=i486 -O2 -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Wextra \
           -fno-stack-protector -fno-pie -nostdlib \
           -fno-builtin-memset -fno-builtin-memcpy \
@@ -13,18 +11,12 @@ LDFLAGS = -m elf_i386 -T linker.ld --oformat binary
 
 BUILD_DIR = build
 
-# The hard disk image `make` builds (installed and ready, like Setup makes
-# it): its size in MB. 64 MB = 130 cylinders of 16 heads x 63 sectors.
 HDD_MB ?= 64
 
-# ── Sources ──────────────────────────────────────────────────────────────────
+# Sources
 # Every .c in these dirs is built automatically; just drop a new file in.
 SRC_DIRS = apps config drivers fonts fs interrupts lib network os shell ui
 
-# Kept in-tree but deliberately not built:
-#   apps/asmusic.c      – app retired from the registry (still gitignored WIP)
-#   lib/libc_compat.c   – libc shim for future TCC/NASM ports; pulled from the
-#                         build in 7d3b781 ("OS now boots"), not needed yet
 EXCLUDE = apps/asmusic.c lib/libc_compat.c
 
 C_SRC   = kernel.c $(filter-out $(EXCLUDE),$(foreach d,$(SRC_DIRS),$(wildcard $(d)/*.c)))
@@ -40,7 +32,7 @@ BOOT_BIN = $(BOOT_DIR)/mbr.bin $(BOOT_DIR)/vbr.bin $(BOOT_DIR)/stage2.bin
 OBJ = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SRC)) \
       $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRC))
 
-# ── Bundled apps: .APP packages put in /APPS on the disk image ──────────────
+# Bundled apps: .APP packages put in /APPS on the disk image
 # extapps/<name>.c + extapps/shim.c (kernel calls -> app API) + the string
 # and number helpers, linked at 0 with only what is used (--gc-sections),
 # packed by tools/mkapp.py (name, state, heap from APP_META). Where each goes
@@ -69,7 +61,7 @@ $(EXT_DIR)/%.APP: $(EXT_DIR)/extapps/%.o $(EXT_LIB_OBJ) $(EXT_HELP)
 
 apps: $(EXT_PKGS)
 
-# ── SDK: building apps without the source tree (tools/mksdk.py, sdk/) ───────
+# SDK: building apps without the source tree (tools/mksdk.py, sdk/)
 # build/sdk/ASMOS-SDK (and .zip): headers, libasmos.a (the objects above),
 # mkapp.py, mkiso.py, app.mk, an example. Not part of `all`: make sdk.
 SDK_DIR = build/sdk/ASMOS-SDK
@@ -82,7 +74,7 @@ sdk: $(EXT_LIB_OBJ) tools/mksdk.py
 
 .DEFAULT_GOAL := all
 
-# ── Build ────────────────────────────────────────────────────────────────────
+# Build
 # os_image.bin  a hard disk with ASMOS installed (the 86Box/QEMU disk)
 # setup.img     the 1.44 MB setup floppy: boot it to install on any disk
 all: os_image.bin setup.img
@@ -127,7 +119,7 @@ setup.img: $(MKDISK_IN)
 -include $(OBJ:.o=.d)
 -include $(EXT_LIB_OBJ:.o=.d) $(patsubst %,$(EXT_DIR)/extapps/%.d,$(EXT_APPS))
 
-# ── Run ──────────────────────────────────────────────────────────────────────
+# Run
 QEMU_FLAGS = -drive format=raw,file=os_image.bin \
              -m 4M -machine pc \
              -audiodev coreaudio,id=snd0 \
@@ -137,7 +129,14 @@ QEMU_FLAGS = -drive format=raw,file=os_image.bin \
              -vga std \
              -display cocoa,zoom-to-fit=on \
              -device ne2k_isa,irq=3,iobase=0x300,netdev=net0 \
-             -netdev user,id=net0
+             -netdev user,id=net0$(FTP_FWD)
+# make qemu FTP=1: the Mac reaches ASMOS's FTP server (ftp startsrv) at
+# localhost:2121, and its data ports 50000-50009
+FTP_DATA = 50000 50001 50002 50003 50004 50005 50006 50007 50008 50009
+FTP_FWD = $(if $(FTP),$(comma)hostfwd=tcp::2121-:21$(subst $(space),,$(foreach \
+          p,$(FTP_DATA),$(comma)hostfwd=tcp::$(p)-:$(p))))
+comma := ,
+space := $(subst ,, )
 
 qemu: all
 	qemu-system-i386 $(QEMU_FLAGS)
@@ -146,7 +145,7 @@ qemu-fdd: all
 	qemu-system-i386 $(QEMU_FLAGS) -drive format=raw,file=setup.img,if=floppy
 
 # with a CD in the drive (secondary master, ATAPI). By default cd.iso: the
-# bundled apps in APPS\ (they show in Apps > CDROM) and a long-named file.
+# bundled apps in APPS\ (they show in Apps > CDROM)
 # Any other disc: make qemu-cd CD_ISO=my.iso
 CD_ISO ?= cd.iso
 CD_DIR  = $(BUILD_DIR)/cd
@@ -175,7 +174,7 @@ bochs: all
 boottest: os_image.bin setup.img
 	python3 tools/boottest.py os_image.bin setup.img kernel.bin
 
-# ── Misc ─────────────────────────────────────────────────────────────────────
+# Misc
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f *.bin *.log *.map qemulog.txt floppy.img setup.img cd.iso

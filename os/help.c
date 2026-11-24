@@ -1,5 +1,8 @@
-/* Help pages: the folders in /HELP, the pages an .APP carries, the Help
- * menu (os/help.h). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "os/help.h"
 #include "fs/fs.h"
 #include "lib/memory.h"

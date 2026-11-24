@@ -1,11 +1,11 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef EXTAPPS_SHIM_H
 #define EXTAPPS_SHIM_H
-/* Compiles built-in app sources as .APPs: shim.c maps kernel calls to the
- * app API, while string/math helpers are linked in. APP_META(name, state,
- * single_instance, heap_kb, init, on_frame, destroy) declares metadata for
- * tools/mkapp.py --meta. The state's first member must be its window *;
- * heap_kb 0 = 64 KB.
- *   APP_META("Puzzle", puzzle_state_t, true, 0, puzzle_init, NULL, NULL); */
+
 #include "os/appapi.h"
 
 #include "drivers/opl2.h"

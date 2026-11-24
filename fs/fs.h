@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef FS_H
 #define FS_H
 
@@ -73,8 +78,9 @@ typedef struct __attribute__((packed)) {
 #define DRIVE_HDB 1
 #define DRIVE_FDD0 2
 #define DRIVE_FDD1 3
-#define DRIVE_CD0 4 /* the CD-ROM: ISO 9660, read only (fs/iso9660.h) */
-#define DRIVE_COUNT 5
+#define DRIVE_CD0 4  /* the CD-ROM: ISO 9660, read only (fs/iso9660.h) */
+#define DRIVE_NET0 5 /* a folder on an FTP server (fs/netfs.h) */
+#define DRIVE_COUNT 6
 
 typedef enum {
     FAT_TYPE_FAT12 = 12,
@@ -120,10 +126,10 @@ typedef struct {
 
 extern const char *g_drive_paths[DRIVE_COUNT];
 
-#define VFS_MOUNT_COUNT 4
+#define VFS_MOUNT_COUNT 5
 extern vfs_mount_t g_vfs_mounts[VFS_MOUNT_COUNT];
 
-#define PROTECTED_PATH_COUNT 8
+#define PROTECTED_PATH_COUNT 9
 extern const char *g_protected_paths[PROTECTED_PATH_COUNT];
 
 extern fat_vol_t g_drives[DRIVE_COUNT];

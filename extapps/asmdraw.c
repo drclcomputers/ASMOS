@@ -1,4 +1,8 @@
-/* ASMDraw - small paint program. .PIC = 2x u16 (w, h) + w*h colour bytes */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 #include "os/prefs.h"
 

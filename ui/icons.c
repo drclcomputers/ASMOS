@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "ui/icons.h"
 
 #include "lib/graphics.h"
@@ -176,6 +181,30 @@ void draw_cd_icon(int ax, int ay, bool sel) {
                 draw_dot(ax + x, ay + y, sel ? LIGHT_GRAY : WHITE);
             else if (c == 'o')
                 draw_dot(ax + x, ay + y, sel ? LIGHT_GRAY : DARK_GRAY);
+        }
+}
+
+/* a server box on a network cable, a machine at each end */
+void draw_net_icon(int ax, int ay, bool sel) {
+    static const char *k[20] = {
+        "  xxxxxxxxxxxxxxxx  ", "  xssssssssssssssx  ", "  xswwwwwwwwwwggsx  ",
+        "  xsoooooooooooosx  ", "  xssssssssssssssx  ", "  xswwwwwwwwwwwwsx  ",
+        "  xsoooooooooooosx  ", "  xssssssssssssssx  ", "  xxxxxxxxxxxxxxxx  ",
+        "         xx         ", "         xx         ", "         xx         ",
+        "         xx         ", " xxxxx   xx   xxxxx ", " xwwwx   xx   xwwwx ",
+        " xwwwxxxxxxxxxxwwwx ", " xwwwxxxxxxxxxxwwwx ", " xxxxx        xxxxx ",
+        "  xxx          xxx  ", "                    "};
+    for (int y = 0; y < 20; y++)
+        for (int x = 0; x < 20; x++) {
+            char c = k[y][x];
+            uint8_t col = c == 'x'   ? BLACK
+                          : c == 's' ? (sel ? DARK_GRAY : LIGHT_GRAY)
+                          : c == 'w' ? (sel ? LIGHT_GRAY : WHITE)
+                          : c == 'o' ? DARK_GRAY
+                          : c == 'g' ? (sel ? DARK_GRAY : LIGHT_GREEN)
+                                     : 0xFF;
+            if (col != 0xFF)
+                draw_dot(ax + x, ay + y, col);
         }
 }
 

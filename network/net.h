@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef NET_H
 #define NET_H
 
@@ -17,7 +22,7 @@
 #define ARP_OP_REPLY 2
 #define ARP_CACHE_SIZE 16
 
-#define NET_MAX_SOCKETS 16
+#define NET_MAX_SOCKETS 32
 #define NET_UDP_BUFSIZE 1460
 #define NET_TCP_BUFSIZE 4096
 
@@ -100,8 +105,17 @@ typedef enum {
     TCP_FIN_WAIT2,
     TCP_TIME_WAIT,
     TCP_CLOSE_WAIT,
-    TCP_LAST_ACK
+    TCP_LAST_ACK,
+    TCP_LISTEN,
+    TCP_SYN_RCVD,
+    TCP_CLOSING
 } tcp_state_t;
+
+/* per connection (network/tcp.c): what is sent and not yet acknowledged,
+ * and what came and is not yet read */
+#define TCP_TXBUF 8192
+#define TCP_RXBUF 8192 /* (the window offered) */
+#define TCP_MSS 1460
 
 typedef struct {
     bool used;
@@ -111,16 +125,12 @@ typedef struct {
     uint8_t remote_ip[4];
     uint8_t remote_mac[6];
 
-    uint8_t *rx_buf; /* allocated on udp_open/tcp_connect */
+    uint8_t *rx_buf; /* UDP: one datagram */
     uint16_t rx_len;
     bool rx_ready;
 
     tcp_state_t tcp_state;
-    uint32_t tx_seq;
-    uint32_t rx_seq;
-    uint8_t *tcp_rx; /* allocated on tcp_connect */
-    uint16_t tcp_rx_head;
-    uint16_t tcp_rx_tail;
+    struct tcp_cb *tcb; /* TCP: network/tcp.c */
 } net_socket_t;
 
 typedef struct {
@@ -132,6 +142,12 @@ typedef struct {
 void net_init(void);
 void net_set_ip(const uint8_t ip[4], const uint8_t gw[4], const uint8_t nm[4]);
 void net_get_ip(uint8_t ip[4]);
+void net_get_config(uint8_t ip[4], uint8_t gw[4], uint8_t nm[4]);
+bool net_ready(void); /* a card and an address (DHCP may not have one yet) */
+/* one UDP datagram to a known MAC, without a socket or ARP (DHCP) */
+bool net_send_udp(const uint8_t mac[6], const uint8_t dst_ip[4],
+                  uint16_t src_port, uint16_t dst_port, const uint8_t *data,
+                  uint16_t len);
 void net_rx_enqueue(const uint8_t *frame, uint16_t len);
 
 void arp_request(const uint8_t ip[4]);
@@ -145,12 +161,39 @@ bool udp_send(int sock, const uint8_t dst_ip[4], uint16_t dst_port,
 int udp_recv(int sock, uint8_t *buf, uint16_t maxlen, uint8_t src_ip[4],
              uint16_t *src_port);
 
+/* TCP. Lost data is sent again until the other side has it; sockets
+ * are numbers, -1 = none. */
+/* waits until connected (5 s); local_port 0 = any */
 int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
                 uint16_t local_port);
+/* closes and waits (3 s) for the rest to be acknowledged */
 void tcp_close(int sock);
+/* closes and returns: the stack finishes the closing in the background */
+void tcp_release(int sock);
+/* cuts it off (RST): what wasn't sent or read is lost */
+void tcp_abort(int sock);
+/* waits while the send buffer is full; false = the connection is gone */
 bool tcp_send(int sock, const uint8_t *data, uint16_t len);
-int tcp_recv(int sock, uint8_t *buf, uint16_t maxlen);
+/* doesn't wait: the bytes taken (0 = the buffer is full), -1 = gone */
+int tcp_write(int sock, const uint8_t *data, uint16_t len);
+int tcp_recv(int sock, uint8_t *buf, uint16_t maxlen); /* 0 = nothing yet */
+uint16_t tcp_available(int sock); /* bytes waiting to be read */
+uint16_t tcp_pending(int sock);   /* bytes not yet acknowledged */
 tcp_state_t tcp_state(int sock);
+bool tcp_was_reset(int sock); /* refused, reset, or gave up resending */
+bool tcp_peer(int sock, uint8_t ip[4], uint16_t *port);
+uint16_t tcp_local_port(int sock);
+/* a server: connections come in on the port, tcp_accept takes them (it
+ * doesn't wait). Closing the listener refuses new ones. */
+int tcp_listen(uint16_t port);
+int tcp_accept(int listen_sock);
+
+typedef struct {
+    uint32_t segs_in, segs_out;
+    uint32_t timeouts;    /* sent again when the timer ran out */
+    uint32_t fast_rexmit; /* sent again on duplicate ACKs */
+} tcp_stats_t;
+extern tcp_stats_t g_tcp_stats;
 
 bool icmp_ping(const uint8_t dst_ip[4], uint16_t id, uint16_t seq,
                uint32_t timeout_ms);

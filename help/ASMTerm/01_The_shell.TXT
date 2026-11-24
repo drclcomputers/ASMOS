@@ -8,5 +8,5 @@ Type help for the list of commands, help and a topic for more.
 - File > Paste types the clipboard's text.
 
 A few commands: ls, cd, cat, cp, mv, rm, mkdir, write, format, play,
-ping. A name with spaces goes in quotes. The topics of help: files,
+ping, ftp. A name with spaces goes in quotes. The topics of help: files,
 time, info, network, devices, programs, shell.

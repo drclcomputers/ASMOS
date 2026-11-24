@@ -1,3 +1,8 @@
+; Copyright (c) 2026 @drclcomputers. All rights reserved.
+;
+; This work is licensed under the terms of the MIT license.
+; For a copy, see <https://opensource.org/licenses/MIT>.
+;
 ; ─────────────────────────────────────────────────────────────────────────────
 ; ASMOS stage 2, at 0x7E00 (the reserved sectors after the VBR): measures the
 ; RAM, enables A20, finds /SYSTEM/KERNEL.SYS, copies it to 1 MB 64 KB at a

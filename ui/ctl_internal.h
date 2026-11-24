@@ -1,6 +1,11 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef UI_CTL_INTERNAL_H
 #define UI_CTL_INTERNAL_H
-/* Shared between controls.c, ctl_edit.c and dialogs.c. Not for apps. */
+
 #include "ui/controls.h"
 
 void ctl_layout(control *c);

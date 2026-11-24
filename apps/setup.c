@@ -1,6 +1,8 @@
-/* Setup installs ASMOS from the setup floppy (automatically at boot, or via
- * "app run Setup" with the floppy in FDD0). It supports disk selection,
- * erase/keep, screen mode, confirmation, progress, and restart. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/gpu.h"

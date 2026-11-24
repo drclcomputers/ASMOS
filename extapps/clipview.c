@@ -1,5 +1,8 @@
-/* ClipView - clipboard history: pick an entry to see it, Copy puts it back
- * on the clipboard. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 typedef struct {

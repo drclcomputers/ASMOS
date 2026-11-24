@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef FS_BOOTCODE_H
 #define FS_BOOTCODE_H
 /* The boot code (boot/bootcode.asm): the master boot record, the volume
@@ -8,6 +13,5 @@ extern const uint8_t boot_mbr[512];
 extern const uint8_t boot_vbr[512];
 extern const uint8_t boot_stage2[];
 extern const uint8_t boot_stage2_end[];
-#define BOOT_STAGE2_SECTORS                                                    \
-    ((uint32_t)(boot_stage2_end - boot_stage2) / 512u)
+#define BOOT_STAGE2_SECTORS ((uint32_t)(boot_stage2_end - boot_stage2) / 512u)
 #endif

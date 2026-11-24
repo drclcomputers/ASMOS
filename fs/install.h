@@ -1,11 +1,10 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef FS_INSTALL_H
 #define FS_INSTALL_H
-
-/*
- * Setup/SYS stages: probe; optionally erase as FAT16 (up to 2 GB); write boot
- * code preserving the MBR table and BPB; copy the kernel and ASMOS.ZIP.
- * See boot/bootdefs.inc and tools/mkdisk.py. Units 0/1 are HDA/HDB.
- */
 
 #include "lib/core.h"
 

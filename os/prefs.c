@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "os/prefs.h"
 
 #include "fs/fs.h"
@@ -7,10 +12,8 @@
 #define PREFS_DIR "/PREFS"
 #define PREFS_MAX 8192
 
-static char s_buf[PREFS_MAX]; /* file text, '\0'-terminated */
+static char s_buf[PREFS_MAX];
 static int s_len;
-/* the app whose file s_buf holds: its whole name (a name like "Audio
- * Player" cut to 8 characters gave another file than file_of(name)) */
 static char s_app[40];
 static bool s_batch; /* inside begin/end */
 

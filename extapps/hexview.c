@@ -1,4 +1,8 @@
-/* HexView - read-only hex + ASCII viewer (files up to 64 KB). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 #define MAX_FILE_SIZE 65536

@@ -1,9 +1,10 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "lib/mem.h"
 #include "lib/core.h"
-
-/* String instructions: on a 386/486 `rep movsd` / `rep stosd` move 4 bytes
- * in a few clocks, where a byte loop costs ~7 clocks a byte. Everything
- * (fill_rect, window paints, the blit's shadow copy) goes through these. */
 
 void *memset(void *dst, int c, size_t n) {
     uint32_t v = (uint8_t)c;

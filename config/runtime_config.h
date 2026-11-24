@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef RUNTIME_CONFIG_H
 #define RUNTIME_CONFIG_H
 
@@ -7,8 +12,6 @@
 #define CFG_VERSION 4
 #define CFG_PATH "/ASMOS.CFG"
 
-/* The game port's calibration (drivers/joystick.h): times in the driver's
- * units, per axis (X, Y of stick A, then X, Y of stick B). */
 typedef struct __attribute__((packed)) {
     uint16_t min[4], mid[4], max[4];
     uint8_t deadzone; /* percent of the travel that counts as centred */
@@ -54,12 +57,9 @@ typedef struct __attribute__((packed)) {
     uint8_t printer_no_ff; /* 1 = no form feed after a job */
     uint8_t ui_zoom2;      /* 1 = everything 2x (640x400 and up; restart) */
     uint8_t codepage;      /* characters 128-255: CP_WESTERN/CENTRAL/DOS */
-    uint8_t _reserved[20];
-    /* version 3: the desktop pattern drawn in Settings (WALLPAPER_CUSTOM):
-     * 8x8 pixels, row by row, two to a byte (left one in the high nibble).
-     * Older files end before it: they load with the default one. */
+    uint8_t net_dhcp;      /* 1 = the address from DHCP (network/dhcp.h) */
+    uint8_t _reserved[19];
     uint8_t wall_custom[32];
-    /* version 4: the joystick. Older files end before it (uncalibrated). */
     joy_cfg_t joy;
 } os_config_t;
 
@@ -77,7 +77,7 @@ void cfg_init_defaults(void);
  * everything on */
 void cfg_set_low_end(bool low);
 bool cfg_is_low_end(void);
-int cfg_frame_ms(void); /* from fps_cap */
+int cfg_frame_ms(void);
 bool cfg_load(void);
 bool cfg_save(void);
 

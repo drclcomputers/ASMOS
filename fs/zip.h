@@ -1,12 +1,10 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #ifndef FS_ZIP_H
 #define FS_ZIP_H
-
-/*
- * Supports PKZIP 2.0 stored/deflate archives; skips and counts encrypted,
- * ZIP64, and other methods. Paths are absolute, and extracted names are
- * sanitized to stay in the target folder. Operations are synchronous and
- * report progress through a callback.
- */
 
 #include "lib/core.h"
 

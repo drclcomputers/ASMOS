@@ -1,4 +1,8 @@
-/* Floppy formatting (fs/fdformat.h). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "fs/fdformat.h"
 #include "drivers/fdd.h"
 #include "fs/fdd_ctrl.h"

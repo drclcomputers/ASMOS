@@ -1,8 +1,8 @@
-/* Notes are saved in /PREFS/CALNOTES.TXT, one per line: "YYYYMMDD text".
- * Click/arrows select a day,
- * Enter/double-click edits it, PgUp/PgDn change months, Home goes to today,
- * and Delete removes notes. Weeks start Monday; View changes this in
- * /PREFS/CALENDAR.INI. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 #define NOTES_FILE "/PREFS/CALNOTES.TXT"

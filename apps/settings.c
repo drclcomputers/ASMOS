@@ -1,5 +1,8 @@
-/* Settings - edits g_cfg; wallpaper/sound changes apply at once, Save writes
- * ASMOS.CFG. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "config/runtime_config.h"
 #include "config/video_cfg.h"
 #include "drivers/joystick.h"
@@ -8,7 +11,10 @@
 #include "drivers/sb16.h"
 #include "drivers/sermouse.h"
 #include "lib/time.h"
-#include "network/gopher.h" /* parse_ip_str */
+#include "network/dhcp.h"
+#include "network/dns.h"
+#include "network/gopher.h"
+#include "network/net.h"
 #include "os/api.h"
 #include "os/print.h"
 #include "ui/saver.h"
@@ -44,6 +50,8 @@ typedef struct {
     /* what only a restart applies, as last saved: Save says "restart" only
      * when one of these changed */
     uint8_t boot_sig[24];
+    control *dhcp, *net_state; /* Network: DHCP */
+    int net_shown; /* the DHCP state last shown (+ 1; 0 = not yet) */
 } settings_state_t;
 
 /* the settings that take effect at the next start */
@@ -54,11 +62,8 @@ static void boot_settings(uint8_t *out) {
     *o++ = g_cfg.fpu_emulate;
     *o++ = g_cfg.networking_enabled;
     *o++ = g_cfg.start_in_gui;
-    const uint8_t *ip[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
-                            g_cfg.dns_server};
-    for (int i = 0; i < 4; i++)
-        for (int k = 0; k < 4; k++)
-            *o++ = ip[i][k];
+    for (int i = 0; i < 16; i++) /* (the addresses apply at once now) */
+        *o++ = 0;
     *o++ = 0;
     *o++ = 0;
     *o++ = 0;
@@ -183,6 +188,84 @@ static void on_edit(control *c, int ev) {
         set_dirty(c->user, true);
 }
 
+// Network tab: DHCP, or the addresses typed in
+
+/* the fields: typed in, or (DHCP) what it got, greyed */
+static void net_fields(settings_state_t *s) {
+    bool dhcp = ctl_value(s->dhcp);
+    dhcp_info_t d;
+    dhcp_info(&d);
+    const uint8_t *src[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
+                             g_cfg.dns_server};
+    const uint8_t *got[4] = {d.ip, d.gateway, d.netmask, d.dns};
+    for (int i = 0; i < 4; i++) {
+        ctl_enable(s->ip[i], !dhcp);
+        if (!dhcp && s->net_shown)
+            continue; /* (as typed) */
+        const uint8_t *a = dhcp ? got[i] : src[i];
+        char t[20];
+        snprintf(t, sizeof(t), "%d.%d.%d.%d", a[0], a[1], a[2], a[3]);
+        ctl_set_text(s->ip[i], dhcp && d.state < DHCP_BOUND ? "" : t);
+    }
+}
+
+/* "Got 10.0.2.15 from 10.0.2.2, 23 h left" */
+static void net_status(settings_state_t *s) {
+    char t[64];
+    dhcp_info_t d;
+    dhcp_info(&d);
+    if (!g_cfg.networking_enabled || !ne2000_detected())
+        snprintf(t, sizeof(t), "%s",
+                 ne2000_detected() ? "Networking is off." : "No network card.");
+    else if (d.state == DHCP_OFF)
+        snprintf(t, sizeof(t), "Fixed address.");
+    else if (d.state < DHCP_BOUND)
+        snprintf(t, sizeof(t), "Asking the network for an address...");
+    else if (d.lease_s == 0xFFFFFFFFu)
+        snprintf(t, sizeof(t), "From %d.%d.%d.%d, for good.", d.server[0],
+                 d.server[1], d.server[2], d.server[3]);
+    else
+        snprintf(t, sizeof(t), "From %d.%d.%d.%d, %u %s left.", d.server[0],
+                 d.server[1], d.server[2], d.server[3],
+                 d.lease_left_s >= 7200 ? d.lease_left_s / 3600
+                                        : d.lease_left_s / 60,
+                 d.lease_left_s >= 7200 ? "h" : "min");
+    ctl_set_text(s->net_state, t);
+}
+
+static void on_dhcp(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CHANGE)
+        return;
+    set_dirty(s, true);
+    s->net_shown = 0; /* fill the fields again */
+    net_fields(s);
+    s->net_shown = 1;
+}
+
+static void on_renew(control *c, int ev) {
+    settings_state_t *s = c->user;
+    if (ev != EV_CLICK || !g_cfg.net_dhcp || !ne2000_detected())
+        return;
+    dhcp_start();
+    s->net_shown = 0;
+}
+
+/* Save: the addresses apply at once (DHCP starts or stops) */
+static void net_apply(void) {
+    if (!g_cfg.networking_enabled || !ne2000_detected())
+        return;
+    if (g_cfg.net_dhcp) {
+        if (dhcp_state() == DHCP_OFF)
+            dhcp_start();
+        return;
+    }
+    dhcp_stop(true);
+    net_set_ip(g_cfg.ip, g_cfg.gateway, g_cfg.netmask);
+    dns_set_server(g_cfg.dns_server);
+    arp_announce();
+}
+
 static void on_save(control *c, int ev) {
     settings_state_t *s = c->user;
     (void)ev;
@@ -191,7 +274,8 @@ static void on_save(control *c, int ev) {
     uint8_t *dst[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
                        g_cfg.dns_server};
     uint8_t tmp[4][4];
-    for (int i = 0; i < 4; i++)
+    bool dhcp = ctl_value(s->dhcp);
+    for (int i = 0; i < 4 && !dhcp; i++)
         if (!parse_ip_str(ctl_text(s->ip[i]), tmp[i])) {
             char m[64];
             snprintf(m, sizeof(m), "%s must look like 10.0.2.15.", names[i]);
@@ -200,8 +284,11 @@ static void on_save(control *c, int ev) {
             dlg_message(s->win, "Settings", m);
             return;
         }
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 4 && !dhcp; i++)
         memcpy(dst[i], tmp[i], 4);
+    g_cfg.net_dhcp = dhcp;
+    net_apply();
+    s->net_shown = 0;
     int vm = ctl_value(s->screen);
     bool screen_changed = vm != s->screen_saved;
     if (screen_changed) {
@@ -919,6 +1006,17 @@ static void settings_frame(void *state) {
         s->p_tick = pit_ticks; /* the printer's own state: once a second */
         prn_status(s);
     }
+    if (ctl_value(s->tabs) == P_NET && s->net_state &&
+        (pit_ticks - s->p_tick > 1000 ||
+         s->net_shown != (int)dhcp_state() + 1)) {
+        s->p_tick = pit_ticks; /* once a second, or when DHCP moves on */
+        if (ctl_value(s->dhcp)) {
+            s->net_shown = 0;
+            net_fields(s);
+        }
+        s->net_shown = (int)dhcp_state() + 1;
+        net_status(s);
+    }
     if (ctl_value(s->tabs) != P_CLOCK)
         return;
     time_full_t t = time_rtc_local();
@@ -1052,25 +1150,31 @@ static void build(settings_state_t *s) {
                             : "Only at 640x400 and up");
     ctl_set_tooltip(np, "Paging keeps apps out of each other's memory");
 
-    /* Network */
-    flag(s, P_NET, 10, 24, "Networking enabled", &g_cfg.networking_enabled);
+    /* Network: DHCP, or the addresses typed in */
+    flag(s, P_NET, 10, 24, "Networking enabled (restart)",
+         &g_cfg.networking_enabled);
+    s->dhcp =
+        on_page(s,
+                ctl_check(w, 10, 37, 200, "Get an address automatically (DHCP)",
+                          g_cfg.net_dhcp != 0, on_dhcp),
+                P_NET);
+    ctl_set_tooltip(s->dhcp, "Off: type the addresses in");
+    control *rn =
+        on_page(s, ctl_button(w, 210, 50, 56, 13, "Renew", 0, on_renew), P_NET);
+    ctl_set_tooltip(rn, "Ask the network for an address again");
     static const char *lbl[4] = {
         "IP address:", "Gateway:", "Netmask:", "DNS server:"};
-    uint8_t *src[4] = {g_cfg.ip, g_cfg.gateway, g_cfg.netmask,
-                       g_cfg.dns_server};
     for (int i = 0; i < 4; i++) {
-        char t[20];
-        snprintf(t, sizeof(t), "%d.%d.%d.%d", src[i][0], src[i][1], src[i][2],
-                 src[i][3]);
-        on_page(s, ctl_label(w, 10, 42 + i * 16, 60, 12, lbl[i], 0), P_NET);
+        on_page(s, ctl_label(w, 10, 53 + i * 15, 60, 12, lbl[i], 0), P_NET);
         s->ip[i] = on_page(
-            s, ctl_edit(w, 76, 42 + i * 16, 90, 12, t, 15, ES_DECIMAL, on_edit),
+            s,
+            ctl_edit(w, 76, 52 + i * 15, 90, 12, "", 15, ES_DECIMAL, on_edit),
             P_NET);
     }
-    on_page(s,
-            ctl_label(w, 10, 110, 240, 8,
-                      "QEMU user networking: DNS 10.0.2.3 or 8.8.8.8", 0),
-            P_NET);
+    ctl_set_tooltip(s->ip[3], "QEMU and 86Box: 10.0.2.3, or 8.8.8.8");
+    s->net_state = on_page(s, ctl_label(w, 10, 115, 256, 9, "", 0), P_NET);
+    net_fields(s);
+    s->net_shown = 1;
 
     /* Clock: date, time, time zone. Set Clock writes the clock chip at
      * once; the time zone is a setting (Save). */

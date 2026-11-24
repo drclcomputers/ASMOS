@@ -1,5 +1,8 @@
-/* RFC 1436 Gopher client for ASMTerm: menus, text, search, downloads, URLs,
- * history, and navigation. Redraws in place when clear() is supported. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "network/gopher.h"
 #include "fs/fs.h"
 #include "lib/core.h"

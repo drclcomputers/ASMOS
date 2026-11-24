@@ -1,6 +1,8 @@
-/* Screen saver: three original effects drawn with the usual primitives.
- * Animation runs in fixed 30 ms steps, so speed is the same on a 386 and
- * a Pentium (slow machines just draw fewer of the steps). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "ui/saver.h"
 
 #include "config/runtime_config.h"

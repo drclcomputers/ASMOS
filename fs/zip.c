@@ -1,6 +1,8 @@
-/* Deflate uses a 16 KB window, lazy hash matching, and the cheapest stored,
- * fixed, or dynamic block. Incompressible data grows only a few bytes per
- * window; memory use is ~100 KB to compress and 34 KB to extract. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "fs/zip.h"
 #include "fs/fs.h"
 #include "lib/alloc.h"

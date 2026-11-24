@@ -1,7 +1,8 @@
-/* More of the kernel's functions for apps: each is one call of the app API
- * under the kernel's own name (the rest are in shim.c). Made from the API
- * table (os/appload.c) and the headers' prototypes; `make sdk` checks that
- * every function the SDK's headers declare is here or in shim.c. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "extapps/shim.h"
 
 // controls (ui/controls.h)

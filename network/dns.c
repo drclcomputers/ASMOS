@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "network/dns.h"
 #include "drivers/ne2000.h"
 #include "lib/core.h"
@@ -28,6 +33,8 @@ void dns_set_server(const uint8_t ip[4]) {
     if (ip)
         memcpy(s_dns_server, ip, 4);
 }
+
+void dns_get_server(uint8_t ip[4]) { memcpy(ip, s_dns_server, 4); }
 
 static uint16_t encode_name(uint8_t *buf, uint16_t max_len, const char *name) {
     uint16_t pos = 0;

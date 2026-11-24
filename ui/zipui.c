@@ -1,5 +1,8 @@
-/* Compress/extract dialogs for fs/zip.c. Jobs run on submit and draw progress
- * directly to screen while other work pauses, like folder copying. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "drivers/gpu.h"
 #include "fs/fs.h"
 #include "fs/zip.h"

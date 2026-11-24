@@ -1,3 +1,8 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "shell/cmds.h"
 #include "drivers/gpu.h"
 #include "drivers/joystick.h"
@@ -15,13 +20,16 @@
 #include "drivers/ne2000.h"
 #include "fs/fdformat.h"
 #include "fs/install.h"
+#include "fs/netfs.h"
 #include "lib/audio.h"
 #include "lib/cpu.h"
 #include "lib/fpu_emu.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
+#include "network/dhcp.h"
 #include "network/dns.h"
+#include "network/ftpd.h"
 #include "network/gopher.h"
 #include "network/net.h"
 #include "os/app_registry.h"
@@ -125,6 +133,12 @@ static const help_topic_t HELP[] = {
      "  gopher <host> [port] [selector]\n"
      "                   Browse Gopher; also gopher://host/1/sel\n"
      "  netconf          Network card and settings\n"
+     "  dhcp [renew|release]  The address from DHCP\n"
+     "  ftp mount <host> [port] [user] [password]\n"
+     "                   An FTP server's folder as /NET0; ftp umount\n"
+     "  ftp startsrv [port] [-r] [-p password]\n"
+     "                   Serve the disks over FTP (-r: read only);\n"
+     "                   ftp stopsrv. ftp: what is on\n"
      "  Address, gateway and DNS are in Settings > Network.\n"},
     {"devices", "Sound, printer and ports",
      "  play <f> [loop]  Play a WAV or MIDI file; play stop\n"
@@ -1357,6 +1371,177 @@ void cmd_netconf(const char *args, char *out, size_t max) {
     char buf[64];
     sprintf(buf, "ISR=0x%02X BNRY=0x%02X CURR=0x%02X\n\n", isr, bnry, curr);
     append(out, max, buf);
+    uint8_t ip[4], gw[4], nm[4], dns[4];
+    net_get_config(ip, gw, nm);
+    dns_get_server(dns);
+    sprintf(buf, "IP %d.%d.%d.%d  mask %d.%d.%d.%d  (%s)\n", ip[0], ip[1],
+            ip[2], ip[3], nm[0], nm[1], nm[2], nm[3],
+            dhcp_state() == DHCP_OFF ? "fixed" : "DHCP");
+    append(out, max, buf);
+    sprintf(buf, "Gateway %d.%d.%d.%d  DNS %d.%d.%d.%d\n", gw[0], gw[1], gw[2],
+            gw[3], dns[0], dns[1], dns[2], dns[3]);
+    append(out, max, buf);
+}
+
+/* ftp: mount / umount a server's folder as /NET0, start / stop the server */
+void cmd_ftp(const char *args, char *out, size_t max) {
+    char w[6][64];
+    int n = 0;
+    for (const char *p = args; *p && n < 6;) {
+        while (*p == ' ')
+            p++;
+        int k = 0;
+        while (*p && *p != ' ')
+            if (k < 63)
+                w[n][k++] = *p++;
+            else
+                p++;
+        w[n][k] = 0;
+        if (k)
+            n++;
+    }
+    char buf[160];
+    const char *err;
+    if (n == 0) {
+        char d[128];
+        netfs_describe(d, sizeof(d));
+        snprintf(buf, sizeof(buf), "/NET0: %s\n", d);
+        append(out, max, buf);
+        uint8_t ip[4];
+        net_get_ip(ip);
+        if (ftpd_running())
+            snprintf(buf, sizeof(buf),
+                     "Server: on, ftp://%d.%d.%d.%d:%u/%s, %d connected, "
+                     "%u files sent, %u got\n",
+                     ip[0], ip[1], ip[2], ip[3], ftpd_port(),
+                     ftpd_read_only() ? " (read only)" : "", ftpd_clients(),
+                     ftpd_files_sent(), ftpd_files_got());
+        else
+            snprintf(buf, sizeof(buf), "Server: off (ftp startsrv)\n");
+        append(out, max, buf);
+    } else if (!strcmp(w[0], "mount") && n >= 2) {
+        uint32_t port = n >= 3 ? (uint32_t)str_to_int(w[2]) : 21;
+        if (!port || port > 65535) {
+            append(out, max, "The port is 1..65535.\n");
+            return;
+        }
+        append(out, max, "Connecting...\n");
+        if (netfs_connect(w[1], (uint16_t)port, n >= 4 ? w[3] : "",
+                          n >= 5 ? w[4] : "", NULL, &err)) {
+            char d[128];
+            netfs_describe(d, sizeof(d));
+            snprintf(buf, sizeof(buf), "/NET0 is %s\n", d);
+        } else {
+            snprintf(buf, sizeof(buf), "Not mounted: %s\n", err);
+        }
+        append(out, max, buf);
+    } else if (!strcmp(w[0], "umount") || !strcmp(w[0], "unmount")) {
+        if (!netfs_connected()) {
+            append(out, max, "/NET0 isn't mounted.\n");
+            return;
+        }
+        if (dir_context.drive_id == DRIVE_NET0)
+            fs_chdir("/");
+        netfs_disconnect();
+        append(out, max, "/NET0 is gone.\n");
+    } else if (!strcmp(w[0], "startsrv")) {
+        uint32_t port = 21;
+        bool ro = false;
+        const char *pass = "";
+        for (int i = 1; i < n; i++) {
+            if (!strcmp(w[i], "-r"))
+                ro = true;
+            else if (!strcmp(w[i], "-p") && i + 1 < n)
+                pass = w[++i];
+            else if (w[i][0] >= '0' && w[i][0] <= '9')
+                port = (uint32_t)str_to_int(w[i]);
+        }
+        if (!port || port > 65535) {
+            append(out, max, "The port is 1..65535.\n");
+            return;
+        }
+        if (!ftpd_start((uint16_t)port, ro, pass, &err)) {
+            snprintf(buf, sizeof(buf), "Not started: %s\n", err);
+            append(out, max, buf);
+            return;
+        }
+        uint8_t ip[4];
+        net_get_ip(ip);
+        snprintf(buf, sizeof(buf), "Serving on ftp://%d.%d.%d.%d:%u/%s%s\n",
+                 ip[0], ip[1], ip[2], ip[3], (unsigned)port,
+                 ro ? " read only" : "", *pass ? ", with a password" : "");
+        append(out, max, buf);
+        append(out, max, "Any user name. ftp stopsrv ends it.\n");
+    } else if (!strcmp(w[0], "stopsrv")) {
+        if (!ftpd_running()) {
+            append(out, max, "The server isn't running.\n");
+            return;
+        }
+        ftpd_stop();
+        append(out, max, "The server stopped.\n");
+    } else {
+        append(out, max,
+               "Usage: ftp mount <host> [port] [user] [password]\n"
+               "       ftp umount\n"
+               "       ftp startsrv [port] [-r] [-p password]\n"
+               "       ftp stopsrv\n");
+    }
+}
+
+/* dhcp [renew|release] */
+void cmd_dhcp(const char *args, char *out, size_t max) {
+    char buf[96];
+    if (!g_cfg.networking_enabled || !ne2000_detected()) {
+        append(out, max, "No network.\n");
+        return;
+    }
+    if (!strcmp(args, "renew")) {
+        dhcp_start();
+        append(out, max, "Asking for an address...\n");
+        uint32_t until = time_millis() + 8000;
+        while (dhcp_state() != DHCP_BOUND && time_millis() < until) {
+            net_poll();
+            task_yield();
+        }
+    } else if (!strcmp(args, "release")) {
+        dhcp_stop(true);
+        uint8_t zero[4] = {0, 0, 0, 0};
+        net_set_ip(zero, zero, zero);
+        append(out, max, "Address given back. dhcp renew gets one again.\n");
+        return;
+    } else if (args[0]) {
+        append(out, max, "Usage: dhcp [renew|release]\n");
+        return;
+    }
+    dhcp_info_t d;
+    dhcp_info(&d);
+    if (d.state == DHCP_OFF) {
+        append(out, max, "DHCP is off: the address is fixed (Settings).\n");
+        return;
+    }
+    if (d.state < DHCP_BOUND) {
+        sprintf(buf, "DHCP: %s (no answer yet, %d tries)\n",
+                dhcp_state_name(d.state), d.tries);
+        append(out, max, buf);
+        return;
+    }
+    sprintf(buf, "DHCP: %s, from %d.%d.%d.%d\n", dhcp_state_name(d.state),
+            d.server[0], d.server[1], d.server[2], d.server[3]);
+    append(out, max, buf);
+    sprintf(buf, "  IP %d.%d.%d.%d  mask %d.%d.%d.%d\n", d.ip[0], d.ip[1],
+            d.ip[2], d.ip[3], d.netmask[0], d.netmask[1], d.netmask[2],
+            d.netmask[3]);
+    append(out, max, buf);
+    sprintf(buf, "  gateway %d.%d.%d.%d  DNS %d.%d.%d.%d\n", d.gateway[0],
+            d.gateway[1], d.gateway[2], d.gateway[3], d.dns[0], d.dns[1],
+            d.dns[2], d.dns[3]);
+    append(out, max, buf);
+    if (d.lease_s == 0xFFFFFFFFu)
+        append(out, max, "  lease: for good\n");
+    else {
+        sprintf(buf, "  lease: %u s, %u s left\n", d.lease_s, d.lease_left_s);
+        append(out, max, buf);
+    }
 }
 
 void cmd_app(const char *args, char *out, size_t max) {

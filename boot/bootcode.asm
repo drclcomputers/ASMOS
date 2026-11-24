@@ -1,3 +1,8 @@
+; Copyright (c) 2026 @drclcomputers. All rights reserved.
+;
+; This work is licensed under the terms of the MIT license.
+; For a copy, see <https://opensource.org/licenses/MIT>.
+
 ; The boot code, inside the kernel: Setup (apps/setup.c) and the shell's
 ; SYS command (fs/install.c) write it to the disks they make bootable.
 ; Built first by the makefile from mbr.asm, vbr.asm and stage2.asm.

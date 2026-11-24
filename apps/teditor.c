@@ -1,4 +1,8 @@
-/* TEditor - text editor built on the multi-line edit control. */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "drivers/lpt.h"
 #include "os/api.h"
 

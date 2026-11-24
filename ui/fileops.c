@@ -1,5 +1,11 @@
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "ui/fileops.h"
 #include "fs/fs.h"
+#include "fs/netfs.h"
 #include "lib/audio.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -387,6 +393,12 @@ void fo_info_text(const char *path, char *out, int sz) {
     dir_entry_t de;
     char vp[FS_PATH_SZ];
     fo_vpath(path, vp, sizeof(vp));
+    if (!strcasecmp(path, "/NET0") && netfs_connected()) { /* the drive */
+        char where[96];
+        netfs_describe(where, sizeof(where));
+        snprintf(out, sz, "Drive:  NET0\nServer: %s\nType:   FTP", where);
+        return;
+    }
     if (!fs_find(path, &de)) {
         snprintf(out, sz, "Path:   %s\n(not found)", vp);
         return;

@@ -11,3 +11,6 @@ it, a file to open it in its app.
 
 Settings > System chooses one FileF window for each folder, or a single
 window that is reused.
+
+Drive > Connect to Server opens a folder on an FTP server as NET0.
+Server, port and user are remembered for next time; the password is not.

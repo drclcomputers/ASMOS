@@ -82,8 +82,9 @@ Features
 - **App memory protection**: each .APP runs in its own address space (386
   paging). A crashing app is closed and the rest keeps running.
 - **Sound**: Sound Blaster 16 (WAV), OPL2 FM (MIDI), the PC speaker.
-- **Network**: NE2000 (ISA, or PCI clones), IPv4 with a static address,
-  ping, DNS, a Gopher browser.
+- **Network**: NE2000 (ISA, or PCI clones), IPv4 from DHCP or typed in,
+  TCP that resends what is lost, ping, DNS, a Gopher browser. An FTP
+  server's folder as a drive (/NET0), and an FTP server for the disks.
 - **Printing**: parallel port, plain text, Epson ESC/P or HP PCL, with a
   print queue.
 - **Shell**: a command line with a built-in x86 assembler.
@@ -279,7 +280,7 @@ lists the topics:
 files     pwd cd ls mkdir rmdir cat find touch write cp mv rm format sys
 time      date time cal
 info      sysinfo mem df lspci
-network   ping gopher netconf
+network   ping gopher netconf dhcp ftp
 devices   play lpt joy print
 programs  asm (assemble .ASM to .BIN), run (a .BIN), app run|scan|list|unload
 shell     help clear echo history tee gui exit shutdown reboot
@@ -366,8 +367,22 @@ mouse type in the machine settings.
 **No sound**: the boot log shows "Sound Blaster" and "OPL2 FM synth". The SB16
 is looked for at 220h-280h. Check that sound is on in Settings > Sound.
 
-**No network**: the "NE2000 card" lines in the boot log. Set the address,
-gateway and DNS in Settings > Network (there is no DHCP).
+**No network**: the "NE2000 card" lines in the boot log. The address comes
+from DHCP (Settings > Network shows what it got; `dhcp` in the shell). On
+a network without a DHCP server, untick it and type the address, gateway
+and DNS in.
+
+**FTP**: `ftp mount <host> [port] [user] [password]` (or FileF's Drive >
+Connect to Server) makes a server's folder the drive /NET0; `ftp umount`
+ends it. `ftp startsrv [port] [-r] [-p password]` serves the disks to
+other machines (`/` lists the drives, `/HDA/GAMES` is /GAMES; any user
+name; `-r` read only); `ftp stopsrv` stops it. Passive and active mode
+both work. Under QEMU's user networking, `make qemu FTP=1` forwards the
+server's port and its data ports (50000-50009): the host reaches it at
+`ftp://localhost:2121` (clients that take the address in the PASV reply
+need to use the server's own instead, as most do by themselves; EPSV has
+none). 86Box: with SLiRP the same ports need forwarding; a bridged (pcap)
+network needs nothing.
 
 **A floppy put in doesn't show up**: open FileF and double-click FDD0 in
 Drives (the empty drive is listed there).
@@ -452,8 +467,10 @@ Known limitations
 - **Video**: 320x200x256, 640x400x16, 640x480x16, 800x600x16 (SVGA). No
   256 colours above 320x200, nothing above 800x600, no accelerated drivers.
   The UI uses 16 colours in all of them.
-- **Network**: NE2000 only, static IPv4, no DHCP. Ping, DNS and Gopher
-  (no web browser).
+- **Network**: NE2000 only, IPv4 only. Ping, DNS, Gopher and FTP (no web
+  browser, no SMB/Windows shares). FTP is plain text: passwords go over
+  the wire as they are, as in any FTP. /NET0 writes a file from the start
+  or at its end, not in the middle (FTP can't).
 - **Keyboard**: US layout only; other characters with Alt + number pad or
   Character Map.
 - **Characters**: one code page at a time, 1 byte a character (no Unicode,
@@ -679,7 +696,7 @@ lib/         Freestanding libs: memory, strings, math, time, graphics,
              paging, APM, FPU emulator
 config/      Compile-time and saved settings (ASMOS.CFG)
 fonts/       Fonts (fonts_ext.c: codes 128-255, made by tools/mkglyphs.py)
-network/     IPv4, DNS, Gopher client
+network/     IPv4, TCP, DHCP, DNS, Gopher, FTP client and server
 tools/       mkdisk.py (disk images), mkiso.py (CD images), mksdk.py (SDK),
              bootemu.py / boottest.py (boot tests), fontmaker.py and
              mkglyphs.py + glyphart.py (fonts)

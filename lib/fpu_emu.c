@@ -1,4 +1,8 @@
-/* x87 emulator (see fpu_emu.h). */
+// Copyright (c) 2026 @drclcomputers. All rights reserved.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
 #include "lib/fpu_emu.h"
 #include "lib/mem.h"
 
