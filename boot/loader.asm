@@ -62,8 +62,9 @@ kernel_gdt:
     dq 0                        ; 0x18: APM 32-bit code   (lib/apm.c fills
     dq 0                        ; 0x20: APM 16-bit code    these three in,
     dq 0                        ; 0x28: APM data           in this order)
-    dq 0                        ; 0x30
-    dq 0                        ; 0x38
+    dw 0xFFFF, 0x0000, 0x9A00, 0x0000 ; 0x30: 16-bit code, base 0, 64 KB
+    dw 0xFFFF, 0x0000, 0x9200, 0x0000 ; 0x38: 16-bit data   (BIOS calls:
+                                ; lib/realmode.asm)
     dw 0x0FFF, 0x0400, 0x9200, 0x0040 ; 0x40: BIOS data area (0x400): some
                                 ; APM BIOSes load selector 0x40 as if real
 kernel_gdt_end:

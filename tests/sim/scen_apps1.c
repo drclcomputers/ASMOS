@@ -659,46 +659,67 @@ int scen_apps1(const char *name) {
         return fails;
     }
     if (!strcmp(name, "screenmodes")) {
-        /* Settings > Display offers only the screens this machine may use
-         * (the boot loader's limits at 0x0603: config/video_cfg.h) */
+        /* Settings > Display offers only the sizes and colours this machine
+         * may use (the boot loader's mask at 0x0603, config/video_cfg.h):
+         * a size list, then the colours of the size chosen, and why not */
         int fails = 0;
         char b[300];
-        extern uint8_t g_video_limits;
-        extern int video_max_mode(void);
-        extern const char *video_limit_reason(void);
-        extern const char *video_mode_name(int);
         static const struct {
-            uint8_t lim;
-            int n;
-            const char *why;
-        } cases[] = {{0x40, 1, "3 MB"},
-                     {0x02, 3, "486"},
-                     {0x42, 3, "4 MB"},
-                     {0xC3 & ~0x01, 3, "card"},
-                     {0x43, 4, NULL}};
+            uint8_t allowed, flags;
+            int sizes;            /* in the size list */
+            int top_cols;         /* colours offered at the biggest size */
+            const char *why;      /* the size list's note (NULL: none) */
+            const char *cols_why; /* the colours' note at the biggest size */
+        } cases[] = {
+            {0x11, VF_486, 1, 2, "not on", NULL}, /* 320 only */
+            {0x17, 0, 3, 1, "486", "VESA"},       /* a 386 */
+            {0x1F, VF_486, 4, 1, NULL, "VESA"},   /* plain VGA */
+            {0x7F, VF_486 | VF_VBE, 4, 1, NULL, "no 256-colour"}, /* 640 VESA */
+            {0x77, VF_486 | VF_VBE | VF_NO800, 3, 2, "no 800", NULL},
+            {0xFF, VF_486 | VF_VBE | VF_VBE2, 4, 2, NULL, NULL}, /* all */
+        };
+        uint8_t was_a = g_video_allowed, was_f = g_video_flags;
         for (unsigned k = 0; k < sizeof cases / sizeof cases[0]; k++) {
-            g_video_limits = cases[k].lim;
+            g_video_allowed = cases[k].allowed;
+            g_video_flags = cases[k].flags;
             sim_launch("Settings");
             sim_frames(3);
             window *w = wm_focused_window();
-            control *combo = NULL;
+            control *size = NULL, *cols = NULL;
             for (control *c = w ? w->controls : NULL; c; c = c->next)
-                if (c->type == CTL_COMBO && !combo)
-                    combo = c;
-            int n = combo ? list_count(combo) : -1;
-            const char *why = video_limit_reason();
+                if (c->type == CTL_COMBO && !cols) {
+                    if (!size)
+                        size = c;
+                    else
+                        cols = c;
+                }
+            int n = size ? list_count(size) : -1;
+            T("a size list and a colours list", size && cols);
+            if (!size || !cols)
+                return fails;
+            list_set_sel(size, n - 1); /* the biggest */
+            size->handler(size, EV_CHANGE);
+            int nc = list_count(cols);
+            const char *why = size->tip, *cwhy = cols->tip;
             snprintf(b, sizeof b,
-                     "    limits %02X: %d screens, top '%s', why: %s\n",
-                     cases[k].lim, n, n > 0 ? video_mode_name(n - 1) : "-",
-                     why ? why : "-");
+                     "    allowed %02X: %d sizes, top %s with %d colour "
+                     "choices\n      size note: %s\n      colour note: %s\n",
+                     cases[k].allowed, n, list_get(size, n - 1), nc,
+                     why ? why : "-", cwhy ? cwhy : "-");
             wr(1, b);
-            T("as many screens as allowed", n == cases[k].n);
-            T("the reason names it",
-              cases[k].why ? (why && strstr(why, cases[k].why)) : why == NULL);
+            T("as many sizes as allowed", n == cases[k].sizes);
+            T("the colours of the biggest", nc == cases[k].top_cols);
+            T("the size note says why", cases[k].why
+                                            ? why && strstr(why, cases[k].why)
+                                            : why && !strstr(why, "No more"));
+            T("the colour note says why",
+              cases[k].cols_why ? cwhy && strstr(cwhy, cases[k].cols_why)
+                                : cwhy && !strstr(cwhy, "Not "));
             os_quit_app_by_desc(os_find_app("Settings"));
             sim_frames(3);
         }
-        g_video_limits = 0x43;
+        g_video_allowed = was_a;
+        g_video_flags = was_f;
         return fails;
     }
     if (!strcmp(name, "zoom")) {
@@ -720,10 +741,11 @@ int scen_apps1(const char *name) {
         T("the switch is there", zc != NULL);
         if (!zc)
             return fails;
-        T("offered only from 640x400 up", zc->enabled == (g_video_mode != 0));
+        T("offered only from 640x400 up",
+          zc->enabled == (video_mode_size(g_video_mode) != 0));
         if (g_zoom == 2) {
             T("on: half the screen each way",
-              SCREEN_WIDTH * 2 == (g_video_mode == 3 ? 800 : 640));
+              SCREEN_WIDTH * 2 == video_size_w(video_mode_size(g_video_mode)));
             T("the switch shows it on", ctl_value(zc) == 1);
             snprintf(b, sizeof b, "    mouse %d,%d\n", mouse.x, mouse.y);
             wr(1, b);

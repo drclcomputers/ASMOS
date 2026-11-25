@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.4.7
+Version 3.5.8
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -40,11 +40,13 @@ Features
 - **Desktop**: overlapping windows, a menu bar, desktop icons, a Trash, an
   Apps menu built from the /APPS folder, and a busy hourglass. Alt+Tab and
   Alt+Shift+Tab switch windows.
-- **Four screen modes**: 320x200 in 256 colours (fast, Mode 13h), 640x400
-  and 640x480 in 16 colours (planar VGA), 800x600 in 16 colours (SVGA). The
-  bigger ones only where the machine can take them (see below). Settings >
-  System > "Large display: 2x" draws everything twice the size in the
-  16-colour modes (800x600 then looks like 400x300, sharp and chunky).
+- **Four screen sizes, 16 or 256 colours**: 320x200, 640x400, 640x480 and
+  800x600, each in 16 colours (planar VGA; 800x600 needs SVGA) or 256
+  (Mode 13h at 320x200; above that a VESA video card, with a linear frame
+  buffer or a 64 KB window it moves). Only what the machine and its card
+  can take is offered (see below). Settings > System > "Large display: 2x"
+  draws everything twice the size from 640x400 up (800x600 then looks like
+  400x300, sharp and chunky).
 - **Files**: FAT12 floppies and FAT16 hard disks (up to 2 GB), long names
   up to 63 characters, up to 2 hard disks and 2 floppy drives. New names
   are made of letters, digits, the dot and `- _ # $ % & + = @ ! ~ ( ) [ ]
@@ -158,10 +160,10 @@ Optional:
 Speed: usable on a 386SX-16 at 320x200 with the frame rate at 30. Smooth on
 a 486 and up.
 
-Screen modes, by machine (the boot loader enforces it; Setup and Settings
+Screen sizes, by machine (the boot loader enforces it; Setup and Settings
 only offer what fits):
 
-| Machine                                     | Screens                   |
+| Machine                                     | Sizes                     |
 | ------------------------------------------- | ------------------------- |
 | under 3 MB of RAM                           | 320x200                   |
 | a 386, 3 MB or more                         | 320x200, 640x400, 640x480 |
@@ -170,9 +172,20 @@ only offer what fits):
 
 The bigger screens need two frames' worth of memory (600 KB at 640x480,
 940 KB at 800x600), and 800x600 has 2.3 times the pixels of 640x400: too
-much for a 386. 800x600 also needs an SVGA card with that mode in its BIOS
-(VESA mode 102h or mode 6Ah: nearly all of them). Without it, ASMOS starts
-in 640x480 and the boot log says why.
+much for a 386. 800x600 in 16 colours also needs an SVGA card with that mode
+in its BIOS (VESA mode 102h or mode 6Ah: nearly all of them).
+
+Colours: 320x200 has 16 or 256 on any VGA card. Bigger sizes in 256 colours
+need a VESA BIOS (VBE) with an 8-bit mode of that size: 100h (640x400),
+101h (640x480), 103h (800x600), or the card's own numbers from its mode
+list (VBE 2). A linear frame buffer is used where the card has one; else
+the 64 KB window at A000h, moved through the BIOS. Settings > Display has a
+size list and a colours list; the colours list shows only what that size
+has here, and its tooltip says why not.
+
+If the chosen mode doesn't work, ASMOS starts in the same colours at a
+smaller size (or 16 colours at the same size, if the card refuses the
+256-colour mode), and the boot log's "Graphics" lines say why.
 
 Build and run
 =============================================================================
@@ -425,7 +438,8 @@ On an installed disk, save in Settings or shut down with Shut Down. Turning
 the power off without it loses changes since the last save.
 
 **The screen is garbled or out of range**: some monitors and VGA cards don't
-like 640x400 (a tweaked mode) or 800x600. Pick another in Settings > Display
+like 640x400 (a tweaked mode), 800x600, or a VESA 256-colour mode. Pick
+another in Settings > Display
 (or install again with Keep the files and choose there). 640x480 is the
 standard VGA mode and works everywhere.
 
@@ -436,6 +450,12 @@ standard VGA mode and works everywhere.
 lines in the boot log and the Screen tooltip in Settings > Display. It needs
 a 486, 4 MB and an SVGA card with that mode. In 86Box, pick an SVGA card
 (Tseng ET4000, S3, Cirrus Logic...), not plain VGA.
+
+**256 colours aren't offered above 320x200**: the card needs a VESA BIOS
+with an 8-bit mode of that size; the Colours tooltip in Settings > Display
+says which part is missing. In 86Box, an S3 Trio or Cirrus Logic GD54xx
+card has one; an ET4000 without a VESA driver doesn't. Plain VGA has only
+320x200 in 256 colours.
 
 Known limitations
 =============================================================================

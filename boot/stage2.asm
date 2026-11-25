@@ -23,7 +23,9 @@
 ; first stage-2 sector (volume sector 1). Settings > System rewrites the mode
 ; byte (config/video_cfg.c), so it must stay here. The VBR checks the "VM".
 ;   0 = 320x200x256 (mode 13h), 1 = 640x400x16 (mode 12h, 400 lines),
-;   2 = 640x480x16 (mode 12h), 3 = 800x600x16 (SVGA mode 6Ah / VESA 102h)
+;   2 = 640x480x16 (mode 12h), 3 = 800x600x16 (SVGA mode 6Ah / VESA 102h),
+;   4 = 320x200x16 (mode 0Dh), 5..7 = 640x400, 640x480, 800x600 in 256
+;   colours (VESA 100h, 101h, 103h, or the card's own numbers)
 ; What the machine can take limits it (step 5).
     db 'V', 'M'
 video_mode db 0
@@ -190,15 +192,25 @@ entry:
     mov  [BOOTINFO_PART], eax
 
 ; ── 5. Screen mode ───────────────────────────────────────────────────────────
-; The mode asked for (video_mode), but no more than the machine can take:
+; The mode asked for (video_mode) if the machine allows it, else the nearest
+; one it does (smaller first, the same colours first; 320x200 in 256). Allowed:
 ;   under 3 MB              320x200 only (two 640-wide frames don't fit)
 ;   a 386                   up to 640x480 (800x600 is too many pixels)
 ;   a 486 or better, 4 MB   800x600 too, if the video card has the mode
+;   256 colours above 320x200: the card's VESA BIOS has the mode, and it can
+;   be reached (a linear frame buffer, or a window to write through)
 ; (3 and 4 MB with some slack: BIOSes keep a little for themselves.)
-; What is allowed goes to 0x0603 for Setup and Settings (bootdefs.inc).
+; The allowed modes go to 0x0603, the rest to 0x0620.. (bootdefs.inc).
     xor  ax, ax
     mov  ds, ax
-    xor  bx, bx                     ; bl = highest mode, bh = flags
+    mov  es, ax
+    mov  di, BOOTINFO_VFLAGS        ; 0x0621..0x0631: nothing found yet
+    mov  cx, 0x11
+    xor  al, al
+    cld
+    rep  stosb
+    mov  byte [BOOTINFO_VMARK], 'V'
+    xor  bx, bx                     ; bl = the largest size (0..3)
     pushfd                          ; a 486 can flip AC (EFLAGS bit 18),
     pop  eax                        ; a 386 can't
     mov  ecx, eax
@@ -212,26 +224,74 @@ entry:
     xor  eax, ecx
     test eax, 0x40000
     jz   .cpu_known
-    or   bh, VMAX_486
+    or   byte [BOOTINFO_VFLAGS], VF_486
 .cpu_known:
     mov  eax, [BOOTINFO_RAM]
     cmp  eax, 0x2C0000              ; "3 MB"
     jb   .limit_known
     mov  bl, 2
-    test bh, VMAX_486
+    test byte [BOOTINFO_VFLAGS], VF_486
     jz   .limit_known
     cmp  eax, 0x3C0000              ; "4 MB"
     jb   .limit_known
     mov  bl, 3
 .limit_known:
-    or   bl, bh
-    mov  [BOOTINFO_VMAX], bl
-    and  bl, 3
-    mov  al, [video_mode]
-    cmp  al, bl
-    jbe  .mode_known
-    mov  al, bl
-.mode_known:
+    mov  [v_maxsize], bl
+    call vbe_probe
+    ; the allowed modes: no bigger than that; 256 colours above 320x200
+    ; only with a VESA mode of that size
+    xor  dl, dl                     ; dl = the mask
+    xor  si, si                     ; si = the mode
+.allow:
+    mov  al, [mode_size + si]
+    cmp  al, [v_maxsize]
+    ja   .allow_next
+    cmp  byte [mode_256 + si], 0
+    je   .allow_yes
+    test al, al
+    jz   .allow_yes
+    movzx ax, al
+    bt   word [BOOTINFO_V256], ax
+    jnc  .allow_next
+.allow_yes:
+    bts  dx, si
+.allow_next:
+    inc  si
+    cmp  si, 8
+    jb   .allow
+    mov  [BOOTINFO_VMAX], dl
+    ; the mode: the one asked for, else the nearest allowed (320x200x256
+    ; always is, so it ends)
+    movzx bx, byte [video_mode]
+    cmp  bx, 8
+    jb   .asked_ok
+    xor  bx, bx
+.asked_ok:
+    mov  ch, [mode_256 + bx]        ; ch = 1: 256 colours asked for
+    mov  cl, [mode_size + bx]       ; cl = the size, then smaller
+    mov  dh, cl                     ; dh = the size asked for
+.pick:
+    test cl, cl                     ; down to 320x200 (not asked for): 256
+    jnz  .pick_go                   ; colours first, as it always was
+    test dh, dh
+    jz   .pick_go
+    mov  ch, 1
+.pick_go:
+    mov  al, ch
+    call pick_one
+    jnc  .picked
+    mov  al, ch
+    xor  al, 1
+    call pick_one
+    jnc  .picked
+    dec  cl
+    jns  .pick
+    xor  al, al
+.picked:
+    cmp  al, 4
+    je   .setup_0d
+    ja   .setup_vbe8
+.setup_16:                          ; (al = 0..3)
     cmp  al, 3
     je   .setup_800
     cmp  al, 2
@@ -239,6 +299,81 @@ entry:
     cmp  al, 1
     je   .setup_mode_x
     jmp  .setup_mode_13h
+
+; ── 256 colours above 320x200: the card's VESA mode (5..7 in al) ────────────
+.setup_vbe8:
+    mov  [v_mode], al
+    movzx si, al
+    movzx si, byte [mode_size + si]
+    shl  si, 1
+    mov  cx, [vbe_modes + si]
+    call vbe_info
+    jc   .vbe8_fail
+    mov  [BOOTINFO_VBEMODE], cx
+    mov  ax, [VBE_MINFO + 16]       ; bytes a line
+    mov  [BOOTINFO_PITCH], ax
+    mov  ax, [VBE_MINFO + 4]        ; granularity, KB
+    mov  [BOOTINFO_GRAN], ax
+    mov  ax, [VBE_MINFO + 6]        ; window size, KB
+    mov  [BOOTINFO_WINKB], ax
+    call vbe_window                 ; al = the window to write through
+    mov  [BOOTINFO_VWIN], al
+    mov  [BOOTINFO_WINSEG], dx
+    call vbe_lfb
+    mov  [BOOTINFO_LFB], eax
+    mov  bx, cx
+    test eax, eax
+    jz   .vbe8_set
+    or   bx, 0x4000                 ; the linear frame buffer
+.vbe8_set:
+    push bx
+    mov  ax, 0x4F02
+    int  0x10
+    pop  bx
+    xor  dx, dx
+    mov  ds, dx
+    mov  es, dx
+    cmp  ax, 0x004F
+    je   .vbe8_ok
+    test bx, 0x4000                 ; the linear one refused: the window
+    jz   .vbe8_fail
+    mov  cx, [BOOTINFO_VBEMODE]
+    call vbe_info
+    jc   .vbe8_fail
+    call vbe_window
+    jc   .vbe8_fail
+    mov  dword [BOOTINFO_LFB], 0
+    and  bx, 0x3FFF
+    jmp  .vbe8_set
+.vbe8_fail:                         ; not here after all: 16 colours
+    mov  word [BOOTINFO_VBEMODE], 0
+    movzx ax, byte [v_mode]
+    btr  word [BOOTINFO_VMAX], ax
+    sub  al, 4                      ; 5..7 -> 1..3, the same size
+    movzx dx, al
+    btr  word [BOOTINFO_V256], dx
+    jmp  .setup_16
+.vbe8_ok:
+    movzx si, byte [v_mode]
+    movzx si, byte [mode_size + si]
+    shl  si, 1
+    mov  ax, [size_w + si]
+    mov  [BOOTINFO_WIDTH], ax
+    mov  ax, [size_h + si]
+    mov  [BOOTINFO_HEIGHT], ax
+    mov  al, [v_mode]
+    mov  [BOOTINFO_VMODE], al
+    jmp  .video_setup_done
+
+; ── 320×200×16: the BIOS's mode 0Dh, planar (40 bytes a line per plane) ────
+.setup_0d:
+    mov  ax, 0x000D
+    int  0x10
+    mov  cx, 4000                   ; 8 000 bytes
+    mov  bx, 320
+    mov  si, 200
+    mov  dl, 4
+    jmp  .planar_clear
 
 ; ── 800×600×16: the SVGA BIOS's mode, planar like 640x480 (100 bytes a
 ; line per plane, 60 000 bytes: inside the 64 KB window, no banks) ─────────
@@ -259,7 +394,8 @@ entry:
     je   .ok_800
     xor  ax, ax                     ; not on this card: 640x480
     mov  ds, ax
-    or   byte [BOOTINFO_VMAX], VMAX_NO800
+    or   byte [BOOTINFO_VFLAGS], VF_NO800
+    and  byte [BOOTINFO_VMAX], 0xF7
     jmp  .setup_480
 .ok_800:
     mov  cx, 30000                  ; 60 000 bytes, all 4 planes at once
@@ -1039,6 +1175,185 @@ kbc_flush:
     pop  ax
     ret
 
+; ── Screen-mode helpers (step 5) ─────────────────────────────────────────────
+VBE_CINFO equ 0x9000                ; the card's info (512 bytes): FAT_BUF,
+VBE_MINFO equ 0x9200                ; free now; a mode's (256 bytes)
+
+; al = colours (0 = 16, 1 = 256), cl = size -> al = that mode; CF = not
+; allowed
+pick_one:
+    shl  al, 2
+    add  al, cl
+    movzx si, al
+    mov  al, [mode_by + si]
+    movzx bx, al
+    bt   word [BOOTINFO_VMAX], bx
+    cmc
+    ret
+
+; cx = a VESA mode -> its info at VBE_MINFO; CF = none
+vbe_info:
+    pushad
+    mov  ax, 0x4F01
+    mov  di, VBE_MINFO
+    int  0x10
+    xor  dx, dx
+    mov  ds, dx
+    mov  es, dx
+    cmp  ax, 0x004F
+    popad
+    je   .ok
+    stc
+    ret
+.ok:
+    clc
+    ret
+
+; the mode at VBE_MINFO: eax = its linear frame buffer (VBE 2.0), or 0
+vbe_lfb:
+    xor  eax, eax
+    test byte [BOOTINFO_VFLAGS], VF_VBE2
+    jz   .done
+    test byte [VBE_MINFO], 0x80
+    jz   .done
+    mov  eax, [VBE_MINFO + 40]
+.done:
+    ret
+
+; the mode at VBE_MINFO: a window to write through? al = 0 (A) / 1 (B),
+; dx = its segment; CF = none
+vbe_window:
+    test byte [VBE_MINFO], 0x40     ; VBE 2.0: no windows at all
+    jnz  .no
+    cmp  word [VBE_MINFO + 4], 0    ; (a granularity is needed)
+    je   .no
+    xor  al, al
+    mov  dx, [VBE_MINFO + 8]
+    mov  ah, [VBE_MINFO + 2]        ; A: there and writable?
+    and  ah, 5
+    cmp  ah, 5
+    je   .seg
+    inc  al
+    mov  dx, [VBE_MINFO + 10]
+    mov  ah, [VBE_MINFO + 3]
+    and  ah, 5
+    cmp  ah, 5
+    jne  .no
+.seg:
+    cmp  dx, 0xA000
+    jne  .no
+    clc
+    ret
+.no:
+    stc
+    ret
+
+; cx = a VESA mode: 256 colours, [v_size]'s size, and reachable? CF = no
+vbe_check:
+    call vbe_info
+    jc   .bad
+    mov  ax, [VBE_MINFO]            ; supported, colour, graphics
+    and  ax, 0x19
+    cmp  ax, 0x19
+    jne  .bad
+    movzx si, byte [v_size]
+    shl  si, 1
+    test byte [VBE_MINFO], 0x02     ; the details there? (VBE 1.0 may not)
+    jz   .std_only
+    cmp  byte [VBE_MINFO + 25], 8   ; 8 bits a pixel, packed
+    jne  .bad
+    cmp  byte [VBE_MINFO + 27], 4
+    jne  .bad
+    mov  ax, [size_w + si]
+    cmp  [VBE_MINFO + 18], ax
+    jne  .bad
+    mov  ax, [size_h + si]
+    cmp  [VBE_MINFO + 20], ax
+    jne  .bad
+    jmp  .reach
+.std_only:                          ; then only the standard number counts
+    cmp  cx, [std_modes + si]
+    jne  .bad
+.reach:
+    call vbe_lfb
+    test eax, eax
+    jnz  .good
+    call vbe_window
+    jc   .bad
+.good:
+    clc
+    ret
+.bad:
+    stc
+    ret
+
+; the card's VESA BIOS: a 256-colour mode of each size above 320x200?
+; -> BOOTINFO_V256, vbe_modes, the VBE flags
+vbe_probe:
+    mov  di, VBE_CINFO
+    mov  dword [di], 'VBE2'         ; (asks for the 2.0 details)
+    mov  ax, 0x4F00
+    int  0x10
+    xor  dx, dx
+    mov  ds, dx
+    mov  es, dx
+    cmp  ax, 0x004F
+    jne  .done
+    cmp  dword [VBE_CINFO], 'VESA'
+    jne  .done
+    or   byte [BOOTINFO_VFLAGS], VF_VBE
+    cmp  word [VBE_CINFO + 4], 0x0200
+    jb   .v1
+    or   byte [BOOTINFO_VFLAGS], VF_VBE2
+.v1:
+    mov  byte [v_size], 1
+.size:
+    movzx si, byte [v_size]
+    shl  si, 1
+    mov  cx, [std_modes + si]       ; the standard number first,
+    call vbe_check
+    jnc  .found
+    lfs  si, [VBE_CINFO + 14]       ; then the card's list
+    mov  bp, 256                    ; (no more than that)
+.list:
+    mov  cx, [fs:si]
+    cmp  cx, 0xFFFF
+    je   .next
+    add  si, 2
+    push fs
+    push si
+    call vbe_check
+    pop  si
+    pop  fs
+    jnc  .found
+    dec  bp
+    jnz  .list
+    jmp  .next
+.found:
+    movzx si, byte [v_size]
+    shl  si, 1
+    mov  [vbe_modes + si], cx
+    movzx ax, byte [v_size]
+    bts  word [BOOTINFO_V256], ax
+.next:
+    inc  byte [v_size]
+    cmp  byte [v_size], 3
+    jbe  .size
+.done:
+    ret
+
+;              320x200  640x400  640x480  800x600
+size_w    dw   320,     640,     640,     800
+size_h    dw   200,     400,     480,     600
+std_modes dw   0x0013,  0x0100,  0x0101,  0x0103  ; VESA's 256-colour numbers
+vbe_modes dw   0,       0,       0,       0       ; what the card has
+mode_size db   0, 1, 2, 3, 0, 1, 2, 3            ; mode -> size
+mode_256  db   1, 0, 0, 0, 0, 1, 1, 1            ; mode -> 256 colours?
+mode_by   db   4, 1, 2, 3,  0, 5, 6, 7           ; [colours * 4 + size]
+v_maxsize db   0
+v_size    db   0
+v_mode    db   0
+
 ; ── GDT: flat 4 GB code and data ────────────────────────────────────────────
 align 4
 gdt_start:
@@ -1098,6 +1413,9 @@ dap_off     dw 0
 dap_seg     dw 0
 dap_lba     dd 0, 0
 
+%if ($-$$) > FAT_BUF - STAGE2_ADDR
+  %error "stage 2 would run into its FAT buffer (FAT_BUF)"
+%endif
 %if ($-$$) > STAGE2_MAX * 512
   %error "stage 2 is over STAGE2_MAX sectors"
 %endif

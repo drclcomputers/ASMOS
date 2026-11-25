@@ -79,6 +79,8 @@ static const char *kind_name(const inst_disk_t *d) {
 
 static uint32_t mb(uint32_t sectors) { return sectors / 2048; }
 
+static int s_modes[VIDEO_MODES], s_nmodes; /* the screen list's modes */
+
 /* the disk ASMOS runs from now (not on the setup floppy) */
 static bool running_from(int unit) {
     return !g_setup_mode && unit == DRIVE_HDA && fs_drive_mounted(DRIVE_HDA);
@@ -125,7 +127,7 @@ static void act(setup_t *s, int id) {
                 return;
             }
             s->keep_files = ctl_value(s->keep) != 0;
-            s->video = ctl_value(s->vmode);
+            s->video = s_modes[ctl_value(s->vmode) % VIDEO_MODES];
             go_page(s, P_CONFIRM);
         }
         return;
@@ -228,16 +230,27 @@ static void page_how(setup_t *s) {
         text(s, 50, "  (an update: your files and settings stay)");
     else
         text(s, 50, "  (your files stay; ASMOS's go in SYSTEM and APPS)");
-    /* the screens this machine can take (config/video_cfg.h): 0 .. max */
+
     text(s, 70, "Screen:");
     s->vmode = ctl_combo(s->win, 60, 68, 176, NULL);
-    int max = video_max_mode();
-    for (int m = 0; m <= max; m++)
-        list_add(s->vmode, video_mode_name(m));
-    list_set_sel(s->vmode, g_video_mode <= max ? g_video_mode : max);
-    if (video_limit_reason()) {
-        char why[64];
-        snprintf(why, sizeof(why), "(no more: %s)", video_limit_reason());
+    s_nmodes = 0;
+    int sel = 0;
+    for (int sz = 0; sz < VIDEO_SIZES; sz++)
+        for (int k = 0; k < 2; k++) {
+            int m = video_mode_of(sz, k ? 256 : 16);
+            if (!video_mode_allowed(m))
+                continue;
+            if (m == g_video_mode)
+                sel = s_nmodes;
+            s_modes[s_nmodes++] = m;
+            list_add(s->vmode, video_mode_name(m));
+        }
+    list_set_sel(s->vmode, sel);
+    if (!video_mode_allowed(VIDEO_800) || !video_mode_allowed(VIDEO_800_256)) {
+        char why[72];
+        snprintf(why, sizeof(why), "(not offered: %s)",
+                 video_mode_reason(video_mode_allowed(VIDEO_800) ? VIDEO_800_256
+                                                                 : VIDEO_800));
         text(s, 84, why);
     }
     button(s, 10, "Back", 2, on_btn);

@@ -386,10 +386,12 @@ void boot_check_graphics(void) {
     snprintf(t, sizeof(t), "Resolution = %d x %d", SCREEN_WIDTH, SCREEN_HEIGHT);
     boot_check_line(t, true, NULL);
     /* asked for more than this machine takes (boot/stage2.asm) */
+    snprintf(t, sizeof(t), "Colours = %d", video_mode_colors(g_video_mode));
+    boot_check_line(t, true, NULL);
     int want = video_cfg_get();
-    if (want > g_video_mode && video_limit_reason()) {
-        snprintf(t, sizeof(t), "%s", video_limit_reason());
-        boot_check_line("Bigger screen", true, t);
+    if (want >= 0 && want != g_video_mode && video_mode_reason(want)) {
+        snprintf(t, sizeof(t), "%s", video_mode_reason(want));
+        boot_check_line(video_mode_name(want), true, t);
     }
 }
 

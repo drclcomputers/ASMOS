@@ -94,13 +94,27 @@ sectors 1..4   stage 2
     5. **Hand-off values.** It writes the boot drive to 0x0608, whether LBA
        reads worked to 0x0609, and the volume's start to 0x060C.
     6. **Screen mode.** It sets the mode stored in byte 4 of its own first
-       sector (0 = 320x200, 1 = 640x400, 2 = 640x480, 3 = 800x600).
-       Settings > Display changes that byte, and so does Setup. It never
-       sets more than the machine can take: under 3 MB of RAM only
-       320x200; a 386 (it can't set the AC flag) up to 640x480; 800x600
-       with a 486, 4 MB, and a card that accepts VESA mode 102h or mode
-       6Ah (else 640x480). What it allowed goes to 0x0603 for Setup and
-       Settings.
+       sector (`config/video_cfg.h`): 0 = 320x200x256, 1-3 = 640x400,
+       640x480, 800x600 in 16 colours, 4 = 320x200x16 (BIOS mode 0Dh),
+       5-7 = 640x400, 640x480, 800x600 in 256 colours. Settings > Display
+       changes that byte, and so does Setup. It never sets more than the
+       machine can take:
+        - under 3 MB of RAM only 320x200; a 386 (it can't set the AC flag)
+          up to 640x480; 800x600 with a 486 and 4 MB.
+        - 800x600x16: a card that accepts VESA mode 102h or mode 6Ah.
+        - 256 colours above 320x200: a VESA BIOS (4F00h) with an 8-bit
+          packed-pixel graphics mode of that size (4F01h): the standard
+          number (100h, 101h, 103h) first, then the card's mode list. It
+          needs a linear frame buffer, or a writable window at A000h.
+          4F02h sets it, with the linear buffer if there is one (if that
+          is refused, with the window).
+        - If the mode is refused, the same colours at a smaller size; at
+          320x200, 256 colours if it was a bigger size that failed.
+          What it allowed goes to 0x0603 (a bit per mode) for Setup and
+          Settings, and what it found on the card to 0x0620-0x0631 (the
+          VESA mode, line length, frame buffer, window: `boot/bootdefs.inc`).
+          The kernel maps the linear buffer uncached, or moves the window
+          with 4F05h through `lib/realmode.asm` (a brief drop to real mode).
     7. **Protected mode.** It switches to 32-bit protected mode and jumps
        to the kernel at 1 MB.
 

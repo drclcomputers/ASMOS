@@ -219,21 +219,37 @@ int scen_misc1(const char *name) {
         sim_launch("Settings");
         sim_frames(3);
         window *w = wm_focused_window();
-        control *scr = NULL, *save = NULL;
+        /* the size list, then the colours list (both say "restart") */
+        control *scr = NULL, *cols = NULL, *save = NULL;
         for (control *c = w->controls; c; c = c->next) {
-            if (c->tip && strstr(c->tip, "restart"))
-                scr = c;
+            if (c->type == CTL_COMBO && c->tip && strstr(c->tip, "restart")) {
+                if (!scr)
+                    scr = c;
+                else if (!cols)
+                    cols = c;
+            }
             if (c->type == CTL_BUTTON && !strcmp(ctl_text(c), "Save"))
                 save = c;
         }
         T("Screen combo enabled", scr && scr->enabled);
+        T("Colours combo enabled", cols && cols->enabled);
+        if (!scr || !cols || !save)
+            return fails;
         sim_shot("vid1");
-        list_set_sel(scr, 1);
+        list_set_sel(scr, 1); /* 640x400: still 256 colours, if it can */
         ctl_invoke(scr, EV_CHANGE);
+        sim_frames(1);
+        T("the colours stay 256",
+          !strcmp(list_get(cols, ctl_value(cols)), "256 colours"));
+        sim_click(save->ax + 5, save->ay + 5);
+        sim_frames(2);
+        T("saved 640x400x256 to sector 1", video_cfg_get() == VIDEO_640_256);
+        list_set_sel(cols, 0); /* then 16 colours */
+        ctl_invoke(cols, EV_CHANGE);
         sim_frames(1);
         sim_click(save->ax + 5, save->ay + 5);
         sim_frames(2);
-        T("saved 640x400 to sector 1", video_cfg_get() == VIDEO_640);
+        T("saved 640x400x16 to sector 1", video_cfg_get() == VIDEO_640);
         uint8_t sec[512];
         fs_read_sector(DRIVE_HDA, 1, sec);
         T("only the mode byte changed",

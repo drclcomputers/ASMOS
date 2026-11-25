@@ -5,6 +5,7 @@
  * with hardware stubbed, scripted input and PPM screenshots. */
 #include "config/config.h"
 #include "config/runtime_config.h"
+#include "config/video_cfg.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "fs/fs.h"
@@ -154,7 +155,7 @@ void gpu_invalidate(void) { s_sfull = 1; }
  * only the sizes change, as in the kernel */
 int g_zoom = 1;
 void gpu_set_zoom(int z) {
-    if (g_video_mode == 0 || (z != 1 && z != 2))
+    if (video_mode_size(g_video_mode) == 0 || (z != 1 && z != 2))
         z = 1;
     if (z == g_zoom)
         return;
@@ -230,7 +231,7 @@ static void make_pal256(void) {
 int gpu_palette(uint8_t (*rgb)[3], int max) {
     if (!s_pal256[63][0])
         make_pal256();
-    int n = g_video_mode == 0 ? 256 : 16;
+    int n = video_mode_colors(g_video_mode);
     for (int i = 0; i < n && i < max; i++)
         for (int k = 0; k < 3; k++)
             rgb[i][k] = s_pal256[i][k];
@@ -495,7 +496,7 @@ void sim_shot(const char *name) {
             int i_ = y * SCREEN_WIDTH + x;
             uint8_t c = g_sim_vram[i_] != g_sim_shadow[i_] ? g_sim_vram[i_]
                                                            : BACKBUF[i_];
-            if (g_video_mode == 0 && c > 15) { /* 256 colours */
+            if (video_mode_colors(g_video_mode) == 256 && c > 15) {
                 row[x * 3] = (uint8_t)(rgb[c][0] * 255 / 63);
                 row[x * 3 + 1] = (uint8_t)(rgb[c][1] * 255 / 63);
                 row[x * 3 + 2] = (uint8_t)(rgb[c][2] * 255 / 63);
@@ -812,7 +813,8 @@ void simvmm_on(void);
 
 const char *sim_arg2;
 /* "scenario@800" / "@640x480" / "@640" / "@320": run it in that screen mode
- * (the kernel's numbers: config/video_cfg.h) */
+ * (the kernel's numbers: config/video_cfg.h); "...x256" for 256 colours,
+ * "@320x16" for 320x200 with 16 */
 static int s_sim_zoom = 1;
 static void sim_screen_from_name(char *name) {
     char *at = strchr(name, '@');
@@ -822,10 +824,10 @@ static void sim_screen_from_name(char *name) {
     static const struct {
         const char *n;
         int mode, w, h;
-    } m[] = {{"320", 0, 320, 200},
-             {"640", 1, 640, 400},
-             {"640x480", 2, 640, 480},
-             {"800", 3, 800, 600}};
+    } m[] = {{"320", 0, 320, 200},         {"640", 1, 640, 400},
+             {"640x480", 2, 640, 480},     {"800", 3, 800, 600},
+             {"320x16", 4, 320, 200},      {"640x256", 5, 640, 400},
+             {"640x480x256", 6, 640, 480}, {"800x256", 7, 800, 600}};
     int z = 1, n = (int)strlen(at);
     if (n > 2 && !strcmp(at + n - 2, "x2")) {
         z = 2;

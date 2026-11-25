@@ -62,6 +62,9 @@ class CPU:
         self.iflag = 1
         self.pe = False
         self.gdt = (0, 0)
+        self.idt = (0, 0x3FF)
+        self.cr0 = 0x10
+        self.cr3 = 0
         self.a20 = False
         self.steps = 0
         self.max_steps = 200_000_000
@@ -483,11 +486,13 @@ class CPU:
         if op == 0x9C:
             return self.push(self.flags(), osz)
         if op == 0x9D:
+            return self.set_flags(self.pop(osz), osz)
+        if op == 0xCF:  # iret (real mode, or the same privilege)
+            ip = self.pop(osz)
+            cs = self.pop(osz)
             f = self.pop(osz)
-            self.cf, self.zf, self.sf = f & 1, (f >> 6) & 1, (f >> 7) & 1
-            self.iflag, self.df, self.of = (f >> 9) & 1, (f >> 10) & 1, (f >> 11) & 1
-            if osz == 4:
-                self.ac = (f >> 18) & 1 if self.bios.cpu486 else 0
+            self.far_jump(cs, ip)
+            return self.set_flags(f, osz)
             return
         if 0xA0 <= op <= 0xA3:
             size = osz if op & 1 else 1
@@ -564,6 +569,9 @@ class CPU:
             raise Halt("hlt")
         if op in (0xF6, 0xF7):
             return self.group3(op, osz, asz, segov)
+        if op == 0xF5:  # cmc
+            self.cf ^= 1
+            return
         if op in (0xF8, 0xF9):
             self.cf = op & 1
             return
@@ -589,6 +597,13 @@ class CPU:
             if reg == 4:
                 self.eip = self.get(ea, osz)
                 return
+            if reg in (3, 5):  # call far / jmp far [m16:16/32]
+                ip = self.rd(ea[1], osz)
+                cs = self.rd(ea[1] + osz, 2)
+                if reg == 3:
+                    self.push(self.seg[CS].sel, osz)
+                    self.push(self.eip, osz)
+                return self.far_jump(cs, ip)
             if reg == 6:
                 return self.push(self.get(ea, osz), osz)
             raise NotImplementedError("FF /%d" % reg)
@@ -611,6 +626,12 @@ class CPU:
             | (self.of << 11)
             | (self.ac << 18)
         )
+
+    def set_flags(self, f, osz):
+        self.cf, self.zf, self.sf = f & 1, (f >> 6) & 1, (f >> 7) & 1
+        self.iflag, self.df, self.of = (f >> 9) & 1, (f >> 10) & 1, (f >> 11) & 1
+        if osz == 4:
+            self.ac = (f >> 18) & 1 if self.bios.cpu486 else 0
 
     def jump_rel(self, d):
         self.eip = (self.eip + d) & (0xFFFFFFFF if self.code32() else 0xFFFF)
@@ -713,20 +734,31 @@ class CPU:
             return self.put(ea, 1, int(self.cond(op & 0xF)))
         if op == 0x01:
             reg, ea = self.modrm(asz, segov)
-            if reg == 2:  # lgdt
+            if reg in (2, 3):  # lgdt / lidt
                 lim = self.rd(ea[1], 2)
                 base = self.rd(ea[1] + 2, 4) & (0xFFFFFFFF if osz == 4 else 0xFFFFFF)
-                self.gdt = (base, lim)
+                if reg == 2:
+                    self.gdt = (base, lim)
+                else:
+                    self.idt = (base, lim)
+                return
+            if reg in (0, 1):  # sgdt / sidt
+                base, lim = self.gdt if reg == 0 else self.idt
+                self.wr(ea[1], 2, lim)
+                self.wr(ea[1] + 2, 4, base)
                 return
             raise NotImplementedError("0F 01 /%d" % reg)
         if op in (0x20, 0x22):
             b = self.fetch(1)
             cr, r = (b >> 3) & 7, b & 7
-            if cr != 0:
+            if cr not in (0, 3):
                 raise NotImplementedError("CR%d" % cr)
             if op == 0x20:
-                self.r[r] = 0x10 | int(self.pe)
-            else:
+                self.r[r] = self.cr0 if cr == 0 else self.cr3
+            elif cr == 3:
+                self.cr3 = self.r[r]
+            else:  # (paging is a bit, kept: the tests map 1:1 anyway)
+                self.cr0 = self.r[r] | 0x10
                 self.pe = bool(self.r[r] & 1)
             return
         if op in (0xA0, 0xA8):
@@ -740,6 +772,29 @@ class CPU:
             )
             self.cf = self.of = int(r != self.signed(r & MASK[osz], osz))
             return self.setreg(reg, osz, r)
+        if op in (0xA3, 0xAB, 0xB3, 0xBB):  # bt / bts / btr / btc r/m, r
+            reg, ea = self.modrm(asz, segov)
+            bit = self.reg(reg, osz)
+            if ea[0] == "m":  # (memory: the offset may reach past it)
+                ea = ("m", ea[1] + (bit >> 3), None)
+                size, bit = 1, bit & 7
+            else:
+                size, bit = osz, bit & (8 * osz - 1)
+            v = self.get(ea, size)
+            self.cf = (v >> bit) & 1
+            if op == 0xAB:
+                self.put(ea, size, v | 1 << bit)
+            elif op == 0xB3:
+                self.put(ea, size, v & ~(1 << bit))
+            elif op == 0xBB:
+                self.put(ea, size, v ^ 1 << bit)
+            return
+        if op in (0xB2, 0xB4, 0xB5):  # lss / lfs / lgs
+            reg, ea = self.modrm(asz, segov)
+            off = self.rd(ea[1], osz)
+            sel = self.rd(ea[1] + osz, 2)
+            self.load_seg({0xB2: SS, 0xB4: FS, 0xB5: GS}[op], sel)
+            return self.setreg(reg, osz, off)
         if op in (0xB6, 0xB7, 0xBE, 0xBF):
             size = 1 if op in (0xB6, 0xBE) else 2
             reg, ea = self.modrm(asz, segov)
@@ -748,6 +803,85 @@ class CPU:
                 v = self.signed(v, size)
             return self.setreg(reg, osz, v)
         raise NotImplementedError("0F %02X" % op)
+
+
+class VbeCard:
+    """a VESA BIOS: modes {number: dict(w, h, bpp=8, lfb=addr or 0, win=A/B
+    writable, gran KB, pitch, ext=False for VBE 1.0's missing details)},
+    `refuse` modes 4F02h won't set, `refuse_lfb` modes it won't set with
+    the linear frame buffer"""
+
+    LIST = 0xC0100  # the mode list, in the card's "ROM"
+
+    def __init__(self, version=0x0200, modes=None, refuse=(), refuse_lfb=()):
+        self.version = version
+        self.modes = modes or {}
+        self.refuse = set(refuse)
+        self.refuse_lfb = set(refuse_lfb)
+        self.calls = []
+
+    def info(self, m, a):
+        m[a : a + 512] = bytes(512)
+        m[a : a + 4] = b"VESA"
+        struct.pack_into(
+            "<HIIHH", m, a + 4, self.version, 0xC0000000, 0, 0x0100, 0xC000
+        )
+        struct.pack_into("<H", m, a + 18, 16)  # 1 MB
+        nums = list(self.modes) + [0x102]
+        for i, n in enumerate(nums):
+            struct.pack_into("<H", m, self.LIST + 2 * i, n)
+        struct.pack_into("<H", m, self.LIST + 2 * len(nums), 0xFFFF)
+        return 0x004F
+
+    def mode_info(self, m, a, num):
+        self.calls.append(("4F01", num))
+        d = self.modes.get(num & 0x1FF)
+        if d is None:
+            return 0x014F
+        m[a : a + 256] = bytes(256)
+        lfb = d.get("lfb", 0) if self.version >= 0x200 else 0
+        attr = 0x01 | 0x08 | 0x10 | (0x02 if d.get("ext", True) else 0)
+        attr |= 0x80 if lfb else 0
+        attr |= 0x40 if d.get("nowin") else 0
+        wa = 0x07 if d.get("win", "A") == "A" else 0x03  # B: A only reads
+        wb = 0x05 if d.get("win", "A") == "B" else 0
+        struct.pack_into(
+            "<HBBHHHHIHHHBBBBBBBB",
+            m,
+            a,
+            attr,
+            wa,
+            wb,
+            d.get("gran", 64),
+            64,
+            0xA000,
+            0xA000 if wb else 0,
+            0,
+            d.get("pitch", d["w"]),
+            d["w"],
+            d["h"],
+            8,
+            16,
+            1,
+            d.get("bpp", 8),
+            1,
+            d.get("model", 4),
+            0,
+            0,
+        )
+        struct.pack_into("<I", m, a + 40, lfb)
+        return 0x004F
+
+    def set(self, bios, bx):
+        num, want_lfb = bx & 0x1FF, bool(bx & 0x4000)
+        d = self.modes.get(num)
+        if d is None or num in self.refuse:
+            return 0x014F
+        if want_lfb and (num in self.refuse_lfb or not d.get("lfb")):
+            return 0x014F
+        bios.vmode = num
+        bios.vbe_lfb = want_lfb
+        return 0x004F
 
 
 class Bios:
@@ -768,6 +902,7 @@ class Bios:
         dirty=False,  # BIOS calls change what they needn't: DF, ES...
         cpu486=True,  # False: a 386 (EFLAGS.AC can't be set)
         svga=None,  # 800x600x16: "both", "vbe" (only 4F02h 102h), "6a" (only mode 6Ah), None
+        vbe=None,  # a VESA card: see VbeCard
     ):
         self.disk = disk
         self.drive = drive
@@ -785,7 +920,10 @@ class Bios:
         self.dirty = dirty  # INT 15h returns with DF set, high halves changed
         self.cpu486 = cpu486
         self.svga = svga
+        self.vbe = vbe
+        self.vbe_lfb = False  # the last VESA mode set with its linear buffer
         self.vmode = 0x03  # the screen mode the BIOS set last
+        self.ports = []  # (port, value) written
         self.out = ""
         self.calls = []
         self.reads = 0
@@ -799,6 +937,7 @@ class Bios:
         return 0
 
     def outport(self, cpu, port, v):
+        self.ports.append((port, v))
         if port == 0x92 and v & 2:
             cpu.a20 = True
 
@@ -853,9 +992,21 @@ class Bios:
                 cpu.setreg(0, 1, self.vmode)
                 cpu.setreg(4, 1, 80)
             elif cpu.reg(0, 2) == 0x4F02:  # VESA set mode (no VBE: AX stays)
-                if self.svga in ("vbe", "both") and cpu.reg(3, 2) & 0x1FF == 0x102:
+                bx = cpu.reg(3, 2)
+                if self.svga in ("vbe", "both") and bx & 0x1FF == 0x102:
                     self.vmode = 0x102
                     cpu.setreg(0, 2, 0x004F)
+                elif self.vbe:
+                    cpu.setreg(0, 2, self.vbe.set(self, bx))
+            elif cpu.reg(0, 2) == 0x4F05 and self.vbe:  # the window's place
+                self.vbe.calls.append(("4F05", cpu.reg(3, 2), cpu.reg(2, 2)))
+                cpu.setreg(0, 2, 0x004F)
+            elif cpu.reg(0, 2) in (0x4F00, 0x4F01) and self.vbe:
+                es_di = cpu.seg[ES].base + cpu.reg(7, 2)
+                if cpu.reg(0, 2) == 0x4F00:
+                    cpu.setreg(0, 2, self.vbe.info(cpu.m, es_di))
+                else:
+                    cpu.setreg(0, 2, self.vbe.mode_info(cpu.m, es_di, cpu.reg(1, 2)))
             return
         if n == 0x15:
             if ah == 0x88:

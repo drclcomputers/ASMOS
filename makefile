@@ -23,7 +23,7 @@ C_SRC   = kernel.c $(filter-out $(EXCLUDE),$(foreach d,$(SRC_DIRS),$(wildcard $(
 # boot/loader.asm must stay first (entry point); linker.ld also pins it.
 # boot/bootcode.asm: the boot sectors below, inside the kernel (Setup, SYS).
 ASM_SRC = boot/loader.asm interrupts/interrupt.asm os/task_switch.asm \
-          boot/bootcode.asm
+          boot/bootcode.asm lib/realmode.asm
 
 # The boot sectors (flat binaries): MBR, the volume's boot sector, stage 2.
 BOOT_DIR = $(BUILD_DIR)/boot
@@ -94,6 +94,9 @@ $(BOOT_DIR)/%.bin: boot/%.asm boot/bootdefs.inc
 	$(AS) -f bin -I. $< -o $@
 
 $(BUILD_DIR)/boot/bootcode.o: $(BOOT_BIN)
+# BIOS calls from the kernel: the real-mode half, copied to 0x1000
+$(BUILD_DIR)/lib/realmode.o: $(BOOT_DIR)/rmstub.bin boot/rmdefs.inc
+$(BOOT_DIR)/rmstub.bin: boot/rmdefs.inc
 
 # the FPU emulator is big; below 640 KB size matters more than its speed
 $(BUILD_DIR)/lib/fpu_emu.o: CFLAGS += -Os
@@ -172,7 +175,7 @@ bochs: all
 # boot both images in tools/bootemu.py (an x86 + BIOS emulator) under many
 # BIOS kinds, and broken ones: checks the boot code without a real machine
 boottest: os_image.bin setup.img
-	python3 tools/boottest.py os_image.bin setup.img kernel.bin
+	python3 tools/boottest.py os_image.bin setup.img kernel.bin build/lib/realmode.o $(LD)
 
 # Misc
 clean:

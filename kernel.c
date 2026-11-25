@@ -19,6 +19,7 @@
 #include "drivers/ne2000.h"
 #include "drivers/opl2.h"
 #include "drivers/sb16.h"
+#include "lib/realmode.h"
 
 #include "network/dhcp.h"
 #include "network/dns.h"
@@ -86,14 +87,20 @@ static void dbg_bar(int col, uint8_t color) {
                      "outb %%al,    %%dx\n\t" ::
                          : "eax", "edx");
 
-    if (g_video_mode == 0) {
-        volatile uint8_t *fb = (volatile uint8_t *)0xA0000;
+    if (video_mode_colors(g_video_mode) == 256) {
+        /* (paging is off yet: a linear frame buffer is where it is; a
+         * window shows the first 64 KB) */
+        int pitch = g_vbe.mode ? g_vbe.pitch : g_screen_width;
+        uint32_t end = g_vbe.mode && !g_vbe.lfb ? 65536 : 0xFFFFFFFFu;
+        volatile uint8_t *fb =
+            (volatile uint8_t *)(g_vbe.lfb ? g_vbe.lfb : 0xA0000);
         int x = col * 8;
         if (x + 8 > g_screen_width)
             return;
         for (int y = 0; y < g_screen_height; y++)
             for (int i = 0; i < 8; i++)
-                fb[y * g_screen_width + x + i] = color;
+                if ((uint32_t)(y * pitch + x + i) < end)
+                    fb[y * pitch + x + i] = color;
     } else {
         volatile uint8_t *fb = (volatile uint8_t *)0xA0000;
         int bx = col, stride = g_screen_width / 8;
@@ -183,21 +190,16 @@ static void boot_banner(void) {
 }
 
 static void resolution_set(void) {
+    video_limits_from_boot(); /* (also the VESA mode: g_vbe) */
     g_video_mode = *(volatile uint8_t *)0x0602;
-    g_video_limits = *(volatile uint8_t *)0x0603;
+    if (g_video_mode >= VIDEO_MODES)
+        g_video_mode = VIDEO_640;
     g_screen_width = *(volatile uint16_t *)0x0604;
     g_screen_height = *(volatile uint16_t *)0x0606;
 
-    if (g_screen_width == 0 || g_screen_height == 0) {
-        if (RESMODE) {
-            g_video_mode = 1;
-            g_screen_width = 640;
-            g_screen_height = 400;
-        } else {
-            g_video_mode = 0;
-            g_screen_width = 320;
-            g_screen_height = 200;
-        }
+    if (g_screen_width == 0 || g_screen_height == 0) { /* (from the mode) */
+        g_screen_width = video_size_w(video_mode_size(g_video_mode));
+        g_screen_height = video_size_h(video_mode_size(g_video_mode));
     }
 
     if (g_screen_width > 800)
@@ -211,6 +213,7 @@ static void resolution_set(void) {
 }
 
 void kmain(void) {
+    realmode_install(); /* (BIOS calls: the bank switch of a VESA mode) */
     resolution_set();
 
     detect_heap_range();
@@ -257,8 +260,8 @@ void kmain(void) {
 
     /* Paging: app memory protection (lib/vmm.h). Settings > System can
      * turn it off (no_paging) should a machine misbehave with it. */
-    if (!g_cfg.no_paging)
-        vmm_init(s_ram_top);
+    if (!g_cfg.no_paging && vmm_init(s_ram_top))
+        gpu_map(); /* a linear frame buffer is past the RAM: map it */
     if (g_cfg.fpu_emulate && cpu_has_fpu()) { /* Settings: test the emulator */
         cpu_emulate_fpu();
         idt_emulate_fpu();
@@ -308,7 +311,7 @@ void kmain(void) {
     for (int i = 0; i < app_registry_count; i++)
         os_install_app(app_registry[i].desc);
 
-    appload_scan_dir("/apps"); /* external .APP packages, if any */
+    appload_scan_dir("/apps");
 
     if (g_setup_mode) {
         extern app_descriptor setup_app;

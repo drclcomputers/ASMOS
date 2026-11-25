@@ -223,6 +223,33 @@ bool vmm_map_page(vmm_ctx_t *ctx, uint32_t virt, uint32_t phys,
     return true;
 }
 
+bool vmm_map_device(uint32_t phys, uint32_t size) {
+    if (!vmm_enabled() || !size)
+        return false;
+    uint32_t a = phys & ~0xFFFu, end = phys + size;
+    if (end < phys) /* (to the end of the 4 GB) */
+        end = 0xFFFFF000u;
+    for (; a < end && a >= (phys & ~0xFFFu); a += PAGE_SIZE) {
+        uint32_t *pde = &(*s_kernel_pd)[a >> 22];
+        if (!(*pde & PAGE_PRESENT)) {
+            uint32_t *pt = (uint32_t *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+            if (!pt)
+                return false;
+            memset(pt, 0, PAGE_SIZE);
+            *pde = (uint32_t)(uintptr_t)pt | PAGE_WRITABLE | PAGE_PRESENT;
+        }
+        uint32_t *pt = (uint32_t *)(uintptr_t)(*pde & ~0xFFFu);
+        /* PCD | PWT: not cached, what is written goes to the card (486
+         * on: a 386 has no such bits) */
+        uint32_t nc = cpu_family() >= 4 ? 0x18u : 0;
+        pt[(a >> 12) & 0x3FF] = a | nc | PAGE_WRITABLE | PAGE_PRESENT;
+    }
+    /* the TLB: CR3 again (a 386 has no invlpg) */
+    __asm__ volatile("mov %%cr3, %%eax\n\tmov %%eax, %%cr3" ::
+                         : "eax", "memory");
+    return true;
+}
+
 void vmm_destroy_context(vmm_ctx_t *ctx) {
     if (!ctx)
         return;

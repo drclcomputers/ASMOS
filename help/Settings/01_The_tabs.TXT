@@ -1,8 +1,10 @@
 # The tabs
 
-- Display: the screen mode, the desktop pattern and colours, the screen
-  saver, the speed options, and Characters (the code page for accents
-  and symbols).
+- Display: the screen size and its colours, 16 or 256 (only what this
+  machine and its video card can take; the tooltip says why not; both
+  take effect at the next start), the desktop pattern and colours, the
+  screen saver, the speed options, and Characters (the code page for
+  accents and symbols).
 - Sound: sound on or off, the start-up chime, the Sound Blaster's volume.
 - Clock: the date, the time and the time zone.
 - Network: the address from DHCP (it shows what it got, and Renew asks

@@ -6,9 +6,49 @@
 #include "config/video_cfg.h"
 
 #include "fs/fs.h"
+#include "lib/string.h"
 
 #define VM_LBA 1 /* first stage-2 sector */
 #define VM_OFF 2 /* "VM" at 2-3, the mode at 4 */
+
+// the modes
+
+static const uint8_t k_size[VIDEO_MODES] = {0, 1, 2, 3, 0, 1, 2, 3};
+static const uint8_t k_256[VIDEO_MODES] = {1, 0, 0, 0, 0, 1, 1, 1};
+static const uint16_t k_w[VIDEO_SIZES] = {320, 640, 640, 800};
+static const uint16_t k_h[VIDEO_SIZES] = {200, 400, 480, 600};
+
+int video_mode_size(int m) { return m >= 0 && m < VIDEO_MODES ? k_size[m] : 0; }
+int video_mode_colors(int m) {
+    return m >= 0 && m < VIDEO_MODES && k_256[m] ? 256 : 16;
+}
+int video_size_w(int s) { return s >= 0 && s < VIDEO_SIZES ? k_w[s] : 0; }
+int video_size_h(int s) { return s >= 0 && s < VIDEO_SIZES ? k_h[s] : 0; }
+
+int video_mode_of(int size, int colors) {
+    for (int m = 0; m < VIDEO_MODES; m++)
+        if (k_size[m] == size && video_mode_colors(m) == colors)
+            return m;
+    return -1;
+}
+
+const char *video_size_name(int s) {
+    static const char *const n[VIDEO_SIZES] = {"320 x 200", "640 x 400",
+                                               "640 x 480", "800 x 600"};
+    return s >= 0 && s < VIDEO_SIZES ? n[s] : "?";
+}
+
+const char *video_mode_name(int m) {
+    static char b[VIDEO_MODES][28];
+    if (m < 0 || m >= VIDEO_MODES)
+        return "?";
+    if (!b[m][0])
+        snprintf(b[m], sizeof(b[m]), "%s, %d colours",
+                 video_size_name(k_size[m]), video_mode_colors(m));
+    return b[m];
+}
+
+// the boot disk
 
 static uint8_t s_drive = DRIVE_HDA;
 
@@ -42,37 +82,57 @@ const char *video_cfg_set(int mode) {
     return video_cfg_get() == mode ? NULL : "the boot disk did not keep it";
 }
 
-// what this machine may use (boot/stage2.asm step 5)
+// what this machine may use (boot/stage2.asm step 5, boot/bootdefs.inc)
 
-#define VMAX_486 0x40
-#define VMAX_NO800 0x80
+uint8_t g_video_allowed = 0xFF; /* (no boot info: everything) */
+uint8_t g_video_flags = VF_486 | VF_VBE | VF_VBE2, g_video_256 = 0x0E;
+vbe_info_t g_vbe;
+static uint32_t s_ram = 0; /* 0 = unknown */
 
-uint8_t g_video_limits = VIDEO_800; /* (no boot info: everything) */
+#define BI8(a) (*(volatile uint8_t *)(a))
+#define BI16(a) (*(volatile uint16_t *)(a))
+#define BI32(a) (*(volatile uint32_t *)(a))
 
-int video_max_mode(void) { return g_video_limits & 3; }
-
-const char *video_mode_name(int mode) {
-    switch (mode) {
-    case VIDEO_320:
-        return "320 x 200, 256 colours";
-    case VIDEO_640:
-        return "640 x 400, 16 colours";
-    case VIDEO_640x480:
-        return "640 x 480, 16 colours";
-    case VIDEO_800:
-        return "800 x 600, 16 colours";
+void video_limits_from_boot(void) {
+    s_ram = BI32(0x0500);
+    if (BI8(0x0620) != 'V') { /* an older loader: highest mode + flags */
+        uint8_t old = BI8(0x0603);
+        g_video_allowed = (uint8_t)((2u << (old & 3)) - 1);
+        g_video_flags = (old & 0x40 ? VF_486 : 0) | (old & 0x80 ? VF_NO800 : 0);
+        g_video_256 = 0;
+        return;
     }
-    return "?";
+    g_video_allowed = BI8(0x0603) | 1; /* (320x200x256 always works) */
+    g_video_flags = BI8(0x0621);
+    g_video_256 = BI8(0x0622);
+    g_vbe.win = BI8(0x0623);
+    g_vbe.mode = BI16(0x0624);
+    g_vbe.pitch = BI16(0x0626);
+    g_vbe.lfb = BI32(0x0628);
+    g_vbe.gran = (uint32_t)BI16(0x062C) * 1024;
+    g_vbe.win_size = (uint32_t)BI16(0x062E) * 1024;
+    g_vbe.win_addr = (uint32_t)BI16(0x0630) << 4;
 }
 
-const char *video_limit_reason(void) {
-    if (video_max_mode() == VIDEO_800)
+bool video_mode_allowed(int m) {
+    return m >= 0 && m < VIDEO_MODES && (g_video_allowed >> m) & 1;
+}
+
+const char *video_mode_reason(int m) {
+    if (video_mode_allowed(m))
         return NULL;
-    if (g_video_limits & VMAX_NO800)
-        return "the video card has no 800 x 600 mode";
-    if (video_max_mode() == VIDEO_320)
+    int s = video_mode_size(m);
+    if (s > 0 && s_ram && s_ram < 0x2C0000)
         return "bigger screens need 3 MB of RAM";
-    if (!(g_video_limits & VMAX_486))
+    if (s == 3 && !(g_video_flags & VF_486))
         return "800 x 600 needs a 486 or better";
-    return "800 x 600 needs 4 MB of RAM";
+    if (s == 3 && s_ram && s_ram < 0x3C0000)
+        return "800 x 600 needs 4 MB of RAM";
+    if (video_mode_colors(m) == 256 && s > 0)
+        return g_video_flags & VF_VBE
+                   ? "the video card has no 256-colour mode of that size"
+                   : "256 colours that big need a VESA video card";
+    if (m == VIDEO_800)
+        return "the video card has no 800 x 600 mode";
+    return "not on this machine";
 }

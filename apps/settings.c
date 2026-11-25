@@ -20,13 +20,12 @@
 #include "ui/saver.h"
 #include "ui/uifont.h"
 
-/* tabs; Screen Saver and Speed open from Display */
 enum { P_WALL, P_SOUND, P_CLOCK, P_NET, P_PRINT, P_DEVICES, P_SYSTEM };
 
 #define PERF_FLAGS 5
 
 typedef struct {
-    window *win; /* must stay first */
+    window *win;
     control *tabs, *status, *save;
     control *pattern, *col_a, *col_b, *screen;
     int screen_saved; /* mode on the boot disk (config/video_cfg.h) */
@@ -40,18 +39,17 @@ typedef struct {
     window *sub;          /* Screen Saver or Speed, while open */
     control *p_type, *p_port, *p_status;
     control *dev_list; /* Devices tab */
-    /* the pattern editor, while open: its copy of the pattern, the two
-     * colours (left button / right button) */
+
     uint8_t pat[64];
     uint8_t pen, back;
     int pat_lx, pat_ly; /* last cell painted while dragging */
     uint32_t p_rev, p_tick;
     bool dirty;
-    /* what only a restart applies, as last saved: Save says "restart" only
-     * when one of these changed */
+
     uint8_t boot_sig[24];
     control *dhcp, *net_state; /* Network: DHCP */
-    int net_shown; /* the DHCP state last shown (+ 1; 0 = not yet) */
+    int net_shown;
+    control *colors;
 } settings_state_t;
 
 /* the settings that take effect at the next start */
@@ -178,9 +176,50 @@ static void on_ffmode(control *c, int ev) {
     set_dirty(c->user, true);
 }
 
+// Display: the screen's size and colours, as this machine allows them
+
+static int s_size_of[VIDEO_SIZES];
+static int s_cols_of[2];
+
+static int screen_mode(settings_state_t *s) {
+    int sz = s_size_of[ctl_value(s->screen) & 3];
+    int m = video_mode_of(sz, s_cols_of[ctl_value(s->colors) & 1]);
+    return m >= 0 ? m : 0;
+}
+
+static void fill_colors(settings_state_t *s, int want) {
+    int sz = s_size_of[ctl_value(s->screen) & 3], n = 0, sel = 0;
+    list_clear(s->colors);
+    static const int cols[2] = {16, 256};
+    const char *why = NULL;
+    for (int k = 0; k < 2; k++) {
+        int m = video_mode_of(sz, cols[k]);
+        if (!video_mode_allowed(m)) {
+            why = video_mode_reason(m);
+            continue;
+        }
+        if (cols[k] == want)
+            sel = n;
+        s_cols_of[n++] = cols[k];
+        list_add(s->colors, cols[k] == 16 ? "16 colours" : "256 colours");
+    }
+    list_set_sel(s->colors, sel);
+    static char tip[96];
+    if (why)
+        snprintf(tip, sizeof(tip), "Not %s here: %s",
+                 s_cols_of[0] == 16 ? "256" : "16", why);
+    else
+        snprintf(tip, sizeof(tip), "Takes effect when you restart");
+    ctl_set_tooltip(s->colors, tip);
+}
+
 static void on_screen(control *c, int ev) {
-    if (ev == EV_CHANGE)
-        set_dirty(c->user, true);
+    settings_state_t *s = c->user;
+    if (ev != EV_CHANGE)
+        return;
+    if (c == s->screen)
+        fill_colors(s, s_cols_of[ctl_value(s->colors) & 1]);
+    set_dirty(s, true);
 }
 
 static void on_edit(control *c, int ev) {
@@ -190,7 +229,6 @@ static void on_edit(control *c, int ev) {
 
 // Network tab: DHCP, or the addresses typed in
 
-/* the fields: typed in, or (DHCP) what it got, greyed */
 static void net_fields(settings_state_t *s) {
     bool dhcp = ctl_value(s->dhcp);
     dhcp_info_t d;
@@ -209,7 +247,6 @@ static void net_fields(settings_state_t *s) {
     }
 }
 
-/* "Got 10.0.2.15 from 10.0.2.2, 23 h left" */
 static void net_status(settings_state_t *s) {
     char t[64];
     dhcp_info_t d;
@@ -289,7 +326,7 @@ static void on_save(control *c, int ev) {
     g_cfg.net_dhcp = dhcp;
     net_apply();
     s->net_shown = 0;
-    int vm = ctl_value(s->screen);
+    int vm = screen_mode(s);
     bool screen_changed = vm != s->screen_saved;
     if (screen_changed) {
         const char *err = video_cfg_set(vm);
@@ -1034,26 +1071,34 @@ static void build(settings_state_t *s) {
 
     /* Display: screen mode (kept on the boot disk), wallpaper */
     on_page(s, ctl_label(w, 10, 24, 60, 12, "Screen:", 0), P_WALL);
-    s->screen = on_page(s, ctl_combo(w, 76, 24, 176, on_screen), P_WALL);
-    /* only what this machine can take (config/video_cfg.h): 0 .. max */
-    int max = video_max_mode();
-    for (int m = 0; m <= max; m++)
-        list_add(s->screen, video_mode_name(m));
+    s->screen = on_page(s, ctl_combo(w, 76, 24, 84, on_screen), P_WALL);
+    s->colors = on_page(s, ctl_combo(w, 164, 24, 88, on_screen), P_WALL);
+
     int vm = video_cfg_get();
-    s->screen_saved = vm >= 0 ? vm : g_video_mode;
-    if (s->screen_saved > max) /* shown as the most it can; the disk's choice
-                                * stays unless changed here */
-        s->screen_saved = max;
-    list_set_sel(s->screen, s->screen_saved);
+    s->screen_saved = vm >= 0 && video_mode_allowed(vm) ? vm : g_video_mode;
+    int n = 0, sel = 0, biggest = 0;
+    for (int sz = 0; sz < VIDEO_SIZES; sz++) {
+        if (!video_mode_allowed(video_mode_of(sz, 16)) &&
+            !video_mode_allowed(video_mode_of(sz, 256)))
+            continue;
+        if (sz == video_mode_size(s->screen_saved))
+            sel = n;
+        s_size_of[n++] = sz;
+        list_add(s->screen, video_size_name(sz));
+        biggest = sz;
+    }
+    list_set_sel(s->screen, sel);
+    fill_colors(s, video_mode_colors(s->screen_saved));
     ctl_enable(s->screen, vm >= 0);
+    ctl_enable(s->colors, vm >= 0);
     static char tip[96];
     if (vm < 0)
         snprintf(tip, sizeof(tip),
                  "This boot disk can't store it: "
                  "rebuild the image");
-    else if (video_limit_reason())
+    else if (biggest < VIDEO_SIZES - 1)
         snprintf(tip, sizeof(tip), "Takes effect when you restart. No more: %s",
-                 video_limit_reason());
+                 video_mode_reason(video_mode_of(biggest + 1, 16)));
     else
         snprintf(tip, sizeof(tip), "Takes effect when you restart");
     ctl_set_tooltip(s->screen, tip);
@@ -1143,9 +1188,9 @@ static void build(settings_state_t *s) {
     ctl_set_tooltip(fe, "Test the FPU emulator on a machine that has an FPU");
     control *zm = flag(s, P_SYSTEM, 10, 120, "Large display: 2x (restart)",
                        &g_cfg.ui_zoom2);
-    ctl_enable(zm, g_video_mode != 0); /* 640x400 and up */
-    ctl_set_tooltip(zm, g_video_mode != 0
-                            ? "Everything twice the size: 800x600 looks "
+    bool big = video_mode_size(g_video_mode) != 0;
+    ctl_enable(zm, big);
+    ctl_set_tooltip(zm, big ? "Everything twice the size: 800x600 looks "
                               "like 400x300"
                             : "Only at 640x400 and up");
     ctl_set_tooltip(np, "Paging keeps apps out of each other's memory");

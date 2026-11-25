@@ -5,17 +5,22 @@
 
 #include "drivers/gpu.h"
 #include "config/config.h"
+#include "config/video_cfg.h"
 #include "drivers/pointer.h"
 #include "lib/core.h"
 #include "lib/io.h"
 #include "lib/memory.h"
+#include "lib/realmode.h"
 #include "lib/time.h"
+#include "lib/vmm.h"
 
 /*
- * Copies the 1-byte-per-pixel back buffer to VGA. A shadow frame detects
- * changes in 32-pixel blocks, reducing writes on slow ISA video. The 16-color
- * modes use four 1-bit planes; a lookup table converts eight pixels to plane
- * bytes in eight lookups.
+ * Copies the 1-byte-per-pixel back buffer to the screen. A shadow frame
+ * detects changes, reducing writes on slow ISA video. The 16-color modes use
+ * four 1-bit planes; a lookup table converts eight pixels to plane bytes in
+ * eight lookups. The 256-colour ones are a byte a pixel: mode 13h at
+ * 0xA0000, a VESA mode's linear frame buffer, or its 64 KB window moved
+ * along by the video BIOS (VESA 4F05h, through lib/realmode.h).
  */
 
 #define MODEX_FB 0x000A0000U
@@ -24,6 +29,15 @@
 #define SEQ_MAP_MASK 0x02
 
 uint32_t g_vesa_fb = MODEX_FB;
+
+/* 256 colours: where the pixels go */
+static uint8_t *s_fb8;         /* the screen's first byte (or the window) */
+static uint32_t s_pitch;       /* bytes a screen line */
+static bool s_banked;          /* through a window */
+static uint32_t s_gran, s_win; /* the window: its steps, its size */
+static int32_t s_bank = -1;    /* where it is now (in steps); -1 = unknown */
+
+static bool is8(void) { return video_mode_colors(g_video_mode) == 256; }
 
 static uint8_t *s_shadow;     /* last frame sent, NULL = always full */
 static bool s_full = true;    /* next blit sends everything */
@@ -40,6 +54,50 @@ static const uint8_t k_dac16[16][3] = {
     {42, 0, 0},   {42, 0, 42},  {42, 21, 0},  {42, 42, 42},
     {21, 21, 21}, {21, 21, 63}, {21, 63, 21}, {21, 63, 63},
     {63, 21, 21}, {63, 21, 63}, {63, 63, 21}, {63, 63, 63}};
+
+/* 256 colours: the BIOS's mode 13h palette (6 bits), set in every 256-colour
+ * mode alike: the 16 colours, 16 greys, then 9 rings of 24 hues (3
+ * brightnesses x 3 saturations), black */
+static uint8_t s_pal256[256][3];
+
+static void make_pal256(void) {
+    static const uint8_t grey[16] = {0,  5,  8,  11, 14, 17, 20, 24,
+                                     28, 32, 36, 40, 45, 50, 56, 63};
+    static const uint8_t ring[9][2] = {{63, 0}, {63, 31}, {63, 45},
+                                       {28, 0}, {28, 14}, {28, 20},
+                                       {16, 0}, {16, 8},  {16, 11}};
+    for (int i = 0; i < 16; i++)
+        for (int k = 0; k < 3; k++) {
+            s_pal256[i][k] = k_dac16[i][k];
+            s_pal256[16 + i][k] = grey[i];
+        }
+    for (int r = 0; r < 9; r++) {
+        int hi = ring[r][0], lo = ring[r][1], st[5];
+        for (int k = 0; k < 5; k++)
+            st[k] = lo + (hi - lo) * k / 4;
+        /* blue -> magenta -> red -> yellow -> green -> cyan -> blue */
+        for (int h = 0; h < 24; h++) {
+            int seg = h / 4, k = h % 4, c[3];
+            static const int8_t shape[6][3] = {{1, -1, 2}, {2, -1, -2},
+                                               {2, 1, -1}, {-2, 2, -1},
+                                               {-1, 2, 1}, {-1, -2, 2}};
+            for (int j = 0; j < 3; j++) { /* 2 hi, -1 lo, 1 up, -2 down */
+                int v = shape[seg][j];
+                c[j] = v == 2 ? hi : v == -1 ? lo : v == 1 ? st[k] : st[4 - k];
+            }
+            for (int j = 0; j < 3; j++)
+                s_pal256[32 + r * 24 + h][j] = (uint8_t)c[j];
+        }
+    }
+    /* 248..255 stay black */
+}
+
+static void palette256(void) {
+    outb(0x3C8, 0);
+    for (int i = 0; i < 256; i++)
+        for (int k = 0; k < 3; k++)
+            outb(0x3C9, s_pal256[i][k]);
+}
 
 static void planar_palette(void) {
     (void)inb(0x3DA); /* the attribute controller: back to "index" */
@@ -65,8 +123,29 @@ static void planar_palette(void) {
 
 void gpu_init(void) {
     g_vesa_fb = MODEX_FB;
-    if (g_video_mode != 0)
+    make_pal256();
+    s_bank = -1;
+    if (is8()) {
+        int pw = SCREEN_WIDTH * g_zoom;
+        s_fb8 = (uint8_t *)MODEX_FB;
+        s_pitch = (uint32_t)pw;
+        s_banked = false;
+        if (g_vbe.mode) { /* a VESA mode */
+            s_pitch = g_vbe.pitch ? g_vbe.pitch : (uint32_t)pw;
+            if (g_vbe.lfb) {
+                s_fb8 = (uint8_t *)(uintptr_t)g_vbe.lfb;
+            } else {
+                s_banked = true;
+                s_win = g_vbe.win_size ? g_vbe.win_size : 65536;
+                s_gran = g_vbe.gran && g_vbe.gran <= s_win ? g_vbe.gran : s_win;
+                s_fb8 = (uint8_t *)(uintptr_t)(g_vbe.win_addr ? g_vbe.win_addr
+                                                              : MODEX_FB);
+            }
+        }
+        palette256();
+    } else {
         planar_palette();
+    }
     for (int c = 0; c < 16; c++)
         s_spread[c] = (uint32_t)(c & 1) | ((uint32_t)((c >> 1) & 1) << 8) |
                       ((uint32_t)((c >> 2) & 1) << 16) |
@@ -78,24 +157,67 @@ void gpu_init(void) {
 
 void gpu_invalidate(void) { s_full = true; }
 
+/* a linear frame buffer sits past the RAM: in the page tables (kmain, once
+ * paging is on, before any app context copies them) */
+void gpu_map(void) {
+    if (is8() && g_vbe.mode && g_vbe.lfb)
+        vmm_map_device(g_vbe.lfb, s_pitch * (uint32_t)(SCREEN_HEIGHT * g_zoom));
+}
+
 int gpu_palette(uint8_t (*rgb)[3], int max) {
-    int n = g_video_mode == 0 ? 256 : 16;
-    if (g_video_mode != 0) {
-        for (int i = 0; i < n && i < max; i++)
-            for (int k = 0; k < 3; k++)
-                rgb[i][k] = k_dac16[i][k];
-        return n;
-    }
-    uint32_t f = gpu_lock();
-    outb(0x3C7, 0); /* read from entry 0: R, G, B, next entry */
-    for (int i = 0; i < n; i++)
-        for (int k = 0; k < 3; k++) {
-            uint8_t v = inb(0x3C9) & 63;
-            if (i < max)
-                rgb[i][k] = v;
-        }
-    gpu_unlock(f);
+    int n = is8() ? 256 : 16;
+    for (int i = 0; i < n && i < max; i++)
+        for (int k = 0; k < 3; k++)
+            rgb[i][k] = s_pal256[i][k]; /* (the first 16: the same) */
     return n;
+}
+
+// 256 colours: bytes to the screen
+
+/* the window to `pos` (in steps), by the video BIOS */
+static void set_bank(int32_t pos) {
+    uint32_t f = gpu_lock(); /* (the pointer's interrupt puts it back) */
+    rm_regs_t r = {0};
+    r.eax = 0x4F05;
+    r.ebx = g_vbe.win; /* BH 0: set */
+    r.edx = (uint32_t)pos;
+    realmode_int(0x10, &r);
+    s_bank = pos;
+    gpu_unlock(f);
+}
+
+/* n bytes at offset off of the screen */
+static void put_bytes(uint32_t off, const uint8_t *src, uint32_t n) {
+    if (!s_banked) {
+        memcpy(s_fb8 + off, src, n);
+        return;
+    }
+    while (n) {
+        uint32_t start = (uint32_t)s_bank * s_gran;
+        if (s_bank < 0 || off < start || off >= start + s_win) {
+            set_bank((int32_t)(off / s_gran));
+            start = (uint32_t)s_bank * s_gran;
+        }
+        uint32_t k = start + s_win - off;
+        if (k > n)
+            k = n;
+        memcpy(s_fb8 + (off - start), src, k);
+        off += k, src += k, n -= k;
+    }
+}
+
+/* n logical pixels at (x, y): zoomed, each goes out as 2x2 */
+static void put_run(int y, int x, const uint8_t *px, int n) {
+    if (g_zoom == 1) {
+        put_bytes((uint32_t)y * s_pitch + (uint32_t)x, px, (uint32_t)n);
+        return;
+    }
+    uint8_t tmp[800];
+    for (int k = 0; k < n; k++)
+        tmp[2 * k] = tmp[2 * k + 1] = px[k];
+    for (int r = 0; r < 2; r++)
+        put_bytes((uint32_t)(2 * y + r) * s_pitch + 2u * (uint32_t)x, tmp,
+                  2u * (uint32_t)n);
 }
 
 /* 8 pixels -> plane bytes: byte p of the result is plane p (bit 7 = the
@@ -123,7 +245,7 @@ static int s_y0, s_y1 = 399; /* rows to look at in this blit */
 int g_zoom = 1;
 
 void gpu_set_zoom(int z) {
-    if (g_video_mode == 0 || (z != 1 && z != 2))
+    if (video_mode_size(g_video_mode) == 0 || (z != 1 && z != 2))
         z = 1; /* not 320x200 */
     if (z == g_zoom)
         return;
@@ -201,36 +323,34 @@ static void blit_planar(void) {
     s_last_blocks = sent;
 }
 
-/* 320x200x256 linear: send the runs of changed dwords. `repe cmpsd` skips
- * an unchanged run in one instruction (the old C loop compared dword by
- * dword); each changed run then goes out with rep movsd. */
-static void blit_linear(void) {
-    uint32_t n = (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) / 4;
-    const uint32_t *src = (const uint32_t *)BACKBUF;
-    uint32_t *fb = (uint32_t *)MODEX_FB;
-    uint32_t *sh = (uint32_t *)s_shadow;
+/* 256 colours: per line, the runs of changed dwords. `repe cmpsd` skips an
+ * unchanged run in one instruction; each changed run goes out at once. */
+static void blit8(void) {
+    const int w = SCREEN_WIDTH;
+    const uint32_t n = (uint32_t)w / 4;
+    bool full = s_full || !s_shadow;
     uint32_t sent = 0;
-    /* the shadow first, then the screen: the pointer (drivers/pointer.c)
-     * may be put back from the shadow in between, and must not bring
-     * back the old picture */
-    if (s_full || !sh) {
-        if (sh)
-            memcpy(sh, src, n * 4);
-        memcpy(fb, src, n * 4);
-        s_last_blocks = n / 8;
-        return;
-    }
-    uint32_t i = (uint32_t)(s_y0 * SCREEN_WIDTH) / 4;
-    n = (uint32_t)((s_y1 + 1) * SCREEN_WIDTH) / 4;
-    while (i < n) {
-        i += mem_same_run(src + i, sh + i, n - i);
-        if (i >= n)
-            break;
-        uint32_t run = mem_diff_run(src + i, sh + i, n - i);
-        memcpy(sh + i, src + i, run * 4);
-        memcpy(fb + i, src + i, run * 4);
-        sent += run;
-        i += run;
+    for (int y = s_y0; y <= s_y1; y++) {
+        const uint32_t *src = (const uint32_t *)(BACKBUF + y * w);
+        uint32_t *sh = s_shadow ? (uint32_t *)(s_shadow + y * w) : NULL;
+        uint32_t i = 0;
+        while (i < n) {
+            uint32_t run = n - i;
+            if (!full) {
+                i += mem_same_run(src + i, sh + i, n - i);
+                if (i >= n)
+                    break;
+                run = mem_diff_run(src + i, sh + i, n - i);
+            }
+            /* the shadow first, then the screen: the pointer (drivers/
+             * pointer.c) may be put back from the shadow in between, and
+             * must not bring back the old picture */
+            if (sh)
+                memcpy(sh + i, src + i, run * 4);
+            put_run(y, (int)i * 4, (const uint8_t *)(src + i), (int)run * 4);
+            sent += run;
+            i += run;
+        }
     }
     s_last_blocks = sent / 8; /* report in 32-pixel units like planar */
 }
@@ -261,8 +381,8 @@ void gpu_blit_rows(int y0, int y1) {
     }
     s_y0 = y0;
     s_y1 = y1;
-    if (g_video_mode == 0)
-        blit_linear();
+    if (is8())
+        blit8();
     else
         blit_planar();
     s_full = false;
@@ -284,7 +404,11 @@ static void count_frame(void) {
 uint32_t gpu_fps(void) { return s_fps; }
 uint32_t gpu_last_blocks(void) { return s_last_blocks; }
 
-gpu_backend_t gpu_backend(void) { return GPU_BACKEND_MODEX; }
+gpu_backend_t gpu_backend(void) {
+    if (!is8())
+        return GPU_BACKEND_MODEX;
+    return s_banked ? GPU_BACKEND_BANKED : GPU_BACKEND_LINEAR;
+}
 
 // straight to the screen (the pointer)
 
@@ -304,15 +428,20 @@ void gpu_put(int x, int y, int w, int h, const uint8_t *pix) {
     outb(VGA_SEQ_ADDR, SEQ_MAP_MASK);      /* half way through a plane   */
     uint8_t old_mask = inb(VGA_SEQ_DATA);
 
-    if (g_video_mode == 0) { /* linear 256-colour */
-        uint8_t *fb = (uint8_t *)MODEX_FB;
-        for (int yy = y0; yy < y1; yy++)
+    if (is8()) { /* a byte a pixel; the window put back where it was */
+        int32_t bank = s_bank;
+        for (int yy = y0; yy < y1; yy++) {
+            uint8_t line[800];
             for (int xx = x0; xx < x1; xx++) {
                 uint8_t c = s_shadow[yy * sw + xx];
                 if (pix && pix[(yy - y) * w + (xx - x)] != 0xFF)
                     c = pix[(yy - y) * w + (xx - x)];
-                fb[yy * sw + xx] = c;
+                line[xx - x0] = c;
             }
+            put_run(yy, x0, line, x1 - x0);
+        }
+        if (s_banked && bank >= 0 && s_bank != bank)
+            set_bank(bank);
     } else {
         /* in logical pixels; zoomed, each goes out as 2x2 (blit_planar) */
         uint32_t *fb = (uint32_t *)MODEX_FB;
@@ -348,12 +477,13 @@ void gpu_put(int x, int y, int w, int h, const uint8_t *pix) {
     outb(VGA_SEQ_ADDR, old_idx);
 }
 
-uint32_t gpu_lock(void) {
+/* (weak: tests/sim/gputest.c runs where cli isn't allowed) */
+__attribute__((weak)) uint32_t gpu_lock(void) {
     uint32_t f;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(f)::"memory");
     return f;
 }
 
-void gpu_unlock(uint32_t f) {
+__attribute__((weak)) void gpu_unlock(uint32_t f) {
     __asm__ volatile("pushl %0; popfl" ::"r"(f) : "memory", "cc");
 }

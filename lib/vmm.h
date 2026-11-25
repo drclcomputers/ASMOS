@@ -51,6 +51,9 @@ void vmm_load_kernel(void);
 uint32_t vmm_current(void);    /* CR3, 0 when paging is off */
 void vmm_switch(uint32_t cr3); /* load a value vmm_current() returned */
 bool vmm_map_page(vmm_ctx_t *ctx, uint32_t virt, uint32_t phys, uint32_t flags);
+/* Device memory (a video card's frame buffer) at its own address in the
+ * kernel's space, uncached. Before any context is made: they copy it. */
+bool vmm_map_device(uint32_t phys, uint32_t size);
 
 extern uint32_t g_kernel_pd_phys;
 
