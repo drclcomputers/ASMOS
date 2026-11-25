@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.6.3
+Version 3.6.8
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -186,6 +186,13 @@ has here, and its tooltip says why not.
 If the chosen mode doesn't work, ASMOS starts in the same colours at a
 smaller size (or 16 colours at the same size, if the card refuses the
 256-colour mode), and the boot log's "Graphics" lines say why.
+
+Memory: the kernel (code, data, its stack) takes just under 1 MB, the screen
+two frames (the one being drawn and the last one sent: 125 KB at 320x200,
+500 KB at 640x400, 940 KB at 800x600), and the rest is free for windows,
+files and the apps. The 384 KB between 640 KB and 1 MB is video memory and
+the BIOS: not usable, and not counted as used. About OS, Monitor and the
+shell's `mem` show the parts.
 
 Build and run
 =============================================================================

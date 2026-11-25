@@ -176,10 +176,11 @@ int fo_list_dirs(const char *dir, char (*names)[FS_NAME_SZ], int max,
     uint16_t cl;
     if (!dir_of(dir, &drive, &cl))
         return 0;
-    static dir_entry_t raw[128];
-    static char nm[128][FS_NAME_SZ];
+    dir_entry_t *raw = kmalloc(128 * sizeof(dir_entry_t)); /* (12 KB) */
+    char (*nm)[FS_NAME_SZ] = kmalloc(128 * FS_NAME_SZ);
     int count = 0, n = 0;
-    fs_list_dir_names(drive, cl, raw, nm, 128, &count);
+    if (raw && nm)
+        fs_list_dir_names(drive, cl, raw, nm, 128, &count);
     for (int i = 0; i < count && n < max; i++) {
         if (!(raw[i].attr & ATTR_DIRECTORY) || raw[i].name[0] == '.')
             continue;
@@ -187,6 +188,8 @@ int fo_list_dirs(const char *dir, char (*names)[FS_NAME_SZ], int max,
             continue;
         strcpy(names[n++], nm[i]);
     }
+    kfree(raw);
+    kfree(nm);
     for (int i = 1; i < n; i++) /* insertion sort by name */
         for (int j = i; j > 0 && strcasecmp(names[j - 1], names[j]) > 0; j--) {
             char t[FS_NAME_SZ];

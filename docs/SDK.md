@@ -100,7 +100,8 @@ Makefile.
 `APP_META(name, state type, one instance only, heap KB, init, frame,
 destroy)`: ASMOS gives each instance its own zeroed state (its first
 member: the window) and a heap (`kmalloc` / `kfree`, 64 KB unless you ask
-for more, in 16 KB steps). `frame` is called every frame, about 60 times
+for more, in 16 KB steps; `APP_HEAP_PLUS_SCREEN | 128` is 128 KB and one
+screen's pixels more, for a canvas). `frame` is called every frame, about 60 times
 a second: games and animations go there.
 
 From `asmos.h` you can use what ASMOS's own apps use:

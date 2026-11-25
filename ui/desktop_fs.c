@@ -108,11 +108,13 @@ void desktop_fs_reload(void) {
     if (g_setup_mode) /* an empty desktop behind Setup */
         return;
 
-    static dir_entry_t raw[DESKTOP_MAX_ITEMS];
-    static char names[DESKTOP_MAX_ITEMS][FS_NAME_SZ];
+    /* the folder's entries: room for them only while they are read */
+    dir_entry_t *raw = kmalloc(DESKTOP_MAX_ITEMS * sizeof(dir_entry_t));
+    char (*names)[FS_NAME_SZ] = kmalloc(DESKTOP_MAX_ITEMS * FS_NAME_SZ);
     int raw_count = 0;
-    fs_list_dir_names(DRIVE_HDA, s_cluster, raw, names, DESKTOP_MAX_ITEMS,
-                      &raw_count);
+    if (raw && names)
+        fs_list_dir_names(DRIVE_HDA, s_cluster, raw, names, DESKTOP_MAX_ITEMS,
+                          &raw_count);
 
     int slot = 0;
     for (int i = 0; i < raw_count && s_count < DESKTOP_MAX_ITEMS; i++) {
@@ -142,6 +144,8 @@ void desktop_fs_reload(void) {
         grid_slot(slot++, &it->x, &it->y);
         s_count++;
     }
+    kfree(raw);
+    kfree(names);
 
     for (uint8_t d = DRIVE_FDD0; d <= DRIVE_NET0 && s_count < DESKTOP_MAX_ITEMS;
          d++) { /* the floppies, the CD, a server: only with a disk in (an

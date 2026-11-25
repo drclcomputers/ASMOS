@@ -33,6 +33,7 @@ int gpu_palette256(uint8_t (*rgb)[3], int max);
 #define GPU_CUSTOM 248
 bool gpu_set_color(int i, uint8_t r, uint8_t g, uint8_t b);
 uint32_t gpu_palette_changes(void); /* counts gpu_set_color calls */
+uint32_t gpu_shadow_bytes(void);    /* the last frame's copy (kernel heap) */
 uint32_t gpu_fps(void);             /* frames per second, updated each second */
 uint32_t gpu_last_blocks(void);     /* 32-pixel blocks the last blit sent */
 gpu_backend_t gpu_backend(void);

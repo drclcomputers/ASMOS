@@ -124,11 +124,18 @@ typedef struct {
     void *state;
     loaded_app_t *la;
     heap_t heap;
-    uint8_t *mem;          /* the heap's block */
-    uint32_t pages;        /* in the frame pool, else 0 (kernel heap block) */
-    vmm_ctx_t *ctx;        /* NULL: no paging / no frames */
-    char open[FS_PATH_SZ]; /* a file to open (api->open_request) */
+    uint8_t *mem;   /* the heap's block */
+    uint32_t pages; /* in the frame pool, else 0 (kernel heap block) */
+    vmm_ctx_t *ctx; /* NULL: no paging / no frames */
+    char *open;     /* a file to open (api->open_request), allocated, or NULL */
+    uint32_t kbytes; /* its block on the kernel heap (0: in the pool) */
 } dyn_inst_t;
+
+/* a file for an instance to open: a copy, the one before dropped */
+static void set_open(dyn_inst_t *di, const char *path) {
+    kfree(di->open);
+    di->open = path && path[0] ? strdup(path) : NULL;
+}
 
 /* a file for the next instance started (appload_run_named) */
 static char s_next_open[FS_PATH_SZ];
@@ -169,6 +176,8 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
      * paint program's canvas needs it), then the least that runs */
     uint32_t heap = (la->hdr.flags & ASMA_HEAP_MASK) >> ASMA_HEAP_SHIFT;
     heap = heap ? heap * 16384u : APP_HEAP_DEFAULT;
+    if (la->hdr.flags & ASMA_FLAG_HEAP_SCREEN) /* (its canvas: the screen) */
+        heap += (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT);
     uint32_t want = (size + heap + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint32_t least = (size + APP_HEAP_MIN + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint32_t bytes = want;
@@ -188,6 +197,7 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
         if (!di->mem)
             return NULL;
     }
+    di->kbytes = di->pages ? 0 : bytes;
     heap_init(&di->heap, (uint32_t)(uintptr_t)di->mem,
               (uint32_t)(uintptr_t)di->mem + bytes);
     void *state = heap_alloc(&di->heap, size);
@@ -213,7 +223,7 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
     di->la = la;
     di->used = true;
     if (s_next_open[0]) { /* started to open a file */
-        snprintf(di->open, sizeof(di->open), "%s", s_next_open);
+        set_open(di, s_next_open);
         s_next_open[0] = 0;
     }
     return state;
@@ -234,6 +244,7 @@ static void dyn_state_free(app_descriptor *d, void *state) {
         pmm_free_frames((uint32_t)(uintptr_t)di->mem, di->pages);
     else
         kfree(di->mem);
+    kfree(di->open);
     memset(di, 0, sizeof(*di));
     vmm_switch(cr3);
 }
@@ -527,10 +538,10 @@ static bool api_rename(const char *path, const char *new_name) {
 
 static bool api_open_request(char *path, int sz) {
     dyn_inst_t *di = inst_of(s_calling_state);
-    if (!di || !di->open[0] || !path || sz <= 0)
+    if (!di || !di->open || !path || sz <= 0)
         return false;
     snprintf(path, sz, "%s", di->open);
-    di->open[0] = 0;
+    set_open(di, NULL);
     return true;
 }
 
@@ -1017,7 +1028,19 @@ static void free_slot(loaded_app_t *la) {
         pmm_free_frames((uint32_t)(uintptr_t)la->raw, la->img_pages);
     else if (la->raw)
         kfree(la->raw);
+    kfree(la->path);
     memset(la, 0, sizeof(*la));
+}
+
+uint32_t appload_kernel_heap_bytes(void) {
+    uint32_t n = 0;
+    for (int i = 0; i < MAX_RUNNING_APPS; i++)
+        if (s_inst[i].used)
+            n += s_inst[i].kbytes;
+    for (int i = 0; i < MAX_LOADED_APPS; i++)
+        if (s_loaded[i].loaded && s_loaded[i].raw && !s_loaded[i].img_pages)
+            n += s_loaded[i].image_size + 16;
+    return n;
 }
 
 bool appload_unload(app_descriptor *desc) {
@@ -1146,8 +1169,7 @@ app_descriptor *appload_load(const char *path) {
     g_dlg_call_hook = hook_dlg;
     g_menu_call_hook = hook_menu;
     s_err[0] = 0;
-    if (!path || !path[0] ||
-        strlen(path) >= sizeof(((loaded_app_t *)0)->path)) {
+    if (!path || !path[0] || strlen(path) >= FS_PATH_SZ) {
         set_err("Bad path.");
         return NULL;
     }
@@ -1298,7 +1320,12 @@ app_descriptor *appload_load(const char *path) {
     slot->file_size = fsize;
     slot->mod_date = mdate;
     slot->mod_time = mtime;
-    snprintf(slot->path, sizeof(slot->path), "%s", path);
+    slot->path = strdup(path);
+    if (!slot->path) { /* (no room even for its name) */
+        free_slot(slot);
+        set_err("Not enough memory to load the app.");
+        return NULL;
+    }
 
     slot->desc.name = slot->hdr.name;
     slot->desc.state_size = h.state_size;
@@ -1330,7 +1357,7 @@ app_instance_t *appload_launch(const char *path) {
     loaded_app_t *la = find_by_desc(d);
     if (la && la->faulted && !has_instances(d)) {
         /* crashed earlier: reload fresh copy from disk */
-        char p[sizeof(la->path)];
+        char p[FS_PATH_SZ];
         snprintf(p, sizeof(p), "%s", la->path);
         free_slot(la);
         d = appload_load(p);
@@ -1428,7 +1455,7 @@ bool appload_run_named(const char *name, const char *file) {
     if (a && s_next_open[0]) { /* not taken: it was running already */
         dyn_inst_t *di = inst_of(a->state);
         if (di)
-            snprintf(di->open, sizeof(di->open), "%s", s_next_open);
+            set_open(di, s_next_open);
     }
     s_next_open[0] = 0;
     if (!a && appload_last_error()[0])

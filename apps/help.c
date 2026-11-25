@@ -116,45 +116,57 @@ static uint32_t hash(uint32_t h, const char *t) {
 }
 
 /* the tree from /HELP; returns its signature (to see it changed) */
-static uint32_t fill_tree(help_state_t *s, bool build) {
-    static listing_t top, in;
-    list_sorted(HELP_DIR, &top);
+static uint32_t fill_tree_in(help_state_t *s, bool build, listing_t *top,
+                             listing_t *in) {
+    list_sorted(HELP_DIR, top);
     uint32_t sig = 7;
     if (build) {
         tree_clear(s->tree);
         s->nrel = 0;
         s->nfolders = 0;
     }
-    for (int i = 0; i < top.n; i++) {
-        if (!top.dir[i])
+    for (int i = 0; i < top->n; i++) {
+        if (!top->dir[i])
             continue;
         char p[FS_PATH_SZ], label[48];
-        snprintf(p, sizeof(p), "%s/%s", HELP_DIR, top.names[i]);
-        list_sorted(p, &in);
-        sig = hash(sig, top.names[i]);
+        snprintf(p, sizeof(p), "%s/%s", HELP_DIR, top->names[i]);
+        list_sorted(p, in);
+        sig = hash(sig, top->names[i]);
         int folder = -1;
         if (build) {
-            shown_name(top.names[i], label, sizeof(label));
-            int r = add_rel(s, top.names[i]);
+            shown_name(top->names[i], label, sizeof(label));
+            int r = add_rel(s, top->names[i]);
             folder = tree_add(s->tree, -1, label, (uint32_t)r, false);
             if (folder >= 0 && s->nfolders < 64)
                 s->folders[s->nfolders++] = folder;
         }
-        for (int k = 0; k < in.n; k++) {
-            if (in.dir[k])
+        for (int k = 0; k < in->n; k++) {
+            if (in->dir[k])
                 continue;
-            sig = hash(sig, in.names[k]);
+            sig = hash(sig, in->names[k]);
             if (!build || folder < 0)
                 continue;
             char rel[REL_SZ];
-            snprintf(rel, sizeof(rel), "%s/%s", top.names[i], in.names[k]);
+            snprintf(rel, sizeof(rel), "%s/%s", top->names[i], in->names[k]);
             int r = add_rel(s, rel);
             if (r < 0)
                 break;
-            shown_name(in.names[k], label, sizeof(label));
+            shown_name(in->names[k], label, sizeof(label));
             tree_add(s->tree, folder, label, (uint32_t)r, false);
         }
     }
+    return sig;
+}
+
+/* (the two listings, 8 KB, only while the tree is made) */
+static uint32_t fill_tree(help_state_t *s, bool build) {
+    listing_t *top = kmalloc(sizeof(listing_t));
+    listing_t *in = kmalloc(sizeof(listing_t));
+    uint32_t sig = 7;
+    if (top && in)
+        sig = fill_tree_in(s, build, top, in);
+    kfree(top);
+    kfree(in);
     return sig;
 }
 
@@ -310,15 +322,17 @@ static void show(help_state_t *s, const char *rel) {
     dir_entry_t de;
     if (fs_find(path, &de) && (de.attr & ATTR_DIRECTORY)) {
         /* a folder: its first page */
-        static listing_t in;
-        list_sorted(path, &in);
-        for (int k = 0; k < in.n; k++)
-            if (!in.dir[k]) {
+        listing_t *in = kmalloc(sizeof(listing_t));
+        if (in)
+            list_sorted(path, in);
+        for (int k = 0; in && k < in->n; k++)
+            if (!in->dir[k]) {
                 char r[REL_SZ];
-                snprintf(r, sizeof(r), "%s/%s", rel, in.names[k]);
+                snprintf(r, sizeof(r), "%s/%s", rel, in->names[k]);
                 snprintf(path, sizeof(path), "%s/%s", HELP_DIR, r);
                 break;
             }
+        kfree(in);
     }
     snprintf(s->shown, sizeof(s->shown), "%s", rel);
     kfree(s->raw);

@@ -248,6 +248,29 @@ int gpu_palette256(uint8_t (*rgb)[3], int max) {
             rgb[i][k] = s_pal256[i][k];
     return 256;
 }
+/* (kernel.c's meminfo: the sim's own memory, as if 4 MB) */
+#include "os/meminfo.h"
+uint32_t gpu_shadow_bytes(void) { return 0; }
+void meminfo(meminfo_t *m) {
+    memset(m, 0, sizeof(*m));
+    m->screen = (uint32_t)g_backbuf_size;
+    m->apps = (pmm_total() - pmm_free_count()) * 4096;
+    m->heap = heap_used();
+    m->free = heap_remaining() + pmm_free_count() * 4096;
+    m->reserved = 0x60000;
+    m->kernel = 0xF0000;
+    m->total =
+        m->reserved + m->kernel + m->screen + m->heap + m->apps + m->free;
+}
+const char *meminfo_kb(uint32_t bytes, char *out, int sz) {
+    uint32_t kb = (bytes + 512) / 1024;
+    if (kb >= 10240)
+        snprintf(out, sz, "%u.%u MB", kb / 1024, kb % 1024 * 10 / 1024);
+    else
+        snprintf(out, sz, "%u KB", kb);
+    return out;
+}
+
 /* (drivers/gpu.c: the apps' 8 colours) */
 static uint32_t s_pal_changes;
 uint32_t gpu_palette_changes(void) { return s_pal_changes; }

@@ -39,7 +39,9 @@ static int32_t s_bank = -1;    /* where it is now (in steps); -1 = unknown */
 
 static bool is8(void) { return video_mode_colors(g_video_mode) == 256; }
 
-static uint8_t *s_shadow;     /* last frame sent, NULL = always full */
+static uint8_t *s_shadow;      /* last frame sent, NULL = always full */
+static uint32_t s_shadow_size; /* (for the memory report) */
+uint32_t gpu_shadow_bytes(void) { return s_shadow_size; }
 static bool s_full = true;    /* next blit sends everything */
 static uint32_t s_spread[16]; /* colour bit p -> bit 8*p */
 static uint32_t s_frames, s_fps, s_fps_t0;
@@ -152,8 +154,10 @@ void gpu_init(void) {
         s_spread[c] = (uint32_t)(c & 1) | ((uint32_t)((c >> 1) & 1) << 8) |
                       ((uint32_t)((c >> 2) & 1) << 16) |
                       ((uint32_t)((c >> 3) & 1) << 24);
-    if (!s_shadow) /* only as big as this screen mode needs */
+    if (!s_shadow) { /* only as big as this screen mode needs */
         s_shadow = (uint8_t *)kmalloc((uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT));
+        s_shadow_size = s_shadow ? (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT) : 0;
+    }
     s_full = true;
 }
 

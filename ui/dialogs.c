@@ -384,12 +384,17 @@ static void join(char *out, int n, const char *dir, const char *name) {
         snprintf(out, n, "%s/%s", dir, name);
 }
 
-static void fill_list(dlg_t *d) {
-    list_clear(d->list);
-    ctl_set_text(d->path, d->dir);
-    static char names[160][FS_NAME_SZ];
-    static char got[128][FS_NAME_SZ];
-    static uint8_t isdir[160];
+/* the folder's names while the list is filled (22 KB: allocated) */
+typedef struct {
+    char names[160][FS_NAME_SZ];
+    char got[128][FS_NAME_SZ];
+    uint8_t isdir[160];
+    dir_entry_t ents[128];
+} fill_t;
+
+static void fill_list_in(dlg_t *d, fill_t *f) {
+    char (*names)[FS_NAME_SZ] = f->names, (*got)[FS_NAME_SZ] = f->got;
+    uint8_t *isdir = f->isdir;
     int n = 0;
     if (strcmp(d->dir, "/") != 0) {
         strcpy(names[n], "..");
@@ -403,7 +408,7 @@ static void fill_list(dlg_t *d) {
     }
     uint8_t drv;
     uint16_t cl;
-    static dir_entry_t ents[128];
+    dir_entry_t *ents = f->ents;
     int cnt = 0;
     if (fs_resolve_dir(d->dir, &drv, &cl) &&
         fs_list_dir_names(drv, cl, ents, got, 128, &cnt)) {
@@ -451,6 +456,15 @@ static void fill_list(dlg_t *d) {
         tree_set_sel(d->tree, strcmp(d->dir, "/")
                                   ? tree_find_path(d->tree, d->dir)
                                   : -1);
+}
+
+static void fill_list(dlg_t *d) {
+    list_clear(d->list);
+    ctl_set_text(d->path, d->dir);
+    fill_t *f = kmalloc(sizeof(fill_t));
+    if (f)
+        fill_list_in(d, f);
+    kfree(f);
 }
 
 static void go_dir(dlg_t *d, const char *name) {
@@ -611,10 +625,11 @@ static void on_dir_tree(control *c, int ev) {
     if (ev == EV_EXPAND) {
         int node = tree_event_node(c);
         tree_path(c, node, path, sizeof(path));
-        static char names[64][FS_NAME_SZ];
-        int n = fo_list_dirs(path, names, 64, false);
+        char (*names)[FS_NAME_SZ] = kmalloc(64 * FS_NAME_SZ);
+        int n = names ? fo_list_dirs(path, names, 64, false) : 0;
         for (int i = 0; i < n; i++)
             tree_add(c, node, names[i], 0, true);
+        kfree(names);
     } else if (ev == EV_CHANGE && tree_sel(c) >= 0) {
         tree_path(c, tree_sel(c), path, sizeof(path));
         if (strcmp(path, d->dir)) {
@@ -823,6 +838,7 @@ typedef struct {
     bool zoom;       /* readable text instead of the whole page */
     int top;         /* zoomed: first line shown */
     control *view, *label, *prev, *next, *zoom_btn;
+    char lines[PRINT_LINES][PRINT_COLS + 1]; /* the page's text */
 } prn_prev_t;
 
 static int field_int(control *c, int def) {
@@ -845,7 +861,7 @@ static void paint_page(control *c, int x, int y, int w, int h) {
     int f = FONT_MONO; /* 4x6 in 5-pixel cells: the closest to a printer */
 
     if (p->zoom && p->doc.kind == PRINT_DOC_TEXT) { /* readable */
-        static char lines[PRINT_LINES][PRINT_COLS + 1];
+        char (*lines)[PRINT_COLS + 1] = p->lines;
         int n = print_text_page(p->doc.text, p->doc.len, p->page, lines);
         int pw = PRINT_COLS * 5 + 16, px = x + (w - pw) / 2;
         if (pw > w)
@@ -874,7 +890,7 @@ static void paint_page(control *c, int x, int y, int w, int h) {
 
     if (p->doc.kind == PRINT_DOC_TEXT) {
         /* each word as a grey bar, where the printer will put it */
-        static char lines[PRINT_LINES][PRINT_COLS + 1];
+        char (*lines)[PRINT_COLS + 1] = p->lines;
         int n = print_text_page(p->doc.text, p->doc.len, p->page, lines);
         for (int i = 0; i < n; i++) {
             int ly = py + (5 + i * 10 / 6) * ph / PAPER_H;

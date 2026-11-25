@@ -124,7 +124,7 @@ setup.img: $(MKDISK_IN)
 
 # Run
 QEMU_FLAGS = -drive format=raw,file=os_image.bin \
-             -m 4M -machine pc \
+             -m 1.8M -machine pc \
              -audiodev coreaudio,id=snd0 \
              -machine pcspk-audiodev=snd0 \
              -device sb16,audiodev=snd0 \

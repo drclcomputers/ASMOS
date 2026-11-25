@@ -1,6 +1,66 @@
+#include "os/meminfo.h"
 #include "scen.h"
 
 int scen_misc2(const char *name) {
+    if (!strcmp(name, "memreport")) {
+        /* where the memory goes (os/meminfo.h): the parts add up, the
+         * About box and `mem` say them, an app's memory shows as apps */
+        int fails = 0;
+        static char o[4096];
+        char b[300];
+        meminfo_t m;
+        meminfo(&m);
+        snprintf(b, sizeof b,
+                 "    total %u: kernel %u heap %u screen %u apps %u free %u "
+                 "reserved %u KB\n",
+                 m.total / 1024, m.kernel / 1024, m.heap / 1024,
+                 m.screen / 1024, m.apps / 1024, m.free / 1024,
+                 m.reserved / 1024);
+        wr(1, b);
+        T("the parts add up",
+          m.kernel + m.heap + m.screen + m.apps + m.free + m.reserved ==
+              m.total);
+        T("the screen: the back buffer at least",
+          m.screen >= (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT));
+        uint32_t apps0 = m.apps;
+        sim_launch("ASMDRAW");
+        sim_frames(5);
+        meminfo(&m);
+        snprintf(b, sizeof b, "    with ASMDraw: apps %u KB\n", m.apps / 1024);
+        wr(1, b);
+        T("an app's memory counts as apps",
+          m.apps >= apps0 + (uint32_t)(SCREEN_WIDTH * SCREEN_HEIGHT));
+        cli_execute_command("mem", o, sizeof o);
+        wr(1, o);
+        T("mem: the parts", strstr(o, "system") && strstr(o, "screen") &&
+                                strstr(o, "apps") && strstr(o, "BIOS"));
+        wm_close(wm_focused_window()); /* (the desktop's menus) */
+        sim_frames(3);
+        menu_item *about = NULL; /* the desktop's About OS */
+        for (int i = 0; i < g_menubar.menu_count && !about; i++)
+            for (int k = 0; k < g_menubar.menus[i].item_count; k++)
+                if (g_menubar.menus[i].items[k].label &&
+                    strstr(g_menubar.menus[i].items[k].label, "About OS"))
+                    about = &g_menubar.menus[i].items[k];
+        if (about) {
+            menu_item_run(about);
+            sim_frames(3);
+        }
+        window *d = wm_focused_window();
+        bool row = false, disp = false;
+        for (control *c = d ? d->controls : NULL; c; c = c->next)
+            if (c->type == CTL_LABEL && c->text) {
+                row |= !strncmp(c->text, "OS ", 3) && strstr(c->text, "apps");
+                disp |= strstr(c->text, " colors") &&
+                        strstr(c->text, video_mode_colors(g_video_mode) == 256
+                                            ? "256"
+                                            : "16");
+            }
+        sim_shot("about_mem");
+        T("About ASMOS: what the memory is used for", about && row);
+        T("... and the right number of colours", disp);
+        return fails;
+    }
     if (!strcmp(name, "sdkapp")) { /* built with the SDK alone (make sdk) */
         int fails = 0;
         char b[300];

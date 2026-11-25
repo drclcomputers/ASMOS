@@ -12,6 +12,7 @@
 #include "drivers/sermouse.h"
 #include "fonts/fonts.h"
 #include "lib/wav.h"
+#include "os/meminfo.h"
 
 #include "fs/fs.h"
 
@@ -242,11 +243,14 @@ void cmd_ls(const char *arg, char *out, size_t max) {
             return;
         }
     }
-    static dir_entry_t entries[64];
-    static char names[64][FS_NAME_SZ];
+    dir_entry_t *entries = kmalloc(64 * sizeof(dir_entry_t));
+    char (*names)[FS_NAME_SZ] = kmalloc(64 * FS_NAME_SZ);
     int count = 0;
-    if (!fs_list_dir_names(drive, cluster, entries, names, 64, &count)) {
+    if (!entries || !names ||
+        !fs_list_dir_names(drive, cluster, entries, names, 64, &count)) {
         append(out, max, "Error listing files\n\n");
+        kfree(entries);
+        kfree(names);
         return;
     }
 
@@ -260,6 +264,8 @@ void cmd_ls(const char *arg, char *out, size_t max) {
                      entries[i].file_size);
         append(out, max, ss);
     }
+    kfree(entries);
+    kfree(names);
     append(out, max, "\n");
 }
 
@@ -566,9 +572,18 @@ void cmd_df(char *out, size_t max) {
 
 void cmd_mem(char *out, size_t max) {
     char buf[128];
+    meminfo_t mi; /* (os/meminfo.h) */
+    meminfo(&mi);
+    sprintf(buf,
+            "RAM %u KB: system %u (kernel %u, heap %u), screen %u, apps %u,\n"
+            "  free %u, video memory and BIOS %u (KB)\n",
+            mi.total / 1024, (mi.kernel + mi.heap) / 1024, mi.kernel / 1024,
+            mi.heap / 1024, mi.screen / 1024, mi.apps / 1024, mi.free / 1024,
+            mi.reserved / 1024);
+    append(out, max, buf);
     sprintf(buf, "Kernel heap used: %u KB  free: %u KB%s\n", heap_used() / 1024,
             heap_remaining() / 1024,
-            heap_check(&g_kheap) &&
+            (!g_kheap.first || heap_check(&g_kheap)) && /* (may be empty) */
                     (!g_kheap_low.first || heap_check(&g_kheap_low))
                 ? ""
                 : "  (CORRUPT)");

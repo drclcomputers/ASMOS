@@ -404,12 +404,14 @@ static void ff_reload(ff_inst_t *s) {
         }
     }
 
-    static dir_entry_t raw[MAX_ENTRIES]; /* (one reload at a time) */
-    static char names[MAX_ENTRIES][FS_NAME_SZ];
+    /* the folder's entries: room for them only while they are read */
+    dir_entry_t *raw = kmalloc(MAX_ENTRIES * sizeof(dir_entry_t));
+    char (*names)[FS_NAME_SZ] = kmalloc(MAX_ENTRIES * FS_NAME_SZ);
     int count = 0;
     s->unfiltered = 0;
-    fs_list_dir_names(s->drive_id, s->dir_cluster, raw, names, MAX_ENTRIES,
-                      &count);
+    if (raw && names)
+        fs_list_dir_names(s->drive_id, s->dir_cluster, raw, names, MAX_ENTRIES,
+                          &count);
     for (int i = 0; i < count && s->item_count < MAX_ENTRIES; i++) {
         if (raw[i].name[0] == '.')
             continue;
@@ -425,6 +427,8 @@ static void ff_reload(ff_inst_t *s) {
         it->hidden = is_hidden;
         strcpy(it->name, names[i]);
     }
+    kfree(raw);
+    kfree(names);
     ff_sort(s);
     ff_layout(s);
     s->drag_idx = -1;
@@ -1556,10 +1560,11 @@ static void on_tree(control *c, int ev) {
         int node = tree_event_node(c);
         char path[FS_PATH_SZ];
         tree_path(c, node, path, sizeof(path));
-        static char names[64][FS_NAME_SZ];
-        int n = fo_list_dirs(path, names, 64, s->show_hidden);
+        char (*names)[FS_NAME_SZ] = kmalloc(64 * FS_NAME_SZ);
+        int n = names ? fo_list_dirs(path, names, 64, s->show_hidden) : 0;
         for (int i = 0; i < n; i++)
             tree_add(c, node, names[i], 0, true);
+        kfree(names);
     } else if (ev == EV_CHANGE) {
         int node = tree_sel(c);
         if (node < 0)

@@ -73,7 +73,10 @@ letters, digits and `. - _ # $ % & + = @ ! ~ ( ) [ ] { }`, no spaces.
   pool memory unmapped, kernel code/constants read-only (486+; a 386
   ignores write protection in ring 0). Wild writes into kernel _data_
   (heap, globals) are still not caught: the API is called directly.
-- Shell `mem` shows the kernel heap, the app pool and the paging state.
+- Shell `mem` shows where the RAM goes (os/meminfo.h: the kernel, its
+  heap, the screen, the apps, free, video memory and the BIOS), the kernel
+  heap, the app pool and the paging state. Monitor and About OS show the
+  same, video memory and the BIOS not counted as used.
 - An infinite loop shows the hourglass after 0.6 s; Win/Ctrl+Shift+Q ends
   the app, Ctrl+Alt+Del / Ctrl+Alt+Win stops it and opens Monitor. Loops
   with interrupts disabled can't be stopped.
@@ -248,7 +251,13 @@ Like the keyboard, it is the same for every window: read it only when
 ## A bigger heap
 
 `mkapp.py --heap 272` (KB; header flags bits 8-15, 16 KB units): for an
-app with big buffers (ASMDraw's canvas). Default 64 KB.
+app with big buffers. Default 64 KB.
+
+`--heap-screen` (header flag bit 2; in APP_META: `APP_HEAP_PLUS_SCREEN |
+128`): that much and one screen's pixels more (width x height bytes), for a
+canvas as big as the screen. ASMDraw asks for 128 KB and a screen: 191 KB
+at 320x200, 597 KB at 800x600. An older ASMOS refuses the flag ("Unknown
+.APP flags").
 
 ## Bundled apps (extapps/)
 

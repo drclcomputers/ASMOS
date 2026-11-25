@@ -1064,5 +1064,5 @@ static void asmdraw_destroy(void *state) {
     s->canvas = NULL;
 }
 
-APP_META("ASMDraw", asmdraw_state_t, false, 592, asmdraw_init, asmdraw_on_frame,
-         asmdraw_destroy);
+APP_META("ASMDraw", asmdraw_state_t, false, APP_HEAP_PLUS_SCREEN | 128,
+         asmdraw_init, asmdraw_on_frame, asmdraw_destroy);

@@ -28,6 +28,7 @@
 #include "os/app_registry.h"
 #include "os/appload.h"
 #include "os/error.h"
+#include "os/meminfo.h"
 #include "os/os.h"
 #include "os/scheduler.h"
 #include "shell/cli.h"
@@ -114,6 +115,37 @@ static void dbg_bar(int col, uint8_t color) {
 unsigned int g_ram_bytes;
 static uint32_t s_ram_top; /* end of RAM (or of what we use of it) */
 
+// where the memory goes (os/meminfo.h)
+
+void meminfo(meminfo_t *m) {
+    memset(m, 0, sizeof(*m));
+    uint32_t shadow = gpu_shadow_bytes(),
+             app_heap = appload_kernel_heap_bytes();
+    uint32_t used = heap_used();
+    m->screen = (uint32_t)g_backbuf_size + shadow;
+    m->apps = (pmm_total() - pmm_free_count()) * PMM_PAGE_SIZE + app_heap;
+    m->heap = used > shadow + app_heap ? used - shadow - app_heap : 0;
+    m->free = heap_remaining() + pmm_free_count() * PMM_PAGE_SIZE;
+    m->reserved = 0x100000 - 0xA0000;
+    /* the kernel: what it is made of, or (RAM known) the rest */
+    uint32_t parts = ((uint32_t)&_heap_start - 0x100000) + /* code, data */
+                     0x10000 + /* BIOS data, buffers */
+                     (0xA0000 - (uint32_t)&_kstack_bottom) + /* stack */
+                     0x10000;                                /* the top 64 KB */
+    uint32_t others = m->reserved + m->screen + m->heap + m->apps + m->free;
+    m->total = g_ram_bytes > others + parts ? g_ram_bytes : others + parts;
+    m->kernel = m->total - others;
+}
+
+const char *meminfo_kb(uint32_t bytes, char *out, int sz) {
+    uint32_t kb = (bytes + 512) / 1024;
+    if (kb >= 10240)
+        snprintf(out, sz, "%u.%u MB", kb / 1024, kb % 1024 * 10 / 1024);
+    else
+        snprintf(out, sz, "%u KB", kb);
+    return out;
+}
+
 static void detect_heap_range(void) {
     dbg_bar(0, 4);
 
@@ -135,18 +167,26 @@ static void detect_heap_range(void) {
     dbg_bar(3, 6);
 
     uint32_t heap_top;
-    if (total_ram == 0 || total_ram <= heap_bot) {
+    if (total_ram == 0) /* (not known: assume 512 KB above the kernel) */
         heap_top = heap_bot + 0x80000;
-    } else {
+    else if (total_ram > heap_bot + 0x10000)
         heap_top = total_ram - 0x10000;
-    }
+    else /* nothing above the kernel: only the heap below 640 KB */
+        heap_top = heap_bot;
 
     if (heap_top > HEAP_END_MAX)
         heap_top = HEAP_END_MAX;
 
     dbg_bar(4, 5);
 
-    if (heap_top <= heap_bot + 0x10000U) {
+    /* below 640 KB, after the back buffer (where the image was read before
+     * stage 2 copied it to 1 MB), up to the stack: a second heap. With it,
+     * a 2 MB machine runs even if little is left above the kernel. */
+    uint32_t low =
+        ((uint32_t)&_low_heap_start + (uint32_t)g_backbuf_size + 15U) & ~15U;
+    uint32_t low_end = (uint32_t)&_kstack_bottom;
+    uint32_t low_size = low_end > low ? low_end - low : 0;
+    if (heap_top - heap_bot + low_size < 0x20000U) { /* under 128 KB in all */
         dbg_bar(5, 12);
         for (;;)
             __asm__ volatile("hlt");
@@ -164,19 +204,14 @@ static void detect_heap_range(void) {
     if (pool > PMM_MAX_FRAMES * PMM_PAGE_SIZE)
         pool = PMM_MAX_FRAMES * PMM_PAGE_SIZE;
     uint32_t pool_base = (heap_top - pool) & ~(PMM_PAGE_SIZE - 1);
-    if (pool_base > heap_bot + 0x40000) { /* keep >= 256 KB kernel heap */
+    if (pool_base > heap_bot + 0x40000) {
         pmm_init(pool_base, (heap_top - pool_base) / PMM_PAGE_SIZE);
         heap_top = pool_base;
     }
     s_ram_top = total_ram > heap_top ? total_ram : heap_top;
 
     alloc_set_range(heap_bot, heap_top);
-
-    /* below 640 KB, after the back buffer (where the image was read before
-     * stage 2 copied it to 1 MB), up to the stack: a second heap */
-    uint32_t low =
-        ((uint32_t)&_low_heap_start + (uint32_t)g_backbuf_size + 15U) & ~15U;
-    alloc_add_low(low, (uint32_t)&_kstack_bottom);
+    alloc_add_low(low, low_end);
 
     dbg_bar(6, 7);
 }

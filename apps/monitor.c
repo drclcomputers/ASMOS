@@ -6,6 +6,7 @@
 #include "drivers/gpu.h"
 #include "os/api.h"
 #include "os/appload.h"
+#include "os/meminfo.h"
 
 #define REFRESH_MS 1000
 
@@ -61,12 +62,23 @@ static void fill_tasks(monitor_state_t *s) {
 
 static void refresh_system(monitor_state_t *s) {
     char b[80];
-    uint32_t used = heap_used() / 1024;
-    uint32_t total = (heap_used() + heap_remaining()) / 1024;
-    snprintf(b, sizeof(b), "Heap: %u KB used of %u KB", used, total);
+    /* the RAM there is to use (not video memory and the BIOS: never free) */
+    meminfo_t mi;
+    meminfo(&mi);
+    uint32_t usable = (mi.total - mi.reserved) / 1024;
+    uint32_t used = usable - mi.free / 1024;
+    snprintf(b, sizeof(b), "Memory: %u KB used of %u KB", used, usable);
     ctl_set_text(s->mem, b);
-    ctl_set_range(s->memmeter, 0, total ? total : 1, 0);
+    ctl_set_range(s->memmeter, 0, usable ? usable : 1, 0);
     ctl_set_value(s->memmeter, used);
+    char tip[160];
+    snprintf(tip, sizeof(tip),
+             "System %u KB, screen %u KB, apps %u KB, free %u KB. "
+             "(%u KB more: video memory and the BIOS)",
+             (mi.kernel + mi.heap) / 1024, mi.screen / 1024, mi.apps / 1024,
+             mi.free / 1024, mi.reserved / 1024);
+    ctl_set_tooltip(s->mem, tip);
+    ctl_set_tooltip(s->memmeter, tip);
     time_hms_t u = uptime_hms();
     snprintf(b, sizeof(b), "Up:   %02u:%02u:%02u    Display: %u fps", u.hours,
              u.minutes, u.seconds, gpu_fps());

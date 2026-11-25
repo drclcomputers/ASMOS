@@ -10,14 +10,18 @@
 
 /* a few sectors kept: directories are read again and again */
 #define CACHE 4
-static struct {
+static struct cd_cache {
     uint32_t lba;
     bool valid;
     uint8_t data[CD_SECTOR];
-} s_cache[CACHE];
+} *s_cache; /* (8 KB, made the first time a CD is read) */
 static int s_next_slot;
 
 static const uint8_t *sector(uint32_t lba) {
+    if (!s_cache)
+        s_cache = kzalloc(CACHE * sizeof(struct cd_cache));
+    if (!s_cache)
+        return NULL;
     for (int i = 0; i < CACHE; i++)
         if (s_cache[i].valid && s_cache[i].lba == lba)
             return s_cache[i].data;
@@ -80,7 +84,7 @@ static bool dir_extent(uint16_t id, uint32_t *lba, uint32_t *size) {
 }
 
 static void cache_drop(void) {
-    for (int i = 0; i < CACHE; i++)
+    for (int i = 0; s_cache && i < CACHE; i++)
         s_cache[i].valid = false;
 }
 

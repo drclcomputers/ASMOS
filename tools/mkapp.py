@@ -33,7 +33,8 @@ import sys
 MAGIC, V2 = 0x414D5341, 2
 HDR = 80
 NO_ENTRY = 0xFFFFFFFF
-F_SINGLE, F_WINDOW = 1, 2
+F_SINGLE, F_WINDOW, F_HEAP_SCREEN = 1, 2, 4
+HEAP_PLUS_SCREEN = 0x80000000  # extapps/shim.h APP_HEAP_PLUS_SCREEN
 R_386_32, R_386_PC32, R_386_NONE = 1, 2, 0
 SHF_ALLOC, SHF_WRITE, SHF_EXEC = 2, 1, 4
 SHT_NOBITS, SHT_REL, SHT_SYMTAB = 8, 9, 2
@@ -180,6 +181,9 @@ def build(a):
     if not (4 <= a.state <= 65536):
         die("--state must be 4..65536")
     flags = (F_SINGLE if a.single else 0) | (F_WINDOW if a.window_first else 0)
+    if a.heap & HEAP_PLUS_SCREEN or a.heap_screen:  # + one screen's pixels
+        flags |= F_HEAP_SCREEN
+        a.heap &= ~HEAP_PLUS_SCREEN
     if a.heap:  # bits 8-15: heap in 16 KB units (0 = the default 64 KB)
         units = (a.heap + 15) // 16
         if not (1 <= units <= 255):
@@ -281,6 +285,11 @@ def main():
     )
     p.add_argument(
         "--heap", type=int, default=0, help="heap in KB (default 64; for big buffers)"
+    )
+    p.add_argument(
+        "--heap-screen",
+        action="store_true",
+        help="and one screen's pixels more (width x height bytes: a canvas)",
     )
     p.add_argument(
         "--meta",

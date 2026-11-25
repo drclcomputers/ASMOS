@@ -33,6 +33,9 @@ typedef struct {
     void (*init)(void *), (*frame)(void *), (*destroy)(void *);
 } app_meta_t;
 
+/* heap_kb | APP_HEAP_PLUS_SCREEN: that much and one screen's pixels more
+ * (width x height bytes), for a canvas as big as the screen */
+#define APP_HEAP_PLUS_SCREEN 0x80000000u
 #define APP_META(nm, type, single, heap_kb, fi, ff, fd)                        \
     const app_meta_t app_meta = {nm, sizeof(type), single, heap_kb, fi, ff, fd}
 

@@ -4,11 +4,13 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
 #include "ui/desktop.h"
+#include "config/video_cfg.h"
 #include "drivers/ata.h"
 #include "drivers/cdrom.h"
 #include "drivers/fdd.h"
 #include "drivers/gpu.h"
 #include "os/help.h"
+#include "os/meminfo.h"
 #include "os/watchdog.h"
 #include "ui/cursor.h"
 #include "ui/desktop_fs.h"
@@ -87,12 +89,18 @@ void draw_wallpaper_pattern(void) {
     }
     case WALLPAPER_CUSTOM: {
         /* eight rows across the screen, then copies of them */
-        static uint8_t rows[8][800];
+        uint8_t *rows = kmalloc(8 * SCREEN_WIDTH);
+        if (!rows) {
+            clear_screen(main_col);
+            break;
+        }
         for (int r = 0; r < 8; r++)
             for (int x = 0; x < SCREEN_WIDTH; x++)
-                rows[r][x] = cfg_wall_px(x, r);
+                rows[r * SCREEN_WIDTH + x] = cfg_wall_px(x, r);
         for (int y = 0; y < SCREEN_HEIGHT; y++)
-            draw_pixels(0, y, SCREEN_WIDTH, 1, rows[y & 7], SCREEN_WIDTH);
+            draw_pixels(0, y, SCREEN_WIDTH, 1, rows + (y & 7) * SCREEN_WIDTH,
+                        SCREEN_WIDTH);
+        kfree(rows);
         break;
     }
     default:
@@ -357,8 +365,8 @@ static void run_if_yes(void *fn, bool yes) {
 }
 
 static void menu_about_os(void) {
-    char ver[24], cpu[56], fpu[48], mem[48], disp[48], snd[48], snd2[48],
-        net[48], net2[48], up[24];
+    char ver[24], cpu[56], fpu[48], mem[48], mem2[64], disp[48], snd[48],
+        snd2[48], net[48], net2[48], up[24];
     sprintf(ver, "ASMOS %s", VER);
 
     snprintf(cpu, sizeof(cpu), "%s", cpu_model_str());
@@ -371,14 +379,19 @@ static void menu_about_os(void) {
     else
         strcpy(fpu, "x87 FPU");
 
-    uint32_t free_kb = (heap_remaining() + pmm_free_count() * 4096) / 1024;
-    if (g_ram_bytes)
-        sprintf(mem, "%u KB, %u KB free", g_ram_bytes / 1024, free_kb);
-    else
-        sprintf(mem, "Unknown, %u KB free", free_kb);
+    /* (os/meminfo.h: video memory and the BIOS are not counted as used) */
+    meminfo_t mi;
+    meminfo(&mi);
+    char a[16], b[16], c[16], d[16];
+    snprintf(mem, sizeof(mem), "%s, %s free", meminfo_kb(mi.total, a, 16),
+             meminfo_kb(mi.free, b, 16));
+    snprintf(mem2, sizeof(mem2), "OS %s, screen %s, apps %s",
+             meminfo_kb(mi.kernel + mi.heap, a, 16),
+             meminfo_kb(mi.screen, c, 16), meminfo_kb(mi.apps, d, 16));
 
-    sprintf(disp, "VGA %dx%d, %d colors", SCREEN_WIDTH, SCREEN_HEIGHT,
-            SCREEN_WIDTH == 320 ? 256 : 16);
+    sprintf(disp, "%dx%d, %d colors%s", SCREEN_WIDTH * g_zoom,
+            SCREEN_HEIGHT * g_zoom, video_mode_colors(g_video_mode),
+            g_vbe.mode ? " (VESA)" : "");
 
     snd2[0] = 0;
     if (sb16_detected()) {
@@ -416,6 +429,7 @@ static void menu_about_os(void) {
     rows[n++] = (dlg_row_t){"Processor", cpu};
     rows[n++] = (dlg_row_t){"Coprocessor", fpu};
     rows[n++] = (dlg_row_t){"Memory", mem};
+    rows[n++] = (dlg_row_t){"In use", mem2};
     rows[n++] = (dlg_row_t){"Display", disp};
     rows[n++] = (dlg_row_t){"Sound", snd};
     if (snd2[0])
@@ -495,7 +509,7 @@ static menu *s_apps_menu;
 
 typedef struct {
     char label[24];
-    char path[192];       /* a .APP to load, or */
+    char *path;           /* a .APP to load (allocated), or */
     app_descriptor *desc; /* a built-in app (from a shortcut) */
 } ext_app_t;
 
@@ -551,8 +565,9 @@ static bool read_shortcut(const char *path, ext_app_t *x) {
         l1[--e] = 0;
     if (!*l1)
         return false;
+    char target[192] = "";
     x->desc = NULL;
-    x->path[0] = 0;
+    x->path = NULL;
     for (int i = 0; i < app_registry_count && !x->desc; i++)
         if (app_registry[i].menu_label &&
             (!strcasecmp(l1, app_registry[i].menu_label) ||
@@ -563,11 +578,13 @@ static bool read_shortcut(const char *path, ext_app_t *x) {
         }
     if (!x->desc) {
         if (strchr(l1, '/')) /* a path */
-            snprintf(x->path, sizeof(x->path), "%s", l1);
-        else if (!appload_find_named(l1, x->path, sizeof(x->path)))
+            snprintf(target, sizeof(target), "%s", l1);
+        else if (!appload_find_named(l1, target, sizeof(target)))
             return false; /* no such app in /APPS */
-        if (!appload_peek_name(x->path, x->label, sizeof(x->label)))
+        if (!appload_peek_name(target, x->label, sizeof(x->label)))
             return false; /* nothing there to run */
+        if (!(x->path = strdup(target)))
+            return false;
     }
     if (l2 && *l2)
         snprintf(x->label, sizeof(x->label), "%s", l2);
@@ -580,6 +597,7 @@ bool desktop_open_shortcut(const char *path) {
     if (!read_shortcut(path, &x))
         return false;
     launch_ext(&x);
+    kfree(x.path);
     return true;
 }
 
@@ -593,12 +611,18 @@ static bool is_folder(const dir_entry_t *e) {
            e->name[0] != 0xE5 && !(e->attr & ATTR_HIDDEN);
 }
 
+/* a folder's entries, while they are looked at (allocated) */
+typedef struct {
+    dir_entry_t ents[48];
+    char names[48][FS_NAME_SZ];
+} listing_t;
+
 /* the .APPs and shortcuts of one folder, sorted by label, as items of m */
-static void add_folder_apps(menu *m, const char *dir) {
+static void add_folder_apps_in(menu *m, const char *dir, listing_t *l) {
     uint8_t drive;
     uint16_t cluster;
-    static dir_entry_t ents[48];
-    static char names[48][FS_NAME_SZ];
+    dir_entry_t *ents = l->ents;
+    char (*names)[FS_NAME_SZ] = l->names;
     int count = 0;
     if (!m || !fs_resolve_dir(dir, &drive, &cluster) ||
         !fs_list_dir_names(drive, cluster, ents, names, 48, &count))
@@ -619,9 +643,10 @@ static void add_folder_apps(menu *m, const char *dir) {
                 continue; /* a shortcut to nothing */
         } else {
             x->desc = NULL;
-            snprintf(x->path, sizeof(x->path), "%s", full);
-            if (!appload_peek_name(x->path, x->label, sizeof(x->label)))
+            if (!appload_peek_name(full, x->label, sizeof(x->label)))
                 continue; /* not a .APP we can run */
+            if (!(x->path = strdup(full)))
+                continue;
         }
         s_next++;
     }
@@ -637,13 +662,19 @@ static void add_folder_apps(menu *m, const char *dir) {
         menu_add_item_ud(m, s_ext[i].label, launch_ext, &s_ext[i]);
 }
 
+static void add_folder_apps(menu *m, const char *dir) {
+    listing_t *l = kmalloc(sizeof(listing_t));
+    if (l)
+        add_folder_apps_in(m, dir, l);
+    kfree(l);
+}
+
 /* the folders in /APPS: the groups, sorted by name */
-static void find_groups(void) {
-    s_ngroups = 0;
+static void find_groups_in(listing_t *l) {
     uint8_t drive;
     uint16_t cluster;
-    static dir_entry_t ents[48];
-    static char names[48][FS_NAME_SZ];
+    dir_entry_t *ents = l->ents;
+    char (*names)[FS_NAME_SZ] = l->names;
     int count = 0;
     if (!fs_resolve_dir(APPS_DIR, &drive, &cluster) ||
         !fs_list_dir_names(drive, cluster, ents, names, 48, &count))
@@ -691,6 +722,14 @@ static void find_groups(void) {
     }
 }
 
+static void find_groups(void) {
+    s_ngroups = 0;
+    listing_t *l = kmalloc(sizeof(listing_t));
+    if (l)
+        find_groups_in(l);
+    kfree(l);
+}
+
 /* /APPS gone (a new disk, or deleted): make it again with a shortcut for
  * each built-in app in its group (the .APPs come with the disk image) */
 static void apps_dir_defaults(void) {
@@ -727,6 +766,10 @@ void desktop_refresh_apps_menu(void) {
         return;
     menubar_close_all(&g_menubar); /* no dropdown on the old submenus */
     menu_clear(s_apps_menu);
+    for (int i = 0; i < s_next; i++) { /* the paths of the menu's apps */
+        kfree(s_ext[i].path);
+        s_ext[i].path = NULL;
+    }
     s_next = 0;
     s_apps_rev = g_fs_rev;
     dir_entry_t de;

@@ -31,10 +31,14 @@
 #define ASMA_VERSION_2 2
 #define ASMA_FLAG_SINGLE (1u << 0)
 #define ASMA_FLAG_WINDOW_FIRST (1u << 1)
+/* the heap is that much plus one screen's pixels (a paint program's
+ * canvas): small screens, small heap */
+#define ASMA_FLAG_HEAP_SCREEN (1u << 2)
 #define ASMA_HEAP_SHIFT 8
 #define ASMA_HEAP_MASK 0xFF00u /* heap size, 16 KB units */
 #define ASMA_FLAGS_KNOWN                                                       \
-    (ASMA_FLAG_SINGLE | ASMA_FLAG_WINDOW_FIRST | ASMA_HEAP_MASK)
+    (ASMA_FLAG_SINGLE | ASMA_FLAG_WINDOW_FIRST | ASMA_FLAG_HEAP_SCREEN |       \
+     ASMA_HEAP_MASK)
 
 #define ASMA_NAME_MAX 32
 #define ASMA_HEADER_V1 68
@@ -84,7 +88,7 @@ typedef struct {
     bool was_run;
     uint32_t file_size;
     uint16_t mod_date, mod_time;
-    char path[FS_PATH_SZ];
+    char *path; /* the .APP's (allocated: kept only while it is loaded) */
 } loaded_app_t;
 
 /* The .APP in /APPS (or one of its folders) whose header name is `name`
@@ -95,6 +99,10 @@ const char *appload_path_of(const app_descriptor *d);
 /* Run the app called `name` from /APPS; with `file`, ask it to open that
  * file (api->open_request). False if there is no such app. */
 bool appload_run_named(const char *name, const char *file);
+
+/* the apps' memory on the kernel heap (when the frame pool had no room):
+ * their images and heaps, in bytes */
+uint32_t appload_kernel_heap_bytes(void);
 
 /* Load (or reuse / hot-reload if the file changed) and register. */
 app_descriptor *appload_load(const char *path);
