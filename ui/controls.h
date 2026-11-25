@@ -9,7 +9,7 @@
 /* windows own/draw controls, route input, and manage
  * focus (Tab/Shift+Tab). Controls live until their window is destroyed.
  * Coordinates are client-relative; anchor styles resize controls.
- * Enter/Esc invoke default/cancel buttons; handlers use c->user. */
+ * Enter/Esc invoke default/cancel buttons; handlers use c->user.*/
 
 #include "lib/core.h"
 
