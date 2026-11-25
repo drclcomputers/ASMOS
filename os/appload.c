@@ -796,6 +796,30 @@ static uint32_t api_speed_flags(void) {
            (g_cfg.no_tooltips ? SPEED_NO_TIPS : 0);
 }
 
+// .BMP pictures (API size 11)
+
+static const char *api_bmp_save(const char *path, const uint8_t *pix, int w,
+                                int h, int stride, const uint8_t (*pal)[3],
+                                int colors) {
+    const char *e = bmp_save(path, pix, w, h, stride, pal, colors);
+    char dir[FS_PATH_SZ]; /* open views of that folder show it */
+    if (path && !e) {
+        fo_parent(path, dir, sizeof(dir));
+        fo_changed(dir);
+    }
+    return e;
+}
+
+static const app_bmp_api_t s_bmp = {
+    .size = sizeof(app_bmp_api_t),
+    .open = bmp_open,
+    .work_size = bmp_work_size,
+    .begin = bmp_begin,
+    .rows = bmp_rows,
+    .error = bmp_error,
+    .save = api_bmp_save,
+};
+
 static const os_api_t s_api = {
     .version = OS_API_VERSION,
     .size = sizeof(os_api_t),
@@ -818,6 +842,9 @@ static const os_api_t s_api = {
     .kb = &kb,
     .joy = &joy,
     .screen_palette = gpu_palette,
+    .set_screen_color = gpu_set_color,
+    .palette256 = gpu_palette256,
+    .bmp = &s_bmp,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

@@ -9,3 +9,5 @@ cd.iso
 cd83.iso
 SDKHELLO.APP
 sdkapp/build
+bmp/*.BMP
+bmp/*.EXP

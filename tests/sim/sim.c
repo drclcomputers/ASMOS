@@ -6,6 +6,7 @@
 #include "config/config.h"
 #include "config/runtime_config.h"
 #include "config/video_cfg.h"
+#include "drivers/gpu.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "fs/fs.h"
@@ -226,6 +227,8 @@ static void make_pal256(void) {
             p[0] = (uint8_t)rr, p[1] = (uint8_t)gg, p[2] = (uint8_t)bb;
         }
     }
+    for (int i = GPU_CUSTOM; i < 256; i++) /* the apps' own: white */
+        s_pal256[i][0] = s_pal256[i][1] = s_pal256[i][2] = 63;
 }
 
 int gpu_palette(uint8_t (*rgb)[3], int max) {
@@ -236,6 +239,26 @@ int gpu_palette(uint8_t (*rgb)[3], int max) {
         for (int k = 0; k < 3; k++)
             rgb[i][k] = s_pal256[i][k];
     return n;
+}
+int gpu_palette256(uint8_t (*rgb)[3], int max) {
+    if (!s_pal256[63][0])
+        make_pal256();
+    for (int i = 0; i < 256 && i < max; i++)
+        for (int k = 0; k < 3; k++)
+            rgb[i][k] = s_pal256[i][k];
+    return 256;
+}
+/* (drivers/gpu.c: the apps' 8 colours) */
+static uint32_t s_pal_changes;
+uint32_t gpu_palette_changes(void) { return s_pal_changes; }
+bool gpu_set_color(int i, uint8_t r, uint8_t g, uint8_t b) {
+    if (!s_pal256[63][0])
+        make_pal256();
+    if (i < GPU_CUSTOM || i > 255)
+        return false;
+    s_pal_changes++;
+    s_pal256[i][0] = r & 63, s_pal256[i][1] = g & 63, s_pal256[i][2] = b & 63;
+    return video_mode_colors(g_video_mode) == 256;
 }
 
 /* two IDE disks: HDA (the image) and HDB (absent unless a test adds it) */

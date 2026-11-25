@@ -25,8 +25,16 @@ void gpu_invalidate(void); /* next blit sends the whole screen */
  * (the BIOS's mode 13h palette, set in each), 16 in the planar modes.
  * Fills up to max, returns how many the screen has. */
 int gpu_palette(uint8_t (*rgb)[3], int max);
-uint32_t gpu_fps(void);         /* frames per second, updated each second */
-uint32_t gpu_last_blocks(void); /* 32-pixel blocks the last blit sent */
+/* all 256, whatever the screen (a picture made on a 256-colour screen, to
+ * be shown in 16) */
+int gpu_palette256(uint8_t (*rgb)[3], int max);
+/* 248..255: colours the apps may change (white at the start; ASMDraw's
+ * own). Values 0..63. True if the screen shows them (256 colours). */
+#define GPU_CUSTOM 248
+bool gpu_set_color(int i, uint8_t r, uint8_t g, uint8_t b);
+uint32_t gpu_palette_changes(void); /* counts gpu_set_color calls */
+uint32_t gpu_fps(void);             /* frames per second, updated each second */
+uint32_t gpu_last_blocks(void);     /* 32-pixel blocks the last blit sent */
 gpu_backend_t gpu_backend(void);
 
 /* w*h pixels (0xFF = see-through; NULL = none) over the last frame sent,

@@ -11,6 +11,7 @@ z.write(sys.argv[1], "KERNEL.SYS")
 z.close()
 PY
 (cd lfn && python3 mk.py >/dev/null && python3 mk2.py >/dev/null)
+(cd bmp && python3 mk.py) # test pictures (scen_bmp.c)
 nasm -f bin bin/hello.asm -o bin/HELLO.BIN
 CC=${CC:-gcc}
 LD=${LD:-ld}

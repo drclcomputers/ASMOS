@@ -558,7 +558,7 @@ static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {
     else {
         const char *dot = strrchr(it->name, '.');
         const char *ext = dot ? dot + 1 : "";
-        if (!strcasecmp(ext, "PIC"))
+        if (!strcasecmp(ext, "PIC") || !strcasecmp(ext, "BMP"))
             draw_pic_icon(ax, ay, it->selected);
         else if (!strcasecmp(ext, "TXT"))
             draw_txt_icon(ax, ay, it->selected);

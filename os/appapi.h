@@ -13,6 +13,7 @@
 #include "drivers/joystick.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
+#include "lib/bmp.h"
 #include "lib/core.h"
 #include "lib/time.h"
 #include "ui/controls.h"
@@ -208,6 +209,23 @@ typedef struct {
     int (*history_current)(void);
 } app_clip_api_t;
 
+/* .BMP pictures (API size 11): lib/bmp.h, where they are explained. In
+ * an app (extapps/shim.h) the same names call these: bmp_open, bmp_start,
+ * bmp_rows, bmp_error, bmp_end, bmp_read_all, bmp_save; the reading
+ * memory comes from the app's own heap. */
+typedef struct {
+    uint32_t size;
+    const char *(*open)(const char *path, bmp_info_t *bi);
+    uint32_t (*work_size)(const bmp_info_t *bi, const bmp_target_t *t);
+    bmp_reader_t *(*begin)(const char *path, const bmp_info_t *bi,
+                           const bmp_target_t *t, uint8_t *out, int out_w,
+                           int out_h, int stride, void *work);
+    int (*rows)(bmp_reader_t *r, int n);
+    const char *(*error)(const bmp_reader_t *r);
+    const char *(*save)(const char *path, const uint8_t *pix, int w, int h,
+                        int stride, const uint8_t (*pal)[3], int colors);
+} app_bmp_api_t;
+
 typedef struct os_api {
     uint32_t version;
     uint32_t size; /* sizeof(os_api_t) – check before using newer members */
@@ -311,11 +329,25 @@ typedef struct os_api {
     const joyvar *joy;
 
     // appended in API size 9
-    /* The screen's colours, 6 bits each (0..63): 256 in 320x200 (indexes
-     * 16..255 are the BIOS's mode 13h palette), 16 in the other modes, where
-     * an index above 15 shows as index & 15. Fills up to max entries of rgb
-     * and returns how many the screen has. */
+    /* The screen's colours, 6 bits each (0..63): 256 in the 256-colour
+     * modes (indexes 16..247 are the BIOS's mode 13h palette, 248..255 the
+     * custom ones below), 16 in the others, where an index above 15 shows
+     * as index & 15. Fills up to max entries of rgb and returns how many the
+     * screen has. */
     int (*screen_palette)(uint8_t (*rgb)[3], int max);
+
+    // appended in API size 10: custom colours
+    /* Indexes APP_COLOR_CUSTOM..255 (8 of them) are colours an app may set
+     * (0..63 each): white at the start, the same for every window. True if
+     * the screen shows them now (256 colours); on a 16-colour screen they
+     * are kept, for a picture's file. Other indexes: false, unchanged. */
+    bool (*set_screen_color)(int index, uint8_t r, uint8_t g, uint8_t b);
+    /* All 256 colours, whatever the screen: to show a picture made on a
+     * 256-colour screen in 16. Returns 256. */
+    int (*palette256)(uint8_t (*rgb)[3], int max);
+
+    // appended in API size 11: .BMP pictures (lib/bmp.h)
+    const app_bmp_api_t *bmp;
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */
@@ -325,6 +357,10 @@ typedef struct os_api {
 #define APP_ATTR_HIDDEN 0x02
 #define APP_ATTR_SYSTEM 0x04
 #define APP_ATTR_DIR 0x10
+
+/* api->set_screen_color (API size 10) */
+#define APP_COLOR_CUSTOM 248
+#define APP_COLORS_CUSTOM 8
 
 /* api->speed_flags() */
 #define SPEED_LOW_END (1u << 0)  /* the "Low-end machine" preset is on   */

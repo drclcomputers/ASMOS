@@ -152,11 +152,49 @@ sub-tables: `time` (local time, calendar maths, the desktop alarm), `sound`
 ## API size 9: the screen's colours
 
 `screen_palette(rgb, max)` fills `rgb` with the screen's colours (6 bits
-each, 0..63) and returns how many it has: 256 in 320x200 (the BIOS's mode
-13h palette: 16..31 greys, then rings of hues, 248..255 black), 16 in the
-other modes, where an index above 15 shows as `index & 15`. A game that
-draws its own pictures maps its colours to the nearest ones once at start
-(and with 16 can dither between two of them).
+each, 0..63) and returns how many it has: 256 in the 256-colour modes (the
+BIOS's mode 13h palette: 16..31 greys, then rings of hues; 248..255 the
+custom colours of size 10), 16 in the others, where an index above 15 shows
+as `index & 15`. A game that draws its own pictures maps its colours to the
+nearest ones once at start (and with 16 can dither between two of them).
+
+## API size 10: custom colours
+
+`set_screen_color(i, r, g, b)` changes one of the 8 colours from
+`APP_COLOR_CUSTOM` (248) to 255 (values 0..63). They start white and are
+the same for every window (ASMDraw's custom colours are these), so a viewer
+of other pictures leaves them out when it looks for the nearest colour. It
+returns true if the screen shows them now (a 256-colour screen); on a
+16-colour screen the colour is still kept, for a picture's file, but
+indexes above 15 show as `index & 15`.
+
+`palette256(rgb, max)` gives all 256 colours whatever the screen, to turn a
+picture made on a 256-colour screen into its nearest 16.
+
+## API size 11: .BMP pictures
+
+`api->bmp` is the kernel's `lib/bmp.h` (where it is explained): reading
+Windows and OS/2 .BMPs of 1 to 32 bits a pixel, RLE too, into indexes of
+the screen's colours (the nearest, or dithered), and saving 4- or 8-bit
+ones. In an app the same names call it (extapps/shim.h):
+
+```c
+bmp_info_t *bi = kmalloc(sizeof *bi); /* (800 bytes: not on the stack) */
+const char *why = bmp_open("/HDA/SUNSET.BMP", bi);
+uint8_t pal[256][3];
+int n = A->screen_palette(pal, 256);
+bmp_target_t t = {(const uint8_t (*)[3])pal, n > 248 ? 248 : n, 0, true};
+uint8_t *pix = why ? NULL : kmalloc(bi->w * bi->h);
+if (pix)
+    why = bmp_read_all("/HDA/SUNSET.BMP", bi, &t, pix, bi->w, bi->h, bi->w);
+```
+
+For a big picture, `bmp_start` then `bmp_rows(r, n)` from `on_frame` (it
+returns the rows done; `bmp_error(r)` says why it stopped), then
+`bmp_end(r)`: BMP Viewer fills its window that way. The reader's memory
+(`bmp_work_size`: about 40 KB for 24 bits) comes from the app's own heap.
+`n` 248 leaves out the 8 custom colours, which other apps change.
+`bmp_save(path, pix, w, h, stride, pal, 16 or 256)` writes one.
 
 ## What an app needs: --min-cpu, --min-ram
 

@@ -44,7 +44,7 @@ typedef struct {
     control *tree;   /* file dialogs: folder tree */
     bool *check_out; /* dlg_input_check: receives the box on OK */
     char dir[FS_PATH_SZ];
-    char ext[4];
+    char ext[16];   /* "PIC" or a list: "PIC,BMP" (the first: Save's) */
     char title[40]; /* callers may pass a stack buffer */
     void *xdata;    /* kind-specific (print dialog, preview); freed here */
 } dlg_t;
@@ -70,6 +70,24 @@ static void unlink_dlg(dlg_t *d) {
             s_open[i] = NULL;
     if (d->owner && d->owner->modal_child == d->win)
         d->owner->modal_child = NULL;
+}
+
+/* the name's extension is one of the list ("PIC,BMP") */
+static bool ext_listed(const char *list, const char *name) {
+    const char *dot = strrchr(name, '.');
+    if (!dot)
+        return false;
+    const char *e = dot + 1, *p = list;
+    int n = (int)strlen(e);
+    while (*p) {
+        int k = 0;
+        while (p[k] && p[k] != ',')
+            k++;
+        if (k == n && !strncasecmp(p, e, (size_t)n))
+            return true;
+        p += p[k] ? k + 1 : k;
+    }
+    return false;
 }
 
 /* close the dialog, then report. text: result for text dialogs */
@@ -381,11 +399,8 @@ static void fill_list(dlg_t *d) {
             bool dir = (e->attr & ATTR_DIRECTORY) != 0;
             if (!dir && d->kind == K_FOLDER)
                 continue;
-            if (!dir && d->ext[0]) {
-                const char *dot = strrchr(got[i], '.');
-                if (!dot || strcasecmp(dot + 1, d->ext) != 0)
-                    continue;
-            }
+            if (!dir && d->ext[0] && !ext_listed(d->ext, got[i]))
+                continue;
             strcpy(names[n], got[i]);
             isdir[n++] = dir;
         }
@@ -517,8 +532,10 @@ static void file_ok(dlg_t *d) {
     const char *base = strrchr(nm, '/');
     base = base ? base + 1 : nm;
     if (!strchr(base, '.') && d->ext[0]) {
-        int n = (int)strlen(nm);
-        snprintf(nm + n, sizeof(nm) - n, ".%s", d->ext);
+        int n = (int)strlen(nm), k = 0;
+        while (d->ext[k] && d->ext[k] != ',')
+            k++; /* the first of the list */
+        snprintf(nm + n, sizeof(nm) - n, ".%.*s", k, d->ext);
         join(path, sizeof(path), d->dir, nm);
         ctl_set_text(d->edit, nm);
         exists = fs_find(path, &de);
@@ -601,10 +618,8 @@ static void file_dialog(window *owner, int kind, const char *title,
     uint16_t cl;
     if (!fs_resolve_dir(d->dir, &drv, &cl))
         strcpy(d->dir, "/");
-    if (ext) {
-        strncpy(d->ext, ext, 3);
-        d->ext[3] = 0;
-    }
+    if (ext)
+        strncpy(d->ext, ext, sizeof(d->ext) - 1);
     window *w = d->win;
     d->path = ctl_label(w, 6, 5, 260, 12, d->dir, CS_BORDER);
     ctl_set_tooltip(ctl_button(w, 270, 5, 30, 12, "Up", 3, on_up),

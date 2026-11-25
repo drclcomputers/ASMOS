@@ -89,7 +89,9 @@ static void make_pal256(void) {
                 s_pal256[32 + r * 24 + h][j] = (uint8_t)c[j];
         }
     }
-    /* 248..255 stay black */
+    for (int i = GPU_CUSTOM; i < 256; i++) /* the apps' own: white */
+        for (int k = 0; k < 3; k++)
+            s_pal256[i][k] = 63;
 }
 
 static void palette256(void) {
@@ -170,6 +172,33 @@ int gpu_palette(uint8_t (*rgb)[3], int max) {
         for (int k = 0; k < 3; k++)
             rgb[i][k] = s_pal256[i][k]; /* (the first 16: the same) */
     return n;
+}
+
+int gpu_palette256(uint8_t (*rgb)[3], int max) {
+    for (int i = 0; i < 256 && i < max; i++)
+        for (int k = 0; k < 3; k++)
+            rgb[i][k] = s_pal256[i][k];
+    return 256;
+}
+
+static uint32_t s_pal_changes;
+uint32_t gpu_palette_changes(void) { return s_pal_changes; }
+
+bool gpu_set_color(int i, uint8_t r, uint8_t g, uint8_t b) {
+    if (i < GPU_CUSTOM || i > 255)
+        return false;
+    s_pal_changes++;
+    s_pal256[i][0] = r & 63;
+    s_pal256[i][1] = g & 63;
+    s_pal256[i][2] = b & 63;
+    if (!is8())
+        return false;        /* (kept for a picture's file) */
+    uint32_t f = gpu_lock(); /* (the DAC's index: one writer at a time) */
+    outb(0x3C8, (uint8_t)i);
+    for (int k = 0; k < 3; k++)
+        outb(0x3C9, s_pal256[i][k]);
+    gpu_unlock(f);
+    return true;
 }
 
 // 256 colours: bytes to the screen

@@ -119,6 +119,9 @@ From `asmos.h` you can use what ASMOS's own apps use:
 - time and sound: `time_rtc_local`, `time_weekday`..., `speaker_beep_async`,
   `audio_open` / `audio_play` (WAV, MIDI, CD tracks)
 - settings: `app_prefs_get_int`, `app_prefs_set_int`...
+- .BMP pictures: `bmp_open`, `bmp_read_all` (or `bmp_start` / `bmp_rows` /
+  `bmp_end`, a few rows a frame), `bmp_save`; the screen's colours with
+  `A->screen_palette` (`lib/bmp.h`)
 - the keyboard, mouse and joystick: `kb.down[...]`, `mouse.x`, `joy.axis[...]`
 
 The rest of the app API is `A->...` (files: `A->file_read`,

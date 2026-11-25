@@ -333,6 +333,7 @@ int scen_misc2(const char *name);
 int scen_joy(const char *name);
 int scen_net(const char *name);
 int scen_sol(const char *name);
+int scen_bmp(const char *name);
 int scen2(const char *name) {
     if (scen_apps1(name) >= 0)
         return 0;
@@ -357,6 +358,8 @@ int scen2(const char *name) {
     if (scen_net(name) >= 0)
         return 0;
     if (scen_sol(name) >= 0)
+        return 0;
+    if (scen_bmp(name) >= 0)
         return 0;
     if (scen_misc2(name) >= 0)
         return 0;

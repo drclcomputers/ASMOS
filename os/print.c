@@ -5,6 +5,7 @@
 
 #include "os/print.h"
 #include "config/runtime_config.h"
+#include "drivers/gpu.h"
 #include "drivers/lpt.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -188,7 +189,25 @@ static bool emit_line(void *u, int page, int line, const char *s) {
 static const uint8_t GREY[16] = {0,  20,  100, 120, 51,  71,  91,  170,
                                  85, 110, 192, 215, 140, 162, 240, 255};
 
-uint8_t print_grey(uint8_t c) { return GREY[c & 15]; }
+/* above 15 (a picture from a 256-colour screen): the same sum of its
+ * palette colour, 0.30 red + 0.59 green + 0.11 blue */
+uint8_t print_grey(uint8_t c) {
+    if (c < 16)
+        return GREY[c];
+    static uint8_t grey[256];
+    static uint32_t made = 0xFFFFFFFF; /* worked out for this palette */
+    if (made != gpu_palette_changes()) {
+        static uint8_t pal[256][3];
+        gpu_palette256(pal, 256);
+        for (int i = 16; i < 256; i++) {
+            uint32_t r = pal[i][0] * 255u / 63, g = pal[i][1] * 255u / 63,
+                     b = pal[i][2] * 255u / 63;
+            grey[i] = (uint8_t)((77 * r + 151 * g + 28 * b) >> 8);
+        }
+        made = gpu_palette_changes();
+    }
+    return grey[c];
+}
 
 bool print_ink(uint8_t grey, int x, int y) {
     static const uint8_t BAYER[4][4] = {

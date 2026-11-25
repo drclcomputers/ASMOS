@@ -192,7 +192,7 @@ static void draw_desktop_item(const desktop_item_t *it, bool dragged_ghost) {
     case DESKTOP_ITEM_FILE: {
         const char *dot = strrchr(it->name, '.');
         const char *ext = dot ? dot + 1 : "";
-        if (strcasecmp(ext, "PIC") == 0)
+        if (strcasecmp(ext, "PIC") == 0 || strcasecmp(ext, "BMP") == 0)
             draw_pic_icon(ax, ay, it->selected);
         else if (strcasecmp(ext, "TXT") == 0)
             draw_txt_icon(ax, ay, it->selected);

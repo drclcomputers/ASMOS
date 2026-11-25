@@ -181,3 +181,24 @@ void draw_dot(int x, int y, unsigned char color) { A->draw_dot(x, y, color); }
 // settings (config/runtime_config.h)
 
 int cfg_frame_ms(void) { return A->frame_ms(); }
+
+// .BMP pictures (lib/bmp.h; bmp_start, bmp_end and bmp_read_all are
+// inline there and use kmalloc: the app's own heap)
+
+const char *bmp_open(const char *path, bmp_info_t *bi) {
+    return A->bmp->open(path, bi);
+}
+uint32_t bmp_work_size(const bmp_info_t *bi, const bmp_target_t *t) {
+    return A->bmp->work_size(bi, t);
+}
+bmp_reader_t *bmp_begin(const char *path, const bmp_info_t *bi,
+                        const bmp_target_t *t, uint8_t *out, int out_w,
+                        int out_h, int stride, void *work) {
+    return A->bmp->begin(path, bi, t, out, out_w, out_h, stride, work);
+}
+int bmp_rows(bmp_reader_t *r, int n) { return A->bmp->rows(r, n); }
+const char *bmp_error(const bmp_reader_t *r) { return A->bmp->error(r); }
+const char *bmp_save(const char *path, const uint8_t *pix, int w, int h,
+                     int stride, const uint8_t (*pal)[3], int colors) {
+    return A->bmp->save(path, pix, w, h, stride, pal, colors);
+}

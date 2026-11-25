@@ -40,7 +40,8 @@ void dlg_input_check(window *owner, const char *title, const char *prompt,
                      const char *check_label, bool *checked, dlg_text_cb cb,
                      void *user);
 /* File pickers return a full path (e.g. "/FDD0/SONG.MID").
- * ext: show only files with this extension ("TXT"), or NULL for all. */
+ * ext: show only files with this extension ("TXT"), or with any of a list
+ * ("PIC,BMP": Save adds the first to a name without one), or NULL for all. */
 void dlg_open_file(window *owner, const char *title, const char *dir,
                    const char *ext, dlg_text_cb cb, void *user);
 void dlg_save_file(window *owner, const char *title, const char *dir,

@@ -377,11 +377,11 @@ static const char *type_name(const char *name, bool is_dir) {
     const char *dot = strrchr(name, '.');
     const char *e = dot ? dot + 1 : "";
     static const char *const map[][2] = {
-        {"TXT", "Text file"},       {"APP", "Application"},
-        {"PIC", "Picture"},         {"WAV", "Sound"},
-        {"MID", "MIDI music"},      {"CFG", "Settings"},
-        {"ASM", "Assembly source"}, {"BIN", "Binary"},
-        {"CDA", "CD audio track"},
+        {"TXT", "Text file"}, {"APP", "Application"},
+        {"PIC", "Picture"},   {"BMP", "Bitmap picture"},
+        {"WAV", "Sound"},     {"MID", "MIDI music"},
+        {"CFG", "Settings"},  {"ASM", "Assembly source"},
+        {"BIN", "Binary"},    {"CDA", "CD audio track"},
     };
     for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
         if (!strcasecmp(e, map[i][0]))
@@ -501,6 +501,7 @@ void fo_open(window *owner, const char *path) {
     static const char *const lnk[] = {"LNK", NULL};
     const char *const *wav = audio_extensions(); /* WAV, MID, ... */
     static const char *const pic[] = {"PIC", NULL};
+    static const char *const bmp[] = {"BMP", NULL};
     static const char *const zip[] = {"ZIP", NULL};
     if (ext_is(name, app)) {
         fo_launch_app(owner, path);
@@ -517,6 +518,7 @@ void fo_open(window *owner, const char *path) {
         /* the apps for these are .APPs in /APPS (extapps/) */
         const char *app = ext_is(name, wav)   ? "Audio Player"
                           : ext_is(name, pic) ? "ASMDraw"
+                          : ext_is(name, bmp) ? "BMP Viewer"
                                               : "HexView";
         if (!appload_run_named(app, path)) {
             char m[96];

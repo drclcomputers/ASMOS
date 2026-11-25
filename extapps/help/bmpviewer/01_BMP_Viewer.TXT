@@ -1,0 +1,16 @@
+# BMP Viewer
+
+BMP Viewer shows .BMP pictures: Windows and OS/2 ones, 1, 4, 8, 16, 24
+and 32 bits a pixel, RLE-packed ones too. Double-click a .BMP in FileF,
+or File > Open.
+
+- A picture bigger than the window scrolls: the bars, the arrows, PgUp
+  and PgDn (Ctrl+PgUp/PgDn sideways), Home and End (Ctrl: the corners),
+  or drag the picture with the mouse.
+- On a 256-colour screen (Settings > Display) it is shown in 256
+  colours; on a 16-colour one in the 16. Each colour becomes the
+  nearest the screen has.
+- View > Dithering mixes dots of the nearest colours, for photos. Turn it
+  off for drawings with flat colours.
+- A big picture fills in from the bottom while it is read. One needs
+  about a byte a pixel of memory (1024 x 768: 768 KB).

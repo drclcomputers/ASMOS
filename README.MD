@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.5.8
+Version 3.6.3
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -275,12 +275,13 @@ The bundled apps:
 | Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                        | the printer's jobs (from Settings > Printers)             |
 | Joystick                                                           | calibrate the game port's stick (Settings > Devices)      |
-| ASMDraw                                                            | pixel art editor                                          |
+| ASMDraw                                                            | pixel art: .PIC and .BMP, 16 colours or 24 with 256       |
 | Help                                                               | the help pages of every app                               |
 | Character Map                                                      | every character of the code page, to copy                 |
 | Calculator, Calendar (with notes), Clock (with an alarm), ClipView | accessories                                               |
 | Audio Player                                                       | WAV and MIDI files, audio CDs                             |
 | HexView                                                            | files in hex                                              |
+| BMP Viewer                                                         | .BMP pictures, scrolled, in 256 or 16 colours             |
 | Puzzle, Sudoku, Solitaire (Klondike, Spider, FreeCell)             | games                                                     |
 
 The first group is built into the kernel. The rest are .APP files in /APPS,
