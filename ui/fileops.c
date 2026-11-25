@@ -389,6 +389,12 @@ static const char *type_name(const char *name, bool is_dir) {
     return *e ? "File" : "File (no extension)";
 }
 
+const char *fo_type_of(const char *ext) {
+    char n[8];
+    snprintf(n, sizeof(n), "x.%s", ext ? ext : "");
+    return type_name(n, false);
+}
+
 void fo_info_text(const char *path, char *out, int sz) {
     dir_entry_t de;
     char vp[FS_PATH_SZ];

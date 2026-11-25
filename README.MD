@@ -275,7 +275,7 @@ The bundled apps:
 | Format Disk                                                        | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                        | the printer's jobs (from Settings > Printers)             |
 | Joystick                                                           | calibrate the game port's stick (Settings > Devices)      |
-| ASMDraw                                                            | pixel art: .PIC and .BMP, 16 colours or 24 with 256       |
+| ASMDraw                                                            | paint: 10 tools, 6 brushes, .PIC and .BMP, 24 colours     |
 | Help                                                               | the help pages of every app                               |
 | Character Map                                                      | every character of the code page, to copy                 |
 | Calculator, Calendar (with notes), Clock (with an alarm), ClipView | accessories                                               |

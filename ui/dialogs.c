@@ -45,6 +45,9 @@ typedef struct {
     bool *check_out; /* dlg_input_check: receives the box on OK */
     char dir[FS_PATH_SZ];
     char ext[16];   /* "PIC" or a list: "PIC,BMP" (the first: Save's) */
+    control *types; /* Save with a list: the type to save as */
+    char typ[4][4]; /* ... the list's types */
+    int ntyp;
     char title[40]; /* callers may pass a stack buffer */
     void *xdata;    /* kind-specific (print dialog, preview); freed here */
 } dlg_t;
@@ -90,6 +93,13 @@ static bool ext_listed(const char *list, const char *name) {
     return false;
 }
 
+/* the type Save adds: the one chosen, else the list's first */
+static const char *save_type(dlg_t *d) {
+    if (d->types)
+        return d->typ[ctl_value(d->types) & 3];
+    return d->ntyp ? d->typ[0] : "";
+}
+
 /* close the dialog, then report. text: result for text dialogs */
 static void finish(dlg_t *d, bool ok, const char *text) {
     static char result[FS_PATH_SZ];
@@ -126,6 +136,8 @@ static bool on_close_btn(window *w) {
     return true;
 }
 
+#define DLG_BOTTOM 5 /* extra rows below every dialog's buttons */
+
 static dlg_t *open_dlg(window *owner, int kind, const char *title, int w,
                        int h) {
     dlg_t *d = (dlg_t *)kzalloc(sizeof(dlg_t));
@@ -141,6 +153,10 @@ static dlg_t *open_dlg(window *owner, int kind, const char *title, int w,
         kfree(d);
         return NULL;
     }
+    /* room under the bottom row of buttons (they sat on the edge), if
+     * the screen has it */
+    if (h + DLG_BOTTOM <= SCREEN_HEIGHT - MENUBAR_H - 1)
+        h += DLG_BOTTOM;
     int x = (SCREEN_WIDTH - w) / 2, y = (SCREEN_HEIGHT - h) / 3;
     if (y < MENUBAR_H + 1) /* tall dialog, small screen */
         y = MENUBAR_H + 1;
@@ -399,7 +415,9 @@ static void fill_list(dlg_t *d) {
             bool dir = (e->attr & ATTR_DIRECTORY) != 0;
             if (!dir && d->kind == K_FOLDER)
                 continue;
-            if (!dir && d->ext[0] && !ext_listed(d->ext, got[i]))
+            if (!dir && d->ext[0] &&
+                !ext_listed(d->types ? d->typ[ctl_value(d->types) & 3] : d->ext,
+                            got[i]))
                 continue;
             strcpy(names[n], got[i]);
             isdir[n++] = dir;
@@ -531,11 +549,12 @@ static void file_ok(dlg_t *d) {
     /* save: add the default extension, validate, confirm overwrite */
     const char *base = strrchr(nm, '/');
     base = base ? base + 1 : nm;
-    if (!strchr(base, '.') && d->ext[0]) {
-        int n = (int)strlen(nm), k = 0;
-        while (d->ext[k] && d->ext[k] != ',')
-            k++; /* the first of the list */
-        snprintf(nm + n, sizeof(nm) - n, ".%.*s", k, d->ext);
+    /* no extension, or (with a Type list) one that isn't of the list:
+     * the type's is added */
+    if (d->ext[0] &&
+        (!strchr(base, '.') || (d->types && !ext_listed(d->ext, base)))) {
+        int n = (int)strlen(nm);
+        snprintf(nm + n, sizeof(nm) - n, ".%s", save_type(d));
         join(path, sizeof(path), d->dir, nm);
         ctl_set_text(d->edit, nm);
         exists = fs_find(path, &de);
@@ -605,6 +624,24 @@ static void on_dir_tree(control *c, int ev) {
     }
 }
 
+/* another type: the name's extension follows (if it is one of the list),
+ * and the files shown */
+static void on_type(control *c, int ev) {
+    dlg_t *d = (dlg_t *)c->user;
+    if (ev != EV_CHANGE)
+        return;
+    char nm[FS_PATH_SZ];
+    strncpy(nm, ctl_text(d->edit), sizeof(nm) - 1);
+    nm[sizeof(nm) - 1] = 0;
+    char *dot = strrchr(nm, '.');
+    if (dot && !strchr(dot, '/') && ext_listed(d->ext, nm)) {
+        snprintf(dot + 1, sizeof(nm) - (size_t)(dot + 1 - nm), "%s",
+                 save_type(d));
+        ctl_set_text(d->edit, nm);
+    }
+    fill_list(d);
+}
+
 static void file_dialog(window *owner, int kind, const char *title,
                         const char *dir, const char *name, const char *ext,
                         dlg_text_cb cb, void *user) {
@@ -620,6 +657,14 @@ static void file_dialog(window *owner, int kind, const char *title,
         strcpy(d->dir, "/");
     if (ext)
         strncpy(d->ext, ext, sizeof(d->ext) - 1);
+    for (const char *e = d->ext; *e && d->ntyp < 4;) { /* the list */
+        int k = 0;
+        while (e[k] && e[k] != ',')
+            k++;
+        snprintf(d->typ[d->ntyp++], sizeof(d->typ[0]), "%.*s", k < 3 ? k : 3,
+                 e);
+        e += e[k] ? k + 1 : k;
+    }
     window *w = d->win;
     d->path = ctl_label(w, 6, 5, 260, 12, d->dir, CS_BORDER);
     ctl_set_tooltip(ctl_button(w, 270, 5, 30, 12, "Up", 3, on_up),
@@ -638,6 +683,18 @@ static void file_dialog(window *owner, int kind, const char *title,
         ctl_label(w, 6, 125, 30, 12, "Name:", 0);
         d->edit = ctl_edit(w, 36, 125, 264, 12, name ? name : "", 255,
                            ES_FILENAME, NULL);
+    }
+    if (kind == K_SAVE && d->ntyp > 1) { /* Save as: which type */
+        ctl_label(w, 6, 143, 30, 12, "Type:", 0);
+        d->types = ctl_combo(w, 36, 142, 150, on_type);
+        d->types->user = d;
+        for (int i = 0; i < d->ntyp; i++) {
+            char t[40];
+            snprintf(t, sizeof(t), "%s (.%s)", fo_type_of(d->typ[i]),
+                     d->typ[i]);
+            list_add(d->types, t);
+        }
+        list_set_sel(d->types, 0);
     }
     control *ok = ctl_button(w, 194, 142, 50, 13,
                              kind == K_SAVE     ? "Save"

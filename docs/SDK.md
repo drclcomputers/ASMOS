@@ -109,7 +109,7 @@ From `asmos.h` you can use what ASMOS's own apps use:
   `ctl_list`, `ctl_check`, `ctl_combo`, `ctl_tabs`, `ctl_tree`,
   `ctl_custom` (draw it yourself)... and `list_*`, `tree_*`, `edit_*`
 - dialogs: `dlg_message`, `dlg_confirm`, `dlg_input`, `dlg_open_file`,
-  `dlg_save_file`, `dlg_print`
+  `dlg_save_file`, `dlg_print`, `dlg_color` (a colour picker)
 - menus: `window_add_menu`, `menu_add_item`, `menu_add_separator`
 - drawing: `fill_rect`, `draw_line`, `draw_string`, `draw_pixels`,
   `text_width`... colours `BLACK` .. `WHITE`, fonts `FONT_SYSTEM`...

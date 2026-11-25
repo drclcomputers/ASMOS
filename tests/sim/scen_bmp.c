@@ -289,51 +289,111 @@ static bool line_is(control *cv, int y, int x0, int x1, uint8_t c) {
     return true;
 }
 
-static void slide(control *sl, int v) {
-    ctl_set_value(sl, v);
-    ctl_invoke(sl, EV_CHANGE);
+/* a control by the start of its tooltip */
+static control *tipped(window *w, const char *tip) {
+    for (control *c = w ? w->controls : NULL; c; c = c->next)
+        if (c->tip && !strncmp(c->tip, tip, strlen(tip)))
+            return c;
+    return NULL;
+}
+
+/* the biggest custom control: the canvas */
+static control *canvas_of(window *w) {
+    control *best = NULL;
+    for (control *c = w ? w->controls : NULL; c; c = c->next)
+        if (c->type == CTL_CUSTOM &&
+            (!best || c->aw * c->ah > best->aw * best->ah))
+            best = c;
+    return best;
+}
+
+/* the colour picker (ui/colorpick.c): these numbers typed in */
+static window *pick_rgb(int r, int g, int b) {
+    window *d = wm_focused_window();
+    int v[3] = {r, g, b};
+    for (int i = 0; i < 3; i++) {
+        control *e = nth(d, CTL_EDIT, i);
+        char t[4];
+        snprintf(t, sizeof t, "%d", v[i]);
+        if (e) {
+            ctl_set_text(e, t);
+            ctl_invoke(e, EV_CHANGE);
+        }
+    }
+    sim_frames(1);
+    return d;
+}
+
+static void press(window *d, const char *label) {
+    for (control *c = d ? d->controls : NULL; c; c = c->next)
+        if (c->type == CTL_BUTTON && c->text && !strcmp(c->text, label)) {
+            sim_click(c->ax + 5, c->ay + 5);
+            break;
+        }
+    sim_frames(2);
+}
+
+/* a custom colour through Edit... and the picker */
+static void set_custom(control *edit, int r, int g, int b) {
+    sim_click(edit->ax + 5, edit->ay + 5);
+    sim_frames(2);
+    press(pick_rgb(r, g, b), "OK");
+}
+
+static void clean_prefs(void) { /* the root, white customs, the pencil */
+    app_prefs_begin("ASMDRAW");
+    app_prefs_set("ASMDRAW", "dir", "/");
+    app_prefs_set_int("ASMDRAW", "pen", 0);
+    app_prefs_set_int("ASMDRAW", "tool", 0);
+    app_prefs_set_int("ASMDRAW", "size", 0);
+    for (int k = 0; k < 8; k++) {
+        char key[4] = {'c', (char)('0' + k), 0};
+        app_prefs_set_int("ASMDRAW", key, 0x3FFFF);
+    }
+    app_prefs_end();
 }
 
 static int draw_files(void) {
     int fails = 0;
     char b[300];
     bool many = gpu_palette(s_pal, 256) == 256;
-    app_prefs_begin("ASMDRAW"); /* a clean start: the root, white customs */
-    app_prefs_set("ASMDRAW", "dir", "/");
-    app_prefs_set_int("ASMDRAW", "pen", 0);
-    for (int k = 0; k < 8; k++) {
-        char key[4] = {'c', (char)('0' + k), 0};
-        app_prefs_set_int("ASMDRAW", key, 0x3FFFF);
-    }
-    app_prefs_end();
+    clean_prefs();
     sim_launch("ASMDRAW");
     sim_frames(3);
     window *w = wm_focused_window();
-    control *cv = nth(w, CTL_CUSTOM, 0), *pal = nth(w, CTL_CUSTOM, 1);
-    control *sl[3] = {nth(w, CTL_SLIDER, 0), nth(w, CTL_SLIDER, 1),
-                      nth(w, CTL_SLIDER, 2)};
-    T("the colour sliders only with 256 colours", (sl[2] != NULL) == many);
-    int n = many ? 24 : 16, cw = (pal->aw - 20) / n;
+    control *cv = canvas_of(w), *pal = tipped(w, "Click: the pen");
+    control *edit = nth(w, CTL_BUTTON, 0);
+    T("Edit... (the colour picker) only with 256 colours",
+      (edit != NULL && !strcmp(edit->text, "Edit...")) == many);
+    T("no sliders any more", nth(w, CTL_SLIDER, 0) == NULL);
+    int n = many ? 24 : 16, cw = pal->aw / n;
     uint8_t pen = 4; /* red, or the third custom colour */
     if (many) {
-        sim_click(pal->ax + 20 + 18 * cw + cw / 2, pal->ay + 5);
+        sim_click(pal->ax + 18 * cw + cw / 2, pal->ay + 5);
         sim_frames(1);
-        T("a custom colour starts white", s_pal[250][0] == 63 &&
-                                              ctl_value(sl[0]) == 63 &&
-                                              ctl_value(sl[2]) == 63);
-        slide(sl[0], 10);
-        slide(sl[1], 40);
-        slide(sl[2], 20);
-        sim_frames(1);
+        T("a custom colour starts white", s_pal[250][0] == 63);
+        sim_click(edit->ax + 5, edit->ay + 5); /* Edit... */
+        sim_frames(2);
+        window *d = pick_rgb(10, 40, 20);
+        sim_shot("draw_picker");
         gpu_palette(s_pal, 256);
-        T("the sliders change the screen's colour 250",
+        T("the picker shows it at once, in colour 250",
+          d != w && s_pal[250][0] == 10 && s_pal[250][1] == 40 &&
+              s_pal[250][2] == 20);
+        press(d, "OK");
+        T("OK: kept", wm_focused_window() == w && s_pal[250][1] == 40);
+        sim_click(edit->ax + 5, edit->ay + 5);
+        sim_frames(2);
+        press(pick_rgb(0, 0, 0), "Cancel");
+        gpu_palette(s_pal, 256);
+        T("Cancel: put back",
           s_pal[250][0] == 10 && s_pal[250][1] == 40 && s_pal[250][2] == 20);
         pen = 250;
     } else {
-        sim_click(pal->ax + 20 + 4 * cw + cw / 2, pal->ay + 5);
+        sim_click(pal->ax + 4 * cw + cw / 2, pal->ay + 5);
     }
     sim_drag(cv->ax + 12, cv->ay + 12, cv->ax + 60, cv->ay + 12);
-    sim_click(pal->ax + 20 + 8 * cw + cw / 2, pal->ay + 5); /* blue */
+    sim_click(pal->ax + 8 * cw + cw / 2, pal->ay + 5); /* blue */
     sim_drag(cv->ax + 12, cv->ay + 20, cv->ax + 60, cv->ay + 20);
     sim_frames(2);
     sim_shot("draw_custom");
@@ -364,9 +424,7 @@ static int draw_files(void) {
           h[54 + 250 * 4 + 2] == ((10 << 2) | (10 >> 4)) &&
               h[54 + 250 * 4 + 1] == ((40 << 2) | (40 >> 4)));
     if (many) { /* white again; the file brings it back */
-        slide(sl[0], 63);
-        slide(sl[1], 63);
-        slide(sl[2], 63);
+        set_custom(edit, 63, 63, 63);
     }
     run_menu(w, "New");
     sim_frames(2);
@@ -378,14 +436,12 @@ static int draw_files(void) {
       line_is(cv, 10, 10, 58, pen) && line_is(cv, 18, 10, 58, BLUE));
     if (many)
         T("... and its custom colour",
-          s_pal[250][0] == 10 && s_pal[250][1] == 40 && ctl_value(sl[1]) == 40);
+          s_pal[250][0] == 10 && s_pal[250][1] == 40);
 
     /* .PIC: the custom colours after the pixels */
     file_dialog(w, "Save As...", "T1.PIC");
     if (many) {
-        slide(sl[0], 63);
-        slide(sl[1], 63);
-        slide(sl[2], 63);
+        set_custom(edit, 63, 63, 63);
     }
     run_menu(w, "New");
     sim_frames(2);
@@ -415,6 +471,54 @@ static int draw_files(void) {
     T("bigger than the canvas: cut, and says so",
       st && st->text && strstr(st->text, "cut to the window") &&
           canvas_px(cv, 100, 50) == s_exp[5 + 50 * 700 + 100]);
+
+    /* Save As's Type list: the extension it adds, and the one it changes */
+    run_menu(w, "New"); /* (no file: .PIC first) */
+    sim_frames(2);
+    fs_delete("/T2.BMP");
+    fs_delete("/T3.PIC");
+    run_menu(w, "Save As...");
+    sim_frames(2);
+    window *d = wm_focused_window();
+    control *ty = nth(d, CTL_COMBO, 0), *e = nth(d, CTL_EDIT, 0);
+    snprintf(b, sizeof b, "    Type: %s / %s\n", ty ? list_get(ty, 0) : "-",
+             ty ? list_get(ty, 1) : "-");
+    wr(1, b);
+    T("Save As has a Type list: Picture first, then Bitmap",
+      ty && list_count(ty) == 2 && strstr(list_get(ty, 0), "(.PIC)") &&
+          strstr(list_get(ty, 1), "(.BMP)"));
+    if (ty && e) {
+        list_set_sel(ty, 1); /* Bitmap */
+        ctl_invoke(ty, EV_CHANGE);
+        ctl_set_text(e, "T2");
+        sim_frames(1);
+        sim_shot("save_types");
+        ctl_focus(e);
+        sim_key(0x1C);
+        sim_frames(3);
+    }
+    dir_entry_t de;
+    T("a name without one: the type's extension (T2.BMP)",
+      fs_find("/T2.BMP", &de) && !fs_find("/T2.PIC", &de));
+    run_menu(w, "Save As...");
+    sim_frames(2);
+    d = wm_focused_window();
+    ty = nth(d, CTL_COMBO, 0), e = nth(d, CTL_EDIT, 0);
+    T("... and now Bitmap first (the picture's type)",
+      ty && strstr(list_get(ty, 0), "(.BMP)"));
+    if (ty && e) {
+        ctl_set_text(e, "T3.BMP");
+        list_set_sel(ty, 1); /* Picture: the name follows */
+        ctl_invoke(ty, EV_CHANGE);
+        snprintf(b, sizeof b, "    the name now: %s\n", ctl_text(e));
+        wr(1, b);
+        T("another type: the typed name's extension changes",
+          !strcmp(ctl_text(e), "T3.PIC"));
+        ctl_focus(e);
+        sim_key(0x1C);
+        sim_frames(3);
+    }
+    T("... saved so", fs_find("/T3.PIC", &de));
 
     /* a .PIC from a 256-colour screen, on a 16-colour one: the nearest */
     if (!many) {
@@ -512,7 +616,131 @@ static int kernel_lib(void) {
     return fails;
 }
 
+/* the tools, each checked in the picture */
+static int draw_tools(void) {
+    int fails = 0;
+    char b[300];
+    clean_prefs();
+    sim_launch("ASMDRAW");
+    sim_frames(3);
+    window *w = wm_focused_window();
+    control *cv = canvas_of(w), *pal = tipped(w, "Click: the pen");
+    int cw = pal->aw / (gpu_palette(s_pal, 256) == 256 ? 24 : 16);
+#define TOOL(t)                                                                \
+    do {                                                                       \
+        control *t_ = tipped(w, t);                                            \
+        if (t_)                                                                \
+            sim_click(t_->ax + 5, t_->ay + 5);                                 \
+        T("the button: " t, t_ != NULL);                                       \
+    } while (0)
+#define COLOR(i) sim_click(pal->ax + (i) * cw + cw / 2, pal->ay + 5)
+#define AT(x, y) canvas_px(cv, x, y)
+    int x0 = cv->ax + 2, y0 = cv->ay + 2; /* the canvas's (0, 0) */
+    T("10 tools, 6 sizes", tipped(w, "Spray") && tipped(w, "Pick a colour") &&
+                               tipped(w, "Brush: 1 pixel") &&
+                               tipped(w, "Brush: 9 pixels"));
+
+    /* a filled rectangle */
+    COLOR(4); /* red */
+    TOOL("Filled rectangle");
+    sim_drag(x0 + 10, y0 + 10, x0 + 40, y0 + 30);
+    sim_frames(1);
+    T("filled rectangle: all of it", AT(10, 10) == 4 && AT(25, 20) == 4 &&
+                                         AT(40, 30) == 4 && AT(41, 30) == 15 &&
+                                         AT(25, 31) == 15);
+
+    /* Shift + ellipse: a circle in the box 60..90 x 10..40 */
+    COLOR(8); /* blue */
+    TOOL("Ellipse");
+    kb.shift = true;
+    sim_drag(x0 + 60, y0 + 10, x0 + 90, y0 + 30); /* (wider than tall) */
+    kb.shift = false;
+    sim_frames(1);
+    snprintf(b, sizeof b,
+             "    circle: top %d bottom %d left %d right %d "
+             "middle %d\n",
+             AT(75, 10), AT(75, 40), AT(60, 25), AT(90, 25), AT(75, 25));
+    wr(1, b);
+    T("Shift: a circle (as tall as wide)",
+      AT(75, 10) == 1 && AT(75, 40) == 1 && AT(60, 25) == 1 &&
+          AT(90, 25) == 1 && AT(75, 25) == 15 && AT(75, 41) == 15);
+
+    /* fill inside it */
+    COLOR(11); /* yellow */
+    TOOL("Fill");
+    sim_click(x0 + 75, y0 + 25);
+    sim_frames(1);
+    T("fill: inside the circle, not out",
+      AT(75, 25) == 14 && AT(66, 25) == 14 && AT(75, 10) == 1 &&
+          AT(55, 25) == 15);
+
+    /* a filled ellipse, and the colour picked back from it */
+    COLOR(6); /* green */
+    TOOL("Filled ellipse");
+    sim_drag(x0 + 100, y0 + 10, x0 + 140, y0 + 30);
+    sim_frames(1);
+    T("filled ellipse: the middle, not the corner",
+      AT(120, 20) == 2 && AT(101, 20) == 2 && AT(100, 10) == 15);
+    COLOR(0); /* black */
+    TOOL("Pick a colour");
+    sim_click(x0 + 20, y0 + 20); /* the red rectangle */
+    sim_frames(1);
+    control *pens = tipped(w, "The pen over");
+    T("pick: the pen's colour is red now, the tool back to the ellipse",
+      BACKBUF[(pens->ay + 3) * SCREEN_WIDTH + pens->ax + 3] == 4);
+    sim_drag(x0 + 150, y0 + 10, x0 + 170, y0 + 30);
+    sim_frames(1);
+    T("... (it draws a red filled ellipse)", AT(160, 20) == 4);
+
+    /* brush sizes: a 9-pixel dot is 9 across, a line at 45 degrees */
+    COLOR(0);
+    TOOL("Pencil");
+    TOOL("Brush: 9 pixels");
+    sim_click(x0 + 20, y0 + 60);
+    sim_frames(1);
+    T("a 9-pixel brush: 9 across", AT(16, 60) == 0 && AT(24, 60) == 0 &&
+                                       AT(15, 60) == 15 && AT(25, 60) == 15 &&
+                                       AT(20, 56) == 0 && AT(20, 55) == 15);
+    TOOL("Line");
+    TOOL("Brush: 1 pixel");
+    kb.shift = true;
+    sim_drag(x0 + 40, y0 + 50, x0 + 70, y0 + 75); /* -> 45 degrees */
+    kb.shift = false;
+    sim_frames(1);
+    T("Shift + line: 45 degrees", AT(40, 50) == 0 && AT(55, 65) == 0 &&
+                                      AT(70, 80) == 0 && AT(70, 75) == 15);
+
+    /* spray: dots near where it is held, none far */
+    COLOR(5); /* light red: (palette order) */
+    TOOL("Spray");
+    TOOL("Brush: 3 pixels");
+    sim_move(x0 + 120, y0 + 70);
+    mouse.left = true;
+    sim_frames(20);
+    mouse.left = false;
+    sim_frame();
+    int in = 0, out = 0, r = 3 * 2 + 3;
+    for (int y = 50; y < 90; y++)
+        for (int x = 100; x < 140; x++) {
+            int dx = x - 120, dy = y - 70;
+            if (AT(x, y) == 12)
+                *(dx * dx + dy * dy <= r * r ? &in : &out) += 1;
+        }
+    snprintf(b, sizeof b, "    spray: %d dots inside, %d outside\n", in, out);
+    wr(1, b);
+    T("spray: dots around it, while held", in > 20 && out == 0);
+    sim_shot("draw_tools");
+    wm_close(w);
+    sim_frames(3);
+#undef TOOL
+#undef COLOR
+#undef AT
+    return fails;
+}
+
 int scen_bmp(const char *name) {
+    if (!strcmp(name, "drawtools"))
+        return draw_tools();
     if (!strcmp(name, "bmplib"))
         return kernel_lib();
     if (!strcmp(name, "bmpview"))

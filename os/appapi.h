@@ -142,6 +142,10 @@ typedef struct ui_api {
 
     // appended in ui size 3
     control *(*status)(window *, const char *); /* status bar, see ctl_status */
+
+    // appended in ui size 4 (API size 11): the colour picker (dlg_color)
+    void (*color)(window *owner, const char *title, const uint8_t rgb[3],
+                  int preview, dlg_color_cb cb, void *user);
 } ui_api_t;
 
 #define OS_API_VERSION 1

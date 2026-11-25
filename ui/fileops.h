@@ -44,6 +44,8 @@ const char *fo_set_hidden(const char *path, bool hidden);
 const char *fo_clip(const char *path, bool cut); /* file clipboard */
 const char *fo_paste(const char *dst_dir);
 void fo_info_text(const char *path, char *out, int sz);
+/* what files ending .ext are: "Picture" (PIC), "File" if not known */
+const char *fo_type_of(const char *ext);
 
 /* Open by type: folder -> FileF, .APP -> run, text -> TEditor,
  * .WAV -> play, .PIC -> ASMDraw, anything else -> HexView. */

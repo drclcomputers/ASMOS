@@ -743,6 +743,7 @@ static const ui_api_t s_ui = {
     .tree_find_path = tree_find_path,
     .edit_select_all = edit_select_all,
     .status = ctl_status,
+    .color = dlg_color,
 };
 
 // API table given to v2 apps

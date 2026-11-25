@@ -175,12 +175,22 @@ int scen_apps1(const char *name) {
         sim_frames(3);
         window *w = wm_focused_window();
         int cx = w->x + 1, cy = w->y + 26;
-        sim_drag(cx + 40, cy + 20, cx + 120, cy + 60);  /* pencil */
-        sim_click(cx + 9, cy + 2 + 3 * 15 + 5);         /* rect tool */
-        sim_click(cx + 20 + 20 + 4 * 14 + 5, cy + 143); /* red */
+        control *pal = NULL, *rt = NULL, *ft = NULL;
+        for (control *c = w->controls; c; c = c->next) {
+            if (c->tip && !strncmp(c->tip, "Click: the pen", 14))
+                pal = c;
+            if (c->tip && !strncmp(c->tip, "Rectangle", 9))
+                rt = c;
+            if (c->tip && !strncmp(c->tip, "Fill", 4))
+                ft = c;
+        }
+        int pw = pal->aw / 16;
+        sim_drag(cx + 40, cy + 20, cx + 120, cy + 60); /* pencil */
+        sim_click(rt->ax + 5, rt->ay + 5);             /* rectangle */
+        sim_click(pal->ax + 4 * pw + 3, pal->ay + 5);  /* red */
         sim_drag(cx + 60, cy + 70, cx + 180, cy + 120);
-        sim_click(cx + 9, cy + 2 + 4 * 15 + 5);          /* fill */
-        sim_click(cx + 20 + 20 + 11 * 14 + 5, cy + 143); /* yellow */
+        sim_click(ft->ax + 5, ft->ay + 5);             /* fill */
+        sim_click(pal->ax + 11 * pw + 3, pal->ay + 5); /* yellow */
         sim_click(cx + 100, cy + 100);
         sim_move(cx + 150, cy + 40);
         sim_frames(1);

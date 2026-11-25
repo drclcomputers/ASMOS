@@ -324,7 +324,7 @@ int scen_misc2(const char *name) {
         w = wm_focused_window();
         control *r = NULL;
         for (control *c = w->controls; c; c = c->next)
-            if (c->tip && !strcmp(c->tip, "Rectangle"))
+            if (c->tip && !strncmp(c->tip, "Rectangle", 9))
                 r = c;
         sim_move(r->ax + 6, r->ay + 6);
         sim_frames(50);

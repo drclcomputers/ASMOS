@@ -196,6 +196,9 @@ returns the rows done; `bmp_error(r)` says why it stopped), then
 `n` 248 leaves out the 8 custom colours, which other apps change.
 `bmp_save(path, pix, w, h, stride, pal, 16 or 256)` writes one.
 
+Also in API size 11, the UI table's size 4: `api->ui->color`, the colour
+picker (`dlg_color` in an app; docs/UI_TOOLKIT.md).
+
 ## What an app needs: --min-cpu, --min-ram
 
 `mkapp.py --min-cpu 486 --min-ram 4096` (KB) writes the least CPU and RAM

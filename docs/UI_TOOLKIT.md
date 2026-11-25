@@ -150,6 +150,16 @@ window is blocked while its dialog is open. Callback text `NULL` = cancel.
 | `dlg_input_check(…, check_label, bool *checked, cb, user)`            | same; `*checked` is written before `cb` (keep it in your state) |
 | `dlg_open_file(owner, title, dir, ext, cb, user)`                     | `cb(user, path)`                                                |
 | `dlg_save_file(owner, title, dir, name, ext, cb, user)`               | `cb(user, path)` (asks before overwriting)                      |
+| `dlg_color(owner, title, rgb, preview, cb, user)`                     | `cb(user, rgb)`, NULL if cancelled (0..63 each)                 |
+
+`ext` may list several types: `"PIC,BMP"`. Open shows all of them; Save
+has a Type list (the first chosen at the start): its files are shown, a
+name typed without an extension (or with one not of the list) gets its
+extension, and choosing another type changes the typed one. The colour
+picker (`ui/colorpick.c`) has a field of hues, a lighter/darker bar, the 16
+basic colours and Red/Green/Blue as numbers; `preview` is a palette index
+(a custom colour, 248..255) that shows the colour exactly while it is
+chosen and is put back on Cancel, or -1.
 
 Kernel code that must not create windows (fault/error handlers) uses
 `dlg_post_message(title, msg)`: it is shown at the start of the next frame.

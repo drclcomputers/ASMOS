@@ -174,6 +174,11 @@ void dlg_input_check(window *owner, const char *title, const char *prompt,
                        check_label, checked, cb, user);
 }
 
+void dlg_color(window *owner, const char *title, const uint8_t rgb[3],
+               int preview, dlg_color_cb cb, void *user) {
+    A->ui->color(owner, title, rgb, preview, cb, user);
+}
+
 // drawing (lib/graphics.h)
 
 void draw_dot(int x, int y, unsigned char color) { A->draw_dot(x, y, color); }

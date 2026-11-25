@@ -3,51 +3,121 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
+/* ASMDraw: a paint program.
+ *
+ *   tools (2 columns)   | the canvas
+ *   brush sizes          |
+ *   pen/paper | colours (16; 24 with a 256-colour screen) [Edit...]
+ *
+ * Shapes are drawn with the brush: lines, rectangles and ellipses, empty
+ * or filled (Shift: straight lines at 45 degrees, squares, circles). The
+ * 8 custom colours are changed with the colour picker (dlg_color). */
+
 #include "extapps/shim.h"
 #include "os/prefs.h"
 
+/* tools: the numbers are kept in the settings (0..4 as before) */
 #define TOOL_PENCIL 0
 #define TOOL_ERASER 1
 #define TOOL_LINE 2
 #define TOOL_RECT 3
 #define TOOL_FILL 4
-#define NUM_TOOLS 5
-#define BRUSH_SIZES 3
+#define TOOL_FRECT 5
+#define TOOL_ELLIPSE 6
+#define TOOL_FELLIPSE 7
+#define TOOL_SPRAY 8
+#define TOOL_PICK 9
+#define NUM_TOOLS 10
+#define NUM_SIZES 6
 #define CUSTOM APP_COLORS_CUSTOM /* custom colours, on a 256-colour screen */
 #define FIRST_CUSTOM APP_COLOR_CUSTOM
+#define BTN 15            /* a tool button */
+#define BAR (2 * BTN + 4) /* the tool bar's width */
+#define STRIP 12          /* the colour strip's height */
+#define FILL_STACK 16384  /* the fill's pending runs */
 
 static const uint8_t PALETTE_COLORS[16] = {
     BLACK,   WHITE,         DARK_GRAY, LIGHT_GRAY, RED,   LIGHT_RED,
     GREEN,   LIGHT_GREEN,   BLUE,      LIGHT_BLUE, BROWN, YELLOW,
     MAGENTA, LIGHT_MAGENTA, CYAN,      LIGHT_CYAN,
 };
+static const uint8_t SIZES[NUM_SIZES] = {1, 2, 3, 5, 7, 9}; /* pixels */
+/* the buttons, in the bar's order (two a row) */
+static const uint8_t BAR_TOOLS[NUM_TOOLS] = {
+    TOOL_PENCIL, TOOL_ERASER, TOOL_FILL,  TOOL_PICK,    TOOL_LINE,
+    TOOL_SPRAY,  TOOL_RECT,   TOOL_FRECT, TOOL_ELLIPSE, TOOL_FELLIPSE};
+static const char *const TOOL_NAMES[NUM_TOOLS] = {
+    "Pencil",
+    "Eraser (the paper colour)",
+    "Line (Shift: straight or 45 degrees)",
+    "Rectangle (Shift: a square)",
+    "Fill an area",
+    "Filled rectangle (Shift: a square)",
+    "Ellipse (Shift: a circle)",
+    "Filled ellipse (Shift: a circle)",
+    "Spray",
+    "Pick a colour from the picture"};
+
+/* 11x11 pictures: '#' black, 'o' the pen's colour, '.' nothing */
+static const char *const ICONS[NUM_TOOLS][11] = {
+    {"........##.", ".......#..#", "......#..#.", ".....#..#..", "....#..#...",
+     "...#..#....", "..#..#.....", ".##.#......", ".#.#.......", "###........",
+     "##........."}, /* pencil */
+    {"...........", "......####.", ".....#..##.", "....#..#.#.", "...#..#..#.",
+     "..####...#.", "..#..#..#..", "..#..#.#...", "..####.....", "...........",
+     "..........."}, /* eraser */
+    {"...........", ".........#.", "........#..", ".......#...", "......#....",
+     ".....#.....", "....#......", "...#.......", "..#........", ".#.........",
+     "..........."}, /* line */
+    {"...........", "...........", ".#########.", ".#.......#.", ".#.......#.",
+     ".#.......#.", ".#.......#.", ".#.......#.", ".#########.", "...........",
+     "..........."}, /* rectangle */
+    {"....#......", "...#.#.....", "..#...#....", ".#.....#...", "#.......#..",
+     ".#.....#o..", "..#...#.o..", "...#.#..oo.", "....#...oo.", "...........",
+     "..........."}, /* fill */
+    {"...........", "...........", ".#########.", ".#ooooooo#.", ".#ooooooo#.",
+     ".#ooooooo#.", ".#ooooooo#.", ".#ooooooo#.", ".#########.", "...........",
+     "..........."}, /* filled rectangle */
+    {"...........", "...#####...", "..#.....#..", ".#.......#.", ".#.......#.",
+     ".#.......#.", ".#.......#.", ".#.......#.", "..#.....#..", "...#####...",
+     "..........."}, /* ellipse */
+    {"...........", "...#####...", "..#ooooo#..", ".#ooooooo#.", ".#ooooooo#.",
+     ".#ooooooo#.", ".#ooooooo#.", ".#ooooooo#.", "..#ooooo#..", "...#####...",
+     "..........."}, /* filled ellipse */
+    {"......o.o.o", ".......o.o.", ".###..o.o.o", ".#.#.......", "#####......",
+     "#...#......", "#...#......", "#...#......", "#...#......", "#####......",
+     "..........."}, /* spray */
+    {".........##", "........###", ".......###.", "......##...", ".....#.#...",
+     "....#.#....", "...#.#.....", "..#.#......", ".#.#.......", ".##........",
+     "#.........."}, /* pick */
+};
 
 typedef struct {
     window *win; /* must stay first */
-    control *tools[NUM_TOOLS], *brushes[BRUSH_SIZES], *canvas_ctl, *palette,
-        *status;
+    control *tools[NUM_TOOLS], *sizes[NUM_SIZES], *canvas_ctl, *palette, *pens,
+        *edit_btn, *status;
 
     uint8_t *canvas; /* canvas_w * canvas_h colour bytes */
     int canvas_w, canvas_h;
 
-    int tool, brush_size;
-    uint8_t fg_color, bg_color;
+    int tool, size, before_pick;       /* (the tool to go back to after Pick) */
+    uint8_t fg_color, bg_color, color; /* color: the stroke's */
 
-    bool drawing;
+    bool drawing, shift;
     int start_x, start_y, cur_x, cur_y, last_cx, last_cy;
+    uint32_t seed; /* the spray's dots */
     char path[FS_PATH_SZ];
     char title[48];
     char dir[FS_PATH_SZ]; /* folder of the last open/save (remembered) */
     uint32_t status_until;
 
-    /* 256 colours: the 16, then 8 custom ones (white at first) the
-     * sliders change; the screen's colours shared by every window, so
-     * this window's are put back when it gets the focus */
+    /* 256 colours: the 16, then 8 custom ones (white at first) changed
+     * with the colour picker; the screen's colours are shared by every
+     * window, so this window's are put back when it gets the focus */
     bool many;                 /* the screen has 256 colours */
     uint8_t pal[256][3];       /* the screen's, with this window's own */
     uint8_t custom[CUSTOM][3]; /* 0..63 each */
-    int edit;                  /* the custom colour the sliders change */
-    control *rgb[3], *rgb_lab[3];
+    int edit;                  /* the custom colour Edit... changes */
     bool had_focus;
 } asmdraw_state_t;
 
@@ -68,12 +138,6 @@ static void apply_custom(asmdraw_state_t *s) {
     }
 }
 
-/* the sliders show the custom colour being changed */
-static void show_rgb(asmdraw_state_t *s) {
-    for (int c = 0; s->many && c < 3; c++)
-        ctl_set_value(s->rgb[c], s->custom[s->edit][c]);
-}
-
 /* "NAME.PIC - ASMDraw" once a file is open or saved */
 static void set_title(asmdraw_state_t *s) {
     const char *base = strrchr(s->path, '/');
@@ -89,36 +153,62 @@ static void draw_set_status(asmdraw_state_t *s, const char *msg) {
     s->status_until = time_millis() + 3000;
 }
 
-static void canvas_paint(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
-    int r = s->brush_size;
-    int lo_x = cx - r, hi_x = cx + r;
-    int lo_y = cy - r, hi_y = cy + r;
-    if (lo_x < 0)
-        lo_x = 0;
-    if (lo_y < 0)
-        lo_y = 0;
-    if (hi_x >= s->canvas_w)
-        hi_x = s->canvas_w - 1;
-    if (hi_y >= s->canvas_h)
-        hi_y = s->canvas_h - 1;
-    for (int y = lo_y; y <= hi_y; y++)
-        for (int x = lo_x; x <= hi_x; x++)
-            s->canvas[(y)*s->canvas_w + (x)] = color;
+// drawing: everything is runs of one row ("spans"), into the canvas or,
+// while a shape is being dragged, onto the screen over it
+
+typedef struct {
+    asmdraw_state_t *s;
+    bool screen;        /* onto the screen (a preview) */
+    int ox, oy, vw, vh; /* the screen: where the canvas is, what shows */
+    uint8_t color;
+} pen_t;
+
+static void span(const pen_t *p, int x0, int x1, int y) {
+    asmdraw_state_t *s = p->s;
+    int w = p->screen ? p->vw : s->canvas_w;
+    int h = p->screen ? p->vh : s->canvas_h;
+    if (y < 0 || y >= h)
+        return;
+    if (x0 > x1) {
+        int t = x0;
+        x0 = x1;
+        x1 = t;
+    }
+    x0 = x0 < 0 ? 0 : x0;
+    x1 = x1 >= w ? w - 1 : x1;
+    if (x0 > x1)
+        return;
+    if (p->screen)
+        fill_rect(p->ox + x0, p->oy + y, x1 - x0 + 1, 1, p->color);
+    else
+        memset(s->canvas + y * s->canvas_w + x0, p->color,
+               (uint32_t)(x1 - x0 + 1));
 }
 
-static void canvas_line(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
-                        uint8_t color) {
-    int dx = x1 - x0;
-    if (dx < 0)
-        dx = -dx;
-    int dy = y1 - y0;
-    if (dy < 0)
-        dy = -dy;
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
+/* the brush (round, SIZES[size] across) with its middle at (x, y): 1 and
+ * 2 are squares, the rest odd and round */
+static void stamp(const pen_t *p, int x, int y) {
+    int d = SIZES[p->s->size];
+    if (d <= 2) {
+        for (int j = 0; j < d; j++)
+            span(p, x, x + d - 1, y + j);
+        return;
+    }
+    int r = (d - 1) / 2;
+    for (int dy = -r; dy <= r; dy++) {
+        int hw = 0;
+        while ((hw + 1) * (hw + 1) + dy * dy <= r * r + r)
+            hw++;
+        span(p, x - hw, x + hw, y + dy);
+    }
+}
+
+static void line(const pen_t *p, int x0, int y0, int x1, int y1) {
+    int dx = x1 > x0 ? x1 - x0 : x0 - x1, sx = x0 < x1 ? 1 : -1;
+    int dy = y1 > y0 ? y1 - y0 : y0 - y1, sy = y0 < y1 ? 1 : -1;
     int err = dx - dy;
-    while (1) {
-        canvas_paint(s, x0, y0, color);
+    for (;;) {
+        stamp(p, x0, y0);
         if (x0 == x1 && y0 == y1)
             break;
         int e2 = 2 * err;
@@ -133,71 +223,178 @@ static void canvas_line(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
     }
 }
 
-static void canvas_fill(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
-    uint8_t target = s->canvas[(cy)*s->canvas_w + (cx)];
-    if (target == color)
+static void rect(const pen_t *p, int x0, int y0, int x1, int y1, bool fill) {
+    if (fill) {
+        for (int y = y0 < y1 ? y0 : y1; y <= (y0 < y1 ? y1 : y0); y++)
+            span(p, x0, x1, y);
         return;
+    }
+    line(p, x0, y0, x1, y0);
+    line(p, x1, y0, x1, y1);
+    line(p, x1, y1, x0, y1);
+    line(p, x0, y1, x0, y0);
+}
 
+/* the ellipse in the box (x0, y0)-(x1, y1), A. Zingl's way: even sizes
+ * too; filled, a run between each pair of points */
+static void ellipse(const pen_t *p, int x0, int y0, int x1, int y1, bool fill) {
+    long long a = x1 > x0 ? x1 - x0 : x0 - x1, b = y1 > y0 ? y1 - y0 : y0 - y1;
+    long long b1 = b & 1;
+    long long dx = 4 * (1 - a) * b * b, dy = 4 * (b1 + 1) * a * a;
+    long long err = dx + dy + b1 * a * a, e2;
+    if (x0 > x1) {
+        x0 = x1;
+        x1 += (int)a;
+    }
+    if (y0 > y1)
+        y0 = y1;
+    y0 += (int)((b + 1) / 2);
+    y1 = y0 - (int)b1;
+    a *= 8 * a;
+    b1 = 8 * b * b;
+    do {
+        if (fill) {
+            span(p, x0, x1, y0);
+            span(p, x0, x1, y1);
+        } else {
+            stamp(p, x1, y0);
+            stamp(p, x0, y0);
+            stamp(p, x0, y1);
+            stamp(p, x1, y1);
+        }
+        e2 = 2 * err;
+        if (e2 <= dy) {
+            y0++;
+            y1--;
+            err += dy += a;
+        }
+        if (e2 >= dx || 2 * err > dy) {
+            x0++;
+            x1--;
+            err += dx += b1;
+        }
+    } while (x0 <= x1);
+    while (y0 - y1 <= b) { /* a flat one: the ends */
+        if (fill) {
+            span(p, x0 - 1, x1 + 1, y0++);
+            span(p, x0 - 1, x1 + 1, y1--);
+        } else {
+            stamp(p, x0 - 1, y0);
+            stamp(p, x1 + 1, y0++);
+            stamp(p, x0 - 1, y1);
+            stamp(p, x1 + 1, y1--);
+        }
+    }
+}
+
+/* Shift: lines at 0/45/90 degrees, squares and circles */
+static void constrain(const asmdraw_state_t *s, int *x1, int *y1) {
+    int dx = *x1 - s->start_x, dy = *y1 - s->start_y;
+    int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+    if (!s->shift)
+        return;
+    if (s->tool == TOOL_LINE) {
+        if (ax > 2 * ay)
+            *y1 = s->start_y;
+        else if (ay > 2 * ax)
+            *x1 = s->start_x;
+        else {
+            int m = ax > ay ? ax : ay;
+            *x1 = s->start_x + (dx < 0 ? -m : m);
+            *y1 = s->start_y + (dy < 0 ? -m : m);
+        }
+        return;
+    }
+    int m = ax > ay ? ax : ay;
+    *x1 = s->start_x + (dx < 0 ? -m : m);
+    *y1 = s->start_y + (dy < 0 ? -m : m);
+}
+
+/* the shape being dragged, from start to (x1, y1) */
+static void shape(const pen_t *p, int x1, int y1) {
+    const asmdraw_state_t *s = p->s;
+    int x0 = s->start_x, y0 = s->start_y;
+    switch (s->tool) {
+    case TOOL_LINE:
+        line(p, x0, y0, x1, y1);
+        break;
+    case TOOL_RECT:
+    case TOOL_FRECT:
+        rect(p, x0, y0, x1, y1, s->tool == TOOL_FRECT);
+        break;
+    default:
+        ellipse(p, x0, y0, x1, y1, s->tool == TOOL_FELLIPSE);
+    }
+}
+
+static bool is_shape(int t) {
+    return t == TOOL_LINE || t == TOOL_RECT || t == TOOL_FRECT ||
+           t == TOOL_ELLIPSE || t == TOOL_FELLIPSE;
+}
+
+/* the area of one colour around (cx, cy), row by row: runs to the left
+ * and right, then the rows above and below from a stack of seeds */
+static bool canvas_fill(asmdraw_state_t *s, int cx, int cy, uint8_t color) {
+    int w = s->canvas_w, h = s->canvas_h;
+    uint8_t *c = s->canvas, target = c[cy * w + cx];
+    if (target == color)
+        return true;
     typedef struct {
         int16_t x, y;
     } pt_t;
-    int max_pts = s->canvas_w * s->canvas_h / 2;
-    pt_t *stk = (pt_t *)kmalloc(max_pts * sizeof(pt_t));
+    pt_t *stk = (pt_t *)kmalloc(FILL_STACK * sizeof(pt_t));
     if (!stk)
-        return;
+        return false;
     int top = 0;
-
+    bool whole = true;
     stk[top].x = (int16_t)cx;
-    stk[top].y = (int16_t)cy;
-    top++;
-
+    stk[top++].y = (int16_t)cy;
     while (top > 0) {
         top--;
-        int x = stk[top].x;
-        int y = stk[top].y;
-        if (x < 0 || y < 0 || x >= s->canvas_w || y >= s->canvas_h)
+        int x = stk[top].x, y = stk[top].y;
+        if (c[y * w + x] != target)
             continue;
-        if (s->canvas[(y)*s->canvas_w + (x)] != target)
-            continue;
-        s->canvas[(y)*s->canvas_w + (x)] = color;
-        if (top + 4 <= max_pts - 1) {
-            stk[top].x = (int16_t)(x + 1);
-            stk[top].y = (int16_t)y;
-            top++;
-            stk[top].x = (int16_t)(x - 1);
-            stk[top].y = (int16_t)y;
-            top++;
-            stk[top].x = (int16_t)x;
-            stk[top].y = (int16_t)(y + 1);
-            top++;
-            stk[top].x = (int16_t)x;
-            stk[top].y = (int16_t)(y - 1);
-            top++;
+        int l = x, r = x;
+        while (l > 0 && c[y * w + l - 1] == target)
+            l--;
+        while (r < w - 1 && c[y * w + r + 1] == target)
+            r++;
+        memset(c + y * w + l, color, (uint32_t)(r - l + 1));
+        for (int ny = y - 1; ny <= y + 1; ny += 2) { /* a seed per run */
+            if (ny < 0 || ny >= h)
+                continue;
+            bool in = false;
+            for (int i = l; i <= r; i++) {
+                bool t = c[ny * w + i] == target;
+                if (t && !in) {
+                    if (top < FILL_STACK) {
+                        stk[top].x = (int16_t)i;
+                        stk[top++].y = (int16_t)ny;
+                    } else {
+                        whole = false;
+                    }
+                }
+                in = t;
+            }
         }
     }
-
     kfree(stk);
+    return whole;
 }
 
-static void canvas_rect(asmdraw_state_t *s, int x0, int y0, int x1, int y1,
-                        uint8_t color) {
-    if (x0 > x1) {
-        int t = x0;
-        x0 = x1;
-        x1 = t;
-    }
-    if (y0 > y1) {
-        int t = y0;
-        y0 = y1;
-        y1 = t;
-    }
-    for (int x = x0; x <= x1; x++) {
-        canvas_paint(s, x, y0, color);
-        canvas_paint(s, x, y1, color);
-    }
-    for (int y = y0; y <= y1; y++) {
-        canvas_paint(s, x0, y, color);
-        canvas_paint(s, x1, y, color);
+/* a few dots in a circle around (x, y) */
+static void spray(asmdraw_state_t *s, int x, int y) {
+    pen_t p = {s, false, 0, 0, 0, 0, s->color};
+    int r = SIZES[s->size] * 2 + 3, n = SIZES[s->size] + 4;
+    for (int i = 0; i < n; i++) {
+        int dx, dy;
+        do {
+            s->seed = s->seed * 1103515245u + 12345u;
+            dx = (int)((s->seed >> 8) % (uint32_t)(2 * r + 1)) - r;
+            s->seed = s->seed * 1103515245u + 12345u;
+            dy = (int)((s->seed >> 8) % (uint32_t)(2 * r + 1)) - r;
+        } while (dx * dx + dy * dy > r * r);
+        span(&p, x + dx, x + dx, y + dy);
     }
 }
 
@@ -284,7 +481,7 @@ static void asmdraw_save(asmdraw_state_t *s, const char *path) {
 static void take_custom(asmdraw_state_t *s, const uint8_t (*c)[3]) {
     memcpy(s->custom, c, sizeof(s->custom));
     apply_custom(s);
-    show_rgb(s);
+    wm_invalidate(s->win);
 }
 
 /* on a 16-colour screen, colours above 15 (from a 256-colour one) become
@@ -404,141 +601,224 @@ static void asmdraw_load(asmdraw_state_t *s, const char *path) {
     draw_set_status(s, "Opened.");
 }
 
-// canvas control
+// the canvas
 
 static void paint_canvas(control *c, int x, int y, int w, int h) {
     asmdraw_state_t *s = c->user;
     update_canvas_size(s);
+    int vw = s->canvas_w < w ? s->canvas_w : w;
+    int vh = s->canvas_h < h ? s->canvas_h : h;
     /* a row at a time: draw_dot per pixel made a 486 crawl (5 fps) */
-    draw_pixels(x, y, s->canvas_w < w ? s->canvas_w : w,
-                s->canvas_h < h ? s->canvas_h : h, s->canvas, s->canvas_w);
-    if (s->drawing && (s->tool == TOOL_LINE || s->tool == TOOL_RECT)) {
-        int x0 = x + s->start_x, y0 = y + s->start_y;
-        int x1 = x + s->cur_x, y1 = y + s->cur_y;
-        if (s->tool == TOOL_LINE)
-            draw_line(x0, y0, x1, y1, s->fg_color);
-        else
-            draw_rect(x0 < x1 ? x0 : x1, y0 < y1 ? y0 : y1,
-                      (x1 > x0 ? x1 - x0 : x0 - x1) + 1,
-                      (y1 > y0 ? y1 - y0 : y0 - y1) + 1, s->fg_color);
+    draw_pixels(x, y, vw, vh, s->canvas, s->canvas_w);
+    if (s->drawing && is_shape(s->tool)) { /* the shape so far */
+        pen_t p = {s, true, x, y, vw, vh, s->color};
+        int x1 = s->cur_x, y1 = s->cur_y;
+        constrain(s, &x1, &y1);
+        shape(&p, x1, y1);
     }
 }
+
+static void select_tool(asmdraw_state_t *s, int t, int size);
 
 static void on_canvas(control *c, int ev) {
     asmdraw_state_t *s = c->user;
     int cx = c->mx - 2, cy = c->my - 2; /* inside the border */
-    if (cx < 0)
-        cx = 0;
-    if (cy < 0)
-        cy = 0;
-    if (cx >= s->canvas_w)
-        cx = s->canvas_w - 1;
-    if (cy >= s->canvas_h)
-        cy = s->canvas_h - 1;
+    cx = cx < 0 ? 0 : cx >= s->canvas_w ? s->canvas_w - 1 : cx;
+    cy = cy < 0 ? 0 : cy >= s->canvas_h ? s->canvas_h - 1 : cy;
     s->cur_x = cx;
     s->cur_y = cy;
-    uint8_t col = s->tool == TOOL_ERASER ? s->bg_color : s->fg_color;
+    s->shift = kb.shift;
+    pen_t p = {s, false, 0, 0, 0, 0, s->color};
 
     if (ev == EV_MOUSEDOWN || ev == EV_DBLCLICK) {
+        s->color = s->tool == TOOL_ERASER ? s->bg_color : s->fg_color;
+        p.color = s->color;
+        s->start_x = s->last_cx = cx;
+        s->start_y = s->last_cy = cy;
         switch (s->tool) {
         case TOOL_PENCIL:
         case TOOL_ERASER:
-            canvas_paint(s, cx, cy, col);
-            s->last_cx = cx;
-            s->last_cy = cy;
+            stamp(&p, cx, cy);
+            s->drawing = true;
             break;
         case TOOL_FILL:
-            canvas_fill(s, cx, cy, s->fg_color);
+            if (!canvas_fill(s, cx, cy, s->fg_color))
+                draw_set_status(s, "Filled what it could: the area has too "
+                                   "many edges.");
             break;
-        default:
-            s->drawing = true;
-            s->start_x = cx;
-            s->start_y = cy;
+        case TOOL_PICK: {
+            uint8_t v = s->canvas[cy * s->canvas_w + cx];
+            if (kb.shift)
+                s->bg_color = v;
+            else
+                s->fg_color = v;
+            select_tool(s, s->before_pick, -1); /* back to drawing */
+            wm_invalidate(s->win);
+            break;
         }
-    } else if (ev == EV_MOUSEMOVE) {
+        case TOOL_SPRAY:
+            spray(s, cx, cy);
+            s->drawing = true;
+            break;
+        default: /* a shape: from here */
+            s->drawing = true;
+        }
+    } else if (ev == EV_MOUSEMOVE && s->drawing) {
         if (s->tool == TOOL_PENCIL || s->tool == TOOL_ERASER) {
-            canvas_line(s, s->last_cx, s->last_cy, cx, cy, col);
+            line(&p, s->last_cx, s->last_cy, cx, cy);
             s->last_cx = cx;
             s->last_cy = cy;
+        } else if (s->tool == TOOL_SPRAY) {
+            spray(s, cx, cy);
         }
     } else if (ev == EV_MOUSEUP && s->drawing) {
-        if (s->tool == TOOL_LINE)
-            canvas_line(s, s->start_x, s->start_y, cx, cy, s->fg_color);
-        else
-            canvas_rect(s, s->start_x, s->start_y, cx, cy, s->fg_color);
+        if (is_shape(s->tool)) {
+            int x1 = cx, y1 = cy;
+            constrain(s, &x1, &y1);
+            shape(&p, x1, y1);
+        }
         s->drawing = false;
     }
 }
 
-// palette control
+// the tool bar: a button each (drawn here), tools then brush sizes
+
+#define SIZE_ID 100 /* a size button's id: SIZE_ID + its number */
+
+static void bevel(int x, int y, int w, int h, bool down) {
+    fill_rect(x, y, w, h, down ? WHITE : LIGHT_GRAY);
+    draw_rect(x, y, w, h, BLACK);
+    uint8_t hi = down ? DARK_GRAY : WHITE, lo = down ? LIGHT_GRAY : DARK_GRAY;
+    draw_line(x + 1, y + 1, x + w - 2, y + 1, hi);
+    draw_line(x + 1, y + 1, x + 1, y + h - 2, hi);
+    draw_line(x + 1, y + h - 2, x + w - 2, y + h - 2, lo);
+    draw_line(x + w - 2, y + 1, x + w - 2, y + h - 2, lo);
+}
+
+static void paint_button(control *c, int x, int y, int w, int h) {
+    asmdraw_state_t *s = c->user;
+    bool size = c->id >= SIZE_ID;
+    int k = size ? c->id - SIZE_ID : c->id;
+    bevel(x, y, w, h, size ? s->size == k : s->tool == k);
+    if (size) { /* a dot as big as the brush */
+        int d = SIZES[k], ox = x + (w - d) / 2, oy = y + (h - d) / 2;
+        int r = (d - 1) / 2;
+        for (int j = 0; j < d; j++) {
+            int hw = r, dy = j - r;
+            if (d > 2)
+                for (hw = 0; (hw + 1) * (hw + 1) + dy * dy <= r * r + r;)
+                    hw++;
+            fill_rect(d > 2 ? ox + r - hw : ox, oy + j, d > 2 ? 2 * hw + 1 : d,
+                      1, BLACK);
+        }
+        return;
+    }
+    int ix = x + (w - 11) / 2, iy = y + (h - 11) / 2;
+    for (int j = 0; j < 11; j++)
+        for (int i = 0; i < 11; i++) {
+            char ch = ICONS[k][j][i];
+            if (ch != '.')
+                draw_dot(ix + i, iy + j, ch == '#' ? BLACK : s->fg_color);
+        }
+}
+
+static void select_tool(asmdraw_state_t *s, int t, int size) {
+    if (t >= 0 && t < NUM_TOOLS) {
+        if (t == TOOL_PICK && s->tool != TOOL_PICK)
+            s->before_pick = s->tool;
+        s->tool = t;
+    }
+    if (size >= 0 && size < NUM_SIZES)
+        s->size = size;
+    s->drawing = false;
+    wm_invalidate(s->win);
+}
+
+static void on_button(control *c, int ev) {
+    asmdraw_state_t *s = c->user;
+    if (ev != EV_MOUSEDOWN && ev != EV_DBLCLICK)
+        return;
+    if (c->id >= SIZE_ID)
+        select_tool(s, -1, c->id - SIZE_ID);
+    else
+        select_tool(s, c->id, -1);
+}
+
+// colours
+
+/* the pen over the paper; a click swaps them */
+static void paint_pens(control *c, int x, int y, int w, int h) {
+    asmdraw_state_t *s = c->user;
+    int bw = w * 2 / 3, bh = h - 3;
+    fill_rect(x + w - bw, y + 3, bw, bh, s->bg_color);
+    draw_rect(x + w - bw, y + 3, bw, bh, BLACK);
+    fill_rect(x, y, bw, bh, s->fg_color);
+    draw_rect(x, y, bw, bh, BLACK);
+}
+
+static void on_pens(control *c, int ev) {
+    asmdraw_state_t *s = c->user;
+    if (ev != EV_MOUSEDOWN && ev != EV_DBLCLICK)
+        return;
+    uint8_t t = s->fg_color;
+    s->fg_color = s->bg_color;
+    s->bg_color = t;
+    wm_invalidate(s->win);
+}
 
 static void paint_palette(control *c, int x, int y, int w, int h) {
     asmdraw_state_t *s = c->user;
-    /* current colours: fg square over bg square */
-    fill_rect(x + 6, y + 3, 10, h - 6, s->bg_color);
-    draw_rect(x + 6, y + 3, 10, h - 6, BLACK);
-    fill_rect(x + 1, y + 1, 10, h - 6, s->fg_color);
-    draw_rect(x + 1, y + 1, 10, h - 6, BLACK);
-    int n = swatches(s), cw = (w - 20) / n;
+    int n = swatches(s), cw = w / n;
     for (int i = 0; i < n; i++) {
-        fill_rect(x + 20 + i * cw, y + 1, cw - 1, h - 2, swatch_color(i));
-        draw_rect(x + 20 + i * cw, y + 1, cw - 1, h - 2, BLACK);
+        fill_rect(x + i * cw, y, cw - 1, h, swatch_color(i));
+        draw_rect(x + i * cw, y, cw - 1, h, BLACK);
     }
-    if (s->many) { /* the one the sliders change: a white-black frame */
-        int ex = x + 20 + (16 + s->edit) * cw;
-        draw_rect(ex - 1, y, cw + 1, h, WHITE);
-        draw_rect(ex, y + 1, cw - 1, h - 2, BLACK);
+    if (s->many) { /* the one Edit... changes: a white-black frame */
+        int ex = x + (16 + s->edit) * cw;
+        draw_rect(ex - 1, y - 1, cw + 1, h + 2, WHITE);
+        draw_rect(ex, y, cw - 1, h, BLACK);
     }
+}
+
+static void picked(void *user, const uint8_t *rgb) {
+    asmdraw_state_t *s = user;
+    if (!rgb)
+        return; /* (cancelled: the picker put the colour back) */
+    memcpy(s->custom[s->edit], rgb, 3);
+    apply_custom(s);
+    wm_invalidate(s->win);
+}
+
+static void edit_custom(asmdraw_state_t *s) {
+    char t[24];
+    snprintf(t, sizeof(t), "Custom colour %d", s->edit + 1);
+    /* tried in its own palette entry: the picture shows it at once */
+    dlg_color(s->win, t, s->custom[s->edit], FIRST_CUSTOM + s->edit, picked, s);
 }
 
 static void on_palette(control *c, int ev) {
     asmdraw_state_t *s = c->user;
     if (ev != EV_MOUSEDOWN && ev != EV_DBLCLICK)
         return;
-    int n = swatches(s), cw = (c->aw - 20) / n;
-    int i = cw > 0 ? (c->mx - 20) / cw : -1;
-    if (c->mx < 20 || i < 0 || i >= n)
+    int n = swatches(s), cw = c->aw / n;
+    int i = cw > 0 ? c->mx / cw : -1;
+    if (i < 0 || i >= n)
         return;
     if (kb.shift)
         s->bg_color = swatch_color(i);
     else
         s->fg_color = swatch_color(i);
-    if (i >= 16) { /* a custom one: the sliders change it now */
+    if (i >= 16) { /* a custom one: Edit... changes it (double-click too) */
         s->edit = i - 16;
-        show_rgb(s);
+        if (ev == EV_DBLCLICK)
+            edit_custom(s);
     }
-}
-
-static void on_rgb(control *c, int ev) {
-    asmdraw_state_t *s = c->user;
-    if (ev != EV_CHANGE)
-        return;
-    for (int k = 0; k < 3; k++)
-        if (c == s->rgb[k])
-            s->custom[s->edit][k] = (uint8_t)ctl_value(c);
-    apply_custom(s); /* (the canvas changes with the screen's colour) */
     wm_invalidate(s->win);
 }
 
-// tool buttons
-
-static void select_tool(asmdraw_state_t *s, int t, int b) {
-    if (t >= 0)
-        s->tool = t;
-    if (b >= 0)
-        s->brush_size = b;
-    for (int i = 0; i < NUM_TOOLS; i++)
-        ctl_set_value(s->tools[i], i == s->tool);
-    for (int i = 0; i < BRUSH_SIZES; i++)
-        ctl_set_value(s->brushes[i], i == s->brush_size);
-}
-
-static void on_tool(control *c, int ev) {
+static void on_edit_btn(control *c, int ev) {
     (void)ev;
-    if (c->id < 10)
-        select_tool(c->user, c->id, -1);
-    else
-        select_tool(c->user, -1, c->id - 10);
+    edit_custom(c->user);
 }
 
 // files
@@ -615,10 +895,12 @@ static void menu_print(void) {
 
 static void menu_about(void) {
     dlg_message(NULL, "About ASMDraw",
-                "ASMDraw v2.1\nPencil, eraser, line, rectangle, fill.\n"
-                "Click a colour for the pen, Shift+click for the background. "
-                "On a 256-colour screen, 8 more colours: the sliders "
-                "change the one picked.\n.PIC and .BMP pictures.");
+                "ASMDraw v3.0\nPencil, eraser, fill, colour picking, spray, "
+                "lines, rectangles and ellipses (filled too; Shift: "
+                "straight, squares, circles), 6 brush sizes.\n"
+                "Click a colour for the pen, Shift+click for the paper. On "
+                "a 256-colour screen, 8 colours of your own: Edit...\n"
+                ".PIC and .BMP pictures.");
 }
 
 static void asmdraw_init(void *state) {
@@ -634,57 +916,66 @@ static void asmdraw_init(void *state) {
     if (!s->win)
         return;
     s->win->lazy_custom = true; /* the canvas only changes in handlers */
+    s->win->min_w = 270;
+    s->win->min_h = 180;
     window *w = s->win;
-    static const char *TL[NUM_TOOLS] = {"P", "E", "L", "R", "F"};
-    static const char *BL[BRUSH_SIZES] = {"1", "3", "5"};
-    static const char *TT[NUM_TOOLS] = {"Pencil", "Eraser", "Line", "Rectangle",
-                                        "Fill"};
-    static const char *BT[BRUSH_SIZES] = {"Thin brush", "Medium brush",
-                                          "Thick brush"};
-    for (int i = 0; i < NUM_TOOLS; i++) {
-        s->tools[i] = ctl_button(w, 2, 2 + i * 15, 15, 14, TL[i], i, on_tool);
-        ctl_style_add(s->tools[i], CS_TOGGLE | CS_NOFOCUS);
-        ctl_set_tooltip(s->tools[i], TT[i]);
-    }
-    for (int i = 0; i < BRUSH_SIZES; i++) {
-        s->brushes[i] =
-            ctl_button(w, 2, 84 + i * 15, 15, 14, BL[i], 10 + i, on_tool);
-        ctl_style_add(s->brushes[i], CS_TOGGLE | CS_NOFOCUS);
-        ctl_set_tooltip(s->brushes[i], BT[i]);
-    }
-    /* the screen's colours; with 256, a row of sliders for the custom
-     * ones under the palette (the canvas 13 rows shorter) */
+
+    /* the screen's colours, and this window's own 8 (white at first) */
     s->many = A->screen_palette(s->pal, 256) >= 256;
     for (int k = 0; k < CUSTOM; k++) {
         char key[4] = {'c', (char)('0' + k), 0};
-        int v = app_prefs_get_int("ASMDRAW", key, 0x3FFFF); /* white */
+        int v = app_prefs_get_int("ASMDRAW", key, 0x3FFFF);
         s->custom[k][0] = (uint8_t)((v >> 12) & 63);
         s->custom[k][1] = (uint8_t)((v >> 6) & 63);
         s->custom[k][2] = (uint8_t)(v & 63);
     }
     apply_custom(s);
-    int row = s->many ? 13 : 0;
-    s->canvas_ctl =
-        ctl_custom(w, 20, 2, 246, 134 - row, paint_canvas, on_canvas,
-                   CS_BORDER | CS_STRETCH_W | CS_STRETCH_H);
-    s->palette = ctl_custom(w, 20, 138 - row, 246, 12, paint_palette,
-                            on_palette, CS_STRETCH_W | CS_ANCHOR_BOTTOM);
-    ctl_set_tooltip(s->palette,
-                    s->many ? "Click: pen colour, Shift+click: background. "
-                              "The last 8: your own (the sliders)"
-                            : "Click: pen colour, Shift+click: background");
-    static const char *RGB[3] = {"R", "G", "B"};
-    static const char *RGBT[3] = {"Red of the framed colour (0-63)",
-                                  "Green of the framed colour (0-63)",
-                                  "Blue of the framed colour (0-63)"};
-    for (int c = 0; s->many && c < 3; c++) {
-        s->rgb_lab[c] = ctl_label(w, 22 + c * 80, 139, 8, 11, RGB[c], 0);
-        ctl_style_add(s->rgb_lab[c], CS_ANCHOR_BOTTOM);
-        s->rgb[c] = ctl_slider(w, 30 + c * 80, 138, 66, 0, 63, 63, on_rgb);
-        ctl_style_add(s->rgb[c], CS_ANCHOR_BOTTOM);
-        ctl_set_tooltip(s->rgb[c], RGBT[c]);
+    s->seed = time_millis() | 1;
+
+    int cx, cy, cw, ch;
+    win_client_rect(w, &cx, &cy, &cw, &ch);
+    int sy = ch - 11 - STRIP - 2; /* the colours' row (over the status) */
+    for (int i = 0; i < NUM_TOOLS; i++) {
+        int t = BAR_TOOLS[i];
+        control *b = ctl_custom(w, 2 + (i % 2) * BTN, 2 + (i / 2) * BTN,
+                                BTN - 1, BTN - 1, paint_button, on_button, 0);
+        b->id = t;
+        ctl_set_tooltip(b, TOOL_NAMES[t]);
+        s->tools[t] = b;
     }
-    show_rgb(s);
+    static const char *const SIZE_TIPS[NUM_SIZES] = {
+        "Brush: 1 pixel",  "Brush: 2 pixels", "Brush: 3 pixels",
+        "Brush: 5 pixels", "Brush: 7 pixels", "Brush: 9 pixels"};
+    int y0 = 2 + (NUM_TOOLS + 1) / 2 * BTN + 5;
+    for (int i = 0; i < NUM_SIZES; i++) {
+        control *b = ctl_custom(w, 2 + (i % 2) * BTN, y0 + (i / 2) * BTN,
+                                BTN - 1, BTN - 1, paint_button, on_button, 0);
+        b->id = SIZE_ID + i;
+        ctl_set_tooltip(b, SIZE_TIPS[i]);
+        s->sizes[i] = b;
+    }
+    s->canvas_ctl =
+        ctl_custom(w, BAR, 2, cw - BAR - 2, sy - 4, paint_canvas, on_canvas,
+                   CS_BORDER | CS_STRETCH_W | CS_STRETCH_H);
+    s->pens = ctl_custom(w, 2, sy, BAR - 6, STRIP, paint_pens, on_pens,
+                         CS_ANCHOR_BOTTOM);
+    ctl_set_tooltip(s->pens, "The pen over the paper: click to swap them");
+    int edit_w = s->many ? 40 : 0;
+    s->palette =
+        ctl_custom(w, BAR, sy, cw - BAR - 2 - edit_w, STRIP, paint_palette,
+                   on_palette, CS_STRETCH_W | CS_ANCHOR_BOTTOM);
+    ctl_set_tooltip(s->palette,
+                    s->many ? "Click: the pen's colour, Shift+click: the "
+                              "paper's. The last 8 are your own"
+                            : "Click: the pen's colour, Shift+click: the "
+                              "paper's");
+    if (s->many) {
+        s->edit_btn = ctl_button(w, cw - 2 - 38, sy, 38, STRIP, "Edit...", 0,
+                                 on_edit_btn);
+        ctl_style_add(s->edit_btn,
+                      CS_ANCHOR_RIGHT | CS_ANCHOR_BOTTOM | CS_NOFOCUS);
+        ctl_set_tooltip(s->edit_btn, "Change the framed custom colour");
+    }
     s->status = ctl_status(w, "");
 
     menu *f = window_add_menu(w, "File");
@@ -705,9 +996,16 @@ static void asmdraw_init(void *state) {
     s->bg_color =
         (uint8_t)(paper >= 0 && paper < (s->many ? 256 : 16) ? paper : WHITE);
     int tool = app_prefs_get_int("ASMDRAW", "tool", TOOL_PENCIL);
-    int brush = app_prefs_get_int("ASMDRAW", "brush", 0);
-    select_tool(s, tool >= 0 && tool < NUM_TOOLS ? tool : TOOL_PENCIL,
-                brush >= 0 && brush < BRUSH_SIZES ? brush : 0);
+    int old = app_prefs_get_int("ASMDRAW", "brush", 0); /* (ASMDraw 2) */
+    int size = app_prefs_get_int("ASMDRAW", "size",
+                                 old == 2   ? 3
+                                 : old == 1 ? 2
+                                            : 0);
+    s->before_pick = TOOL_PENCIL;
+    select_tool(
+        s,
+        tool >= 0 && tool < NUM_TOOLS && tool != TOOL_PICK ? tool : TOOL_PENCIL,
+        size >= 0 && size < NUM_SIZES ? size : 0);
     if (!app_prefs_get("ASMDRAW", "dir", s->dir, sizeof(s->dir)))
         strcpy(s->dir, "/");
     update_canvas_size(s);
@@ -725,6 +1023,10 @@ static void asmdraw_on_frame(void *state) {
     if (focus && !s->had_focus && s->many)
         apply_custom(s);
     s->had_focus = focus;
+    if (s->drawing && s->tool == TOOL_SPRAY && mouse.left) { /* held still */
+        spray(s, s->cur_x, s->cur_y);
+        wm_invalidate(s->win);
+    }
     if (time_millis() > s->status_until) {
         char info[32] = "";
         control *c = s->canvas_ctl;
@@ -743,8 +1045,9 @@ static void asmdraw_destroy(void *state) {
         app_prefs_begin("ASMDRAW");
         app_prefs_set_int("ASMDRAW", "pen", s->fg_color);
         app_prefs_set_int("ASMDRAW", "paper", s->bg_color);
-        app_prefs_set_int("ASMDRAW", "tool", s->tool);
-        app_prefs_set_int("ASMDRAW", "brush", s->brush_size);
+        app_prefs_set_int("ASMDRAW", "tool",
+                          s->tool == TOOL_PICK ? s->before_pick : s->tool);
+        app_prefs_set_int("ASMDRAW", "size", s->size);
         app_prefs_set_int("ASMDRAW", "w", s->win->w);
         app_prefs_set_int("ASMDRAW", "h", s->win->h);
         app_prefs_set("ASMDRAW", "dir", s->dir);
@@ -761,7 +1064,5 @@ static void asmdraw_destroy(void *state) {
     s->canvas = NULL;
 }
 
-/* the canvas (up to the screen, 250 KB at 640x400) lives in the heap, and
- * a .BMP being read (40 KB more) */
-APP_META("ASMDraw", asmdraw_state_t, false, 320, asmdraw_init, asmdraw_on_frame,
+APP_META("ASMDraw", asmdraw_state_t, false, 592, asmdraw_init, asmdraw_on_frame,
          asmdraw_destroy);

@@ -1,14 +1,23 @@
 # Drawing
 
 ASMDraw draws pictures in 16 colours, or 24 on a 256-colour screen
-(Settings > Display): pencil, eraser, line, rectangle and fill.
+(Settings > Display).
 
-- Click a colour for the pen, Shift+click one for the background.
+- The tools, on the left: pencil, eraser, fill, pick a colour, line,
+  spray, rectangle and filled rectangle, ellipse and filled ellipse.
+  Under them, 6 brush sizes (1 to 9 pixels): pencil, eraser, spray and
+  the lines of shapes use them.
+- Shift while dragging: lines straight or at 45 degrees, squares,
+  circles.
+- Pick a colour: click the picture and the pen takes that colour
+  (Shift+click: the paper), then it goes back to the tool you had.
+- Click a colour for the pen, Shift+click one for the paper (the eraser
+  draws with it). The two squares at the bottom left are the pen over
+  the paper: click them to swap.
 - With 256 colours, the last 8 in the strip are your own: white at
-  first. Click one (it gets a frame), then move the R, G and B sliders
-  under the strip (0 to 63 each). What is drawn in it changes too.
-  They are remembered, and saved in the picture.
-- Pick a tool and a brush size on the left.
+  first. Click one (it gets a frame), then Edit... (or double-click it):
+  the colour picker. What is drawn in it changes as you choose. They are
+  remembered, and saved in the picture.
 - File: New, Open, Save, Save As, Print. Pictures are .PIC or .BMP
   files: Save As picks by the name's ending (UNTITLED.BMP). A .BMP is
   saved with 16 colours if only those are used, else 256; any .BMP

@@ -41,12 +41,22 @@ void dlg_input_check(window *owner, const char *title, const char *prompt,
                      void *user);
 /* File pickers return a full path (e.g. "/FDD0/SONG.MID").
  * ext: show only files with this extension ("TXT"), or with any of a list
- * ("PIC,BMP": Save adds the first to a name without one), or NULL for all. */
+ * ("PIC,BMP", up to 4; Save then has a Type list, the first chosen at the
+ * start, whose extension a bare name gets), or NULL for all. */
 void dlg_open_file(window *owner, const char *title, const char *dir,
                    const char *ext, dlg_text_cb cb, void *user);
 void dlg_save_file(window *owner, const char *title, const char *dir,
                    const char *name, const char *ext, dlg_text_cb cb,
                    void *user);
+
+/* A colour picker (ui/colorpick.c): a field of hues, a lighter/darker
+ * bar, the 16 basic colours, and Red/Green/Blue as numbers (0..63 each).
+ * cb gets the colour (3 bytes), or NULL if cancelled. preview: a palette
+ * index to show the colour in exactly while it is chosen (a custom one,
+ * 248..255, on a 256-colour screen: put back if cancelled), or -1. */
+typedef void (*dlg_color_cb)(void *user, const uint8_t *rgb);
+void dlg_color(window *owner, const char *title, const uint8_t rgb[3],
+               int preview, dlg_color_cb cb, void *user);
 
 /* A folder (full path), from a dialog like the file ones */
 void dlg_choose_folder(window *owner, const char *title, const char *dir,
