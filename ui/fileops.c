@@ -7,6 +7,7 @@
 #include "fs/fs.h"
 #include "fs/netfs.h"
 #include "lib/audio.h"
+#include "lib/bmp.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/wav.h"
@@ -359,11 +360,42 @@ const char *fo_clip(const char *path, bool cut) {
     return NULL;
 }
 
+bool fo_can_paste(void) {
+    return clipboard_has_file() || clipboard_has_image();
+}
+
+/* a picture on the clipboard: a new .BMP in dst_dir (PICTURE.BMP, then
+ * PICTURE2.BMP...), 16 colours if it only uses those */
+static const char *paste_picture(const char *dst_dir) {
+    const clip_image_t *im = clipboard_image();
+    char name[16], dst[FS_PATH_SZ];
+    dir_entry_t de;
+    int n = 1;
+    do {
+        if (n == 1)
+            snprintf(name, sizeof(name), "PICTURE.BMP");
+        else
+            snprintf(name, sizeof(name), "PICTURE%d.BMP", n);
+        fo_join(dst_dir, name, dst, sizeof(dst));
+    } while (fs_find(dst, &de) && ++n < 1000);
+    int top = 0;
+    for (int i = 0; i < im->w * im->h; i++)
+        top = im->pix[i] > top ? im->pix[i] : top;
+    const char *e =
+        bmp_save(dst, im->pix, im->w, im->h, im->w,
+                 (const uint8_t (*)[3])im->pal, top < 16 ? 16 : 256);
+    if (!e)
+        fo_changed(dst_dir);
+    return e;
+}
+
 const char *fo_paste(const char *dst_dir) {
-    if (!clipboard_has_file())
-        return "the clipboard holds no file";
     if (fo_is_trash(dst_dir) || fo_in_trash(dst_dir))
         return "nothing can be pasted into the Trash";
+    if (clipboard_has_image())
+        return paste_picture(dst_dir);
+    if (!clipboard_has_file())
+        return "the clipboard holds no file";
     char src[FS_PATH_SZ], dst[FS_PATH_SZ];
     fo_join(g_clipboard.src_path, g_clipboard.name, src, sizeof(src));
     fo_join(dst_dir, g_clipboard.name, dst, sizeof(dst));

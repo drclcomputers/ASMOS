@@ -709,10 +709,10 @@ void window_draw(window *win) {
     if (win->resizable) {
         int gx = win->x + win->w - RESIZE_BUTTON - 1;
         int gy = win->y + MENUBAR_H + win->h - RESIZE_BUTTON;
-        fill_rect(gx, gy, RESIZE_BUTTON, RESIZE_BUTTON, LIGHT_GRAY);
-        draw_rect(gx, gy, RESIZE_BUTTON, RESIZE_BUTTON, DARK_GRAY);
-        draw_line(gx + 1, gy + 6, gx + 6, gy + 1, DARK_GRAY);
-        draw_line(gx + 4, gy + 6, gx + 6, gy + 4, DARK_GRAY);
+        fill_rect(gx, gy - 1, RESIZE_BUTTON, RESIZE_BUTTON, LIGHT_GRAY);
+        draw_rect(gx, gy - 1, RESIZE_BUTTON, RESIZE_BUTTON, DARK_GRAY);
+        draw_line(gx + 1, gy + 8, gx + 8, gy + 1, DARK_GRAY);
+        draw_line(gx + 4, gy + 8, gx + 8, gy + 4, DARK_GRAY);
     }
 }
 

@@ -12,5 +12,8 @@ or File > Open.
   nearest the screen has.
 - View > Dithering mixes dots of the nearest colours, for photos. Turn it
   off for drawings with flat colours.
+- Edit > Copy (Ctrl+C) puts the picture on the clipboard, in the
+  colours it is shown in: paste it in ASMDraw. Up to 320 KB (a 640 x 480
+  picture is 300 KB).
 - A big picture fills in from the bottom while it is read. One needs
   about a byte a pixel of memory (1024 x 768: 768 KB).

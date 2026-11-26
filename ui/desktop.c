@@ -1095,7 +1095,7 @@ static void context_menu(int hit, int x, int y) {
         menu_add_item(m, "New Folder", menu_new_folder);
         menu_add_separator(m);
         menu_add_item(m, "Paste", menu_paste);
-        menu_enable_last(m, clipboard_has_file());
+        menu_enable_last(m, fo_can_paste());
         menu_add_separator(m);
         menu_add_item(m, "Reload", menu_reload);
         menu_add_item(m, "About OS", menu_about_os);
@@ -1123,7 +1123,7 @@ static void context_menu(int hit, int x, int y) {
         menu_add_item(m, "Copy", menu_copy);
         if (items[hit].kind == DESKTOP_ITEM_DIR) {
             menu_add_item(m, "Paste Into", ctx_paste_into);
-            menu_enable_last(m, clipboard_has_file());
+            menu_enable_last(m, fo_can_paste());
         }
         menu_add_separator(m);
         menu_add_item(m, "Compress...", ctx_compress);

@@ -144,6 +144,12 @@ void menu_add_item(menu *m, char *label, MenuAction action) {
     A->ui->menu_item(m, label, (void (*)(void *))action);
 }
 void menu_add_separator(menu *m) { A->ui->menu_separator(m); }
+void menu_enable_last(menu *m, bool on) { A->ui->menu_enable(m, on); }
+
+// right-click menus: fill popup_menu(), then popup_show_for(c)
+menu *popup_menu(void) { return A->ui->popup_menu(); }
+void popup_show(int x, int y) { A->ui->popup_show(x, y); }
+void popup_show_for(const control *c) { A->ui->popup_show_for(c); }
 
 // the window manager
 void wm_invalidate(window *w) { A->invalidate(w); }
@@ -256,6 +262,20 @@ void audio_update(void) {} /* the OS does it every frame */
 // clipboard
 void clipboard_set_text(const char *t, int len) { A->clip->set_text(t, len); }
 int clipboard_history_count(void) { return A->clip->history_count(); }
+bool clipboard_set_image(int w, int h, const uint8_t *pix, int stride,
+                         const uint8_t (*pal)[3]) {
+    return A->clip->set_image(w, h, pix, stride, pal);
+}
+int clipboard_kind(void) { return A->clip->kind(); }
+const char *clipboard_text(void) { return A->clip->text(); }
+const clip_image_t *clipboard_image(void) { return A->clip->image(); }
+int clipboard_history_kind(int i) { return A->clip->history_kind(i); }
+const clip_image_t *clipboard_history_image(int i) {
+    return A->clip->history_image(i);
+}
+bool clipboard_history_use(int i) { return A->clip->history_use(i); }
+void clipboard_history_remove(int i) { A->clip->history_remove(i); }
+void clipboard_history_clear(void) { A->clip->history_clear(); }
 const char *clipboard_history_get_text(int i) {
     return A->clip->history_text(i);
 }

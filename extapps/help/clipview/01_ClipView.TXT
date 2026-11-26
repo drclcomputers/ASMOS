@@ -1,7 +1,17 @@
 # ClipView
 
-ClipView shows the clipboard's history: the texts copied lately, the
-newest first.
+ClipView is the scrapbook: the last 20 things copied, text and
+pictures, the newest at the top. The one on the clipboard now is
+marked with >.
 
-- Pick one to see it in full below.
-- Double-click it, or press Copy, to put it back on the clipboard.
+- Pick one to see it below: the text in full, or the picture (made
+  smaller if it does not fit).
+- Use (or double-click it) puts it back on the clipboard, to paste
+  again.
+- Delete takes it out of the scrapbook; Clear all empties it.
+- Save... keeps it in a file: text as a .TXT, a picture as a .BMP.
+- Pictures come from ASMDraw's selection and BMP Viewer's Edit > Copy.
+  Paste one in ASMDraw, or in a folder (FileF, the desktop) to make a
+  PICTURE.BMP there.
+- Big pictures fill it fast: when they do, the oldest picture goes
+  first.

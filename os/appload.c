@@ -10,6 +10,7 @@
 #include "lib/audio.h"
 #include "lib/cpu.h"
 #include "os/clipboard.h"
+#include "ui/cursor.h"
 
 #include "config/runtime_config.h"
 #include "drivers/gpu.h"
@@ -665,6 +666,15 @@ static const app_clip_api_t s_clip = {
     .history_count = clipboard_history_count,
     .history_text = clipboard_history_get_text,
     .history_current = api_clip_current,
+    .set_image = clipboard_set_image,
+    .kind = clipboard_kind,
+    .text = clipboard_text,
+    .image = clipboard_image,
+    .history_kind = clipboard_history_kind,
+    .history_image = clipboard_history_image,
+    .history_use = clipboard_history_use,
+    .history_remove = clipboard_history_remove,
+    .history_clear = clipboard_history_clear,
 };
 
 static const ui_api_t s_ui = {
@@ -857,6 +867,7 @@ static const os_api_t s_api = {
     .set_screen_color = gpu_set_color,
     .palette256 = gpu_palette256,
     .bmp = &s_bmp,
+    .pointer = cursor_request,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

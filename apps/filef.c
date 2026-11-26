@@ -1368,7 +1368,7 @@ static void view_context_menu(ff_inst_t *s, control *c) {
         menu_enable_last(m, !prot);
         if (dir) {
             menu_add_item(m, "Paste Into", ctx_paste_into);
-            menu_enable_last(m, clipboard_has_file());
+            menu_enable_last(m, fo_can_paste());
         }
         menu_add_separator(m);
         menu_add_item(m, "Compress...", menu_compress);
@@ -1391,7 +1391,7 @@ static void view_context_menu(ff_inst_t *s, control *c) {
         menu_add_item(m, "New Folder", menu_new_folder);
         menu_add_separator(m);
         menu_add_item(m, "Paste", menu_paste);
-        menu_enable_last(m, clipboard_has_file());
+        menu_enable_last(m, fo_can_paste());
         menu_add_separator(m);
         menu_add_item(m, "Copy Path", menu_copy_path);
         menu_add_item(m, s->show_hidden ? "Hide Hidden" : "Show Hidden",
@@ -1547,7 +1547,7 @@ static void tree_context_menu(ff_inst_t *s, control *c) {
     menu_add_item(m, "New Folder", menu_new_folder);
     menu_add_separator(m);
     menu_add_item(m, "Paste", menu_paste);
-    menu_enable_last(m, clipboard_has_file());
+    menu_enable_last(m, fo_can_paste());
     menu_add_item(m, "Copy Path", menu_copy_path);
     menu_add_separator(m);
     menu_add_item(m, "Get Info", ctx_folder_info);

@@ -18,4 +18,10 @@ const uint8_t *cursor_sprite(int shape);
  * the hourglass while busy) or off (screen saver) */
 void cursor_frame(bool on);
 
+/* shapes past the 4 of CHOSEN_CURSOR (os/appapi.h APP_POINTER_*) */
+#define CURSOR_MOVE 4 /* four arrows, 17x17, hot spot in the middle */
+/* this frame only, over CHOSEN_CURSOR: an app's (api->pointer) */
+void cursor_request(int shape);
+int cursor_shown(void); /* the shape last put up (tests) */
+
 #endif

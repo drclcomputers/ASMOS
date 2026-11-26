@@ -202,6 +202,31 @@ returns the rows done; `bmp_error(r)` says why it stopped), then
 Also in API size 11, the UI table's size 4: `api->ui->color`, the colour
 picker (`dlg_color` in an app; docs/UI_TOOLKIT.md).
 
+## API size 12: pictures on the clipboard, the pointer
+
+The clipboard (`api->clip`, os/clipboard.h; its new members need API
+size 12) holds a picture as well as text:
+`clipboard_set_image(w, h, pix, stride, pal)` copies one (a byte a pixel,
+`pal` its 256 colours, 6 bits each; at most `CLIP_IMAGE_MAX`, 320 KB) and
+`clipboard_image()` gives it back (`w`, `h`, `pix`, `pal`), or NULL. `clipboard_kind()` says which it holds:
+`CLIP_TEXT`, `CLIP_IMAGE`, `CLIP_FILE` (FileF's) or `CLIP_EMPTY`. Map the
+picture's colours to your own before using them: ASMDraw keeps an index
+whose colour is the same, else takes the nearest.
+
+The scrapbook is the clipboard's history, the last 20 things copied (and
+at most 384 KB of them: a new big picture pushes the oldest picture out
+first): `clipboard_history_count()`, `_kind(i)`, `_get_text(i)`,
+`_image(i)` (0 the oldest), `_use(i)` (on the clipboard again),
+`_remove(i)`, `_clear()`. ClipView shows it.
+
+Pasted into a folder (FileF, the desktop), a picture becomes a new
+PICTURE.BMP there.
+
+`api->pointer(shape)` changes the mouse pointer for this frame:
+`APP_POINTER_ARROW`, `HAND`, `CROSS`, `TEXT` or `MOVE` (four arrows).
+Call it from `on_frame` while it should show; ASMDraw does when the mouse
+is over its selection.
+
 ## What an app needs: --min-cpu, --min-ram
 
 `mkapp.py --min-cpu 486 --min-ram 4096` (KB) writes the least CPU and RAM

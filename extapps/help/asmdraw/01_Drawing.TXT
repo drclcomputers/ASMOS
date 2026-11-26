@@ -3,8 +3,9 @@
 ASMDraw draws pictures in 16 colours, or 24 on a 256-colour screen
 (Settings > Display).
 
-- The tools, on the left: pencil, eraser, fill, pick a colour, line,
-  spray, rectangle and filled rectangle, ellipse and filled ellipse.
+- The tools, on the left: select, pick a colour, pencil, eraser, fill,
+  spray, line, rectangle and filled rectangle, ellipse and filled
+  ellipse.
   Under them, 6 brush sizes (1 to 9 pixels): pencil, eraser, spray and
   the lines of shapes use them.
 - Shift while dragging: lines straight or at 45 degrees, squares,
@@ -25,3 +26,17 @@ ASMDraw draws pictures in 16 colours, or 24 on a 256-colour screen
   cut to the window.
 - On a 16-colour screen a picture made with more becomes the nearest
   of the 16.
+
+# The selection
+
+- Select (the dotted box, top left): drag a box over part of the
+  picture.
+- Over it the pointer becomes four arrows: drag it somewhere else. The
+  paper colour is left where it was; hold Ctrl as you start to drag to
+  leave a copy instead. Click outside it (or press Esc) to put it down.
+- Right-click (or Edit): Cut, Copy, Paste, Delete, Select all. Keys:
+  Ctrl+X, Ctrl+C, Ctrl+V, Del, Ctrl+A.
+- Copied, it is a picture on the clipboard: paste it here or in another
+  ASMDraw, or into a folder as a .BMP. ClipView keeps the last ones.
+- Paste puts the picture where you right-clicked (Ctrl+V: the top
+  left), floating: drag it into place.

@@ -27,11 +27,13 @@
 #define TOOL_FELLIPSE 7
 #define TOOL_SPRAY 8
 #define TOOL_PICK 9
-#define NUM_TOOLS 10
+#define TOOL_SELECT 10
+#define NUM_TOOLS 11
 #define NUM_SIZES 6
 #define CUSTOM APP_COLORS_CUSTOM /* custom colours, on a 256-colour screen */
 #define FIRST_CUSTOM APP_COLOR_CUSTOM
 #define BTN 15            /* a tool button */
+#define SBTN 13           /* a brush size button (a row) */
 #define BAR (2 * BTN + 4) /* the tool bar's width */
 #define STRIP 12          /* the colour strip's height */
 #define FILL_STACK 16384  /* the fill's pending runs */
@@ -44,8 +46,8 @@ static const uint8_t PALETTE_COLORS[16] = {
 static const uint8_t SIZES[NUM_SIZES] = {1, 2, 3, 5, 7, 9}; /* pixels */
 /* the buttons, in the bar's order (two a row) */
 static const uint8_t BAR_TOOLS[NUM_TOOLS] = {
-    TOOL_PENCIL, TOOL_ERASER, TOOL_FILL,  TOOL_PICK,    TOOL_LINE,
-    TOOL_SPRAY,  TOOL_RECT,   TOOL_FRECT, TOOL_ELLIPSE, TOOL_FELLIPSE};
+    TOOL_SELECT, TOOL_PICK, TOOL_PENCIL, TOOL_ERASER,  TOOL_FILL,    TOOL_SPRAY,
+    TOOL_LINE,   TOOL_RECT, TOOL_FRECT,  TOOL_ELLIPSE, TOOL_FELLIPSE};
 static const char *const TOOL_NAMES[NUM_TOOLS] = {
     "Pencil",
     "Eraser (the paper colour)",
@@ -56,7 +58,9 @@ static const char *const TOOL_NAMES[NUM_TOOLS] = {
     "Ellipse (Shift: a circle)",
     "Filled ellipse (Shift: a circle)",
     "Spray",
-    "Pick a colour from the picture"};
+    "Pick a colour from the picture",
+    "Select: drag a box, then drag it to move it (Ctrl: a copy); "
+    "right-click: cut, copy, paste"};
 
 /* 11x11 pictures: '#' black, 'o' the pen's colour, '.' nothing */
 static const char *const ICONS[NUM_TOOLS][11] = {
@@ -90,6 +94,9 @@ static const char *const ICONS[NUM_TOOLS][11] = {
     {".........##", "........###", ".......###.", "......##...", ".....#.#...",
      "....#.#....", "...#.#.....", "..#.#......", ".#.#.......", ".##........",
      "#.........."}, /* pick */
+    {"...........", ".#.#.#.#.#.", "...........", ".#.......#.", "...........",
+     ".#.......#.", "...........", ".#.......#.", "...........", ".#.#.#.#.#.",
+     "..........."}, /* select */
 };
 
 typedef struct {
@@ -119,6 +126,16 @@ typedef struct {
     uint8_t custom[CUSTOM][3]; /* 0..63 each */
     int edit;                  /* the custom colour Edit... changes */
     bool had_focus;
+
+    /* the selection (TOOL_SELECT): a box on the canvas. Once moved, or
+     * pasted, its pixels float over the canvas until put down. */
+    bool sel;               /* there is one */
+    int sx, sy, sw, sh;     /* where, in canvas pixels (may stick out) */
+    uint8_t *floating;      /* its pixels while lifted (sw x sh), or NULL */
+    bool selecting, moving; /* dragging a box out; dragging it */
+    int grab_x, grab_y;     /* the pointer within it, while moving */
+    int menu_x, menu_y;     /* where the right-click was (paste there) */
+    bool menu_at;
 } asmdraw_state_t;
 
 /* the palette strip: 16 colours, or 24 with the custom ones */
@@ -398,6 +415,222 @@ static void spray(asmdraw_state_t *s, int x, int y) {
     }
 }
 
+// the selection: a box; dragged, its pixels are lifted off the canvas
+// (the paper colour left behind) and float until they are put down
+
+static void select_tool(asmdraw_state_t *s, int t, int size);
+
+static bool in_sel(const asmdraw_state_t *s, int x, int y) {
+    return s->sel && x >= s->sx && x < s->sx + s->sw && y >= s->sy &&
+           y < s->sy + s->sh;
+}
+
+/* the canvas's pixel, or the paper colour off it */
+static uint8_t at(const asmdraw_state_t *s, int x, int y) {
+    if (x < 0 || y < 0 || x >= s->canvas_w || y >= s->canvas_h)
+        return s->bg_color;
+    return s->canvas[y * s->canvas_w + x];
+}
+
+/* the floating pixels into the canvas where they are (what sticks out
+ * is lost) */
+static void stamp_floating(asmdraw_state_t *s) {
+    for (int y = 0; s->floating && y < s->sh; y++) {
+        int cy = s->sy + y;
+        if (cy < 0 || cy >= s->canvas_h)
+            continue;
+        for (int x = 0; x < s->sw; x++) {
+            int cx = s->sx + x;
+            if (cx >= 0 && cx < s->canvas_w)
+                s->canvas[cy * s->canvas_w + cx] = s->floating[y * s->sw + x];
+        }
+    }
+}
+
+/* put it down: no selection any more */
+static void put_down(asmdraw_state_t *s) {
+    stamp_floating(s);
+    kfree(s->floating);
+    s->floating = NULL;
+    s->sel = s->selecting = s->moving = false;
+    wm_invalidate(s->win);
+}
+
+/* lift the pixels under the box; the paper colour is left, unless it is
+ * a copy (Ctrl). Already floating, a copy leaves one behind. */
+static bool lift(asmdraw_state_t *s, bool copy) {
+    if (s->floating) {
+        if (copy)
+            stamp_floating(s);
+        return true;
+    }
+    uint8_t *f = (uint8_t *)kmalloc((uint32_t)(s->sw * s->sh));
+    if (!f) {
+        draw_set_status(s, "Not enough memory to move it.");
+        return false;
+    }
+    for (int y = 0; y < s->sh; y++)
+        for (int x = 0; x < s->sw; x++) {
+            f[y * s->sw + x] = at(s, s->sx + x, s->sy + y);
+            int cx = s->sx + x, cy = s->sy + y;
+            if (!copy && cx >= 0 && cy >= 0 && cx < s->canvas_w &&
+                cy < s->canvas_h)
+                s->canvas[cy * s->canvas_w + cx] = s->bg_color;
+        }
+    s->floating = f;
+    return true;
+}
+
+/* the selected pixels to the clipboard (with this window's colours) */
+static bool sel_copy(asmdraw_state_t *s) {
+    if (!s->sel) {
+        draw_set_status(s, "Nothing selected: drag a box with the Select "
+                           "tool.");
+        return false;
+    }
+    uint8_t *tmp = NULL;
+    const uint8_t *pix = s->floating;
+    if (!pix) { /* (the canvas under the box) */
+        tmp = (uint8_t *)kmalloc((uint32_t)(s->sw * s->sh));
+        for (int y = 0; tmp && y < s->sh; y++)
+            for (int x = 0; x < s->sw; x++)
+                tmp[y * s->sw + x] = at(s, s->sx + x, s->sy + y);
+        pix = tmp;
+    }
+    bool ok = pix && clipboard_set_image(s->sw, s->sh, pix, s->sw,
+                                         (const uint8_t (*)[3])s->pal);
+    kfree(tmp);
+    draw_set_status(s, ok ? "Copied." : "Too big to copy, or no memory.");
+    return ok;
+}
+
+/* the selection goes: the paper colour where it was */
+static void sel_delete(asmdraw_state_t *s) {
+    if (!s->sel)
+        return;
+    if (!s->floating) /* (lifted, it is already gone from there) */
+        for (int y = 0; y < s->sh; y++)
+            for (int x = 0; x < s->sw; x++) {
+                int cx = s->sx + x, cy = s->sy + y;
+                if (cx >= 0 && cy >= 0 && cx < s->canvas_w && cy < s->canvas_h)
+                    s->canvas[cy * s->canvas_w + cx] = s->bg_color;
+            }
+    kfree(s->floating);
+    s->floating = NULL;
+    s->sel = s->moving = s->selecting = false;
+    wm_invalidate(s->win);
+}
+
+static void sel_cut(asmdraw_state_t *s) {
+    if (sel_copy(s))
+        sel_delete(s);
+}
+
+static void sel_all(asmdraw_state_t *s) {
+    select_tool(s, TOOL_SELECT, -1);
+    put_down(s);
+    s->sel = true;
+    s->sx = s->sy = 0;
+    s->sw = s->canvas_w;
+    s->sh = s->canvas_h;
+}
+
+/* the clipboard's picture, floating: at the right-click, or the top left.
+ * Its colours: the same index where this window's colour is the same,
+ * else the nearest of the screen's (not the custom ones, which change) */
+static void sel_paste(asmdraw_state_t *s) {
+    const clip_image_t *im = clipboard_image();
+    if (!im) {
+        draw_set_status(s, clipboard_kind() == CLIP_TEXT
+                               ? "The clipboard holds text, not a picture."
+                               : "Nothing to paste: copy a picture first.");
+        return;
+    }
+    uint8_t *f = (uint8_t *)kmalloc((uint32_t)(im->w * im->h));
+    if (!f) {
+        draw_set_status(s, "Not enough memory to paste it.");
+        return;
+    }
+    static bool used[256];
+    uint8_t lut[256];
+    memset(used, 0, sizeof(used));
+    for (int i = 0; i < im->w * im->h; i++)
+        used[im->pix[i]] = true;
+    int keep = s->many ? 256 : 16, n = s->many ? FIRST_CUSTOM : 16;
+    for (int i = 0; i < 256; i++) {
+        lut[i] = (uint8_t)i;
+        if (!used[i] || (i < keep && !memcmp(im->pal[i], s->pal[i], 3)))
+            continue;
+        int best = 0, bd = 0x7FFFFFFF;
+        for (int k = 0; k < n; k++) {
+            int d = 0;
+            for (int c = 0; c < 3; c++) {
+                int e = im->pal[i][c] - s->pal[k][c];
+                d += e * e * (c == 1 ? 4 : c == 0 ? 2 : 3);
+            }
+            if (d < bd) {
+                bd = d;
+                best = k;
+            }
+        }
+        lut[i] = (uint8_t)best;
+    }
+    for (int i = 0; i < im->w * im->h; i++)
+        f[i] = lut[im->pix[i]];
+    select_tool(s, TOOL_SELECT, -1);
+    put_down(s);
+    s->floating = f;
+    s->sel = true;
+    s->sw = im->w;
+    s->sh = im->h;
+    s->sx = s->menu_at ? s->menu_x : 0;
+    s->sy = s->menu_at ? s->menu_y : 0;
+    s->menu_at = false;
+    draw_set_status(s, "Pasted: drag it into place, click outside to put it "
+                       "down.");
+}
+
+/* Edit menu, the right-click menu (they act on the focused ASMDraw) */
+#define SEL_ACTION(name, body)                                                 \
+    static void name(void) {                                                   \
+        asmdraw_state_t *s = ui_active_state();                                \
+        if (s)                                                                 \
+            body;                                                              \
+    }
+SEL_ACTION(menu_cut, sel_cut(s))
+SEL_ACTION(menu_copy, sel_copy(s))
+SEL_ACTION(menu_paste, sel_paste(s))
+SEL_ACTION(menu_delete, sel_delete(s))
+SEL_ACTION(menu_select_all, sel_all(s))
+
+/* on the screen at (x, y), vw x vh of the canvas shown: the floating
+ * pixels, then a dotted frame on the box's edge */
+static void draw_selection(asmdraw_state_t *s, int x, int y, int vw, int vh) {
+    if (!s->sel)
+        return;
+    if (s->floating) {
+        int x0 = s->sx < 0 ? -s->sx : 0, y0 = s->sy < 0 ? -s->sy : 0;
+        int x1 = vw - s->sx < s->sw ? vw - s->sx : s->sw;
+        int y1 = vh - s->sy < s->sh ? vh - s->sy : s->sh;
+        if (x1 > x0 && y1 > y0)
+            draw_pixels(x + s->sx + x0, y + s->sy + y0, x1 - x0, y1 - y0,
+                        s->floating + y0 * s->sw + x0, s->sw);
+    }
+    int bx = s->sx, by = s->sy, r = s->sx + s->sw - 1, b = s->sy + s->sh - 1;
+    for (int i = bx; i <= r; i++)
+        for (int k = 0; k < 2; k++) {
+            int py = k ? b : by;
+            if (i >= 0 && i < vw && py >= 0 && py < vh)
+                draw_dot(x + i, y + py, ((i + py) >> 1) & 1 ? BLACK : WHITE);
+        }
+    for (int j = by; j <= b; j++)
+        for (int k = 0; k < 2; k++) {
+            int px = k ? r : bx;
+            if (j >= 0 && j < vh && px >= 0 && px < vw)
+                draw_dot(x + px, y + j, ((px + j) >> 1) & 1 ? BLACK : WHITE);
+        }
+}
+
 static void update_canvas_size(asmdraw_state_t *s) {
     int cw = s->canvas_ctl->aw - 4, ch = s->canvas_ctl->ah - 4;
     if (cw > g_screen_width)
@@ -448,6 +681,8 @@ static bool only16(const asmdraw_state_t *s) {
 }
 
 static void asmdraw_save(asmdraw_state_t *s, const char *path) {
+    if (s->sel)
+        put_down(s); /* (a floating selection is part of the picture) */
     update_canvas_size(s);
     if (s->canvas_w <= 0 || s->canvas_h <= 0) {
         draw_set_status(s, "Invalid canvas size.");
@@ -610,6 +845,7 @@ static void paint_canvas(control *c, int x, int y, int w, int h) {
     int vh = s->canvas_h < h ? s->canvas_h : h;
     /* a row at a time: draw_dot per pixel made a 486 crawl (5 fps) */
     draw_pixels(x, y, vw, vh, s->canvas, s->canvas_w);
+    draw_selection(s, x, y, vw, vh);
     if (s->drawing && is_shape(s->tool)) { /* the shape so far */
         pen_t p = {s, true, x, y, vw, vh, s->color};
         int x1 = s->cur_x, y1 = s->cur_y;
@@ -620,11 +856,95 @@ static void paint_canvas(control *c, int x, int y, int w, int h) {
 
 static void select_tool(asmdraw_state_t *s, int t, int size);
 
+/* right-click: Cut, Copy, Paste (there), Delete, Select all */
+static void canvas_menu(asmdraw_state_t *s, control *c, int cx, int cy) {
+    s->menu_x = cx;
+    s->menu_y = cy;
+    s->menu_at = !ctl_menu_from_key();
+    menu *m = popup_menu();
+    menu_add_item(m, "Cut", menu_cut);
+    menu_enable_last(m, s->sel);
+    menu_add_item(m, "Copy", menu_copy);
+    menu_enable_last(m, s->sel);
+    menu_add_item(m, "Paste", menu_paste);
+    menu_enable_last(m, clipboard_kind() == CLIP_IMAGE);
+    menu_add_item(m, "Delete", menu_delete);
+    menu_enable_last(m, s->sel);
+    menu_add_separator(m);
+    menu_add_item(m, "Select all", menu_select_all);
+    popup_show_for(c);
+}
+
+/* Ctrl+X, C, V, A; Del; Esc puts the selection down */
+static void canvas_key(asmdraw_state_t *s) {
+    uint8_t k = kb.last_scancode;
+    if (kb.ctrl && k == 0x2D)
+        sel_cut(s);
+    else if (kb.ctrl && k == 0x2E)
+        sel_copy(s);
+    else if (kb.ctrl && k == 0x2F) {
+        s->menu_at = false;
+        sel_paste(s);
+    } else if (kb.ctrl && k == 0x1E)
+        sel_all(s);
+    else if (k == DELETE)
+        sel_delete(s);
+    else if (k == ESC && s->sel)
+        put_down(s);
+    else
+        return;
+    wm_invalidate(s->win);
+}
+
+/* the Select tool: a box dragged out, or (inside it) the box moved */
+static void select_mouse(asmdraw_state_t *s, int ev, int rx, int ry, int cx,
+                         int cy) {
+    if (ev == EV_MOUSEDOWN || ev == EV_DBLCLICK) {
+        if (in_sel(s, rx, ry)) {
+            if (lift(s, kb.ctrl)) {
+                s->moving = true;
+                s->grab_x = rx - s->sx;
+                s->grab_y = ry - s->sy;
+            }
+            return;
+        }
+        put_down(s);
+        s->selecting = s->sel = true;
+        s->start_x = s->sx = cx;
+        s->start_y = s->sy = cy;
+        s->sw = s->sh = 1;
+    } else if (ev == EV_MOUSEMOVE && s->moving) {
+        s->sx = rx - s->grab_x;
+        s->sy = ry - s->grab_y;
+    } else if (ev == EV_MOUSEMOVE && s->selecting) {
+        s->sx = cx < s->start_x ? cx : s->start_x;
+        s->sy = cy < s->start_y ? cy : s->start_y;
+        s->sw = (cx > s->start_x ? cx - s->start_x : s->start_x - cx) + 1;
+        s->sh = (cy > s->start_y ? cy - s->start_y : s->start_y - cy) + 1;
+    } else if (ev == EV_MOUSEUP) {
+        if (s->selecting && s->sw == 1 && s->sh == 1)
+            s->sel = false; /* a click, not a box: nothing selected */
+        s->selecting = s->moving = false;
+    }
+}
+
 static void on_canvas(control *c, int ev) {
     asmdraw_state_t *s = c->user;
-    int cx = c->mx - 2, cy = c->my - 2; /* inside the border */
-    cx = cx < 0 ? 0 : cx >= s->canvas_w ? s->canvas_w - 1 : cx;
-    cy = cy < 0 ? 0 : cy >= s->canvas_h ? s->canvas_h - 1 : cy;
+    int rx = c->mx - 2, ry = c->my - 2; /* inside the border */
+    int cx = rx < 0 ? 0 : rx >= s->canvas_w ? s->canvas_w - 1 : rx;
+    int cy = ry < 0 ? 0 : ry >= s->canvas_h ? s->canvas_h - 1 : ry;
+    if (ev == EV_MENU) {
+        canvas_menu(s, c, cx, cy);
+        return;
+    }
+    if (ev == EV_KEY) {
+        canvas_key(s);
+        return;
+    }
+    if (s->tool == TOOL_SELECT) {
+        select_mouse(s, ev, rx, ry, cx, cy);
+        return;
+    }
     s->cur_x = cx;
     s->cur_y = cy;
     s->shift = kb.shift;
@@ -723,6 +1043,8 @@ static void paint_button(control *c, int x, int y, int w, int h) {
 }
 
 static void select_tool(asmdraw_state_t *s, int t, int size) {
+    if (t >= 0 && t < NUM_TOOLS && t != TOOL_SELECT && s->sel)
+        put_down(s);
     if (t >= 0 && t < NUM_TOOLS) {
         if (t == TOOL_PICK && s->tool != TOOL_PICK)
             s->before_pick = s->tool;
@@ -846,6 +1168,9 @@ static void opened(void *user, const char *path) {
     if (!path)
         return;
     strncpy(s->path, path, sizeof(s->path) - 1);
+    kfree(s->floating); /* (a selection belongs to the old picture) */
+    s->floating = NULL;
+    s->sel = s->moving = s->selecting = false;
     asmdraw_load(s, s->path);
     set_title(s);
     note_dir(s);
@@ -855,6 +1180,9 @@ static void menu_new(void) {
     asmdraw_state_t *s = ui_active_state();
     if (!s)
         return;
+    kfree(s->floating); /* (the selection goes with the picture) */
+    s->floating = NULL;
+    s->sel = s->moving = s->selecting = false;
     memset(s->canvas, WHITE, (uint32_t)(s->canvas_w * s->canvas_h));
     s->path[0] = 0;
     draw_set_status(s, "New canvas.");
@@ -886,6 +1214,8 @@ static void menu_print(void) {
     asmdraw_state_t *s = ui_active_state();
     if (!s || !s->canvas)
         return;
+    if (s->sel)
+        put_down(s);
     const char *base = strrchr(s->path, '/');
     base = base ? base + 1 : (s->path[0] ? s->path : "Picture");
     print_doc_t doc = {PRINT_DOC_IMAGE, base,        NULL,        0,
@@ -921,7 +1251,8 @@ static void asmdraw_init(void *state) {
     window *w = s->win;
 
     /* the screen's colours, and this window's own 8 (white at first) */
-    s->many = A->screen_palette(s->pal, 256) >= 256;
+    A->palette256(s->pal, 256); /* (all of them: a copy keeps them) */
+    s->many = A->screen_palette(s->pal, 0) >= 256;
     for (int k = 0; k < CUSTOM; k++) {
         char key[4] = {'c', (char)('0' + k), 0};
         int v = app_prefs_get_int("ASMDRAW", key, 0x3FFFF);
@@ -946,17 +1277,17 @@ static void asmdraw_init(void *state) {
     static const char *const SIZE_TIPS[NUM_SIZES] = {
         "Brush: 1 pixel",  "Brush: 2 pixels", "Brush: 3 pixels",
         "Brush: 5 pixels", "Brush: 7 pixels", "Brush: 9 pixels"};
-    int y0 = 2 + (NUM_TOOLS + 1) / 2 * BTN + 5;
+    int y0 = 2 + (NUM_TOOLS + 1) / 2 * BTN + 4;
     for (int i = 0; i < NUM_SIZES; i++) {
-        control *b = ctl_custom(w, 2 + (i % 2) * BTN, y0 + (i / 2) * BTN,
-                                BTN - 1, BTN - 1, paint_button, on_button, 0);
+        control *b = ctl_custom(w, 2 + (i % 2) * BTN, y0 + (i / 2) * SBTN,
+                                BTN - 1, SBTN - 1, paint_button, on_button, 0);
         b->id = SIZE_ID + i;
         ctl_set_tooltip(b, SIZE_TIPS[i]);
         s->sizes[i] = b;
     }
     s->canvas_ctl =
         ctl_custom(w, BAR, 2, cw - BAR - 2, sy - 4, paint_canvas, on_canvas,
-                   CS_BORDER | CS_STRETCH_W | CS_STRETCH_H);
+                   CS_BORDER | CS_FOCUSABLE | CS_STRETCH_W | CS_STRETCH_H);
     s->pens = ctl_custom(w, 2, sy, BAR - 6, STRIP, paint_pens, on_pens,
                          CS_ANCHOR_BOTTOM);
     ctl_set_tooltip(s->pens, "The pen over the paper: click to swap them");
@@ -987,6 +1318,13 @@ static void asmdraw_init(void *state) {
     menu_add_separator(f);
     menu_add_item(f, "Close", menu_close);
     menu_add_item(f, "About", menu_about);
+    menu *e = window_add_menu(w, "Edit");
+    menu_add_item(e, "Cut", menu_cut);
+    menu_add_item(e, "Copy", menu_copy);
+    menu_add_item(e, "Paste", menu_paste);
+    menu_add_item(e, "Delete", menu_delete);
+    menu_add_separator(e);
+    menu_add_item(e, "Select all", menu_select_all);
 
     /* (a custom colour only where there are 256) */
     int pen = app_prefs_get_int("ASMDRAW", "pen", BLACK);
@@ -1023,6 +1361,13 @@ static void asmdraw_on_frame(void *state) {
     if (focus && !s->had_focus && s->many)
         apply_custom(s);
     s->had_focus = focus;
+    /* the four arrows over the selection: it can be dragged */
+    control *cc = s->canvas_ctl;
+    if (focus && s->tool == TOOL_SELECT &&
+        (s->moving || (mouse.x >= cc->ax && mouse.y >= cc->ay &&
+                       mouse.x < cc->ax + cc->aw && mouse.y < cc->ay + cc->ah &&
+                       in_sel(s, mouse.x - cc->ax - 2, mouse.y - cc->ay - 2))))
+        A->pointer(APP_POINTER_MOVE);
     if (s->drawing && s->tool == TOOL_SPRAY && mouse.left) { /* held still */
         spray(s, s->cur_x, s->cur_y);
         wm_invalidate(s->win);
@@ -1062,6 +1407,8 @@ static void asmdraw_destroy(void *state) {
     if (s->canvas)
         kfree(s->canvas);
     s->canvas = NULL;
+    kfree(s->floating);
+    s->floating = NULL;
 }
 
 APP_META("ASMDraw", asmdraw_state_t, false, APP_HEAP_PLUS_SCREEN | 128,

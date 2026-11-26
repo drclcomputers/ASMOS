@@ -149,6 +149,25 @@ static void paint_view(control *c, int x, int y, int w, int h) {
                 s->pix + (uint32_t)s->sy * (uint32_t)pw + (uint32_t)s->sx, pw);
 }
 
+/* Edit > Copy (Ctrl+C): the picture as shown, in the screen's colours */
+static void copy_picture(bmpview_state_t *s) {
+    const char *e = "Copied: paste it in ASMDraw, or into a folder as a .BMP.";
+    if (!s->pix || s->rd)
+        e = "No picture to copy yet.";
+    else if ((uint32_t)(s->bi.w * s->bi.h) > CLIP_IMAGE_MAX)
+        e = "Too big to copy (the clipboard takes 320 KB).";
+    else if (!clipboard_set_image(s->bi.w, s->bi.h, s->pix, s->bi.w,
+                                  (const uint8_t (*)[3])s->pal))
+        e = "Not enough memory to copy it.";
+    ctl_set_text(s->status, e);
+}
+
+static void menu_copy(void) {
+    bmpview_state_t *s = ui_active_state();
+    if (s)
+        copy_picture(s);
+}
+
 static void on_view(control *c, int ev) {
     bmpview_state_t *s = c->user;
     if (!s->pix)
@@ -164,6 +183,8 @@ static void on_view(control *c, int ev) {
                   s->drag_sy - (c->my - s->drag_my));
     } else if (ev == EV_MOUSEUP) {
         s->drag = false;
+    } else if (ev == EV_KEY && kb.ctrl && kb.last_scancode == 0x2E) {
+        copy_picture(s);
     } else if (ev == EV_KEY) {
         int x = s->sx, y = s->sy;
         int px = s->vw > STEP ? s->vw - STEP : STEP;
@@ -257,9 +278,10 @@ static void menu_close(void) {
 
 static void menu_about(void) {
     dlg_message(NULL, "About BMP Viewer",
-                "BMP Viewer v1.0\nWindows and OS/2 .BMP pictures: 1, 4, 8, "
+                "BMP Viewer v1.1\nWindows and OS/2 .BMP pictures: 1, 4, 8, "
                 "16, 24 and 32 bits, RLE too.\nDrag the picture or use the "
-                "arrows, PgUp, PgDn (Ctrl: sideways), Home, End.");
+                "arrows, PgUp, PgDn (Ctrl: sideways), Home, End.\nEdit > Copy "
+                "(Ctrl+C) puts it on the clipboard.");
 }
 
 static void bmpview_init(void *state) {
@@ -297,6 +319,8 @@ static void bmpview_init(void *state) {
     menu_add_separator(f);
     menu_add_item(f, "Close", menu_close);
     menu_add_item(f, "About", menu_about);
+    menu *ed = window_add_menu(s->win, "Edit");
+    menu_add_item(ed, "Copy", menu_copy);
     menu *v = window_add_menu(s->win, "View");
     menu_add_item(v, s->dither_label, menu_dither);
     clamp_scroll(s);

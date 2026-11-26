@@ -17,7 +17,7 @@
 
 #define MAX_WINDOWS 32
 #define MAX_WIN_MENUS 16
-#define RESIZE_BUTTON 8
+#define RESIZE_BUTTON 10
 
 #define WIN_ANIM_NONE 0
 #define WIN_ANIM_OPEN 1

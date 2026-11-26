@@ -42,7 +42,10 @@ const char *fo_delete(const char *path);
 const char *fo_move(const char *src, const char *dst_dir); /* drag & drop */
 const char *fo_set_hidden(const char *path, bool hidden);
 const char *fo_clip(const char *path, bool cut); /* file clipboard */
+/* the clipboard's file (copied or moved), or its picture (saved as a new
+ * PICTURE.BMP) into dst_dir */
 const char *fo_paste(const char *dst_dir);
+bool fo_can_paste(void); /* a file or a picture to paste */
 void fo_info_text(const char *path, char *out, int sz);
 /* what files ending .ext are: "Picture" (PIC), "File" if not known */
 const char *fo_type_of(const char *ext);

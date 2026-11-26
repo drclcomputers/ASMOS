@@ -16,6 +16,7 @@
 #include "lib/bmp.h"
 #include "lib/core.h"
 #include "lib/time.h"
+#include "os/clipboard.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
 #include "ui/window.h"
@@ -204,13 +205,27 @@ typedef struct {
     const char *const *(*extensions)(void);
 } app_sound_api_t;
 
-/* the text clipboard and its history */
+/* the clipboard and its history (the scrapbook): os/clipboard.h. In an app
+ * (extapps/shim.h) the same names call these: clipboard_set_text,
+ * clipboard_set_image, clipboard_kind... */
 typedef struct {
     uint32_t size;
     void (*set_text)(const char *text, int len);
     int (*history_count)(void);
     const char *(*history_text)(int index); /* 0 = oldest */
     int (*history_current)(void);
+
+    // appended in API size 12: pictures, and the scrapbook's items
+    bool (*set_image)(int w, int h, const uint8_t *pix, int stride,
+                      const uint8_t (*pal)[3]);
+    int (*kind)(void);                  /* CLIP_EMPTY, _TEXT, _FILE, _IMAGE */
+    const char *(*text)(void);          /* NULL: no text */
+    const clip_image_t *(*image)(void); /* NULL: no picture */
+    int (*history_kind)(int index);
+    const clip_image_t *(*history_image)(int index);
+    bool (*history_use)(int index); /* back on the clipboard */
+    void (*history_remove)(int index);
+    void (*history_clear)(void);
 } app_clip_api_t;
 
 /* .BMP pictures (API size 11): lib/bmp.h, where they are explained. In
@@ -352,6 +367,11 @@ typedef struct os_api {
 
     // appended in API size 11: .BMP pictures (lib/bmp.h)
     const app_bmp_api_t *bmp;
+
+    // appended in API size 12: the pointer's shape
+    /* For this frame only (call it each frame while it applies: over the
+     * thing it is for): APP_POINTER_ARROW, _HAND, _CROSS, _TEXT, _MOVE. */
+    void (*pointer)(int shape);
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */
@@ -361,6 +381,13 @@ typedef struct os_api {
 #define APP_ATTR_HIDDEN 0x02
 #define APP_ATTR_SYSTEM 0x04
 #define APP_ATTR_DIR 0x10
+
+/* api->pointer (API size 12) */
+#define APP_POINTER_ARROW 0
+#define APP_POINTER_HAND 1
+#define APP_POINTER_CROSS 2
+#define APP_POINTER_TEXT 3
+#define APP_POINTER_MOVE 4 /* four arrows: something can be moved */
 
 /* api->set_screen_color (API size 10) */
 #define APP_COLOR_CUSTOM 248

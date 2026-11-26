@@ -102,9 +102,53 @@ const uint8_t *cursor_sprite(int shape) {
     return s_sprite[shape];
 }
 
+/* the move pointer (4): four arrows, 17x17, the hot spot in the middle.
+ * 'W' white, 'B' black */
+#define MOVE_N 17
+static const char *const MOVE_ROWS[MOVE_N] = {
+    "........B........", ".......BWB.......", "......BWWWB......",
+    ".....BWWWWWB.....", "......BBWBB......", "...B...BWB...B...",
+    "..BWB..BWB..BWB..", ".BWWBBBBWBBBBWWB.", "BWWWWWWWWWWWWWWWB",
+    ".BWWBBBBWBBBBWWB.", "..BWB..BWB..BWB..", "...B...BWB...B...",
+    "......BBWBB......", ".....BWWWWWB.....", "......BWWWB......",
+    ".......BWB.......", "........B........",
+};
+static uint8_t s_move[MOVE_N * MOVE_N];
+
+static const uint8_t *move_sprite(void) {
+    if (!s_move[0] && !s_move[1]) { /* (made once: corners are see-through) */
+        for (int r = 0; r < MOVE_N; r++)
+            for (int c = 0; c < MOVE_N; c++) {
+                char ch = MOVE_ROWS[r][c];
+                s_move[r * MOVE_N + c] = ch == 'W'   ? WHITE
+                                         : ch == 'B' ? BLACK
+                                                     : 0xFF;
+            }
+    }
+    return s_move;
+}
+
+/* an app's shape for this frame (API size 12), -1: none */
+static int s_request = -1, s_shown;
+
+void cursor_request(int shape) {
+    if (shape >= 0 && shape <= CURSOR_MOVE)
+        s_request = shape;
+}
+
+int cursor_shown(void) { return s_shown; }
+
 void cursor_frame(bool on) {
-    if (on && !wd_busy_shown()) /* the hourglass stands in while busy */
-        pointer_shape(cursor_sprite(CHOSEN_CURSOR), CUR_W, CUR_H, 0, 0);
+    int shape = s_request >= 0 ? s_request : CHOSEN_CURSOR;
+    s_request = -1; /* (asked for again next frame, if still wanted) */
+    if (on && !wd_busy_shown()) { /* the hourglass stands in while busy */
+        if (shape == CURSOR_MOVE)
+            pointer_shape(move_sprite(), MOVE_N, MOVE_N, MOVE_N / 2,
+                          MOVE_N / 2);
+        else
+            pointer_shape(cursor_sprite(shape), CUR_W, CUR_H, 0, 0);
+        s_shown = shape;
+    }
     if (on && !ps2_irq_active()) /* else the timer interrupt moves it */
         pointer_move(mouse.x, mouse.y);
     pointer_show(on);

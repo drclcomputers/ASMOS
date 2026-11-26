@@ -8,7 +8,9 @@
  * both ways, says why it can't show a bad one; ASMDraw opens and saves
  * them and keeps its custom colours; the kernel's own calls read and save
  * them too (fixtures/bmp/mk.py makes the files) */
+#include "lib/bmp.h"
 #include "scen.h"
+#include "ui/cursor.h"
 
 static uint8_t s_buf[400000], s_exp[400000];
 static int s_ew, s_eh;
@@ -738,9 +740,266 @@ static int draw_tools(void) {
     return fails;
 }
 
+// the selection in ASMDraw, the clipboard's pictures, the scrapbook
+
+/* Ctrl + a key, to the focused control */
+static void ctrl_key(uint8_t sc) { sim_key2(sc, 0, false, true); }
+
+/* a key then Enter in the open pop-up menu: the item by its first letter */
+static void popup_pick(char letter, uint8_t sc) {
+    sim_key2(sc, letter, false, false);
+    sim_key(0x1C);
+    sim_frames(2);
+}
+
+static int draw_select(void) {
+    int fails = 0;
+    char b[300];
+    clean_prefs();
+    clipboard_history_clear();
+    sim_launch("ASMDRAW");
+    sim_frames(3);
+    window *w = wm_focused_window();
+    control *cv = canvas_of(w), *pal = tipped(w, "Click: the pen");
+    int cw = pal->aw / (gpu_palette(s_pal, 256) == 256 ? 24 : 16);
+#define TOOL(t)                                                                \
+    do {                                                                       \
+        control *t_ = tipped(w, t);                                            \
+        if (t_)                                                                \
+            sim_click(t_->ax + 5, t_->ay + 5);                                 \
+    } while (0)
+#define AT(x, y) canvas_px(cv, x, y)
+    int x0 = cv->ax + 2, y0 = cv->ay + 2;
+    T("the Select tool", tipped(w, "Select: drag a box") != NULL);
+    sim_click(pal->ax + 4 * cw + cw / 2, pal->ay + 5); /* red */
+    TOOL("Filled rectangle");
+    sim_drag(x0 + 10, y0 + 10, x0 + 40, y0 + 30);
+
+    /* a box 5..45 x 5..35 around it, copied */
+    TOOL("Select: drag a box");
+    sim_drag(x0 + 5, y0 + 5, x0 + 45, y0 + 35);
+    sim_frames(1);
+    ctrl_key(0x2E);
+    const clip_image_t *im = clipboard_image();
+    snprintf(b, sizeof b, "    copied: %d x %d\n", im ? im->w : -1,
+             im ? im->h : -1);
+    wr(1, b);
+    T("Ctrl+C: the box on the clipboard, a picture",
+      im && im->w == 41 && im->h == 31 && clipboard_kind() == CLIP_IMAGE);
+    T("... its pixels", im && im->pix[5 * 41 + 5] == 4 &&
+                            im->pix[25 * 41 + 35] == 4 && im->pix[0] == 15 &&
+                            im->pix[30 * 41 + 40] == 15);
+    T("... and colours", im && !memcmp(im->pal[4], s_pal[4], 3));
+    T("in the scrapbook", clipboard_history_count() == 1 &&
+                              clipboard_history_kind(0) == CLIP_IMAGE);
+
+    /* over it: the move pointer; dragged: it moves, paper left behind */
+    sim_move(x0 + 20, y0 + 20);
+    sim_frames(2);
+    T("over the selection: the move pointer", cursor_shown() == CURSOR_MOVE);
+    sim_move(x0 + 100, y0 + 60);
+    sim_frames(2);
+    T("... not off it", cursor_shown() != CURSOR_MOVE);
+    sim_drag(x0 + 20, y0 + 20, x0 + 80, y0 + 20);
+    sim_frames(2);
+    sim_shot("draw_select");
+    T("moved: the paper where it was", AT(10, 10) == 15 && AT(25, 20) == 15);
+    T("... the pixels where it went",
+      AT(70, 10) == 4 && AT(100, 30) == 4 && AT(101, 31) == 15);
+
+    /* right-click on it: Delete */
+    sim_rclick(x0 + 85, y0 + 20);
+    sim_frames(1);
+    T("right-click: a menu", popup_is_open());
+    popup_pick('d', 0x20);
+    T("Delete: gone", !popup_is_open() && AT(70, 10) == 15 &&
+                          AT(85, 20) == 15 && AT(100, 30) == 15);
+
+    /* Ctrl+V: floats at the top left; a click elsewhere puts it down */
+    ctrl_key(0x2F);
+    sim_frames(1);
+    T("Ctrl+V: the picture at the top left",
+      AT(5, 5) == 4 && AT(35, 25) == 4 && AT(36, 26) == 15);
+    sim_click(x0 + 120, y0 + 70);
+    sim_frames(1);
+    T("put down: it stays", AT(5, 5) == 4 && AT(35, 25) == 4);
+
+    /* right-click elsewhere: Paste there */
+    sim_rclick(x0 + 60, y0 + 50);
+    sim_frames(1);
+    popup_pick('p', 0x19);
+    sim_key(0x01); /* Esc: put down */
+    sim_frames(1);
+    T("right-click, Paste: there", AT(65, 55) == 4 && AT(64, 54) == 15);
+
+    /* Cut: Ctrl+A, Ctrl+X: an empty canvas, the whole of it copied */
+    ctrl_key(0x1E);
+    ctrl_key(0x2D);
+    sim_frames(1);
+    im = clipboard_image();
+    T("Ctrl+A, Ctrl+X: all of it cut", im && im->w > 100 && AT(5, 5) == 15 &&
+                                           AT(65, 55) == 15 &&
+                                           clipboard_history_count() == 2);
+    wm_close(w);
+    sim_frames(3);
+    if (wm_focused_window() && wm_focused_window() != w) { /* "Save?": no */
+        press(wm_focused_window(), "No");
+        sim_frames(2);
+    }
+#undef TOOL
+#undef AT
+    return fails;
+}
+
+static window *clipview(void) {
+    sim_launch("ClipView");
+    sim_frames(3);
+    return FIND("ClipView");
+}
+
+static bool bmp_is(const char *path, int w, int h) {
+    bmp_info_t bi;
+    return !bmp_open(path, &bi) && bi.w == w && bi.h == h;
+}
+
+static int scrapbook(void) {
+    int fails = 0;
+    char b[300];
+    gpu_palette(s_pal, 256);
+    static uint8_t pix[40 * 30];
+    for (int i = 0; i < 40 * 30; i++)
+        pix[i] = i % 40 < 20 ? 4 : 1; /* red | blue */
+
+    /* the scrapbook: text and pictures, the last 20, newest last */
+    clipboard_history_clear();
+    clipboard_set_text("one", (int)strlen("one"));
+    clipboard_set_text("two", (int)strlen("two"));
+    clipboard_set_image(40, 30, pix, 40, (const uint8_t (*)[3])s_pal);
+    T("text, text, a picture", clipboard_history_count() == 3 &&
+                                   g_clip_history_current == 2 &&
+                                   clipboard_kind() == CLIP_IMAGE);
+    T("Use an old one: it is on the clipboard again",
+      clipboard_history_use(0) && clipboard_kind() == CLIP_TEXT &&
+          !strcmp(clipboard_text(), "one") && g_clip_history_current == 0);
+    T("... the picture is still kept",
+      clipboard_history_image(2) && clipboard_history_image(2)->w == 40);
+    clipboard_history_remove(1);
+    T("remove one", clipboard_history_count() == 2 &&
+                        !strcmp(clipboard_history_get_text(0), "one") &&
+                        clipboard_history_kind(1) == CLIP_IMAGE);
+    for (int i = 0; i < 25; i++) {
+        char t[8];
+        snprintf(t, sizeof t, "t%d", i);
+        clipboard_set_text(t, (int)strlen(t));
+    }
+    T("20 at most: the oldest go",
+      clipboard_history_count() == 20 &&
+          !strcmp(clipboard_history_get_text(19), "t24") &&
+          !strcmp(clipboard_history_get_text(0), "t5"));
+    static uint8_t big[560 * 560];
+    memset(big, 2, sizeof big);
+    clipboard_set_image(560, 560, big, 560, (const uint8_t (*)[3])s_pal);
+    clipboard_set_image(560, 560, big, 560, (const uint8_t (*)[3])s_pal);
+    int pics = 0;
+    for (int i = 0; i < clipboard_history_count(); i++)
+        pics += clipboard_history_kind(i) == CLIP_IMAGE;
+    snprintf(b, sizeof b, "    two big pictures: %d kept, %d items\n", pics,
+             clipboard_history_count());
+    wr(1, b);
+    T("two big pictures: only the last kept (by size)",
+      pics == 1 && clipboard_image() && clipboard_image()->w == 560);
+    T("... the text stays (a picture goes first)",
+      clipboard_history_count() == 19 && /* (two went: it was full) */
+          !strcmp(clipboard_history_get_text(17), "t24"));
+    T("too big: refused",
+      !clipboard_set_image(600, 600, big, 0, (const uint8_t (*)[3])s_pal));
+
+    /* ClipView: the list, the preview, Save, Use, Delete */
+    clipboard_history_clear();
+    clipboard_set_text("hello\nworld", (int)strlen("hello\nworld"));
+    clipboard_set_image(40, 30, pix, 40, (const uint8_t (*)[3])s_pal);
+    window *w = clipview();
+    control *list = nth(w, CTL_LIST, 0), *text = nth(w, CTL_EDIT, 0);
+    control *view = nth(w, CTL_CUSTOM, 0);
+    T("ClipView: two items", w && list && list_count(list) == 2);
+    snprintf(b, sizeof b, "    status: %s\n", status(w));
+    wr(1, b);
+    T("the picture first, on the clipboard",
+      !strcmp(status(w), "A picture, 40 x 30: on the clipboard"));
+    T("... shown as a picture", view && view->visible && !text->visible);
+    int red = 0, blue = 0;
+    for (int y = 0; view && y < view->ah; y++)
+        for (int x = 0; x < view->aw; x++) {
+            uint8_t v = BACKBUF[(view->ay + y) * SCREEN_WIDTH + view->ax + x];
+            red += v == 4;
+            blue += v == 1;
+        }
+    snprintf(b, sizeof b, "    preview: %d red, %d blue pixels\n", red, blue);
+    wr(1, b);
+    T("... both halves", red >= 500 && blue >= 500);
+    sim_shot("scrapbook");
+    press(w, "Save...");
+    window *d = wm_focused_window();
+    control *e = nth(d, CTL_EDIT, 0);
+    if (e) {
+        ctl_set_text(e, "CVPIC.BMP");
+        ctl_focus(e);
+    }
+    sim_key(0x1C);
+    sim_frames(3);
+    T("Save...: a .BMP of it", bmp_is("/CVPIC.BMP", 40, 30));
+    list_set_sel(list, 1);
+    ctl_invoke(list, EV_CHANGE);
+    sim_frames(1);
+    T("the text: shown as text",
+      text->visible && !view->visible && !strcmp(text->text, "hello\nworld"));
+    press(w, "Use");
+    T("Use: the text on the clipboard",
+      clipboard_kind() == CLIP_TEXT &&
+          !strcmp(clipboard_text(), "hello\nworld"));
+    T("... marked", list_count(list) == 2 &&
+                        !strncmp(status(w), "Text, 11 characters: on", 23));
+    press(w, "Delete");
+    T("Delete: one left",
+      list_count(list) == 1 && clipboard_history_count() == 1);
+    clipboard_set_text("new", (int)strlen("new"));
+    sim_frames(2);
+    T("something copied: at the top",
+      list_count(list) == 2 && !strncmp(status(w), "Text, 3", 7));
+    wm_close(w);
+    sim_frames(2);
+
+    /* pasted into a folder: a new .BMP; BMP Viewer copies one */
+    fs_delete("/PICTURE.BMP");
+    fs_delete("/PICTURE2.BMP");
+    clipboard_set_image(40, 30, pix, 40, (const uint8_t (*)[3])s_pal);
+    T("paste a picture into a folder: PICTURE.BMP",
+      fo_can_paste() && OK(fo_paste("/")) && bmp_is("/PICTURE.BMP", 40, 30));
+    T("... again: PICTURE2.BMP",
+      OK(fo_paste("/")) && bmp_is("/PICTURE2.BMP", 40, 30));
+    clipboard_set_text("x", (int)strlen("x"));
+    T("text: nothing to paste in a folder", !fo_can_paste());
+    appload_run_named("BMP Viewer", "/PICTURE.BMP");
+    sim_frames(3);
+    w = wm_focused_window();
+    for (int i = 0; i < 600 && w && !strncmp(status(w), "Reading", 7); i++)
+        sim_frames(1);
+    run_menu(w, "Copy");
+    const clip_image_t *im = clipboard_image();
+    T("BMP Viewer, Edit > Copy: the picture",
+      im && im->w == 40 && im->h == 30 && im->pix[0] == 4 && im->pix[39] == 1);
+    wm_close(w);
+    sim_frames(2);
+    return fails;
+}
+
 int scen_bmp(const char *name) {
     if (!strcmp(name, "drawtools"))
         return draw_tools();
+    if (!strcmp(name, "drawsel"))
+        return draw_select();
+    if (!strcmp(name, "scrapbook"))
+        return scrapbook();
     if (!strcmp(name, "bmplib"))
         return kernel_lib();
     if (!strcmp(name, "bmpview"))
