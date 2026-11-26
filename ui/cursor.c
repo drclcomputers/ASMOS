@@ -105,11 +105,18 @@ const uint8_t *cursor_sprite(int shape) {
 }
 
 /* the bigger shapes: 'W' white, 'B' black, '.' see-through; the hot spot
- * in the middle */
+ * at the arrow's tip, else in the middle */
 typedef struct {
-    const char *const *rows;
+    const char *const *rows; /* NULL: the 9x8 one above */
     int w, h;
+    bool tip; /* the hot spot at the top left (else the middle) */
 } big_cursor_t;
+
+static const char *const ARROW_ROWS[] = {
+    /* 0: the arrow, 8x12 */
+    "B.......", "BB......", "BWB.....", "BWWB....", "BWWWB...", "BWWWWB..",
+    "BWWWWWB.", "BWWWWBB.", "BWBWB...", "BB.BWB..", "...BWB..", "....BB..",
+};
 
 static const char *const TEXT_ROWS[] = {
     /* 3: the I-beam, 5x11 */
@@ -146,18 +153,21 @@ static const char *const NS_ROWS[] = {
     "..BWB..", "BBBWBBB", "BWWWWWB", ".BWWWB.", "..BWB..", "...B...",
 };
 
-#define BIG_FIRST CURSOR_TEXT
-static const big_cursor_t BIG[] = {{TEXT_ROWS, 5, 11},  {MOVE_ROWS, 13, 13},
-                                   {NWSE_ROWS, 11, 11}, {NESW_ROWS, 11, 11},
-                                   {WE_ROWS, 13, 7},    {NS_ROWS, 7, 13}};
+static const big_cursor_t BIG[] = {
+    /* by shape */
+    {ARROW_ROWS, 8, 12, true},  {NULL, 0, 0, false},
+    {NULL, 0, 0, false},        {TEXT_ROWS, 5, 11, false},
+    {MOVE_ROWS, 13, 13, false}, {NWSE_ROWS, 11, 11, false},
+    {NESW_ROWS, 11, 11, false}, {WE_ROWS, 13, 7, false},
+    {NS_ROWS, 7, 13, false}};
 #define BIG_N (int)(sizeof(BIG) / sizeof(BIG[0]))
 static uint8_t s_big[13 * 13]; /* the last one made */
 static int s_big_made = -1;
 
 /* any shape up on the screen (the hourglass's is the watchdog's) */
 void cursor_put(int shape) {
-    int k = shape - BIG_FIRST;
-    if (k < 0 || k >= BIG_N) {
+    int k = shape;
+    if (k < 0 || k >= BIG_N || !BIG[k].rows) {
         pointer_shape(cursor_sprite(shape), CUR_W, CUR_H, 0, 0);
         return;
     }
@@ -172,7 +182,10 @@ void cursor_put(int shape) {
             }
         s_big_made = k;
     }
-    pointer_shape(s_big, b->w, b->h, b->w / 2, b->h / 2);
+    if (b->tip)
+        pointer_shape(s_big, b->w, b->h, 0, 0);
+    else
+        pointer_shape(s_big, b->w, b->h, b->w / 2, b->h / 2);
 }
 
 /* a shape for this frame (an app's, an edit field's), -1: none */

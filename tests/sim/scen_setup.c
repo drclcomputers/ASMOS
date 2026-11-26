@@ -337,8 +337,8 @@ int scen_setup(const char *name) {
      g_sim_vram[((gy) + 1) * SCREEN_WIDTH + (gx) + 1] == WHITE)
         /* the arrow is on the screen, not in the frame */
         int arrow = 0, inbb = 0;
-        for (int y = 200; y < 208; y++)
-            for (int x = 300; x < 309; x++) {
+        for (int y = 200; y < 212; y++)
+            for (int x = 300; x < 308; x++) {
                 arrow += g_sim_vram[y * SCREEN_WIDTH + x] !=
                          BACKBUF[y * SCREEN_WIDTH + x];
                 inbb += BACKBUF[y * SCREEN_WIDTH + x] !=
@@ -346,7 +346,7 @@ int scen_setup(const char *name) {
             }
         T("arrow on the screen", arrow > 10);
         T("arrow not in the frame", inbb == 0);
-        T("nothing else differs", DIFF_OUTSIDE(BACKBUF, 300, 200, 9, 8) == 0);
+        T("nothing else differs", DIFF_OUTSIDE(BACKBUF, 300, 200, 8, 12) == 0);
         /* moving it needs no frame (the timer interrupt moves it) */
         uint32_t fr0 = g_wm_frames[0] + g_wm_frames[1] + g_wm_frames[2],
                  none0 = g_wm_frames[0];
@@ -359,7 +359,7 @@ int scen_setup(const char *name) {
         T("moves on an idle desktop draw no frame",
           g_wm_frames[0] - none0 == 2);
         T("arrow went along", g_sim_vram[220 * SCREEN_WIDTH + 340] == BLACK &&
-                                  DIFF_OUTSIDE(BACKBUF, 340, 220, 9, 8) == 0);
+                                  DIFF_OUTSIDE(BACKBUF, 340, 220, 8, 12) == 0);
         extern int g_sim_puts;
         g_sim_puts = 0;
         pointer_move(345, 222); /* (as the interrupt does, between frames) */
@@ -367,8 +367,8 @@ int scen_setup(const char *name) {
                  g_sim_puts);
         wr(1, b);
         T("an interrupt move: one small rectangle",
-          g_sim_puts > 0 && g_sim_puts <= 14 * 10 &&
-              DIFF_OUTSIDE(BACKBUF, 345, 222, 9, 8) == 0);
+          g_sim_puts > 0 && g_sim_puts <= 13 * 14 &&
+              DIFF_OUTSIDE(BACKBUF, 345, 222, 8, 12) == 0);
         mouse.x = 345;
         mouse.y = 222;
         /* busy: the hourglass takes the arrow's place */
@@ -403,7 +403,7 @@ int scen_setup(const char *name) {
         T("done: hourglass gone", !wd_busy_shown());
         T("done: arrow back at the mouse",
           g_sim_vram[mouse.y * SCREEN_WIDTH + mouse.x] == BLACK &&
-              DIFF_OUTSIDE(BACKBUF, mouse.x, mouse.y, 9, 8) == 0);
+              DIFF_OUTSIDE(BACKBUF, mouse.x, mouse.y, 8, 12) == 0);
         sim_shot("busycur");
         return fails;
     }
