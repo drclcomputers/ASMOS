@@ -541,8 +541,31 @@ void wm_clear_overlay(void *user) {
         s_overlay = NULL;
 }
 
+/* the window a click of this frame went down on, as things were then */
+static window *s_click_win;
+
+window *wm_click_window(void) { return s_click_win; }
+
+static window *top_window_at(int mx, int my) {
+    for (int i = win_count - 1; i >= 0; i--) {
+        window *w = win_stack[i];
+        if (!w->visible || w->minimized)
+            continue;
+        int wy = w->y + MENUBAR_H;
+        if (mx >= w->x && mx <= w->x + w->w && my >= wy &&
+            my <= wy + win_shown_h(w))
+            return w;
+    }
+    return NULL;
+}
+
 void wm_update_all(void) {
     bool click_consumed = false;
+    /* before the window acts on it (a button may close or minimize it,
+     * and the click must not then land on what was under it) */
+    s_click_win = mouse.left_clicked || mouse.right_clicked
+                      ? top_window_at(mouse.x, mouse.y)
+                      : NULL;
 
     if (mouse.left_clicked && mouse.y >= SCREEN_HEIGHT - TASKBAR_H) {
         int tx = 0;
@@ -835,6 +858,9 @@ void window_resize(window *win) {
     }
 }
 
+/* where the pointer was when the drag began (one drag at a time) */
+static int s_drag_mx, s_drag_my;
+
 void window_dragged(window *win) {
     if (!win || win->pinned_bottom || win->resizing)
         return;
@@ -842,6 +868,8 @@ void window_dragged(window *win) {
     if (!win->dragging && mouse.left_clicked &&
         in_titlebar(win, mouse.x, mouse.y)) {
         win->dragging = true;
+        s_drag_mx = mouse.x;
+        s_drag_my = mouse.y;
         win->band = g_cfg.outline_drag != 0; /* a frame, not the window */
         win->bx = win->x;
         win->by = win->y;
@@ -866,10 +894,13 @@ void window_dragged(window *win) {
                 win->y = win->by;
                 win->band = false;
             }
-            /* drag to the bottom edge = minimize (no auto-tiling) */
+            /* dragged to the bottom edge = minimize (no auto-tiling); a
+             * click on a title bar down there isn't a drag */
             int snap_threshold = 2 * TASKBAR_H;
+            int mdx = mouse.x - s_drag_mx, mdy = mouse.y - s_drag_my;
+            bool moved = mdx * mdx + mdy * mdy > 4 * 4;
 
-            if (mouse.y > SCREEN_HEIGHT - TASKBAR_H - snap_threshold) {
+            if (moved && mouse.y > SCREEN_HEIGHT - TASKBAR_H - snap_threshold) {
                 win->dragging = false;
                 win->minimized = true;
             }
@@ -1358,9 +1389,6 @@ int wm_compose(menubar *mb, int *y0, int *y1) {
     return WM_FRAME_PART;
 }
 
-/* Tests: draw the scene the plain way (nothing lazy) to compare with what
- * the lazy path left in the back buffer. False when it can't be compared
- * (something is animating). */
 bool wm_debug_reference(menubar *mb) {
     if (scene_transient(mb))
         return false;

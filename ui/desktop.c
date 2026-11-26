@@ -1137,6 +1137,13 @@ static void context_menu(int hit, int x, int y) {
     popup_show(x, y);
 }
 
+/* this frame's click is the desktop's: it went down on the desktop, not on
+ * a window over it (whatever the window did with it since) */
+static bool click_is_mine(void) {
+    window *w = wm_click_window();
+    return !w || w->pinned_bottom;
+}
+
 static void select_only(int hit) {
     desktop_item_t *items = desktop_fs_items();
     int count = desktop_fs_count();
@@ -1253,7 +1260,8 @@ void desktop_on_frame(void) {
         s_press_idx = -1;
 
     if (mouse.left_clicked && mouse.y >= MENUBAR_H &&
-        g_menubar.open_index < 0 && !g_menubar_click_consumed) {
+        mouse.y < SCREEN_HEIGHT - TASKBAR_H && g_menubar.open_index < 0 &&
+        !g_menubar_click_consumed && click_is_mine()) {
         int hit = desktop_hit(mouse.x, mouse.y);
         s_press_idx = hit;
         s_press_x = mouse.x;
@@ -1284,7 +1292,7 @@ void desktop_on_frame(void) {
     /* right-click on the desktop (windows already took theirs) */
     if (mouse.right_clicked && mouse.y >= MENUBAR_H &&
         mouse.y < SCREEN_HEIGHT - TASKBAR_H && !g_menubar_click_consumed &&
-        s_drag_idx < 0) {
+        s_drag_idx < 0 && click_is_mine()) {
         mouse.right_clicked = false;
         int hit = desktop_hit(mouse.x, mouse.y);
         select_only(hit);

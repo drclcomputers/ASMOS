@@ -1,7 +1,94 @@
 #include "os/meminfo.h"
 #include "scen.h"
+#include "ui/desktop_fs.h"
+#include "ui/popup.h"
 
 int scen_misc2(const char *name) {
+    if (!strcmp(name, "clickthrough")) {
+        /* a click on a window is the window's: its title bar buttons
+         * close or minimize it at once, and the click must not then
+         * select (and drag) the desktop icon that was under them */
+        int fails = 0;
+        char b[200];
+        g_cfg.reduce_motion = true; /* (no animation: gone at once) */
+        desktop_item_t *items = desktop_fs_items();
+        int trash = -1;
+        for (int i = 0; i < desktop_fs_count(); i++)
+            if (items[i].used && items[i].kind == DESKTOP_ITEM_TRASH)
+                trash = i;
+        T("the Trash is on the desktop", trash >= 0);
+        if (trash < 0)
+            return fails;
+        int ix = items[trash].x, iy = items[trash].y;
+        int cx = ix + 10, cy = MENUBAR_H + iy + 8; /* inside the icon */
+#define UNSELECT()                                                             \
+    for (int i = 0; i < desktop_fs_count(); i++)                               \
+    items[i].selected = false
+        /* 1: minimize, with the button held and the pointer moving on */
+        UNSELECT();
+        sim_launch("TEDITOR");
+        sim_frames(3);
+        window *w = wm_focused_window();
+        w->x = cx - 21; /* the minimize button (x + 16..26) over the icon */
+        w->y = cy - MENUBAR_H - 8;
+        wm_invalidate_all();
+        sim_frames(2);
+        sim_drag(cx, cy, cx + 60, cy + 40);
+        sim_frames(2);
+        snprintf(b, sizeof b,
+                 "    minimized %d, Trash selected %d, at %d,%d (was %d,%d)\n",
+                 w->minimized, items[trash].selected, items[trash].x,
+                 items[trash].y, ix, iy);
+        wr(1, b);
+        T("minimize: the window goes", w->minimized);
+        T("... the Trash isn't selected or moved", !items[trash].selected &&
+                                                       items[trash].x == ix &&
+                                                       items[trash].y == iy);
+        /* 2: a click on the title bar, over the icon */
+        w->minimized = false;
+        w->x = cx - 60;
+        wm_focus(w);
+        wm_invalidate_all();
+        sim_frames(2);
+        UNSELECT();
+        sim_click(cx, cy);
+        sim_frames(2);
+        T("a click on a title bar: not the desktop's",
+          !items[trash].selected && wm_focused_window() == w);
+        T("... and near the bottom it doesn't minimize (not a drag)",
+          !w->minimized);
+        /* 3: right-click on it: the window's, no desktop menu */
+        sim_move(cx, cy);
+        mouse.right_clicked = true;
+        sim_frame();
+        sim_frames(1);
+        T("a right-click on a title bar: no desktop menu", !popup_is_open());
+        if (popup_is_open()) {
+            sim_key(0x01);
+            sim_frames(2);
+        }
+        /* 4: close, over the icon (the title bar's drag pulled the window
+         * up onto the screen: back) */
+        w->x = cx - 8; /* the close button (x + 3..13) */
+        w->y = cy - MENUBAR_H - 8;
+        wm_invalidate_all();
+        sim_frames(2);
+        UNSELECT();
+        sim_click(cx, cy);
+        sim_frames(2);
+        T("close: the Trash isn't selected",
+          !items[trash].selected && wm_focused_window() != w);
+        /* and the desktop's own: a click on the icon selects it */
+        UNSELECT();
+        sim_click(cx, cy);
+        sim_frames(2);
+        T("a click on the desktop still selects the icon",
+          items[trash].selected);
+        UNSELECT();
+#undef UNSELECT
+        g_cfg.reduce_motion = false;
+        return fails;
+    }
     if (!strcmp(name, "memreport")) {
         /* where the memory goes (os/meminfo.h): the parts add up, the
          * About box and `mem` say them, an app's memory shows as apps */
