@@ -227,7 +227,7 @@ static void on_about(void) {
 static void cv_init(void *state) {
     cv_state_t *s = state;
     s->win =
-        app_window(s, "ClipView", 30, 30, 260, 190, DARK_GRAY, AW_RESIZABLE);
+        app_window(s, "ClipView", 30, 30, 260, 180, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
     s->win->min_w = 230;

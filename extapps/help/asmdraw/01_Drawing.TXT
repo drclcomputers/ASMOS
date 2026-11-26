@@ -34,6 +34,9 @@ ASMDraw draws pictures in 16 colours, or 24 on a 256-colour screen
 - Over it the pointer becomes four arrows: drag it somewhere else. The
   paper colour is left where it was; hold Ctrl as you start to drag to
   leave a copy instead. Click outside it (or press Esc) to put it down.
+- Its edges and corners (the small squares) resize it, and what is in
+  it is stretched to fit: the pointer shows which way. Shift on a corner
+  keeps its shape.
 - Right-click (or Edit): Cut, Copy, Paste, Delete, Select all. Keys:
   Ctrl+X, Ctrl+C, Ctrl+V, Del, Ctrl+A.
 - Copied, it is a picture on the clipboard: paste it here or in another

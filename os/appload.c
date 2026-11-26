@@ -419,6 +419,14 @@ static void api_popup_show_for(const control *c) {
         popup_show_for(c);
 }
 
+/* the pointer's shape, this frame: only for the app in front, the mouse
+ * over its window (not over another, or a menu: ui/cursor.c) */
+static void api_pointer(int shape) {
+    window *w = s_calling_state ? *(window **)s_calling_state : NULL;
+    if (w && w == wm_focused_window() && wm_window_at(mouse.x, mouse.y) == w)
+        cursor_request(shape);
+}
+
 static void api_menu_enable(menu *m, bool on) {
     if (m)
         menu_enable_last(m, on);
@@ -867,7 +875,7 @@ static const os_api_t s_api = {
     .set_screen_color = gpu_set_color,
     .palette256 = gpu_palette256,
     .bmp = &s_bmp,
-    .pointer = cursor_request,
+    .pointer = api_pointer,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

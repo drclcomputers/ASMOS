@@ -111,7 +111,13 @@ From `asmos.h` you can use what ASMOS's own apps use:
   `ctl_custom` (draw it yourself)... and `list_*`, `tree_*`, `edit_*`
 - dialogs: `dlg_message`, `dlg_confirm`, `dlg_input`, `dlg_open_file`,
   `dlg_save_file`, `dlg_print`, `dlg_color` (a colour picker)
-- menus: `window_add_menu`, `menu_add_item`, `menu_add_separator`
+- menus: `window_add_menu`, `menu_add_item`, `menu_add_separator`,
+  `menu_enable_last`; right-click ones: `popup_menu`, `popup_show_for`
+- the clipboard: `clipboard_set_text`, `clipboard_set_image` (a picture),
+  `clipboard_kind`, `clipboard_text`, `clipboard_image`, and the
+  scrapbook's `clipboard_history_*` (`os/clipboard.h`)
+- the mouse pointer and a selection box: `A->pointer(APP_POINTER_...)`,
+  `selbox_*` (below)
 - drawing: `fill_rect`, `draw_line`, `draw_string`, `draw_pixels`,
   `text_width`... colours `BLACK` .. `WHITE`, fonts `FONT_SYSTEM`...
 - strings and numbers: `strlen`, `strcpy`, `strcmp`, `snprintf`,
@@ -128,6 +134,63 @@ From `asmos.h` you can use what ASMOS's own apps use:
 The rest of the app API is `A->...` (files: `A->file_read`,
 `A->list_dir`...; see `docs/DYNAMIC_APPS.md`). A function declared in
 these headers is one you can call: the SDK checks that when it is made.
+
+## The pointer, and selections
+
+`A->pointer(shape)` changes the mouse pointer for one frame: call it from
+`frame` while it applies. It shows only while your window is in front, the
+mouse over it, and no menu open. The shapes (`os/appapi.h`):
+
+| `APP_POINTER_...` | looks like              | for                       |
+| ----------------- | ----------------------- | ------------------------- |
+| `ARROW`           | the arrow               | (the usual)               |
+| `HAND`            | a hand                  | a link, something to push |
+| `CROSS`           | a cross                 | aiming, drawing           |
+| `TEXT`            | the I-beam              | text to type or pick      |
+| `MOVE`            | four arrows             | something to drag around  |
+| `SIZE_WE`         | left-right arrow        | a width to change         |
+| `SIZE_NS`         | up-down arrow           | a height to change        |
+| `SIZE_NWSE`       | top left - bottom right | a corner to drag          |
+| `SIZE_NESW`       | top right - bottom left | the other corners         |
+
+`lib/selbox.h` is a selection box like ASMDraw's: dragged out, moved by
+its inside, resized by its edges and corners (Shift keeps its shape),
+drawn as a dotted frame with 8 handles, and the right pointer for each
+spot. It works in your own units (a picture's pixels, a grid's cells):
+
+```c
+typedef struct { window *win; control *view; selbox_t box; } my_t;
+
+static void on_view(control *c, int ev) {   /* a ctl_custom */
+    my_t *s = c->win->userdata;
+    int x = c->mx, y = c->my;               /* the control's pixels */
+    if (ev == EV_MOUSEDOWN)
+        selbox_down(&s->box, x, y);
+    else if (ev == EV_MOUSEMOVE && selbox_drag(&s->box, x, y, kb.shift))
+        wm_invalidate(s->win);
+    else if (ev == EV_MOUSEUP)
+        selbox_up(&s->box);
+}
+
+static void paint(control *c, int x, int y, int w, int h) {
+    my_t *s = c->user;
+    fill_rect(x, y, w, h, WHITE);
+    selbox_draw(&s->box, x, y, 1, x, y, w, h);  /* zoom 1, clipped */
+}
+
+static void frame(void *state) {             /* the pointer over it */
+    my_t *s = state;
+    control *c = s->view;
+    int p = selbox_pointer_at(&s->box, mouse.x - c->ax, mouse.y - c->ay);
+    if (p >= 0 && window_is_focused(s->win))
+        A->pointer(p);
+}
+```
+
+`selbox_down` returns what it grabbed: `SB_INSIDE` (moving), an edge or
+corner (`SB_N`... `SB_SE`: resizing), or `SB_NONE` (a new box, the old one
+gone: if it carried something, `selbox_hit` first says so). `box.on`
+says if there is one; `selbox_set` and `selbox_clear` make one or drop it.
 
 ## Help pages
 

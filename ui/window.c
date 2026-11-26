@@ -546,7 +546,7 @@ static window *s_click_win;
 
 window *wm_click_window(void) { return s_click_win; }
 
-static window *top_window_at(int mx, int my) {
+window *wm_window_at(int mx, int my) {
     for (int i = win_count - 1; i >= 0; i--) {
         window *w = win_stack[i];
         if (!w->visible || w->minimized)
@@ -561,10 +561,8 @@ static window *top_window_at(int mx, int my) {
 
 void wm_update_all(void) {
     bool click_consumed = false;
-    /* before the window acts on it (a button may close or minimize it,
-     * and the click must not then land on what was under it) */
     s_click_win = mouse.left_clicked || mouse.right_clicked
-                      ? top_window_at(mouse.x, mouse.y)
+                      ? wm_window_at(mouse.x, mouse.y)
                       : NULL;
 
     if (mouse.left_clicked && mouse.y >= SCREEN_HEIGHT - TASKBAR_H) {
@@ -1073,10 +1071,6 @@ static window *window_under_mouse(void) {
     return NULL;
 }
 
-// the outline frame (outline move/resize)
-/*
- * XORed into the back buffer, so drawing it again takes it away: no
- * redraw of what is under it while it moves. */
 static bool s_band_on; /* drawn in the back buffer now */
 static int s_bx, s_by, s_bw, s_bh;
 

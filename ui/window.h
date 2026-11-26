@@ -129,6 +129,7 @@ bool is_desktop_focused();
  * title bar button closes or minimizes it), NULL if none or no click: the
  * desktop takes a click only if it is its own */
 window *wm_click_window(void);
+window *wm_window_at(int mx, int my); /* the top one there, or NULL */
 /* Alt+Tab / Alt+Shift+Tab: called once a frame before the keys go
  * anywhere else; true while the window list is up (it took the key) */
 bool wm_switcher_key(void);

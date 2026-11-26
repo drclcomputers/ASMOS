@@ -1915,19 +1915,13 @@ void ctl_draw_tooltip(void) {
 }
 
 static void hover_cursor(void) {
-    static bool ours;
     window *w = window_at(mouse.x, mouse.y);
     control *c = (w && !w->modal_child && w->controls && !s_capture)
                      ? hit(w, mouse.x, mouse.y)
                      : (s_capture ? s_capture : NULL);
     tip_track(c);
-    if (c && c->type == CTL_EDIT) {
-        CHOSEN_CURSOR = 3; /* I-beam over text fields */
-        ours = true;
-    } else if (ours) {
-        CHOSEN_CURSOR = 0;
-        ours = false;
-    }
+    if (c && c->type == CTL_EDIT)
+        cursor_request(CURSOR_TEXT); /* I-beam over text fields */
 }
 
 // context menus

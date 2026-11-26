@@ -16,6 +16,7 @@
 #include "ui/window.h"
 
 #include "config/config.h"
+#include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "os/os.h"
 
@@ -340,6 +341,12 @@ void menubar_draw(menubar *mb) {
 
 void menubar_update(menubar *mb) {
     menubar_layout(mb);
+    if (mb->open_index >= 0 && kb.key_pressed) { /* a menu open: its keys */
+        if (kb.last_scancode == ESC)
+            menubar_close_all(mb);
+        kb.key_pressed = false; /* (not for the window under it) */
+        kb.last_char = 0;
+    }
     if (mouse.left_clicked && mouse.y < MENUBAR_H) {
         g_menubar_click_consumed = true;
         mouse.left_clicked = false;

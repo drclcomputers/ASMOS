@@ -807,13 +807,62 @@ static int draw_select(void) {
     T("... the pixels where it went",
       AT(70, 10) == 4 && AT(100, 30) == 4 && AT(101, 31) == 15);
 
+    /* the box is at 65..105 x 5..35: its edges resize it */
+    struct {
+        int x, y, shape;
+        const char *what;
+    } edge[] = {{105, 20, CURSOR_SIZE_WE, "right edge: left-right"},
+                {85, 5, CURSOR_SIZE_NS, "top edge: up-down"},
+                {105, 35, CURSOR_SIZE_NWSE, "bottom right: diagonal"},
+                {105, 5, CURSOR_SIZE_NESW, "top right: the other diagonal"},
+                {85, 20, CURSOR_MOVE, "the middle: four arrows"}};
+    for (unsigned i = 0; i < sizeof edge / sizeof edge[0]; i++) {
+        sim_move(x0 + edge[i].x, y0 + edge[i].y);
+        sim_frames(2);
+        char d[80];
+        snprintf(d, sizeof d, "pointer on the %s", edge[i].what);
+        T(d, cursor_shown() == edge[i].shape);
+    }
+    /* a menu open over it: the arrow */
+    menu *apps = NULL;
+    for (int i = 0; i < g_menubar.menu_count; i++)
+        if (!strcmp(g_menubar.menus[i].title, "Apps"))
+            apps = &g_menubar.menus[i];
+    if (apps) {
+        sim_click(apps->bar_x + 4, 4);
+        sim_frames(2);
+        sim_move(x0 + 85, y0 + 20);
+        sim_frames(2);
+        T("a menu open: the arrow over the selection",
+          g_menubar.open_index >= 0 && cursor_shown() == 0);
+        sim_key(0x01);
+        sim_frames(2);
+        T("Esc: the menu closes, the selection stays",
+          g_menubar.open_index < 0 && AT(64, 4) == 0); /* (a handle) */
+    }
+    wm_focus(w);
+    sim_frames(1);
+    /* the bottom right corner dragged: twice as big, the pixels too */
+    sim_drag(x0 + 105, y0 + 35, x0 + 145, y0 + 65);
+    sim_frames(2);
+    sim_shot("draw_resize");
+    T("resized: the pixels stretched", AT(130, 55) == 4 && AT(76, 16) == 4 &&
+                                           AT(70, 8) == 15 &&
+                                           AT(140, 62) == 15);
+    ctrl_key(0x2E);
+    im = clipboard_image();
+    T("... copied as it is shown", im && im->w == 81 && im->h == 61);
+    clipboard_history_remove(clipboard_history_count() - 1);
+    clipboard_history_use(0);
+
     /* right-click on it: Delete */
     sim_rclick(x0 + 85, y0 + 20);
     sim_frames(1);
     T("right-click: a menu", popup_is_open());
+    T("... the arrow over it", cursor_shown() == 0);
     popup_pick('d', 0x20);
     T("Delete: gone", !popup_is_open() && AT(70, 10) == 15 &&
-                          AT(85, 20) == 15 && AT(100, 30) == 15);
+                          AT(85, 20) == 15 && AT(130, 55) == 15);
 
     /* Ctrl+V: floats at the top left; a click elsewhere puts it down */
     ctrl_key(0x2F);
@@ -953,6 +1002,10 @@ static int scrapbook(void) {
     sim_frames(1);
     T("the text: shown as text",
       text->visible && !view->visible && !strcmp(text->text, "hello\nworld"));
+    sim_move(text->ax + 20, text->ay + 6);
+    sim_frames(2);
+    T("over the text: the I-beam", cursor_shown() == CURSOR_TEXT);
+    sim_shot("ibeam");
     press(w, "Use");
     T("Use: the text on the clipboard",
       clipboard_kind() == CLIP_TEXT &&

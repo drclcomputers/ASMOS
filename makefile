@@ -39,7 +39,8 @@ OBJ = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SRC)) \
 # in /APPS, and the shortcuts to the built-in apps: extapps/MANIFEST.
 EXT_APPS    = puzzle sudoku solitaire calendar clock calculator clipview hexview asmdraw audioplayer bmpview
 EXT_DIR     = $(BUILD_DIR)/extapps
-EXT_LIB_SRC = extapps/shim.c extapps/shim_api.c lib/string.c lib/math.c lib/mem.c
+EXT_LIB_SRC = extapps/shim.c extapps/shim_api.c lib/string.c lib/math.c lib/mem.c \
+              lib/selbox.c
 EXT_LIB_OBJ = $(patsubst %.c,$(EXT_DIR)/%.o,$(EXT_LIB_SRC))
 EXT_CFLAGS  = $(CFLAGS) -ffunction-sections -fdata-sections
 EXT_PKGS    = $(patsubst %,$(EXT_DIR)/%.APP,$(EXT_APPS))

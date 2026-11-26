@@ -223,9 +223,12 @@ Pasted into a folder (FileF, the desktop), a picture becomes a new
 PICTURE.BMP there.
 
 `api->pointer(shape)` changes the mouse pointer for this frame:
-`APP_POINTER_ARROW`, `HAND`, `CROSS`, `TEXT` or `MOVE` (four arrows).
-Call it from `on_frame` while it should show; ASMDraw does when the mouse
-is over its selection.
+`APP_POINTER_ARROW`, `HAND`, `CROSS`, `TEXT` (the I-beam), `MOVE` (four
+arrows), `SIZE_WE`, `SIZE_NS`, `SIZE_NWSE`, `SIZE_NESW` (the resize
+arrows). Call it from `on_frame` while it should show; it is taken only
+from the app in front, with the mouse over its window, and not while a
+menu is open. ASMDraw does it over its selection; `lib/selbox.h` (in the
+apps' library) is that selection box, for any app: docs/SDK.md.
 
 ## What an app needs: --min-cpu, --min-ram
 

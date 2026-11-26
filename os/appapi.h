@@ -370,7 +370,8 @@ typedef struct os_api {
 
     // appended in API size 12: the pointer's shape
     /* For this frame only (call it each frame while it applies: over the
-     * thing it is for): APP_POINTER_ARROW, _HAND, _CROSS, _TEXT, _MOVE. */
+     * thing it is for): APP_POINTER_ARROW, _HAND, _CROSS, _TEXT, _MOVE,
+     * _SIZE_NWSE, _SIZE_NESW, _SIZE_WE, _SIZE_NS. */
     void (*pointer)(int shape);
 } os_api_t;
 
@@ -382,12 +383,18 @@ typedef struct os_api {
 #define APP_ATTR_SYSTEM 0x04
 #define APP_ATTR_DIR 0x10
 
-/* api->pointer (API size 12) */
+/* api->pointer (API size 12): the shape for this frame, while the app is
+ * in front and the mouse over its window. lib/selbox.h picks them for a
+ * selection box. */
 #define APP_POINTER_ARROW 0
 #define APP_POINTER_HAND 1
 #define APP_POINTER_CROSS 2
-#define APP_POINTER_TEXT 3
-#define APP_POINTER_MOVE 4 /* four arrows: something can be moved */
+#define APP_POINTER_TEXT 3      /* the I-beam: text can be typed or picked */
+#define APP_POINTER_MOVE 4      /* four arrows: something can be moved */
+#define APP_POINTER_SIZE_NWSE 5 /* resize: top left - bottom right */
+#define APP_POINTER_SIZE_NESW 6 /* resize: top right - bottom left */
+#define APP_POINTER_SIZE_WE 7   /* resize: left - right */
+#define APP_POINTER_SIZE_NS 8   /* resize: up - down */
 
 /* api->set_screen_color (API size 10) */
 #define APP_COLOR_CUSTOM 248

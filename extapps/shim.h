@@ -17,6 +17,7 @@
 #include "lib/graphics.h"
 #include "lib/math.h"
 #include "lib/memory.h"
+#include "lib/selbox.h"
 #include "lib/string.h"
 #include "lib/time.h"
 #include "os/clipboard.h"
@@ -25,7 +26,7 @@
 #include "ui/ui.h"
 #include "ui/uifont.h"
 
-extern const os_api_t *A; /* the API, set on every call into the app */
+extern const os_api_t *A;
 
 typedef struct {
     char name[32];

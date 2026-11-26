@@ -62,7 +62,7 @@ void wd_heartbeat(void) {
     }
     if (s_shown) { /* the arrow comes back */
         s_shown = false;
-        pointer_shape(cursor_sprite(CHOSEN_CURSOR), 9, 8, 0, 0);
+        cursor_restore();
     }
 }
 
