@@ -1,9 +1,235 @@
 #include "os/meminfo.h"
+#include "os/os.h"
 #include "scen.h"
 #include "ui/desktop_fs.h"
 #include "ui/popup.h"
 
+// asking to save before closing (wm_ask_save), the Clock
+
+extern void teditor_open_file(const char *path);
+
+/* the button labelled t in window d, clicked */
+static bool push(window *d, const char *t) {
+    for (control *c = d ? d->controls : NULL; c; c = c->next)
+        if (c->type == CTL_BUTTON && !strcmp(ctl_text(c), t)) {
+            sim_click(c->ax + 5, c->ay + 5);
+            sim_frames(3);
+            return true;
+        }
+    return false;
+}
+
+static bool run_menu(window *w, const char *prefix) {
+    for (int m = 0; w && m < w->win_menu_count; m++)
+        for (int k = 0; k < w->win_menus[m].item_count; k++) {
+            menu_item *it = &w->win_menus[m].items[k];
+            if (it->label && !strncmp(it->label, prefix, strlen(prefix))) {
+                menu_item_run(it);
+                return true;
+            }
+        }
+    return false;
+}
+
+static int file_is(const char *path, const char *want) {
+    char buf[64] = {0};
+    fat_file_t f;
+    if (!fs_open(path, &f))
+        return 0;
+    int n = fs_read(&f, buf, sizeof(buf) - 1);
+    fs_close(&f);
+    buf[n < 0 ? 0 : n] = 0;
+    return !strcmp(buf, want);
+}
+
+static window *teditor_typed(const char *text) {
+    sim_launch("TEDITOR");
+    sim_frames(3);
+    window *w = wm_focused_window();
+    sim_type(text);
+    sim_frames(2);
+    return w;
+}
+
+static int ask_save(void) {
+    int fails = 0;
+    char b[200];
+    fs_delete("/ASK.TXT");
+
+    /* typed in: not saved; closing asks */
+    window *w = teditor_typed("hello");
+    T("typed: the window has unsaved changes", w && w->unsaved);
+    wm_close(w);
+    sim_frames(2);
+    window *d = wm_focused_window();
+    T("closing asks: Save changes?",
+      d && d != w && !strcmp(d->title, "Save changes?") && w->modal_child == d);
+    sim_shot("asksave");
+    push(d, "Cancel");
+    T("Cancel: still open, still not saved",
+      wm_is_registered(w) && w->unsaved && !w->modal_child);
+
+    /* asked again; Don't save closes it (Ctrl+Q does wm_close too: the
+     * scheduler's, not run here) */
+    wm_close(w);
+    sim_frames(2);
+    d = wm_focused_window();
+    T("asked again", d && d != w && !strcmp(d->title, "Save changes?"));
+    push(d, "Don't save");
+    T("Don't save: closed", !wm_is_registered(w));
+
+    /* Save, untitled: Save As first; saved, it closes */
+    w = teditor_typed("hello");
+    wm_close(w);
+    sim_frames(2);
+    push(wm_focused_window(), "Save");
+    d = wm_focused_window();
+    T("Save, untitled: Save As", d && d != w && wm_is_registered(w));
+    control *e = NULL;
+    for (control *c = d ? d->controls : NULL; c; c = c->next)
+        if (c->type == CTL_EDIT && !e)
+            e = c;
+    if (e) {
+        ctl_set_text(e, "ASK.TXT");
+        ctl_focus(e);
+    }
+    sim_key(0x1C);
+    sim_frames(4);
+    T("... saved: it closes", !wm_is_registered(w));
+    T("... the file", file_is("/ASK.TXT", "hello"));
+
+    /* Save As cancelled: it stays, and doesn't close later */
+    w = teditor_typed("x");
+    wm_close(w);
+    sim_frames(2);
+    push(wm_focused_window(), "Save");
+    push(wm_focused_window(), "Cancel");
+    sim_frames(4);
+    T("Save As cancelled: still open, not saved",
+      wm_is_registered(w) && w->unsaved);
+
+    /* shutting down names it */
+    char names[80];
+    int n = wm_unsaved_titles(names, sizeof names);
+    snprintf(b, sizeof b, "    not saved: %d, %s\n", n, names);
+    wr(1, b);
+    T("shutting down: the window not saved is named",
+      n == 1 && strstr(names, "TEditor"));
+    w->unsaved = false;
+    wm_close(w);
+    sim_frames(2);
+
+    /* a file: Save saves it there, and it closes */
+    teditor_open_file("/ASK.TXT");
+    sim_frames(3);
+    w = wm_focused_window();
+    T("opened: nothing to save", w && !w->unsaved);
+    sim_type("!");
+    sim_frames(1);
+    wm_close(w);
+    sim_frames(2);
+    push(wm_focused_window(), "Save");
+    sim_frames(2);
+    T("a file: Save saves it, closes",
+      !wm_is_registered(w) &&
+          (file_is("/ASK.TXT", "!hello") || file_is("/ASK.TXT", "hello!")));
+
+    /* ASMDraw too: drawn on, closing asks */
+    sim_launch("ASMDRAW");
+    sim_frames(3);
+    w = wm_focused_window();
+    T("ASMDraw: nothing to save yet", w && !w->unsaved);
+    control *cv = NULL;
+    for (control *c = w->controls; c; c = c->next)
+        if (c->type == CTL_CUSTOM && (!cv || c->aw * c->ah > cv->aw * cv->ah))
+            cv = c;
+    sim_drag(cv->ax + 10, cv->ay + 10, cv->ax + 40, cv->ay + 30);
+    T("drawn on: not saved", w->unsaved);
+    wm_close(w);
+    sim_frames(2);
+    d = wm_focused_window();
+    T("ASMDraw asks", d && d != w && !strcmp(d->title, "Save changes?"));
+    push(d, "Don't save");
+    T("... Don't save: closed", !wm_is_registered(w));
+    return fails;
+}
+
+static int clock_faces(void) {
+    int fails = 0;
+    char b[200];
+    sim_launch("Clock");
+    sim_frames(3);
+    window *w = FIND("Clock");
+    T("Clock: the text face", w && w->h < 80);
+    run_menu(w, "Classic Clock");
+    sim_frames(2);
+    T("View > Classic Clock: taller, a dial", w->h > 100);
+    sim_shot("clock_classic");
+    /* the hands: black and red on the white face */
+    control *dial = NULL;
+    for (control *c = w->controls; c; c = c->next)
+        if (c->type == CTL_CUSTOM)
+            dial = c;
+    int white = 0, red = 0;
+    for (int y = 0; dial && y < dial->ah; y++)
+        for (int x = 0; x < dial->aw; x++) {
+            uint8_t v = BACKBUF[(dial->ay + y) * SCREEN_WIDTH + dial->ax + x];
+            white += v == WHITE;
+            red += v == RED;
+        }
+    snprintf(b, sizeof b, "    dial: %d white, %d red\n", white, red);
+    wr(1, b);
+    T("... a white face, a red second hand", white > 3000 && red > 10);
+    T("... kept for the next time", app_prefs_get_int("Clock", "Face", 0) == 1);
+
+    /* the alarm page: - and + */
+    g_alarm.set = false;
+    run_menu(w, "Set Alarm...");
+    sim_frames(2);
+    control *hm = NULL, *hp = NULL, *mm = NULL, *mp = NULL;
+    for (control *c = w->controls; c; c = c->next)
+        if (c->type == CTL_BUTTON && c->visible) {
+            if (!strcmp(ctl_text(c), "-"))
+                *(hm ? &mm : &hm) = c;
+            if (!strcmp(ctl_text(c), "+"))
+                *(hp ? &mp : &hp) = c;
+        }
+    T("Set Alarm: a page with - and +", hm && hp && mm && mp && w->h < 100);
+    sim_shot("clock_alarm");
+    time_full_t t = time_rtc_local();
+    sim_click(hp->ax + 4, hp->ay + 4);
+    sim_click(hp->ax + 4, hp->ay + 4);
+    sim_click(mm->ax + 4, mm->ay + 4);
+    /* held: it keeps going */
+    sim_move(mp->ax + 4, mp->ay + 4);
+    mouse.left = true;
+    sim_frames(60); /* (a second) */
+    mouse.left = false;
+    sim_frames(2);
+    push(w, "OK");
+    bool set = g_alarm.set;
+    int ah = g_alarm.hour, am = g_alarm.minute;
+    int want_h = (t.hours + 2) % 24;
+    int got_m = ((am - t.minutes + 1) % 60 + 60) % 60; /* steps held */
+    snprintf(b, sizeof b, "    alarm %d %02d:%02d (now %02d:%02d), %d held\n",
+             set, ah, am, t.hours, t.minutes, got_m);
+    wr(1, b);
+    T("+ + on the hour, - on the minutes, + held: the alarm",
+      set && ah == want_h && got_m >= 3 && got_m <= 8);
+    T("OK: the classic face again", w->h > 100);
+    run_menu(w, "Text Clock");
+    sim_frames(2);
+    T("View > Text Clock: back", w->h < 80);
+    wm_close(w);
+    sim_frames(2);
+    return fails;
+}
+
 int scen_misc2(const char *name) {
+    if (!strcmp(name, "asksave"))
+        return ask_save();
+    if (!strcmp(name, "clockfaces"))
+        return clock_faces();
     if (!strcmp(name, "clickthrough")) {
         /* a click on a window is the window's: its title bar buttons
          * close or minimize it at once, and the click must not then

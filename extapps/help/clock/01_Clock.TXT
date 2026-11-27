@@ -2,5 +2,10 @@
 
 The time and the date, from the PC's clock (Settings > Clock sets them).
 
-- Alarm > Set Alarm rings at a time you choose; Clear Alarm takes it
-  away.
+- View > Classic Clock shows a face with hands (the red one counts the
+  seconds); View > Text Clock goes back to the numbers. Clock keeps the
+  one you chose for the next time.
+- Alarm > Set Alarm: - and + under Hour and Minutes change the time (hold
+  one down to keep going), Ring at this time turns it on or off, then
+  OK. Clear Alarm takes it away.
+- The alarm rings even when Clock is closed.

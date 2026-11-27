@@ -146,6 +146,17 @@ void menu_add_item(menu *m, char *label, MenuAction action) {
 void menu_add_separator(menu *m) { A->ui->menu_separator(m); }
 void menu_enable_last(menu *m, bool on) { A->ui->menu_enable(m, on); }
 
+// asking to save before closing (ui/window.h)
+void wm_ask_save(window *w, bool (*save)(window *w)) {
+    A->ui->ask_save(w, save);
+}
+void wm_set_unsaved(window *w, bool unsaved) { A->ui->set_unsaved(w, unsaved); }
+void wm_close(window *w) { A->ui->close(w); }
+void dlg_ask(window *owner, const char *title, const char *msg,
+             const char *const *buttons, int n, dlg_int_cb cb, void *user) {
+    A->ui->ask(owner, title, msg, buttons, n, cb, user);
+}
+
 // right-click menus: fill popup_menu(), then popup_show_for(c)
 menu *popup_menu(void) { return A->ui->popup_menu(); }
 void popup_show(int x, int y) { A->ui->popup_show(x, y); }

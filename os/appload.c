@@ -773,6 +773,10 @@ static const ui_api_t s_ui = {
     .edit_select_all = edit_select_all,
     .status = ctl_status,
     .color = dlg_color,
+    .ask_save = wm_ask_save,
+    .set_unsaved = wm_set_unsaved,
+    .close = wm_close,
+    .ask = dlg_ask,
 };
 
 // API table given to v2 apps

@@ -109,8 +109,12 @@ From `asmos.h` you can use what ASMOS's own apps use:
 - windows and controls: `app_window`, `ctl_button`, `ctl_edit`,
   `ctl_list`, `ctl_check`, `ctl_combo`, `ctl_tabs`, `ctl_tree`,
   `ctl_custom` (draw it yourself)... and `list_*`, `tree_*`, `edit_*`
-- dialogs: `dlg_message`, `dlg_confirm`, `dlg_input`, `dlg_open_file`,
-  `dlg_save_file`, `dlg_print`, `dlg_color` (a colour picker)
+- dialogs: `dlg_message`, `dlg_confirm`, `dlg_ask` (2 or 3 buttons),
+  `dlg_input`, `dlg_open_file`, `dlg_save_file`, `dlg_print`, `dlg_color`
+  (a colour picker)
+- "save the changes?" on closing, built in: `wm_ask_save(win, save)` once,
+  then `wm_set_unsaved(win, true/false)`; File > Close calls
+  `wm_close(win)` (docs/UI_TOOLKIT.md)
 - menus: `window_add_menu`, `menu_add_item`, `menu_add_separator`,
   `menu_enable_last`; right-click ones: `popup_menu`, `popup_show_for`
 - the clipboard: `clipboard_set_text`, `clipboard_set_image` (a picture),

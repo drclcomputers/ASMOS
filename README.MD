@@ -272,25 +272,25 @@ hourglass is showing).
 
 The bundled apps:
 
-| App                                                      | What it does                                              |
-| -------------------------------------------------------- | --------------------------------------------------------- |
-| FileF                                                    | file manager: copy, move, delete, rename, properties, zip |
-| TEditor                                                  | text editor                                               |
-| Settings                                                 | Display, Sound, Clock, Network, Printers, Devices, System |
-| ASMTerm                                                  | the shell in a window                                     |
-| Monitor                                                  | running apps, End Task, memory, CPU                       |
-| Format Disk                                              | format a floppy (FDD0, FDD1), or erase HDB                |
-| Print Queue                                              | the printer's jobs (from Settings > Printers)             |
-| Joystick                                                 | calibrate the game port's stick (Settings > Devices)      |
-| ASMDraw                                                  | paint: 11 tools, selection, .PIC and .BMP, 24 colours     |
-| Help                                                     | the help pages of every app                               |
-| Character Map                                            | every character of the code page, to copy                 |
-| ClipView                                                 | the scrapbook: the last 20 texts and pictures copied      |
-| Calculator, Calendar (with notes), Clock (with an alarm) | accessories                                               |
-| Audio Player                                             | WAV and MIDI files, audio CDs                             |
-| HexView                                                  | files in hex                                              |
-| BMP Viewer                                               | .BMP pictures, scrolled, in 256 or 16 colours             |
-| Puzzle, Sudoku, Solitaire (Klondike, Spider, FreeCell)   | games                                                     |
+| App                                                               | What it does                                              |
+| ----------------------------------------------------------------- | --------------------------------------------------------- |
+| FileF                                                             | file manager: copy, move, delete, rename, properties, zip |
+| TEditor                                                           | text editor                                               |
+| Settings                                                          | Display, Sound, Clock, Network, Printers, Devices, System |
+| ASMTerm                                                           | the shell in a window                                     |
+| Monitor                                                           | running apps, End Task, memory, CPU                       |
+| Format Disk                                                       | format a floppy (FDD0, FDD1), or erase HDB                |
+| Print Queue                                                       | the printer's jobs (from Settings > Printers)             |
+| Joystick                                                          | calibrate the game port's stick (Settings > Devices)      |
+| ASMDraw                                                           | paint: 11 tools, selection, .PIC and .BMP, 24 colours     |
+| Help                                                              | the help pages of every app                               |
+| Character Map                                                     | every character of the code page, to copy                 |
+| ClipView                                                          | the scrapbook: the last 20 texts and pictures copied      |
+| Calculator, Calendar (with notes), Clock (text or classic, alarm) | accessories                                               |
+| Audio Player                                                      | WAV and MIDI files, audio CDs                             |
+| HexView                                                           | files in hex                                              |
+| BMP Viewer                                                        | .BMP pictures, scrolled, in 256 or 16 colours             |
+| Puzzle, Sudoku, Solitaire (Klondike, Spider, FreeCell)            | games                                                     |
 
 The first group is built into the kernel. The rest are .APP files in /APPS,
 loaded from disk when you start them.

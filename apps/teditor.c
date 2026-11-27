@@ -11,7 +11,6 @@
 typedef struct {
     window *win; /* must stay first */
     control *edit, *status;
-    bool dirty;
     char path[FS_PATH_SZ];
     char title[48];
     char find[64];
@@ -24,8 +23,8 @@ app_descriptor teditor_app;
 static void set_title(teditor_state_t *s) {
     const char *base = strrchr(s->path, '/');
     base = base ? base + 1 : (s->path[0] ? s->path : "Untitled");
-    snprintf(s->title, sizeof(s->title), "%s%s - TEditor", s->dirty ? "*" : "",
-             base);
+    snprintf(s->title, sizeof(s->title), "%s - TEditor", base); /* (the window
+                                                    adds a * if not saved) */
     s->win->title = s->title;
 }
 
@@ -33,14 +32,15 @@ static void update_status(teditor_state_t *s, bool force) {
     int line = edit_line_of(s->edit, s->edit->cursor) + 1;
     int col = edit_col_of(s->edit, s->edit->cursor) + 1;
     if (!force && line == s->last_line && col == s->last_col &&
-        s->dirty == s->last_dirty)
+        s->win->unsaved == s->last_dirty)
         return;
     s->last_line = line;
     s->last_col = col;
-    s->last_dirty = s->dirty;
+    s->last_dirty = s->win->unsaved;
     char b[64];
     snprintf(b, sizeof(b), "%d lines  %s\tLn %d  Col %d",
-             edit_line_count(s->edit), s->dirty ? "modified" : "", line, col);
+             edit_line_count(s->edit), s->win->unsaved ? "modified" : "", line,
+             col);
     ctl_set_text(s->status, b);
     set_title(s);
 }
@@ -65,7 +65,7 @@ static bool load(teditor_state_t *s, const char *path) {
     ctl_set_text(s->edit, buf);
     kfree(buf);
     strncpy(s->path, path, sizeof(s->path) - 1);
-    s->dirty = false;
+    wm_set_unsaved(s->win, false);
     update_status(s, true);
     return true;
 }
@@ -83,7 +83,7 @@ static bool save(teditor_state_t *s, const char *path) {
         return false;
     if (path != s->path)
         strncpy(s->path, path, sizeof(s->path) - 1);
-    s->dirty = false;
+    wm_set_unsaved(s->win, false);
     update_status(s, true);
     return true;
 }
@@ -91,7 +91,7 @@ static bool save(teditor_state_t *s, const char *path) {
 static void on_edit(control *c, int ev) {
     teditor_state_t *s = c->user;
     if (ev == EV_CHANGE)
-        s->dirty = true;
+        wm_set_unsaved(s->win, true);
 }
 
 // file commands
@@ -189,21 +189,11 @@ static void do_print(teditor_state_t *s) {
     dlg_print(s->win, &doc);
 }
 
-/* closing with unsaved changes asks first */
-static void confirm_discard(void *user, bool yes) {
-    teditor_state_t *s = user;
-    if (yes) {
-        s->dirty = false;
-        os_close_own_instance(s->win);
-    }
-}
-
-static bool on_close(window *w) {
+/* closing with unsaved changes asks first (wm_ask_save): Save saves */
+static bool save_changes(window *w) {
     teditor_state_t *s = w->userdata;
-    if (!s->dirty)
-        return os_close_own_instance(w);
-    dlg_confirm(w, "TEditor", "Discard unsaved changes?", confirm_discard, s);
-    return true;
+    do_save(s); /* (untitled: Save As; it closes once that saves) */
+    return !w->unsaved;
 }
 
 // menus (act on the focused TEditor)
@@ -217,7 +207,7 @@ static void menu_new(void) { os_launch_app(&teditor_app); }
 ACTION(menu_open, do_open(s))
 ACTION(menu_save, do_save(s))
 ACTION(menu_save_as, do_save_as(s))
-ACTION(menu_close, on_close(s->win))
+ACTION(menu_close, wm_close(s->win))
 ACTION(menu_print, do_print(s))
 ACTION(menu_cut, edit_cut(s->edit))
 ACTION(menu_copy, edit_copy(s->edit))
@@ -237,7 +227,7 @@ static void teditor_init(void *state) {
     s->win = app_window(s, "TEditor", 30, 20, 260, 176, BLUE, AW_RESIZABLE);
     if (!s->win)
         return;
-    s->win->on_close = on_close;
+    wm_ask_save(s->win, save_changes);
     s->edit = ctl_edit(s->win, 2, 2, 254, 144, "", TEXT_MAX,
                        ES_MULTILINE | CS_STRETCH_W | CS_STRETCH_H, on_edit);
     s->status = ctl_status(s->win, "");
@@ -292,8 +282,8 @@ void teditor_open_file(const char *path) {
     for (int i = 0; i < MAX_RUNNING_APPS && !t; i++) {
         app_instance_t *a = &running_apps[i];
         teditor_state_t *s = a->state;
-        if (a->running && a->desc == &teditor_app && s && s->win && !s->dirty &&
-            !s->path[0] && s->edit->text_len == 0)
+        if (a->running && a->desc == &teditor_app && s && s->win &&
+            !s->win->unsaved && !s->path[0] && s->edit->text_len == 0)
             t = s;
     }
     if (!t) {

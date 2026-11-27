@@ -559,8 +559,13 @@ window *wm_window_at(int mx, int my) {
     return NULL;
 }
 
+static void finish_closes(void);
+
 void wm_update_all(void) {
     bool click_consumed = false;
+    finish_closes();
+    /* before the window acts on it (a button may close or minimize it,
+     * and the click must not then land on what was under it) */
     s_click_win = mouse.left_clicked || mouse.right_clicked
                       ? wm_window_at(mouse.x, mouse.y)
                       : NULL;
@@ -657,9 +662,13 @@ void window_draw(window *win) {
         draw_titlebar_btn(win->x + 3, wy + 3, 10, 10, "X", RED);
         draw_titlebar_btn(win->x + 16, wy + 3, 10, 10, "_", LIGHT_BLUE);
 
-        const char *title = win->title;
-        char title_buf[256];
+        const char *title = win->title ? win->title : "";
+        char title_buf[256], star_buf[256];
         int font = UI_FONT_BOLD;
+        if (win->unsaved && win->save_changes) { /* "*Name": not saved */
+            snprintf(star_buf, sizeof(star_buf), "*%s", title);
+            title = star_buf;
+        }
         int button_offset = 28;
         int max_width = win->w - button_offset - 6;
 
@@ -917,11 +926,92 @@ bool wm_is_registered(const window *win) {
 
 /* Close button: the window's own handler, else end the app that owns it,
  * else just hide it. */
-void wm_close(window *win) {
+static void close_now(window *win) {
+    win->close_saving = false;
     if (win->on_close)
         win->on_close(win);
     else if (!os_close_own_instance(win))
         win->visible = false;
+}
+
+// asking to save before closing
+
+void wm_ask_save(window *win, bool (*save)(window *win)) {
+    if (win)
+        win->save_changes = save;
+}
+
+void wm_set_unsaved(window *win, bool unsaved) {
+    if (win && win->unsaved != unsaved) {
+        win->unsaved = unsaved;
+        wm_invalidate(win); /* (its title's *) */
+    }
+}
+
+int wm_unsaved_titles(char *out, int n) {
+    int count = 0, o = 0;
+    if (n > 0)
+        out[0] = 0;
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (!w->unsaved || !w->save_changes)
+            continue;
+        if (o < n - 1)
+            o += snprintf(out + o, n - o, "%s%s", count ? ", " : "",
+                          w->title ? w->title : "");
+        count++;
+    }
+    return count;
+}
+
+/* Save, Don't save, Cancel: the answer (run as the app, if it is one) */
+static void save_answer(void *user, int choice) {
+    window *w = user;
+    if (!wm_is_registered(w))
+        return;
+    if (choice == 0) { /* Save: closes when saved (wm_finish_closes) */
+        w->close_saving = true;
+        if (w->save_changes)
+            w->save_changes(w);
+    } else if (choice == 1) { /* Don't save */
+        w->unsaved = false;
+        close_now(w);
+    }
+}
+
+void wm_close(window *win) {
+    if (!win)
+        return;
+    if (!win->save_changes || !win->unsaved) {
+        close_now(win);
+        return;
+    }
+    if (win->modal_child) { /* a dialog is open: that first */
+        wm_focus(win->modal_child);
+        return;
+    }
+    if (win->minimized)
+        win->minimized = false;
+    wm_focus(win);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Save the changes to %s before closing?",
+             win->title && win->title[0] ? win->title : "this window");
+    static const char *const BUTTONS[3] = {"Save", "Don't save", "Cancel"};
+    dlg_ask(win, "Save changes?", msg, BUTTONS, 3, save_answer, win);
+}
+
+/* Save was picked: once no dialog is open (a Save As may be), it closes
+ * if the changes were saved, else it stays (the Save As was cancelled) */
+static void finish_closes(void) {
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (!w->close_saving || w->modal_child)
+            continue;
+        w->close_saving = false;
+        if (!w->unsaved)
+            close_now(w);
+        return; /* (one a frame: the stack may have changed) */
+    }
 }
 
 menu *window_add_menu(window *win, const char *title) {
@@ -1071,6 +1161,10 @@ static window *window_under_mouse(void) {
     return NULL;
 }
 
+// the outline frame (outline move/resize)
+/*
+ * XORed into the back buffer, so drawing it again takes it away: no
+ * redraw of what is under it while it moves. */
 static bool s_band_on; /* drawn in the back buffer now */
 static int s_bx, s_by, s_bw, s_bh;
 
@@ -1383,6 +1477,9 @@ int wm_compose(menubar *mb, int *y0, int *y1) {
     return WM_FRAME_PART;
 }
 
+/* Tests: draw the scene the plain way (nothing lazy) to compare with what
+ * the lazy path left in the back buffer. False when it can't be compared
+ * (something is animating). */
 bool wm_debug_reference(menubar *mb) {
     if (scene_transient(mb))
         return false;

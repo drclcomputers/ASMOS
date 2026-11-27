@@ -39,10 +39,34 @@ Full external example: `testapps/hello.c` (also the FDD tool's template).
 | `app_window(state, title, x, y, w, h, bar_color, flags)` | `AW_RESIZABLE`, `AW_HIDDEN`, `AW_NO_ANIM`, `AW_FIXED_POS`. Face colour, min size = 2/3, close = end instance. The first window an app makes while starting opens where the user last closed it (/PREFS/WINDOWS.INI); x, y are only the first time. `AW_FIXED_POS`: always at x, y. Off the screen, or bigger than it: moved on and shrunk to fit. |
 | `win_client_rect(w, &x, &y, &cw, &ch)`                   | client area = `w-2` × `h-17`                                                                                                                                                                                                                                                                                                                      |
 | `ui_active_state()`                                      | state of the focused app window (for menu callbacks)                                                                                                                                                                                                                                                                                              |
-| `w->on_close`                                            | return `true` if handled (e.g. ask “Discard changes?”)                                                                                                                                                                                                                                                                                            |
+| `w->on_close`                                            | return `true` if handled. To ask about unsaved work, use `wm_ask_save`                                                                                                                                                                                                                                                                            |
 
 Coordinates are relative to the client area. Font: 5 px per char, 8 px per
 line (`TH_CHAR_W`, `TH_LINE_H`). Usual heights: button/edit 12–14, label 10.
+
+**Save before closing.** Turn it on once, then say when there are changes:
+
+```c
+static bool save_changes(window *w) {   /* what File > Save does */
+    my_t *s = w->userdata;
+    if (!s->path[0]) {
+        save_as(s);      /* a Save As dialog: it closes when that saves */
+        return false;
+    }
+    return save_to(s, s->path);   /* calls wm_set_unsaved(w, false) */
+}
+...
+wm_ask_save(s->win, save_changes);   /* in init */
+wm_set_unsaved(s->win, true);        /* on an edit */
+wm_set_unsaved(s->win, false);       /* once saved, or a file loaded */
+```
+
+While there are changes the title shows a `*`. The close box, File >
+Close (call `wm_close(win)`) and Ctrl+Q then ask _Save the changes to ...
+before closing?_ with Save, Don't save, Cancel. Save calls `save_changes`;
+the window closes once `wm_set_unsaved(w, false)` has been called and no
+dialog is open (so a cancelled Save As leaves it open). Shut Down and
+Restart name the windows not saved. TEditor and ASMDraw use it.
 
 Every window gets these from the window manager, with no app code:
 
@@ -142,15 +166,16 @@ that holds the selection selects the branch (`EV_CHANGE`).
 All are non-blocking: they return at once and call back later. The owner
 window is blocked while its dialog is open. Callback text `NULL` = cancel.
 
-| call                                                                  | callback                                                        |
-| --------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `dlg_message(owner, title, msg)`                                      | – (`\n` splits lines)                                           |
-| `dlg_confirm(owner, title, msg, cb, user)`                            | `cb(user, bool yes)`                                            |
-| `dlg_input(owner, title, prompt, initial, max, edit_style, cb, user)` | `cb(user, text)`                                                |
-| `dlg_input_check(…, check_label, bool *checked, cb, user)`            | same; `*checked` is written before `cb` (keep it in your state) |
-| `dlg_open_file(owner, title, dir, ext, cb, user)`                     | `cb(user, path)`                                                |
-| `dlg_save_file(owner, title, dir, name, ext, cb, user)`               | `cb(user, path)` (asks before overwriting)                      |
-| `dlg_color(owner, title, rgb, preview, cb, user)`                     | `cb(user, rgb)`, NULL if cancelled (0..63 each)                 |
+| call                                                                  | callback                                                            |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `dlg_message(owner, title, msg)`                                      | – (`\n` splits lines)                                               |
+| `dlg_confirm(owner, title, msg, cb, user)`                            | `cb(user, bool yes)`                                                |
+| `dlg_ask(owner, title, msg, buttons, n, cb, user)`                    | `cb(user, int choice)`: 2 or 3 buttons, 0 the default, Esc the last |
+| `dlg_input(owner, title, prompt, initial, max, edit_style, cb, user)` | `cb(user, text)`                                                    |
+| `dlg_input_check(…, check_label, bool *checked, cb, user)`            | same; `*checked` is written before `cb` (keep it in your state)     |
+| `dlg_open_file(owner, title, dir, ext, cb, user)`                     | `cb(user, path)`                                                    |
+| `dlg_save_file(owner, title, dir, name, ext, cb, user)`               | `cb(user, path)` (asks before overwriting)                          |
+| `dlg_color(owner, title, rgb, preview, cb, user)`                     | `cb(user, rgb)`, NULL if cancelled (0..63 each)                     |
 
 `ext` may list several types: `"PIC,BMP"`. Open shows all of them; Save
 has a Type list (the first chosen at the start): its files are shown, a

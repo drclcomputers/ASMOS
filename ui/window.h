@@ -17,7 +17,7 @@
 
 #define MAX_WINDOWS 32
 #define MAX_WIN_MENUS 16
-#define RESIZE_BUTTON 10
+#define RESIZE_BUTTON 8
 
 #define WIN_ANIM_NONE 0
 #define WIN_ANIM_OPEN 1
@@ -113,6 +113,12 @@ struct window {
      * remembered: dialogs, later windows, AW_FIXED_POS) */
     char pos_key[24];
     int pos_x0, pos_y0;
+
+    /* closing asks to save the changes first: wm_ask_save, wm_set_unsaved
+     * (appended: apps see this struct) */
+    bool (*save_changes)(struct window *win); /* NULL: it never asks */
+    bool unsaved;      /* changes not saved: the title shows a * */
+    bool close_saving; /* Save was picked: it closes once they are saved */
 };
 
 /* height the window takes on screen: just the title bar when shaded */
@@ -169,7 +175,12 @@ extern uint32_t g_wm_frames[3];       /* frames of each WM_FRAME_* kind */
 void wm_update_all(void);
 
 bool wm_is_registered(const window *win);
-void wm_close(window *win); /* what the close button does */
+void wm_close(window *win);
+void wm_ask_save(window *win, bool (*save)(window *win));
+void wm_set_unsaved(window *win, bool unsaved);
+/* the titles of the windows with unsaved changes, "A, B" (shutting down
+ * warns); how many */
+int wm_unsaved_titles(char *out, int n);
 menu *window_add_menu(window *win, const char *title);
 /* Draw fn(user) on top of every window each frame (one at a time), e.g.
  * an icon dragged across windows. Clear it with the same user pointer. */

@@ -448,19 +448,29 @@ static void do_shutdown(void) {
     power_anim_run(false);
     cpu_shutdown();
 }
+
+static void power_confirm(const char *title, const char *q, void (*fn)(void)) {
+    static char msg[256];
+    char names[160];
+    int n = wm_unsaved_titles(names, sizeof(names));
+    if (n)
+        snprintf(msg, sizeof(msg),
+                 "%s\n\nNot saved: %s. Those changes will "
+                 "be lost!",
+                 q, names);
+    else
+        snprintf(msg, sizeof(msg), "%s\n\nAny unsaved work will be lost!", q);
+    dlg_confirm(NULL, title, msg, run_if_yes, (void *)fn);
+}
 static void menu_shutdown(void) {
-    dlg_confirm(NULL, "Shut Down",
-                "Shut down ASMOS?\n\nAny unsaved work will be lost!",
-                run_if_yes, (void *)do_shutdown);
+    power_confirm("Shut Down", "Shut down ASMOS?", do_shutdown);
 }
 static void do_restart(void) {
     power_anim_run(true);
     cpu_reset();
 }
 static void menu_restart(void) {
-    dlg_confirm(NULL, "Restart",
-                "Restart ASMOS?\n\nAny unsaved work will be lost!", run_if_yes,
-                (void *)do_restart);
+    power_confirm("Restart", "Restart ASMOS?", do_restart);
 }
 
 /* the selected floppy, or else the one with a disk in */

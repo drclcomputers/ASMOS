@@ -30,7 +30,8 @@ enum {
     K_PRINT,
     K_PREVIEW,
     K_FOLDER,
-    K_FORM
+    K_FORM,
+    K_ASK
 };
 
 typedef struct {
@@ -50,6 +51,8 @@ typedef struct {
     int ntyp;
     char title[40]; /* callers may pass a stack buffer */
     void *xdata;    /* kind-specific (print dialog, preview); freed here */
+    dlg_int_cb icb; /* dlg_ask: the button pressed */
+    int choice;
 } dlg_t;
 
 #define MAX_DLG 8
@@ -112,6 +115,8 @@ static void finish(dlg_t *d, bool ok, const char *text) {
     window *owner = d->owner;
     dlg_text_cb tcb = d->tcb;
     dlg_bool_cb bcb = d->bcb;
+    dlg_int_cb icb = d->icb;
+    int choice = d->choice;
     void *user = d->user;
     int kind = d->kind;
     unlink_dlg(d);
@@ -122,7 +127,10 @@ static void finish(dlg_t *d, bool ok, const char *text) {
         wm_focus(owner);
     /* bool travels as a 4-byte stack slot under i386 cdecl, so one
      * (void*, void*) caller serves both callback types */
-    if (kind == K_CONFIRM && bcb)
+    if (kind == K_ASK && icb)
+        call(owner, (void (*)(void *, void *))(void (*)(void))icb, user,
+             (void *)(uintptr_t)choice);
+    else if (kind == K_CONFIRM && bcb)
         call(owner, (void (*)(void *, void *))(void (*)(void))bcb, user,
              (void *)(uintptr_t)(ok ? 1 : 0));
     else if (tcb)
@@ -285,6 +293,48 @@ static void message_box(window *owner, int kind, const char *title,
         control *ok = ctl_button(d->win, 78, by, 50, 13, "OK", 1, on_ok);
         ctl_style_add(ok, CS_DEFAULT | CS_CANCEL);
         ctl_focus(ok);
+    }
+}
+
+/* dlg_ask's buttons: which one */
+static void on_ask(control *c, int ev) {
+    (void)ev;
+    dlg_t *d = (dlg_t *)c->user;
+    d->choice = c->id;
+    finish(d, true, NULL);
+}
+
+void dlg_ask(window *owner, const char *title, const char *msg,
+             const char *const *buttons, int n, dlg_int_cb cb, void *user) {
+    n = n < 1 ? 1 : n > 3 ? 3 : n;
+    char text[512];
+    int lines = wrap_text(msg ? msg : "", text, sizeof(text), 38);
+    lines = lines > 12 ? 12 : lines;
+    int bw[3], total = 0;
+    for (int i = 0; i < n; i++) {
+        bw[i] = text_width(buttons[i], UI_FONT_SMALL) + 14;
+        bw[i] = bw[i] < 50 ? 50 : bw[i];
+        total += bw[i] + (i ? 6 : 0);
+    }
+    int w = total + 20 > 210 ? total + 20 : 210;
+    dlg_t *d = open_dlg(owner, K_ASK, title, w, 16 + 8 + lines * 8 + 29);
+    if (!d)
+        return;
+    d->icb = cb;
+    d->user = user;
+    d->choice = n - 1; /* (closed: the last, Cancel) */
+    ctl_label(d->win, 8, 8, w - 18, lines * 8, text, 0);
+    int by = 8 + lines * 8 + 8, x = (w - 2 - total) / 2;
+    for (int i = 0; i < n; i++) {
+        control *b =
+            ctl_button(d->win, x, by, bw[i], 13, buttons[i], i, on_ask);
+        if (i == 0) {
+            ctl_style_add(b, CS_DEFAULT);
+            ctl_focus(b);
+        }
+        if (i == n - 1)
+            ctl_style_add(b, CS_CANCEL);
+        x += bw[i] + 6;
     }
 }
 

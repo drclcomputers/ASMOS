@@ -147,6 +147,14 @@ typedef struct ui_api {
     // appended in ui size 4 (API size 11): the colour picker (dlg_color)
     void (*color)(window *owner, const char *title, const uint8_t rgb[3],
                   int preview, dlg_color_cb cb, void *user);
+
+    // appended in ui size 5 (API size 13): asking to save before closing
+    // (ui/window.h: wm_ask_save, wm_set_unsaved, wm_close), and dlg_ask
+    void (*ask_save)(window *win, bool (*save)(window *win));
+    void (*set_unsaved)(window *win, bool unsaved);
+    void (*close)(window *win); /* as its close box (asks first) */
+    void (*ask)(window *owner, const char *title, const char *msg,
+                const char *const *buttons, int n, dlg_int_cb cb, void *user);
 } ui_api_t;
 
 #define OS_API_VERSION 1

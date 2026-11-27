@@ -230,6 +230,15 @@ from the app in front, with the mouse over its window, and not while a
 menu is open. ASMDraw does it over its selection; `lib/selbox.h` (in the
 apps' library) is that selection box, for any app: docs/SDK.md.
 
+## API size 13: asking to save before closing
+
+`api->ui` (its size 5) gains `ask_save`, `set_unsaved`, `close` and `ask`:
+in an app `wm_ask_save(win, save)`, `wm_set_unsaved(win, bool)`,
+`wm_close(win)` and `dlg_ask(...)` (docs/UI_TOOLKIT.md, "Save before
+closing"). With it on and changes not saved, closing the window asks
+Save / Don't save / Cancel; the title shows a `*`. File > Close should
+call `wm_close(win)` (not `os_quit_app_by_desc`) so that it asks too.
+
 ## What an app needs: --min-cpu, --min-ram
 
 `mkapp.py --min-cpu 486 --min-ram 4096` (KB) writes the least CPU and RAM

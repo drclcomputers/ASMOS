@@ -170,6 +170,9 @@ static void draw_set_status(asmdraw_state_t *s, const char *msg) {
     s->status_until = time_millis() + 3000;
 }
 
+/* the picture changed: closing asks to save it (wm_ask_save) */
+static void changed(asmdraw_state_t *s) { wm_set_unsaved(s->win, true); }
+
 // drawing: everything is runs of one row ("spans"), into the canvas or,
 // while a shape is being dragged, onto the screen over it
 
@@ -489,6 +492,7 @@ static bool lift(asmdraw_state_t *s, bool copy) {
     s->floating = f;
     s->fw = b->w;
     s->fh = b->h;
+    changed(s);
     return true;
 }
 
@@ -522,6 +526,7 @@ static bool sel_copy(asmdraw_state_t *s) {
 static void sel_delete(asmdraw_state_t *s) {
     if (!s->box.on)
         return;
+    changed(s);
     if (!s->floating) /* (lifted, it is already gone from there) */
         for (int y = 0; y < s->box.h; y++)
             for (int x = 0; x < s->box.w; x++) {
@@ -593,6 +598,7 @@ static void sel_paste(asmdraw_state_t *s) {
     s->floating = f;
     s->fw = im->w;
     s->fh = im->h;
+    changed(s);
     selbox_set(&s->box, s->menu_at ? s->menu_x : 0, s->menu_at ? s->menu_y : 0,
                im->w, im->h);
     s->menu_at = false;
@@ -688,20 +694,22 @@ static bool only16(const asmdraw_state_t *s) {
     return true;
 }
 
-static void asmdraw_save(asmdraw_state_t *s, const char *path) {
+static bool asmdraw_save(asmdraw_state_t *s, const char *path) {
     if (s->box.on)
         put_down(s); /* (a floating selection is part of the picture) */
     update_canvas_size(s);
     if (s->canvas_w <= 0 || s->canvas_h <= 0) {
         draw_set_status(s, "Invalid canvas size.");
-        return;
+        return false;
     }
     if (is_bmp(path)) {
         const char *e =
             bmp_save(path, s->canvas, s->canvas_w, s->canvas_h, s->canvas_w,
                      (const uint8_t (*)[3])s->pal, only16(s) ? 16 : 256);
         draw_set_status(s, e ? e : "Saved.");
-        return;
+        if (!e)
+            wm_set_unsaved(s->win, false);
+        return !e;
     }
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(s->canvas_w & 0xFF);
@@ -718,6 +726,9 @@ static void asmdraw_save(asmdraw_state_t *s, const char *path) {
     memcpy(tr + 4, s->custom, CUSTOM * 3);
     ok = ok && A->file_append(path, tr, sizeof(tr));
     draw_set_status(s, ok ? "Saved." : "Save failed.");
+    if (ok)
+        wm_set_unsaved(s->win, false);
+    return ok;
 }
 
 /* a picture's custom colours become this window's */
@@ -949,6 +960,8 @@ static void on_canvas(control *c, int ev) {
     pen_t p = {s, false, 0, 0, 0, 0, s->color};
 
     if (ev == EV_MOUSEDOWN || ev == EV_DBLCLICK) {
+        if (s->tool != TOOL_PICK)
+            changed(s);
         s->color = s->tool == TOOL_ERASER ? s->bg_color : s->fg_color;
         p.color = s->color;
         s->start_x = s->last_cx = cx;
@@ -1170,6 +1183,7 @@ static void opened(void *user, const char *path) {
     s->floating = NULL;
     selbox_clear(&s->box);
     asmdraw_load(s, s->path);
+    wm_set_unsaved(s->win, false);
     set_title(s);
     note_dir(s);
 }
@@ -1183,6 +1197,7 @@ static void menu_new(void) {
     selbox_clear(&s->box);
     memset(s->canvas, WHITE, (uint32_t)(s->canvas_w * s->canvas_h));
     s->path[0] = 0;
+    wm_set_unsaved(s->win, false);
     draw_set_status(s, "New canvas.");
 }
 static void menu_open(void) {
@@ -1190,11 +1205,14 @@ static void menu_open(void) {
     if (s)
         dlg_open_file(s->win, "Open picture", s->dir, "PIC,BMP", opened, s);
 }
+static void save_as(asmdraw_state_t *s) {
+    dlg_save_file(s->win, "Save picture", s->dir, "UNTITLED",
+                  is_bmp(s->path) ? "BMP,PIC" : "PIC,BMP", saved_as, s);
+}
 static void menu_save_as(void) {
     asmdraw_state_t *s = ui_active_state();
     if (s)
-        dlg_save_file(s->win, "Save picture", s->dir, "UNTITLED",
-                      is_bmp(s->path) ? "BMP,PIC" : "PIC,BMP", saved_as, s);
+        save_as(s);
 }
 static void menu_save(void) {
     asmdraw_state_t *s = ui_active_state();
@@ -1206,7 +1224,17 @@ static void menu_save(void) {
 static void menu_close(void) {
     asmdraw_state_t *s = ui_active_state();
     if (s)
-        os_close_own_instance(s->win);
+        wm_close(s->win); /* (asks to save a changed picture) */
+}
+
+/* closing a changed picture: Save (as File > Save: untitled, Save As) */
+static bool save_changes(window *w) {
+    asmdraw_state_t *s = w->userdata;
+    if (!s->path[0]) {
+        save_as(s); /* (it closes once that saves) */
+        return false;
+    }
+    return asmdraw_save(s, s->path);
 }
 static void menu_print(void) {
     asmdraw_state_t *s = ui_active_state();
@@ -1243,7 +1271,8 @@ static void asmdraw_init(void *state) {
     s->win = app_window(s, "ASMDraw", 20, 15, ww, wh, DARK_GRAY, AW_RESIZABLE);
     if (!s->win)
         return;
-    s->win->lazy_custom = true; /* the canvas only changes in handlers */
+    wm_ask_save(s->win, save_changes); /* (closing a changed picture) */
+    s->win->lazy_custom = true;        /* the canvas only changes in handlers */
     s->win->min_w = 270;
     s->win->min_h = 180;
     window *w = s->win;

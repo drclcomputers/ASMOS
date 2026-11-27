@@ -29,6 +29,12 @@ void dlg_info(window *owner, const char *title, const char *heading,
               const char *footer);
 void dlg_confirm(window *owner, const char *title, const char *msg,
                  dlg_bool_cb cb, void *user);
+/* A message and 2 or 3 buttons ("Save", "Don't save", "Cancel"): cb gets
+ * the one pressed (0, 1, 2); the close box, Esc: the last. The first is
+ * the default (Enter). */
+typedef void (*dlg_int_cb)(void *user, int choice);
+void dlg_ask(window *owner, const char *title, const char *msg,
+             const char *const *buttons, int n, dlg_int_cb cb, void *user);
 void dlg_input(window *owner, const char *title, const char *prompt,
                const char *initial, int max_len, uint32_t edit_style,
                dlg_text_cb cb, void *user);

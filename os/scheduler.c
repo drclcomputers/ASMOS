@@ -243,9 +243,9 @@ static void handle_global_shortcuts(void) {
 
     if (kb.key_pressed && kb.ctrl && kb.last_scancode == Q_KEY) {
         window *fw = wm_focused_window();
-        if (fw && fw->on_close) {
+        if (fw && (fw->on_close || os_instance_of_window(fw))) {
             kb.key_pressed = false;
-            fw->on_close(fw);
+            wm_close(fw); /* (asks first if it has unsaved changes) */
         }
     }
 }
