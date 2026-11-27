@@ -1231,15 +1231,6 @@ static void wv_init(void *state) {
         return;
     s->win->min_w = 200;
     s->win->min_h = 120;
-    void *room = kmalloc(256u * 1024u); /* (the loader gives less when */
-    if (!room) {                        /*  memory is short)           */
-        dlg_message(s->win, "World View",
-                    "Not enough memory: World View needs about 640 KB free. "
-                    "Close other apps and try again.");
-        os_quit_app_by_desc(&worldview_app);
-        return;
-    }
-    kfree(room);
     img_palette_init();
     s->pic_k = -1;
     s->focus = -1;
@@ -1247,6 +1238,16 @@ static void wv_init(void *state) {
     s->page.sock = s->page.dns = s->pic.sock = s->pic.dns = -1;
     s->page.data = s->pic.data = s->dl.sock = s->dl.dns = s->dl.data = -1;
     s->menu_item = -1;
+    void *room = kmalloc(256u * 1024u); /* (the loader gives less when */
+    if (!room) {                        /*  memory is short)           */
+        /* (not this window's: it closes now, and its dialogs with it) */
+        dlg_message(NULL, "World View",
+                    "Not enough memory: World View needs about 640 KB free. "
+                    "Close other apps and try again.");
+        os_quit_app_by_desc(&worldview_app);
+        return;
+    }
+    kfree(room);
     if (!app_prefs_get("WorldView", "Home", s->home, sizeof(s->home)) ||
         !s->home[0])
         strcpy(s->home, HOME_URL);

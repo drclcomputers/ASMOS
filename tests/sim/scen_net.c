@@ -2,6 +2,7 @@
  * and a server in the OS over the "wire" (10.0.2.99 mirrors), with frames
  * lost on the way */
 #include "fs/netfs.h"
+#include "lib/pmm.h"
 #include "network/dhcp.h"
 #include "network/dns.h"
 #include "network/ftpd.h"
@@ -1922,6 +1923,198 @@ static int web_lists_test(void) {
     return fails;
 }
 
+// not enough memory: World View says so (it used to close with its
+// warning), and so does the OS when not even the least heap is free
+
+static struct {
+    uint32_t at, n;
+} s_hog_p[4096];
+static int s_hog_np;
+static void *s_hog_k[16384];
+static int s_hog_nk;
+
+static void hog_all(void) {
+    static const uint32_t SIZES[3] = {256, 16, 1};
+    for (int k = 0; k < 3; k++) {
+        uint32_t f;
+        while (s_hog_np < 4096 && (f = pmm_alloc_frames(SIZES[k])) != 0) {
+            s_hog_p[s_hog_np].at = f;
+            s_hog_p[s_hog_np++].n = SIZES[k];
+        }
+    }
+    void *m;
+    while (s_hog_nk < 16384 && (m = kmalloc(4096)) != NULL)
+        s_hog_k[s_hog_nk++] = m;
+}
+
+static void hog_give_back(uint32_t kb) {
+    for (uint32_t got = 0; got < kb && s_hog_nk > 0; got += 4)
+        kfree(s_hog_k[--s_hog_nk]);
+}
+
+static void hog_none(void) {
+    while (s_hog_nk > 0)
+        kfree(s_hog_k[--s_hog_nk]);
+    while (s_hog_np > 0) {
+        s_hog_np--;
+        pmm_free_frames(s_hog_p[s_hog_np].at, s_hog_p[s_hog_np].n);
+    }
+}
+
+/* a window by its title, and its label that starts so */
+static const char *window_says(const char *title, const char *start) {
+    for (int i = 0; i < win_count; i++) {
+        if (!win_stack[i]->title || strcmp(win_stack[i]->title, title))
+            continue;
+        for (control *c = win_stack[i]->controls; c; c = c->next)
+            if (c->type == CTL_LABEL && strstr(ctl_text(c), start))
+                return ctl_text(c);
+    }
+    return NULL;
+}
+
+/* World View's own window (not a dialog titled World View) */
+static bool wv_main_open(void) {
+    for (int i = 0; i < win_count; i++) {
+        window *w = win_stack[i];
+        if (!w->title || !strstr(w->title, "World View"))
+            continue;
+        for (control *c = w->controls; c; c = c->next)
+            if (c->type == CTL_CUSTOM)
+                return true;
+    }
+    return false;
+}
+
+/* what the windows say, for the log */
+static void say_windows(void) {
+    char b[200];
+    for (int i = 0; i < win_count; i++)
+        for (control *c = win_stack[i]->controls; c; c = c->next)
+            if (c->type == CTL_LABEL && ctl_text(c)[0]) {
+                snprintf(b, sizeof b, "    [%s] %s\n",
+                         win_stack[i]->title ? win_stack[i]->title : "",
+                         ctl_text(c));
+                wr(1, b);
+            }
+}
+
+/* World View opened from the Apps menu (its way: messages and all) with
+ * this much memory free */
+static void open_with(uint32_t kb) {
+    hog_all();
+    hog_give_back(kb);
+    appload_run_named("World View", NULL);
+    sim_frames(4);
+    say_windows();
+}
+
+static void ok_and_free(void) {
+    for (int i = 0; i < 4; i++) { /* (the messages' OK) */
+        sim_key(0x1C);
+        sim_frames(2);
+    }
+    hog_none();
+    sim_frames(2);
+}
+
+/* World View, not running (nor half: no window, still there) */
+static bool wv_gone(void) {
+    for (int i = 0; i < MAX_RUNNING_APPS; i++)
+        if (running_apps[i].running && running_apps[i].desc &&
+            running_apps[i].desc->name &&
+            !strcmp(running_apps[i].desc->name, "World View"))
+            return false;
+    return true;
+}
+
+static int low_memory_test(void) {
+    int fails = 0;
+    char b[300];
+    /* not even room for its code: the loader says so */
+    open_with(40);
+    T("no room for the app: a message says so",
+      window_says("World View", "Not enough memory") && wv_gone());
+    ok_and_free();
+
+    /* its code, not even the least heap: the OS says so (it used to show
+     * an error code) */
+    open_with(120);
+    T("no room for its memory: a message says so",
+      window_says("Not enough memory", "There isn't enough memory to start") &&
+          wv_gone());
+    ok_and_free();
+
+    /* its code and heap, not its window: it used to run on, invisible (and
+     * being single, opening it again did nothing, till a restart) */
+    bool said = false, clean = true;
+    for (uint32_t kb = 120; kb <= 200 && !said; kb += 4) {
+        open_with(kb);
+        said = window_says("Not enough memory", "can't open its window");
+        if (said) {
+            snprintf(b, sizeof b, "    (at %u KB)\n", (unsigned)kb);
+            wr(1, b);
+            clean = !window_says("Warning", "") && wv_gone();
+            sim_shot("lowmem_window");
+        }
+        ok_and_free();
+    }
+    T("no room for its window: a message says so, World View gone",
+      said && clean);
+
+    /* started, with less than it needs: it says so and closes (it used to
+     * crash: its quit went to the window in front, its own dialog) */
+    open_with(224);
+    T("too little: World View's own message, up",
+      window_says("World View", "Not enough memory: World View") != NULL);
+    T("... and World View closed (no crash)", wv_gone());
+    sim_shot("lowmem_some");
+    ok_and_free();
+
+    /* whatever is free: it opens, or a message says why (never nothing) */
+    app_prefs_set("WorldView", "Home", "about:bookmarks");
+    int silent = 0, opened = 0;
+    for (uint32_t kb = 40; kb <= 400; kb += 20) {
+        open_with(kb);
+        sim_frames(20);
+        bool msg = window_says("Not enough memory", "") ||
+                   window_says("World View", "Not enough memory");
+        bool open = wv_main_open();
+        if (open)
+            opened++;
+        if (!msg && !open) {
+            snprintf(b, sizeof b, "    %u KB: nothing!\n", (unsigned)kb);
+            wr(1, b);
+            silent++;
+        }
+        if (!open && !wv_gone()) {
+            snprintf(b, sizeof b, "    %u KB: running, no window\n",
+                     (unsigned)kb);
+            wr(1, b);
+            silent++;
+        }
+        window *w = wv_window();
+        if (open && w)
+            wm_close(w);
+        ok_and_free();
+        sim_frames(3);
+    }
+    snprintf(b, sizeof b, "    40-400 KB: %d opened\n", opened);
+    wr(1, b);
+    T("40 to 400 KB free: it opens or says why, every time", !silent);
+
+    /* memory back: it opens */
+    appload_run_named("World View", NULL);
+    sim_frames(5);
+    T("memory back: it opens", wv_main_open());
+    window *w = wv_window();
+    if (w)
+        wm_close(w);
+    sim_frames(3);
+    app_prefs_set("WorldView", "Home", "");
+    return fails;
+}
+
 int scen_net(const char *name) {
     if (!strcmp(name, "web"))
         return web_test();
@@ -1929,6 +2122,8 @@ int scen_net(const char *name) {
         return web_files_test();
     if (!strcmp(name, "weblists"))
         return web_lists_test();
+    if (!strcmp(name, "lowmem"))
+        return low_memory_test();
     if (!strcmp(name, "ftpui"))
         return ftp_ui();
     if (!strcmp(name, "ftp"))

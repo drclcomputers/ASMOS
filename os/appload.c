@@ -814,6 +814,10 @@ static bool api_prefs_set_int(const char *k, int v) {
 }
 
 static void api_quit_self(void *state) {
+    /* NULL: the app whose code is running (in init too, when the window
+     * in front may be anyone's, or a dialog's) */
+    if (!state)
+        state = s_calling_state ? s_calling_state : ui_active_state();
     app_instance_t *a = instance_from_state(state);
     if (a)
         os_quit_app(a);
@@ -1434,7 +1438,8 @@ app_descriptor *appload_load(const char *path) {
     }
     if (!raw) {
         fs_close(&f);
-        set_err("Out of memory for app image.");
+        set_err("Not enough memory to load it. Close other apps and try "
+                "again.");
         return NULL;
     }
     uint8_t *base = (uint8_t *)(((uint32_t)raw + 15u) & ~15u);
@@ -1530,6 +1535,7 @@ app_instance_t *appload_launch(const char *path) {
         if (!d)
             return NULL;
     }
+    s_err[0] = 0; /* (no memory for it: os_launch_app says so itself) */
     return os_launch_app(d);
 }
 

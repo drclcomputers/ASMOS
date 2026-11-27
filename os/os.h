@@ -46,6 +46,9 @@ void os_uninstall_app(app_descriptor *desc);
 window *os_instance_window(const app_instance_t *a);
 app_instance_t *os_launch_app(app_descriptor *desc);
 void os_quit_app(app_instance_t *inst);
+/* the instance with this state (an app's window couldn't be made: it
+ * mustn't run on without one) */
+void os_quit_app_by_state(void *state);
 void os_quit_app_by_desc(app_descriptor *desc);
 app_instance_t *os_find_instance(app_descriptor *desc);
 int os_find_instances(app_descriptor *desc, app_instance_t **out, int max);

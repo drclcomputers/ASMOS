@@ -312,7 +312,8 @@ typedef struct os_api {
 
     const mousevar *mouse;
 
-    /* Ask the OS to close this app instance (pass your own state ptr). */
+    /* Ask the OS to close this app instance: your own state, or NULL for
+     * the app whose code is running (in init too). */
     void (*quit_self)(void *state);
 
     // appended in API size 2 (check api->size)

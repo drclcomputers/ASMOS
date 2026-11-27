@@ -199,7 +199,6 @@ window *wm_register(const window_spec_t *spec) {
 
     window *win = (window *)kmalloc(sizeof(window));
     if (!win) {
-        ERR_WARN_REPORT(ERR_WM_ALLOC, "wm_register: kmalloc");
         return NULL;
     }
 

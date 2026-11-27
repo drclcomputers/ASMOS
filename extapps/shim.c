@@ -172,8 +172,10 @@ bool os_close_own_instance(window *win) {
     return true;
 }
 void os_quit_app_by_desc(app_descriptor *d) {
-    (void)d; /* only ever its own: the app whose window is in front */
-    A->quit_self(A->active_state());
+    (void)d; /* only ever its own: the app whose code is running (not the
+                window in front: in init that is a dialog, or another
+                app's) */
+    A->quit_self(NULL);
 }
 
 // drawing

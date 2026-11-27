@@ -269,7 +269,8 @@ static int wrap_text(const char *msg, char *out, int outsz, int cols) {
     return lines;
 }
 
-static void message_box(window *owner, int kind, const char *title,
+/* false: no memory for it */
+static bool message_box(window *owner, int kind, const char *title,
                         const char *msg, dlg_bool_cb cb, void *user) {
     char text[512];
     int lines = wrap_text(msg ? msg : "", text, sizeof(text), 38);
@@ -278,7 +279,7 @@ static void message_box(window *owner, int kind, const char *title,
     int h = 16 + 8 + lines * 8 + 8 + 13 + 8;
     dlg_t *d = open_dlg(owner, kind, title, 210, h);
     if (!d)
-        return;
+        return false;
     d->bcb = cb;
     d->user = user;
     ctl_label(d->win, 8, 8, 192, lines * 8, text, 0);
@@ -294,6 +295,7 @@ static void message_box(window *owner, int kind, const char *title,
         ctl_style_add(ok, CS_DEFAULT | CS_CANCEL);
         ctl_focus(ok);
     }
+    return true;
 }
 
 /* dlg_ask's buttons: which one */
@@ -339,7 +341,10 @@ void dlg_ask(window *owner, const char *title, const char *msg,
 }
 
 void dlg_message(window *owner, const char *title, const char *msg) {
-    message_box(owner, K_MSG, title, msg, NULL, NULL);
+    /* no memory for it (often what it says: an app couldn't start): shown
+     * as soon as there is, owned by no one */
+    if (!message_box(owner, K_MSG, title, msg, NULL, NULL))
+        dlg_post_message(title, msg);
 }
 
 void dlg_info(window *owner, const char *title, const char *heading,
@@ -827,6 +832,7 @@ void dlg_form_close(window *form) {
 static struct {
     char title[40];
     char msg[200];
+    uint8_t tries; /* (no memory for it yet: again next frame) */
 } s_posted[MAX_POSTED];
 static volatile int s_posted_n;
 
@@ -838,13 +844,25 @@ void dlg_post_message(const char *title, const char *msg) {
     s_posted[i].title[39] = 0;
     strncpy(s_posted[i].msg, msg ? msg : "", 199);
     s_posted[i].msg[199] = 0;
+    s_posted[i].tries = 0;
     s_posted_n = i + 1;
 }
 
+/* A message that can't be shown (no memory: often what it is about) is
+ * tried again each frame, a couple of seconds: an app that failed gives
+ * its memory back at the end of the frame. */
 void dlg_flush_posted(void) {
-    for (int i = 0; i < s_posted_n; i++)
-        dlg_message(NULL, s_posted[i].title, s_posted[i].msg);
-    s_posted_n = 0;
+    int kept = 0;
+    for (int i = 0; i < s_posted_n; i++) {
+        if (message_box(NULL, K_MSG, s_posted[i].title, s_posted[i].msg, NULL,
+                        NULL) ||
+            ++s_posted[i].tries >= 120)
+            continue;
+        if (kept != i)
+            s_posted[kept] = s_posted[i];
+        kept++;
+    }
+    s_posted_n = kept;
 }
 
 /* Draw a box straight into the frame (the system is about to halt). */

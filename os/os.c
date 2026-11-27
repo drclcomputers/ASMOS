@@ -122,8 +122,13 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
         app->state = desc->state_alloc
                          ? desc->state_alloc(desc, desc->state_size)
                          : kmalloc(desc->state_size);
-        if (!app->state) {
-            ERR_WARN_REPORT(ERR_APP_ALLOC, desc->name ? desc->name : "?");
+        if (!app->state) { /* (said so: whoever started it may not) */
+            char msg[120];
+            snprintf(msg, sizeof(msg),
+                     "There isn't enough memory to start %s. Close other "
+                     "apps and try again.",
+                     desc->name ? desc->name : "the app");
+            dlg_post_message("Not enough memory", msg);
             return NULL;
         }
         memset(app->state, 0, desc->state_size);
@@ -147,6 +152,14 @@ app_instance_t *os_launch_app(app_descriptor *desc) {
 void os_quit_app(app_instance_t *inst) {
     if (inst && inst->running)
         inst->wants_quit = true;
+}
+
+void os_quit_app_by_state(void *state) {
+    for (int i = 0; state && i < MAX_RUNNING_APPS; i++)
+        if (running_apps[i].running && running_apps[i].state == state) {
+            os_quit_app(&running_apps[i]);
+            return;
+        }
 }
 
 void os_quit_app_by_desc(app_descriptor *desc) {

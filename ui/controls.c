@@ -2233,8 +2233,18 @@ window *app_window(void *state, const char *title, int x, int y, int w, int h,
     spec.max_w = SCREEN_WIDTH;
     spec.max_h = SCREEN_HEIGHT;
     window *win = wm_register(&spec);
-    if (!win)
+    if (!win) {
+        /* (no window, no way to use it or close it: it goes, and says
+         * why, once its memory is back) */
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "%s can't open its window: there isn't enough memory free. "
+                 "Close other apps and try again.",
+                 title && title[0] ? title : "The app");
+        dlg_post_message("Not enough memory", msg);
+        os_quit_app_by_state(state);
         return NULL;
+    }
     if (flags & AW_NO_ANIM)
         win->anim_state = WIN_ANIM_NONE;
     win->userdata = state;
