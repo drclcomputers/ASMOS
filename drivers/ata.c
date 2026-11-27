@@ -65,10 +65,11 @@ static bool wait_ready(const ata_channel_t *c) {
     return !(status(c) & (ATA_SR_ERR | ATA_SR_DF));
 }
 
-/* Program drive/head + address registers for one sector. */
+/* Program drive/head + address registers for count sectors (1..255). */
 static bool set_address(const ata_disk_t *d, const ata_channel_t *c,
-                        uint32_t lba) {
-    if (lba >= d->sectors)
+                        uint32_t lba, int count) {
+    if (lba >= d->sectors || count < 1 || count > 255 ||
+        count > (int)(d->sectors - lba))
         return false;
     uint8_t sel = d->slave ? 0x10 : 0x00;
     if (d->lba) {
@@ -76,7 +77,7 @@ static bool set_address(const ata_disk_t *d, const ata_channel_t *c,
         delay400(c);
         if (!wait_not_busy(c, 0x200000))
             return false;
-        outb(c->base + ATA_REG_SECCOUNT, 1);
+        outb(c->base + ATA_REG_SECCOUNT, (uint8_t)count);
         outb(c->base + ATA_REG_LBA_LO, lba & 0xFF);
         outb(c->base + ATA_REG_LBA_MID, (lba >> 8) & 0xFF);
         outb(c->base + ATA_REG_LBA_HI, (lba >> 16) & 0xFF);
@@ -89,7 +90,7 @@ static bool set_address(const ata_disk_t *d, const ata_channel_t *c,
         delay400(c);
         if (!wait_not_busy(c, 0x200000))
             return false;
-        outb(c->base + ATA_REG_SECCOUNT, 1);
+        outb(c->base + ATA_REG_SECCOUNT, (uint8_t)count);
         outb(c->base + ATA_REG_LBA_LO, sector);
         outb(c->base + ATA_REG_LBA_MID, cyl & 0xFF);
         outb(c->base + ATA_REG_LBA_HI, cyl >> 8);
@@ -97,7 +98,7 @@ static bool set_address(const ata_disk_t *d, const ata_channel_t *c,
     return true;
 }
 
-static const ata_disk_t *disk_of(uint8_t unit) {
+static ata_disk_t *disk_of(uint8_t unit) {
     if (unit > 1 || s_unit[unit] < 0)
         return NULL;
     return &s_disks[(int)s_unit[unit]];
@@ -202,6 +203,7 @@ static bool identify(int ch, int slave, ata_disk_t *d) {
     if (!d->lba && (!d->heads || !d->spt || d->heads > 16))
         return false;
     copy_model(d->model, id);
+    d->multi = (uint8_t)(id[47] & 0xFF); /* (the most; set_multiple picks) */
     d->present = d->sectors != 0;
     return d->present;
 }
@@ -230,6 +232,27 @@ static bool is_asmos_disk(int idx) {
     return ok;
 }
 
+/* READ/WRITE MULTIPLE: up to 16 sectors per data request (a power of 2
+ * the drive takes), turned on by SET MULTIPLE MODE; refused: not used */
+static void set_multiple(ata_disk_t *d) {
+    int most = d->multi, m = 16;
+    d->multi = 0;
+    while (m > 1 && m > most)
+        m >>= 1;
+    if (most < 2 || m < 2)
+        return;
+    const ata_channel_t *c = &s_chan[d->channel];
+    outb(c->base + ATA_REG_DRIVE, d->slave ? 0xB0 : 0xA0);
+    delay400(c);
+    if (!wait_not_busy(c, 0x200000))
+        return;
+    outb(c->base + ATA_REG_SECCOUNT, (uint8_t)m);
+    outb(c->base + ATA_REG_COMMAND, ATA_CMD_SET_MULTI);
+    delay400(c);
+    if (wait_ready(c))
+        d->multi = (uint8_t)m;
+}
+
 static bool atapi_identify(int ch, int slave);
 
 int ata_init(uint8_t bios_boot_drive) {
@@ -238,9 +261,10 @@ int ata_init(uint8_t bios_boot_drive) {
         reset_channel(&s_chan[ch]);
     int found = 0;
     for (int i = 0; i < ATA_MAX_DISKS; i++)
-        if (identify(i / 2, i % 2, &s_disks[i]))
+        if (identify(i / 2, i % 2, &s_disks[i])) {
+            set_multiple(&s_disks[i]);
             found++;
-        else {
+        } else {
             s_disks[i].present = false;
             atapi_identify(i / 2, i % 2); /* a CD drive? */
         }
@@ -277,37 +301,34 @@ const char *ata_controller_desc(void) { return s_desc; }
 
 // I/O
 
-bool ata_read_sector(uint8_t unit, uint32_t lba, void *buf) {
-    const ata_disk_t *d = disk_of(unit);
-    if (!d)
-        return false;
+/* count sectors (1..255) in one command: READ/WRITE MULTIPLE (d->multi
+ * sectors per data request), else READ/WRITE SECTORS (one per request).
+ * A write is flushed once, at the end. */
+static bool xfer(ata_disk_t *d, uint32_t lba, int count, void *buf,
+                 bool write) {
     const ata_channel_t *c = &s_chan[d->channel];
-    if (!set_address(d, c, lba))
+    if (!set_address(d, c, lba, count))
         return false;
-    outb(c->base + ATA_REG_COMMAND, ATA_CMD_READ_PIO);
+    int per = d->multi ? d->multi : 1;
+    uint8_t cmd = write ? (d->multi ? ATA_CMD_WRITE_MULTI : ATA_CMD_WRITE_PIO)
+                        : (d->multi ? ATA_CMD_READ_MULTI : ATA_CMD_READ_PIO);
+    outb(c->base + ATA_REG_COMMAND, cmd);
     delay400(c);
-    if (!wait_drq(c))
-        return false;
-    uint16_t *p = (uint16_t *)buf;
-    for (int i = 0; i < 256; i++)
-        p[i] = inw(c->base + ATA_REG_DATA);
-    return true;
-}
-
-bool ata_write_sector(uint8_t unit, uint32_t lba, const void *buf) {
-    const ata_disk_t *d = disk_of(unit);
-    if (!d)
-        return false;
-    const ata_channel_t *c = &s_chan[d->channel];
-    if (!set_address(d, c, lba))
-        return false;
-    outb(c->base + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
-    delay400(c);
-    if (!wait_drq(c))
-        return false;
-    const uint16_t *p = (const uint16_t *)buf;
-    for (int i = 0; i < 256; i++)
-        outw(c->base + ATA_REG_DATA, p[i]);
+    uint8_t *p = (uint8_t *)buf;
+    for (int left = count; left > 0;) {
+        int n = left < per ? left : per;
+        if (!wait_drq(c))
+            return false;
+        if (write)
+            outsw(c->base + ATA_REG_DATA, p, (uint32_t)n * 256);
+        else
+            insw(c->base + ATA_REG_DATA, p, (uint32_t)n * 256);
+        delay400(c); /* (then BSY, before the next request's DRQ) */
+        p += n * 512;
+        left -= n;
+    }
+    if (!write)
+        return true;
     if (!wait_ready(c)) /* the write must finish before FLUSH */
         return false;
     /* FLUSH CACHE is ATA-4+; old drives abort it, which is harmless (they
@@ -318,21 +339,49 @@ bool ata_write_sector(uint8_t unit, uint32_t lba, const void *buf) {
     return true;
 }
 
-bool ata_read_sectors(uint8_t unit, uint32_t lba, uint8_t count, void *buf) {
+/* in commands of at most 128 sectors (64 KB). READ/WRITE MULTIPLE failing
+ * is tried again with the plain commands: if those work, the drive's
+ * multiple mode is what failed (not used again); else it was the sectors */
+static bool transfer(uint8_t unit, uint32_t lba, int count, void *buf,
+                     bool write) {
+    ata_disk_t *d = disk_of(unit);
+    if (!d || count < 1)
+        return false;
     uint8_t *p = (uint8_t *)buf;
-    for (uint8_t i = 0; i < count; i++, p += 512)
-        if (!ata_read_sector(unit, lba + i, p))
-            return false;
+    while (count > 0) {
+        int n = count > 128 ? 128 : count;
+        if (!xfer(d, lba, n, p, write)) {
+            uint8_t multi = d->multi;
+            if (!multi)
+                return false;
+            d->multi = 0;
+            if (!xfer(d, lba, n, p, write)) {
+                d->multi = multi;
+                return false;
+            }
+        }
+        lba += (uint32_t)n;
+        p += n * 512;
+        count -= n;
+    }
     return true;
+}
+
+bool ata_read_sector(uint8_t unit, uint32_t lba, void *buf) {
+    return transfer(unit, lba, 1, buf, false);
+}
+
+bool ata_write_sector(uint8_t unit, uint32_t lba, const void *buf) {
+    return transfer(unit, lba, 1, (void *)buf, true);
+}
+
+bool ata_read_sectors(uint8_t unit, uint32_t lba, uint8_t count, void *buf) {
+    return transfer(unit, lba, count, buf, false);
 }
 
 bool ata_write_sectors(uint8_t unit, uint32_t lba, uint8_t count,
                        const void *buf) {
-    const uint8_t *p = (const uint8_t *)buf;
-    for (uint8_t i = 0; i < count; i++, p += 512)
-        if (!ata_write_sector(unit, lba + i, p))
-            return false;
-    return true;
+    return transfer(unit, lba, count, (void *)buf, true);
 }
 
 // shut down

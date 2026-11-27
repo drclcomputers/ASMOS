@@ -38,6 +38,20 @@ void outl(unsigned short port, uint32_t val) {
     asm volatile("outl %0, %1" : : "a"(val), "Nd"(port));
 }
 
+void insw(unsigned short port, void *buf, uint32_t words) {
+    asm volatile("cld; rep insw"
+                 : "+D"(buf), "+c"(words)
+                 : "d"(port)
+                 : "memory");
+}
+
+void outsw(unsigned short port, const void *buf, uint32_t words) {
+    asm volatile("cld; rep outsw"
+                 : "+S"(buf), "+c"(words)
+                 : "d"(port)
+                 : "memory");
+}
+
 void cpu_halt(void) { asm volatile("hlt"); }
 
 void cpu_idle(void) { asm volatile("sti; hlt"); }

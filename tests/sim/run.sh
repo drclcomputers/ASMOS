@@ -8,7 +8,7 @@
 cd "$(dirname "$0")"
 ROOT=../..
 [ -f $ROOT/os_image.bin ] || { echo "build the OS first (make)"; exit 1; }
-make -s -j"$(nproc)" sim gputest atapitest >/dev/null || exit 1
+make -s -j"$(nproc)" sim gputest atapitest hdtest >/dev/null || exit 1
 sh fixtures/make.sh 2>/dev/null || { echo "fixtures failed"; exit 1; }
 mkdir -p out
 
@@ -26,7 +26,7 @@ SCREENS="desktop@640x480 desktop@800 alttab@800 winpos@800 pattern@800
          desktop@640x480x256 desktop@800x256 zoom@800x256 setup@800x256
          bmpview@640x256 bmpview@320 drawbmp@640x256 drawbmp@320
          drawtools@640x256 drawtools@320 drawsel@320 drawsel@640x256 asksave asksave@320
-         clockfaces clockfaces@320
+         clockfaces clockfaces@320 multisector
          scrapbook@640x256 memreport@320 memreport@640x256"
 
 if [ $# -gt 0 ]; then list="$*"; else
@@ -45,6 +45,11 @@ if [ $# -eq 0 ]; then
     n=2
     if ./atapitest >out/atapitest.txt 2>&1; then echo "ok    atapitest"; else
         failed=1; bad="$bad atapitest"; echo "FAIL  atapitest"; grep FAIL out/atapitest.txt | head -5 | sed 's/^/      /'
+    fi
+    # and on a model IDE hard disk (several sectors per command)
+    n=3
+    if ./hdtest >out/hdtest.txt 2>&1; then echo "ok    hdtest"; else
+        failed=1; bad="$bad hdtest"; echo "FAIL  hdtest"; grep FAIL out/hdtest.txt | head -5 | sed 's/^/      /'
     fi
 fi
 for t in $list; do

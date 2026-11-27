@@ -117,7 +117,57 @@ bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf) {
     }
 }
 
+bool fs_read_sectors(uint8_t drive_id, uint32_t lba, int count, void *buf) {
+    if (count < 1 || count > 128)
+        return false;
+    if (drive_id == DRIVE_HDA || drive_id == DRIVE_HDB)
+        return ata_read_sectors(drive_id, g_drives[drive_id].base_lba + lba,
+                                (uint8_t)count, buf);
+    for (int i = 0; i < count; i++) /* (floppies: from the track cache) */
+        if (!fs_read_sector(drive_id, lba + i, (uint8_t *)buf + i * 512))
+            return false;
+    return true;
+}
+
+bool fs_write_sectors(uint8_t drive_id, uint32_t lba, int count,
+                      const void *buf) {
+    if (count < 1 || count > 128)
+        return false;
+    if (drive_id != DRIVE_HDA && drive_id != DRIVE_HDB) {
+        for (int i = 0; i < count; i++)
+            if (!fs_write_sector(drive_id, lba + i,
+                                 (const uint8_t *)buf + i * 512))
+                return false;
+        return true;
+    }
+    for (int i = 0; i < count; i++) /* (a FAT sector: the cache follows) */
+        fat_cache_wrote(drive_id, lba + i, (const uint8_t *)buf + i * 512);
+    return ata_write_sectors(drive_id, g_drives[drive_id].base_lba + lba,
+                             (uint8_t)count, buf);
+}
+
 static fat_vol_t *vol(uint8_t drive_id) { return &g_drives[drive_id]; }
+
+/* Whole sectors from cur_cluster's sector `first` on, in a row on the
+ * disk: the rest of the cluster, and of the clusters after it that follow
+ * it on the disk too (the file's chain as it is: none are allocated
+ * here); at most `want`, and 128 (64 KB: one disk command) */
+static int sector_run(uint8_t drive_id, uint16_t cluster, uint32_t first,
+                      uint32_t want) {
+    fat_vol_t *v = vol(drive_id);
+    uint32_t spc = v->bpb.sectors_per_cluster;
+    uint32_t n = spc - first;
+    if (want > 128)
+        want = 128;
+    while (n < want) {
+        uint16_t next = fat_get(drive_id, cluster);
+        if (next != (uint16_t)(cluster + 1) || !vol_cluster_active(v, next))
+            break;
+        cluster = next;
+        n += spc;
+    }
+    return (int)(n < want ? n : want);
+}
 
 static uint16_t now_fat_time(void) { return time_from_rtc(); }
 static uint16_t now_fat_date(void) { return date_from_rtc(); }
@@ -1693,6 +1743,15 @@ bool fs_create(const char *path, fat_file_t *f) {
     return true;
 }
 
+/* n sectors done from cur_cluster's sector `first` (sector_run): the
+ * offset on, and cur_cluster on the cluster of the last byte (at a cluster's
+ * end it stays there: the next read or write moves on, as for one sector) */
+static void run_done(fat_file_t *f, uint32_t n, uint32_t first, fat_vol_t *v) {
+    f->cur_offset += n * 512;
+    f->cur_cluster = (uint16_t)(f->cur_cluster +
+                                (first + n - 1) / v->bpb.sectors_per_cluster);
+}
+
 int fs_read(fat_file_t *f, void *buf, int len) {
     if (!f->open)
         return -1;
@@ -1724,6 +1783,22 @@ int fs_read(fat_file_t *f, void *buf, int len) {
         if (lba == 0xFFFFFFFF)
             break;
         lba += sector_in_cluster;
+
+        /* whole sectors wanted: straight in, several in one command */
+        uint32_t whole = (uint32_t)len < filesize - f->cur_offset
+                             ? (uint32_t)len / 512
+                             : (filesize - f->cur_offset) / 512;
+        if (offset_in_sector == 0 && whole >= 2) {
+            int n = sector_run(f->drive_id, f->cur_cluster, sector_in_cluster,
+                               whole);
+            if (!fs_read_sectors(f->drive_id, lba, n, out))
+                break;
+            run_done(f, (uint32_t)n, sector_in_cluster, v);
+            out += n * 512;
+            total += n * 512;
+            len -= n * 512;
+            continue;
+        }
 
         uint8_t local_buf[512];
         if (!fs_read_sector(f->drive_id, lba, local_buf))
@@ -1757,11 +1832,20 @@ static int done_write(fat_file_t *f, int total, fat_vol_t *v) {
     return total;
 }
 
+static int write_fat_file(fat_file_t *f, const void *buf, int len);
+
+/* the FAT's changes written once, at the end (fat_batch_begin) */
 int fs_write(fat_file_t *f, const void *buf, int len) {
     if (!f->open || f->drive_id == DRIVE_CD0)
         return -1;
     if (f->drive_id == DRIVE_NET0)
         return netfs_write(f, buf, len);
+    fat_batch_begin(f->drive_id);
+    int r = write_fat_file(f, buf, len);
+    return fat_batch_end() ? r : -1;
+}
+
+static int write_fat_file(fat_file_t *f, const void *buf, int len) {
     fat_vol_t *v = vol(f->drive_id);
     const uint8_t *in = (const uint8_t *)buf;
     int total = 0;
@@ -1801,6 +1885,22 @@ int fs_write(fat_file_t *f, const void *buf, int len) {
         uint32_t offset_in_sector = offset_in_cluster % 512;
         uint32_t lba =
             fat_cluster_to_lba(f->drive_id, f->cur_cluster) + sector_in_cluster;
+
+        /* whole sectors: straight from the caller, several in one command
+         * (into clusters the file has already; new ones come one by one) */
+        if (offset_in_sector == 0 && len >= 1024) {
+            int n = sector_run(f->drive_id, f->cur_cluster, sector_in_cluster,
+                               (uint32_t)len / 512);
+            if (!fs_write_sectors(f->drive_id, lba, n, in))
+                return done_write(f, -1, v);
+            run_done(f, (uint32_t)n, sector_in_cluster, v);
+            in += n * 512;
+            total += n * 512;
+            len -= n * 512;
+            if (f->cur_offset > f->entry.file_size)
+                f->entry.file_size = f->cur_offset;
+            continue;
+        }
 
         if (offset_in_sector != 0 || len < 512) {
             if (!fs_read_sector(f->drive_id, lba, write_sector_buf))

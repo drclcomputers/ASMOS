@@ -1,3 +1,4 @@
+#include "fs/fs.h"
 #include "os/meminfo.h"
 #include "os/os.h"
 #include "scen.h"
@@ -225,7 +226,152 @@ static int clock_faces(void) {
     return fails;
 }
 
+// several sectors per disk command (fs_read / fs_write: whole sectors in a
+// row go in one; drivers/ata.c sends READ/WRITE MULTIPLE)
+
+extern int g_ata_reads, g_ata_writes, g_ata_multi;
+
+static uint8_t pat(uint32_t i, int seed) {
+    return (uint8_t)(i * 7 + (i >> 9) + seed * 31);
+}
+static bool same(const uint8_t *b, uint32_t from, uint32_t n, int seed) {
+    for (uint32_t i = 0; i < n; i++)
+        if (b[i] != pat(from + i, seed))
+            return false;
+    return true;
+}
+static void fill(uint8_t *b, uint32_t from, uint32_t n, int seed) {
+    for (uint32_t i = 0; i < n; i++)
+        b[i] = pat(from + i, seed);
+}
+
+static int multi_sector(void) {
+    int fails = 0;
+    char b[200];
+    enum { BIG = 150001 };
+    static uint8_t buf[BIG + 1024], back[BIG + 1024];
+    fat_file_t f;
+    fs_delete("/BIG.BIN");
+    fill(buf, 0, BIG, 1);
+
+    /* written in one go: whole sectors in a few commands */
+    int w0 = g_ata_writes, m0 = g_ata_multi;
+    T("create", fs_create("/BIG.BIN", &f));
+    int spc = g_drives[f.drive_id].bpb.sectors_per_cluster;
+    T("write 150001 bytes", fs_write(&f, buf, BIG) == BIG);
+    fs_close(&f);
+    int writes = g_ata_writes - w0, multi = g_ata_multi - m0;
+    snprintf(b, sizeof b,
+             "    write: %d disk writes (%d of several sectors), %d-sector "
+             "clusters, %d sectors\n",
+             writes, multi, spc, (BIG + 511) / 512);
+    wr(1, b);
+    T("written: several sectors per command", multi > 0);
+    T("... far fewer commands than sectors, the FAT's too",
+      writes < (BIG + 511) / 512 / 2);
+
+    /* read in one go: the clusters in a row, up to 64 KB a command */
+    int r0 = g_ata_reads;
+    T("open", fs_open("/BIG.BIN", &f));
+    memset(back, 0, sizeof back);
+    T("read it all", fs_read(&f, back, BIG + 100) == BIG);
+    fs_close(&f);
+    int reads = g_ata_reads - r0;
+    snprintf(b, sizeof b, "    read: %d disk reads for %d sectors\n", reads,
+             (BIG + 511) / 512);
+    wr(1, b);
+    T("... the same bytes", same(back, 0, BIG, 1));
+    T("... in far fewer commands", reads < (BIG + 511) / 512 / 4);
+
+    /* in pieces of every size: the same */
+    static const int PIECE[] = {1, 511, 512, 513, 1024, 3000, 70000, 7, 65536};
+    T("open", fs_open("/BIG.BIN", &f));
+    uint32_t at = 0;
+    bool ok = true;
+    for (int i = 0; at < BIG; i = (i + 1) % 9) {
+        int got = fs_read(&f, back, PIECE[i]);
+        uint32_t want = BIG - at < (uint32_t)PIECE[i] ? BIG - at : PIECE[i];
+        if (got != (int)want || !same(back, at, want, 1))
+            ok = false;
+        at += want;
+    }
+    T("read in pieces of 1 to 70000 bytes: the same", ok);
+    /* from a cluster's start, its end, and in the middle */
+    uint32_t cl = (uint32_t)spc * 512,
+             from[] = {cl * 3, cl * 3 - 1, cl - 512, 777, BIG - 2000};
+    ok = true;
+    for (int i = 0; i < 5; i++) {
+        int n = (int)(BIG - from[i] < 9000 ? BIG - from[i] : 9000);
+        if (!fs_seek(&f, from[i]) || fs_read(&f, back, n) != n ||
+            !same(back, from[i], (uint32_t)n, 1))
+            ok = false;
+    }
+    T("seek, then read: the same", ok);
+    fs_close(&f);
+
+    /* written over: the clusters it has, in a row; and from the middle */
+    fill(buf, 0, BIG, 2);
+    T("open", fs_open("/BIG.BIN", &f));
+    T("write it over", fs_write(&f, buf, BIG) == BIG);
+    fill(buf, 1000, 20000, 3);
+    T("... and 20000 bytes from 1000",
+      fs_seek(&f, 1000) && fs_write(&f, buf, 20000) == 20000);
+    fs_close(&f);
+    T("open", fs_open("/BIG.BIN", &f));
+    T("read", fs_read(&f, back, BIG) == BIG);
+    fs_close(&f);
+    T("... the bytes written", same(back, 0, 1000, 2) &&
+                                   same(back + 1000, 1000, 20000, 3) &&
+                                   same(back + 21000, 21000, BIG - 21000, 2));
+
+    /* in pieces: two files growing in turns (their clusters not in a row) */
+    fs_delete("/FRAG1.BIN");
+    fs_delete("/FRAG2.BIN");
+    fat_file_t g;
+    fill(buf, 0, 60000, 4);
+    fill(back, 0, 60000, 5);
+    T("two files", fs_create("/FRAG1.BIN", &f) && fs_create("/FRAG2.BIN", &g));
+    ok = true;
+    for (uint32_t o = 0; o < 60000; o += 5000) {
+        ok = ok && fs_write(&f, buf + o, 5000) == 5000;
+        ok = ok && fs_write(&g, back + o, 5000) == 5000;
+    }
+    fs_close(&f);
+    fs_close(&g);
+    T("written in turns", ok);
+    static uint8_t got[60000];
+    T("the first read back", fs_open("/FRAG1.BIN", &f) &&
+                                 fs_read(&f, got, 60000) == 60000 &&
+                                 same(got, 0, 60000, 4));
+    fs_close(&f);
+    T("the second", fs_open("/FRAG2.BIN", &g) &&
+                        fs_read(&g, got, 60000) == 60000 &&
+                        same(got, 0, 60000, 5));
+    fs_close(&g);
+    fs_delete("/FRAG1.BIN");
+    fs_delete("/FRAG2.BIN");
+    uint32_t used0 = 0, used1 = 0, total = 0;
+    fs_get_usage(&total, &used0);
+    w0 = g_ata_writes;
+    T("delete the big one", fs_delete("/BIG.BIN"));
+    snprintf(b, sizeof b, "    delete: %d disk writes\n", g_ata_writes - w0);
+    wr(1, b);
+    fs_get_usage(&total, &used1);
+    T("... its clusters free again, in a few writes",
+      used0 - used1 >= BIG - 4096 && g_ata_writes - w0 < 12);
+    fill(buf, 0, BIG, 6);
+    T("... and taken again by a new file",
+      fs_create("/BIG.BIN", &f) && fs_write(&f, buf, BIG) == BIG &&
+          fs_close(&f) && fs_open("/BIG.BIN", &f) &&
+          fs_read(&f, back, BIG) == BIG && same(back, 0, BIG, 6));
+    fs_close(&f);
+    fs_delete("/BIG.BIN");
+    return fails;
+}
+
 int scen_misc2(const char *name) {
+    if (!strcmp(name, "multisector"))
+        return multi_sector();
     if (!strcmp(name, "asksave"))
         return ask_save();
     if (!strcmp(name, "clockfaces"))

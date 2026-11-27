@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.6.8
+Version 3.7.9
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -637,7 +637,11 @@ Input (drivers/ps2.c, mouse.c, sermouse.c, keyboard.c, joystick.c)
 
 Disks (drivers/ata.c, fdd.c, fs/)
 
-- ATA in PIO mode with LBA (CHS on old drives). Floppies through the floppy
+- ATA in PIO mode with LBA (CHS on old drives), several sectors per
+  command: READ/WRITE MULTIPLE (16 sectors per data request) where the
+  drive has it, a flush per command, not per sector. File reads and writes
+  move whole sectors in runs of up to 64 KB, and the FAT's changes during
+  one write are written once at its end. Floppies through the floppy
   controller with DMA and a track cache.
 - CD-ROM: ATAPI packet commands, polled PIO (drivers/ata.c). fs/iso9660.c
   reads the disc (Joliet first, else the plain ISO names) and shows it to

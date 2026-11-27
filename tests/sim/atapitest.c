@@ -294,6 +294,17 @@ void outw(unsigned short p, unsigned short v) {
         run_packet();
 }
 
+void insw(unsigned short p, void *buf, uint32_t n) { /* (the hard disk's) */
+    uint16_t *w = buf;
+    while (n--)
+        *w++ = inw(p);
+}
+void outsw(unsigned short p, const void *buf, uint32_t n) {
+    const uint16_t *w = buf;
+    while (n--)
+        outw(p, *w++);
+}
+
 static uint32_t clock;
 uint32_t time_millis(void) { return clock++ / 64; }
 int pci_mechanism(void) { return 0; }

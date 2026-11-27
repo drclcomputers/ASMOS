@@ -40,7 +40,11 @@ atapitest: o/atapitest.o o/ata_real.o o/lib/mem.o o/lib/string.o o/start.o
 	ld -m elf_i386 -static -o $@ $^ 2>&1 | grep -v 'missing .note\|NOTE: This' ; true
 o/atapitest.o: atapitest.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
 o/ata_real.o: $(R)/drivers/ata.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
-clean: ; rm -rf o sim gputest atapitest rtcfg.c simguard.c out
+# the same drivers/ata.c on a model IDE hard disk (hdtest.c)
+hdtest: o/hdtest.o o/ata_real.o o/lib/mem.o o/lib/string.o o/start.o
+	ld -m elf_i386 -static -o $@ $^ 2>&1 | grep -v 'missing .note\|NOTE: This' ; true
+o/hdtest.o: hdtest.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@
+clean: ; rm -rf o sim gputest atapitest hdtest rtcfg.c simguard.c out
 o/rtcfg.o: $(R)/config/runtime_config.c
 	@mkdir -p o; sed 's/^.*0x0602.*$$//' $< > rtcfg.c; gcc $(CFLAGS) -c rtcfg.c -o $@
 o/simvmm.o: simvmm.c ; @mkdir -p o; gcc $(CFLAGS) -c $< -o $@

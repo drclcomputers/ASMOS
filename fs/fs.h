@@ -166,6 +166,10 @@ void fs_usage_invalidate(uint8_t drive_id);
 
 bool fs_read_sector(uint8_t drive_id, uint32_t lba, void *buf);
 bool fs_write_sector(uint8_t drive_id, uint32_t lba, const void *buf);
+/* count sectors (1..128) in a row: one disk command on a hard disk */
+bool fs_read_sectors(uint8_t drive_id, uint32_t lba, int count, void *buf);
+bool fs_write_sectors(uint8_t drive_id, uint32_t lba, int count,
+                      const void *buf);
 
 void fs_make_83(const char *filename, char *out83);
 bool fs_name_char_ok(char c);

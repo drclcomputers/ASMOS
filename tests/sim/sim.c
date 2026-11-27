@@ -459,16 +459,22 @@ int sim_cd_audio_state(void) {
     play_pos();
     return s_play_state;
 }
+/* several sectors: one command (as drivers/ata.c sends them) */
+int g_ata_multi; /* of the reads and writes, how many were several */
 bool ata_read_sectors(uint8_t d, uint32_t l, uint8_t c, void *b) {
-    for (int i = 0; i < c; i++)
-        if (!ata_read_sector(d, l + i, (uint8_t *)b + i * 512))
-            return false;
+    if (d > 1 || !c || l + c > g_dk_sectors[d])
+        return false;
+    g_ata_reads++;
+    g_ata_multi += c > 1;
+    memcpy(b, g_dk[d] + l * 512, (size_t)c * 512);
     return true;
 }
 bool ata_write_sectors(uint8_t d, uint32_t l, uint8_t c, const void *b) {
-    for (int i = 0; i < c; i++)
-        if (!ata_write_sector(d, l + i, (const uint8_t *)b + i * 512))
-            return false;
+    if (d > 1 || !c || l + c > g_dk_sectors[d])
+        return false;
+    g_ata_writes++;
+    g_ata_multi += c > 1;
+    memcpy(g_dk[d] + l * 512, b, (size_t)c * 512);
     return true;
 }
 

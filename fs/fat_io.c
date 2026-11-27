@@ -14,10 +14,15 @@ static fat_vol_t *vol(uint8_t drive_id) { return &g_drives[drive_id]; }
  * Cache frequently used FAT sectors to avoid repeated reads during file
  * operations. fat_cache_wrote() tracks writes; mount/unmount clears the
  * cache because formatting and Setup may write FATs directly.
+ *
+ * Between fat_batch_begin and fat_batch_end (one fs_write) the FAT's
+ * changes stay here, and each sector changed is written once at the end,
+ * not once per cluster: after the file's data, which is the safe order.
  */
 #define FC_N 6
 static struct {
     bool valid;
+    bool dirty; /* changed in a batch, not written yet */
     uint8_t drive;
     uint32_t lba;
     uint32_t used;
@@ -25,31 +30,81 @@ static struct {
 } s_fc[FC_N];
 static uint32_t s_fc_clock;
 static uint16_t s_next_free[DRIVE_COUNT]; /* where fat_alloc looks first */
+static int s_batch = -1; /* the drive whose FAT writes wait, -1 none */
 
-static bool fat_read(uint8_t drive_id, uint32_t lba, uint8_t *out) {
+/* a cache slot for lba: its own, else an empty one, else the one used
+ * longest ago (written out first if it waits to be) */
+static int fc_slot(uint8_t drive_id, uint32_t lba, bool *hit) {
     int victim = -1;
     for (int i = 0; i < FC_N; i++) {
         if (s_fc[i].valid && s_fc[i].drive == drive_id && s_fc[i].lba == lba) {
-            s_fc[i].used = ++s_fc_clock;
-            memcpy(out, s_fc[i].data, 512);
-            return true;
+            *hit = true;
+            return i;
         }
-        if (!s_fc[i].valid) { /* an empty one first */
+        if (!s_fc[i].valid) {
             if (victim < 0 || s_fc[victim].valid)
                 victim = i;
         } else if (victim < 0 ||
                    (s_fc[victim].valid && s_fc[i].used < s_fc[victim].used)) {
-            victim = i; /* else the one used longest ago */
+            victim = i;
         }
     }
-    if (!fs_read_sector(drive_id, lba, out))
-        return false;
-    s_fc[victim].valid = true;
-    s_fc[victim].drive = drive_id;
-    s_fc[victim].lba = lba;
-    s_fc[victim].used = ++s_fc_clock;
-    memcpy(s_fc[victim].data, out, 512);
+    *hit = false;
+    if (s_fc[victim].valid && s_fc[victim].dirty) {
+        s_fc[victim].dirty = false;
+        fs_write_sector(s_fc[victim].drive, s_fc[victim].lba,
+                        s_fc[victim].data);
+    }
+    return victim;
+}
+
+static bool fat_read(uint8_t drive_id, uint32_t lba, uint8_t *out) {
+    bool hit;
+    int i = fc_slot(drive_id, lba, &hit);
+    if (!hit) {
+        if (!fs_read_sector(drive_id, lba, out))
+            return false;
+        s_fc[i].valid = true;
+        s_fc[i].dirty = false;
+        s_fc[i].drive = drive_id;
+        s_fc[i].lba = lba;
+        memcpy(s_fc[i].data, out, 512);
+    }
+    s_fc[i].used = ++s_fc_clock;
+    memcpy(out, s_fc[i].data, 512);
     return true;
+}
+
+/* a FAT sector changed: on the disk now, or (in a batch) at its end */
+static bool fat_write(uint8_t drive_id, uint32_t lba, const uint8_t *data) {
+    if (s_batch != drive_id)
+        return fs_write_sector(drive_id, lba, data);
+    bool hit;
+    int i = fc_slot(drive_id, lba, &hit);
+    s_fc[i].valid = true;
+    s_fc[i].dirty = true;
+    s_fc[i].drive = drive_id;
+    s_fc[i].lba = lba;
+    s_fc[i].used = ++s_fc_clock;
+    memcpy(s_fc[i].data, data, 512);
+    return true;
+}
+
+void fat_batch_begin(uint8_t drive_id) {
+    fat_batch_end();
+    s_batch = drive_id;
+}
+
+bool fat_batch_end(void) {
+    bool ok = true;
+    s_batch = -1;
+    for (int i = 0; i < FC_N; i++)
+        if (s_fc[i].valid && s_fc[i].dirty) {
+            s_fc[i].dirty = false;
+            ok =
+                fs_write_sector(s_fc[i].drive, s_fc[i].lba, s_fc[i].data) && ok;
+        }
+    return ok;
 }
 
 void fat_cache_wrote(uint8_t drive_id, uint32_t lba, const void *data) {
@@ -59,6 +114,8 @@ void fat_cache_wrote(uint8_t drive_id, uint32_t lba, const void *data) {
 }
 
 void fat_cache_drop(uint8_t drive_id) {
+    if (s_batch == drive_id)
+        fat_batch_end();
     for (int i = 0; i < FC_N; i++)
         if (s_fc[i].drive == drive_id)
             s_fc[i].valid = false;
@@ -166,9 +223,9 @@ bool fat_set(uint8_t drive_id, uint16_t cluster, uint16_t value) {
                 *hi = (*hi & 0xF0) | ((val12 >> 8) & 0x0F);
             }
 
-            if (!fs_write_sector(drive_id, lba0, buf0))
+            if (!fat_write(drive_id, lba0, buf0))
                 return false;
-            if (straddle && !fs_write_sector(drive_id, lba0 + 1, buf1))
+            if (straddle && !fat_write(drive_id, lba0 + 1, buf1))
                 return false;
         }
         return true;
@@ -182,7 +239,7 @@ bool fat_set(uint8_t drive_id, uint16_t cluster, uint16_t value) {
         if (!fat_read(drive_id, lba, local_buf))
             return false;
         *(uint16_t *)(local_buf + fat_offset) = value;
-        if (!fs_write_sector(drive_id, lba, local_buf))
+        if (!fat_write(drive_id, lba, local_buf))
             return false;
     }
     return true;
@@ -212,8 +269,13 @@ uint16_t fat_alloc(uint8_t drive_id) {
     return 0;
 }
 
+/* (the FAT's sectors written once each, at the end: a batch, unless one
+ * is open already) */
 void fat_free_chain(uint8_t drive_id, uint16_t cluster) {
     fat_vol_t *v = vol(drive_id);
+    bool mine = s_batch < 0;
+    if (mine)
+        fat_batch_begin(drive_id);
     while (vol_cluster_active(v, cluster)) {
         uint16_t next = fat_get(drive_id, cluster);
         fat_set(drive_id, cluster, FAT16_FREE);
@@ -221,4 +283,6 @@ void fat_free_chain(uint8_t drive_id, uint16_t cluster) {
             s_next_free[drive_id] = cluster; /* free again: look here first */
         cluster = next;
     }
+    if (mine)
+        fat_batch_end();
 }

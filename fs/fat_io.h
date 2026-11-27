@@ -20,5 +20,9 @@ bool fat_cluster_valid(uint8_t drive_id, uint16_t cluster);
  * mounted or unmounted (also forgets where free clusters were) */
 void fat_cache_wrote(uint8_t drive_id, uint32_t lba, const void *data);
 void fat_cache_drop(uint8_t drive_id);
+/* the FAT's changes kept in the cache, then each sector written once
+ * (fs_write: a file growing by many clusters). false: one failed */
+void fat_batch_begin(uint8_t drive_id);
+bool fat_batch_end(void);
 
 #endif

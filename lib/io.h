@@ -14,6 +14,10 @@ uint32_t inl(unsigned short port);
 void outb(unsigned short port, unsigned char val);
 void outw(unsigned short port, unsigned short val);
 void outl(unsigned short port, uint32_t val);
+/* words 16-bit words from (into) one port: rep insw / rep outsw (a disk's
+ * data register) */
+void insw(unsigned short port, void *buf, uint32_t words);
+void outsw(unsigned short port, const void *buf, uint32_t words);
 
 /* Word from the BIOS data area (0x400 + off): COM bases at 0x400, LPT
  * bases at 0x408. Through asm so GCC doesn't flag the low address. */
