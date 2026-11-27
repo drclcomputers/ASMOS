@@ -4,10 +4,12 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
 #include "fs/install.h"
+#include "config/runtime_config.h"
 #include "drivers/ata.h"
 #include "fs/bootcode.h"
 #include "fs/fs.h"
 #include "fs/zip.h"
+#include "lib/cpu.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "lib/time.h"
@@ -331,6 +333,10 @@ static void zip_progress(void *user, const char *name, uint32_t done,
               "Copying the system and the apps");
 }
 
+/* inst_copy_files_parts' filter, while it runs (NULL: everything) */
+static zip_want_fn s_filter;
+static void *s_filter_user;
+
 const char *inst_copy_files(uint8_t drive, const char *kernel, const char *zip,
                             bool replace, inst_progress_fn cb, void *user) {
     if (!fs_drive_mounted(drive) && !fs_mount_drive(drive))
@@ -359,7 +365,8 @@ const char *inst_copy_files(uint8_t drive, const char *kernel, const char *zip,
             cb(user, 30, "Copying the system and the apps");
         zprog_t z = {cb, user};
         zip_stats_t st;
-        err = zip_extract(zip, root, replace, zip_progress, &z, &st);
+        err = zip_extract_some(zip, root, replace, s_filter, s_filter_user,
+                               zip_progress, &z, &st);
         if (err)
             return err;
         if (st.bad)
@@ -406,4 +413,223 @@ const char *inst_copy_files(uint8_t drive, const char *kernel, const char *zip,
     if (cb)
         cb(user, 100, "Done");
     return NULL;
+}
+
+// the apps to choose (SETUP.INF)
+
+static int field(const char **p, char *out, int sz) {
+    int k = 0;
+    while (**p && **p != '|' && **p != '\r' && **p != '\n') {
+        if (k < sz - 1)
+            out[k++] = **p;
+        (*p)++;
+    }
+    out[k] = 0;
+    if (**p == '|')
+        (*p)++;
+    return k;
+}
+
+int inst_read_parts(const char *inf, inst_part_t *parts, int max) {
+    fat_file_t f;
+    if (!fs_open(inf, &f))
+        return 0;
+    static char buf[4096];
+    int n = fs_read(&f, buf, sizeof(buf) - 1);
+    fs_close(&f);
+    if (n <= 0)
+        return 0;
+    buf[n] = 0;
+    int count = 0;
+    for (const char *p = buf; *p && count < max;) {
+        if (*p == ';' || *p == '\r' || *p == '\n') { /* (a note, a gap) */
+            while (*p && *p != '\n')
+                p++;
+            if (*p)
+                p++;
+            continue;
+        }
+        inst_part_t *t = &parts[count];
+        char size[12], group[12], kb[12];
+        memset(t, 0, sizeof(*t));
+        field(&p, t->app, sizeof(t->app));
+        field(&p, t->name, sizeof(t->name));
+        field(&p, size, sizeof(size));
+        field(&p, group, sizeof(group));
+        field(&p, t->path, sizeof(t->path));
+        field(&p, kb, sizeof(kb));
+        while (*p && *p != '\n')
+            p++;
+        if (*p)
+            p++;
+        if (!t->app[0] || !t->path[0])
+            continue;
+        t->size = !strcmp(size, "min")      ? PART_MIN
+                  : !strcmp(size, "medium") ? PART_MEDIUM
+                                            : PART_FULL;
+        t->group = !strcmp(group, "media")   ? PART_MEDIA
+                   : !strcmp(group, "games") ? PART_GAMES
+                   : !strcmp(group, "net")   ? PART_NET
+                                             : PART_ANY;
+        t->kb = (uint16_t)str_to_uint32(kb);
+        count++;
+    }
+    return count;
+}
+
+static void part_file(uint8_t drive, const inst_part_t *p, char *out, int sz) {
+    snprintf(out, sz, "%s/APPS/%s", g_drive_paths[drive], p->path);
+}
+
+bool inst_part_installed(uint8_t drive, const inst_part_t *p) {
+    char path[FS_PATH_SZ];
+    dir_entry_t de;
+    part_file(drive, p, path, sizeof(path));
+    return fs_find(path, &de);
+}
+
+/* which entries of ASMOS.ZIP: an app's by want[], the rest if all_else */
+typedef struct {
+    const inst_part_t *parts;
+    int n;
+    const bool *want;
+    bool all_else;
+} parts_filter_t;
+
+static bool want_entry(void *user, const char *name) {
+    const parts_filter_t *f = user;
+    if (!strncasecmp(name, "APPS/", 5))
+        for (int k = 0; k < f->n; k++)
+            if (!strcasecmp(name + 5, f->parts[k].path))
+                return f->want[k];
+    return f->all_else;
+}
+
+const char *inst_copy_files_parts(uint8_t drive, const char *kernel,
+                                  const char *zip, const inst_part_t *parts,
+                                  int n, const bool *want, inst_progress_fn cb,
+                                  void *user) {
+    parts_filter_t f = {parts, n, want, true};
+    s_filter = want_entry;
+    s_filter_user = &f;
+    const char *err = inst_copy_files(drive, kernel, zip, true, cb, user);
+    s_filter = NULL;
+    s_filter_user = NULL;
+    return err;
+}
+
+const char *inst_change_parts(uint8_t drive, const char *zip,
+                              const inst_part_t *parts, int n, const bool *want,
+                              inst_progress_fn cb, void *user) {
+    if (!fs_drive_mounted(drive))
+        return "the disk is not there";
+    const char *root = g_drive_paths[drive];
+    /* out: the apps not wanted (their group's folder too, once empty) */
+    for (int k = 0; k < n; k++) {
+        if (want[k] || !inst_part_installed(drive, &parts[k]))
+            continue;
+        char path[FS_PATH_SZ];
+        part_file(drive, &parts[k], path, sizeof(path));
+        if (cb)
+            cb(user, 5, "Taking out apps");
+        fs_set_attr(path, ATTR_ARCHIVE);
+        if (!fs_delete(path))
+            return "an app could not be taken out (is it running?)";
+        char *slash = strrchr(path, '/');
+        if (slash && slash - path > (int)strlen(root) + 5) {
+            *slash = 0; /* (its folder: gone if nothing else is in it) */
+            fs_rmdir(path);
+        }
+    }
+    /* in: the wanted ones, from the setup floppy */
+    bool any = false;
+    for (int k = 0; k < n; k++)
+        any |= want[k] && !inst_part_installed(drive, &parts[k]);
+    if (!any) {
+        if (cb)
+            cb(user, 100, "Done");
+        return NULL;
+    }
+    parts_filter_t f = {parts, n, want, false};
+    zprog_t z = {cb, user};
+    zip_stats_t st;
+    if (cb)
+        cb(user, 10, "Copying apps");
+    const char *err = zip_extract_some(zip, root, true, want_entry, &f,
+                                       zip_progress, &z, &st);
+    if (err)
+        return err;
+    if (st.bad)
+        return "some files on the setup disk are damaged";
+    if (cb)
+        cb(user, 100, "Done");
+    return NULL;
+}
+
+// the settings
+
+/* the drive's ASMOS.CFG (an update), else the defaults: a first boot's
+ * (the kernel makes them light on a 386 when there is no ASMOS.CFG; Setup
+ * makes the file, so it does that here, on the same machine) */
+static void read_cfg(uint8_t drive, os_config_t *c, char *path, int sz) {
+    snprintf(path, sz, "%s%s", g_drive_paths[drive], CFG_PATH);
+    os_config_t mine = g_cfg;
+    cfg_init_defaults();
+    if (cpu_family() <= 3)
+        cfg_set_low_end(true);
+    *c = g_cfg;
+    g_cfg = mine;
+    fat_file_t f;
+    if (fs_open(path, &f)) {
+        os_config_t old = *c;
+        int n = fs_read(&f, &old, sizeof(old));
+        fs_close(&f);
+        if (n >= (int)__builtin_offsetof(os_config_t, wall_custom) &&
+            old.magic == CFG_MAGIC)
+            *c = old;
+    }
+}
+
+static const char *write_cfg(const char *path, os_config_t *c);
+
+bool inst_read_network(uint8_t drive) {
+    char path[FS_PATH_SZ];
+    os_config_t c;
+    read_cfg(drive, &c, path, sizeof(path));
+    return c.networking_enabled != 0;
+}
+
+const char *inst_write_network(uint8_t drive, bool on) {
+    char path[FS_PATH_SZ];
+    os_config_t c;
+    read_cfg(drive, &c, path, sizeof(path));
+    c.networking_enabled = on;
+    return write_cfg(path, &c);
+}
+
+const char *inst_write_settings(uint8_t drive, const inst_settings_t *set) {
+    char path[FS_PATH_SZ];
+    os_config_t c;
+    read_cfg(drive, &c, path, sizeof(path));
+    c.networking_enabled = set->network;
+    c.sound_enabled = set->sound;
+    c.play_bootchime = set->chime;
+    c.printer_type = set->printer_type;
+    c.printer_port = set->printer_port;
+    return write_cfg(path, &c);
+}
+
+static const char *write_cfg(const char *path, os_config_t *cp) {
+    os_config_t c = *cp;
+    fat_file_t f;
+    c.magic = CFG_MAGIC;
+    c.version = CFG_VERSION;
+    dir_entry_t de;
+    if (fs_find(path, &de))
+        fs_delete(path);
+    if (!fs_create(path, &f))
+        return "could not save the settings";
+    int w = fs_write(&f, &c, sizeof(c));
+    fs_close(&f);
+    return w == (int)sizeof(c) ? NULL : "could not save the settings";
 }

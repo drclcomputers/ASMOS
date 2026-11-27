@@ -280,13 +280,7 @@ void kmain(void) {
     boot_check_ata();
     boot_check_fat();
 
-    cfg_init_defaults();
-    if (!cfg_load()) { /* first boot: light settings on a 386 */
-        if (cpu_family() <= 3)
-            cfg_set_low_end(true);
-        if (!g_setup_mode)
-            cfg_save();
-    }
+    cfg_boot(g_setup_mode);
     if (g_setup_mode)
         g_cfg.start_in_gui = true;
     joy_init(); /* the calibration is in g_cfg now */

@@ -188,6 +188,20 @@ int sim_pre_mount(const char *sc) {
         g_video_mode = 0;
         return 0;
     }
+    if (!strcmp(sc, "appschange")) { /* ASMOS on HDA; started from the
+                                          setup floppy */
+        extern int g_fdc_drive_type, g_fdcb_drive_type;
+        extern uint8_t g_fdc_img[];
+        extern void fdc_insert_unit(int, int), fdc_setup(void);
+        extern bool load_file(const char *, uint8_t *, uint32_t, uint32_t *);
+        uint32_t n;
+        g_fdc_drive_type = 4;
+        g_fdcb_drive_type = 0;
+        fdc_setup();
+        load_file(ROOT "setup.img", g_fdc_img, 2880 * 512, &n);
+        fdc_insert_unit(0, 1440);
+        return 1;
+    }
     if (strncmp(sc, "setup", 5))
         return 0;
     if (!strcmp(sc, "setup320")) {

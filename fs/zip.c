@@ -1227,6 +1227,21 @@ static bool make_dirs(const char *path) {
 }
 
 /* every entry of the central directory cd, into dst_dir */
+/* zip_extract_some's filter (NULL: all) */
+static zip_want_fn s_want;
+static void *s_want_user;
+
+static bool wanted(const uint8_t *name, uint32_t n) {
+    if (!s_want)
+        return true;
+    char nm[FS_PATH_SZ];
+    if (n >= sizeof(nm))
+        n = sizeof(nm) - 1;
+    memcpy(nm, name, n);
+    nm[n] = 0;
+    return s_want(s_want_user, nm);
+}
+
 static const char *extract_entries(fat_file_t *zf, const uint8_t *cd,
                                    uint32_t cd_size, uint32_t count, inf_t *s,
                                    const char *dst_dir, bool overwrite,
@@ -1236,7 +1251,9 @@ static const char *extract_entries(fat_file_t *zf, const uint8_t *cd,
     /* the total, for progress */
     uint32_t total = 0, done = 0;
     for (uint32_t p = 0, i = 0; i < count && p + 46 <= cd_size; i++) {
-        total += get32(cd + p + 24);
+        if (p + 46 + get16(cd + p + 28) <= cd_size &&
+            wanted(cd + p + 46, get16(cd + p + 28)))
+            total += get32(cd + p + 24);
         p += 46 + get16(cd + p + 28) + get16(cd + p + 30) + get16(cd + p + 32);
     }
     if (!make_dirs(dst_dir))
@@ -1262,6 +1279,8 @@ static const char *extract_entries(fat_file_t *zf, const uint8_t *cd,
             err = "the archive's directory is damaged";
             break;
         }
+        if (!wanted((const uint8_t *)name, nlen))
+            continue;
         /* the path, made safe */
         char out[FS_PATH_SZ];
         snprintf(out, sizeof(out), "%s", dst_dir);
@@ -1391,6 +1410,17 @@ static const char *extract_entries(fat_file_t *zf, const uint8_t *cd,
         }
         st->files++;
     }
+    return err;
+}
+
+const char *zip_extract_some(const char *zip_path, const char *dst_dir,
+                             bool overwrite, zip_want_fn want, void *want_user,
+                             zip_progress_fn cb, void *user, zip_stats_t *st) {
+    s_want = want;
+    s_want_user = want_user;
+    const char *err = zip_extract(zip_path, dst_dir, overwrite, cb, user, st);
+    s_want = NULL;
+    s_want_user = NULL;
     return err;
 }
 

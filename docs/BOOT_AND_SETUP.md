@@ -29,6 +29,9 @@ MBR. The BIOS starts its VBR directly:
 sector 0       VBR (the same code, a floppy BPB)
 sectors 1..4   stage 2
                SYSTEM\KERNEL.SYS   the same kernel (this one boots the floppy)
+               SETUP\SETUP.INF     the apps Setup lets the user choose
+                                   (tools/mkdisk.py, from extapps/MANIFEST:
+                                   app|name|size|group|path in APPS|KB)
                SETUP\ASMOS.ZIP     what Setup puts on the hard disk: the
                                    kernel again, compressed (half as much
                                    floppy to read), and APPS
@@ -171,21 +174,39 @@ restart.`
           boot code, KERNEL.SYS and the apps. Your files and settings stay.
         - Also pick the screen mode the disk will start in (only the ones
           this machine can take are listed).
-    4. **Ready to install.** This page says what will happen, and names the
+    4. **What do you want on it?** Network (off: World View is left out,
+       and ASMOS.CFG says not to start the network card: more memory
+       free), pictures and sound (Picture Viewer, Audio Player), games.
+    5. **How much of ASMOS?** Minimal (the built-in apps, Clock,
+       Calculator), Medium (and Calendar, ASMDraw, ClipView, Picture
+       Viewer, Puzzle), Full (every app), Custom (a tick for each app):
+       each within the answers on page 4. The sizes come from SETUP.INF
+       (extapps/MANIFEST's third column). On a disk that has ASMOS, Custom
+       starts with the apps it has.
+    6. **Sound and printer:** sound on or off, the start-up chime, the
+       printer's kind and port, into the disk's ASMOS.CFG.
+    7. **Ready to install.** This page says what will happen, and names the
        disk when it is going to be erased. Press **Install**.
-    5. **Installing.** The steps are: partition and format, boot code, then
-       KERNEL.SYS and the apps, both from ASMOS.ZIP. A bar shows the
+    8. **Installing.** The steps are: partition and format, boot code, then
+       KERNEL.SYS and the chosen apps, both from ASMOS.ZIP, then the
+       settings. A bar shows the
        progress. Nearly all the time goes on reading the floppy: about
        300 KB, around 10-15 seconds.
-    6. **Done.** Take the floppy out (86Box: the floppy icon > Eject) and
+    9. **Done.** Take the floppy out (86Box: the floppy icon > Eject) and
        press **Restart**.
 5. The computer now starts from the hard disk: BIOS, MBR, VBR, stage 2,
    KERNEL.SYS. The first start makes ASMOS.CFG and the DESKTOP folder.
 
 ### From a running ASMOS
 
-- **`app run Setup`** in ASMTerm, with the setup floppy in A:, installs on
-  the other disk (HDB), or updates this one ("keep the files"). It won't
+- **Adding and taking out apps:** start from the setup floppy with
+  ASMOS on HDA. Setup's first page asks: change the apps of the ASMOS on
+  HDA, or install. Changing shows the same ticks (what is unticked is
+  deleted from HDA's /APPS, an emptied group folder too; nothing else is
+  touched), and the network question sets HDA's ASMOS.CFG. Then take the
+  floppy out and Restart.
+- **`app run Setup`** in ASMTerm, with the setup floppy in A:, does the
+  same from a running ASMOS, or installs on the other disk (HDB). It won't
   erase the disk ASMOS is running from. Setup is in the Apps menu only when
   started from the setup floppy.
 - **`sys hdb`** (or `sys hda`) in ASMTerm makes a disk with a FAT16 volume

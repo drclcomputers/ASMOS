@@ -1,30 +1,35 @@
 # What goes in /APPS on the disk image (tools/mkhdimg.py; makefile).
 # The Apps menu is that folder: each folder is a group. A line per file:
-#   <path in /APPS> | <name>       a bundled app: build/extapps/<name>.APP
+#   <path in /APPS> | <name> | <size> [group]
+#                                  a bundled app: build/extapps/<name>.APP.
+#                                  Setup's choices (SETUP.INF): size min,
+#                                  medium or full (the smallest install it is
+#                                  in), group media, games or net (left out
+#                                  when the user says no to those)
 #   <path in /APPS> | @<target>    a shortcut (.LNK): a built-in app's name,
-#                                  an .APP's name, or a path
+#                                  an .APP's name, or a path (always there)
 FileF.LNK                         | @FileF
 Settings.LNK                      | @Settings
 Help.LNK                          | @Help
 
-Accessories/ASMDraw.APP           | asmdraw
-Accessories/Calculator.APP        | calculator
-Accessories/Calendar.APP          | calendar
+Accessories/ASMDraw.APP           | asmdraw       | medium
+Accessories/Calculator.APP        | calculator    | min
+Accessories/Calendar.APP          | calendar      | medium
 Accessories/CharMap.LNK           | @Character Map
-Accessories/ClipView.APP          | clipview
-Accessories/Clock.APP             | clock
-Accessories/Picture Viewer.APP    | picview
+Accessories/ClipView.APP          | clipview      | medium
+Accessories/Clock.APP             | clock         | min
+Accessories/Picture Viewer.APP    | picview       | medium media
 Accessories/TEditor.LNK           | @TEditor
 
-Games/Puzzle.APP                  | puzzle
-Games/Sudoku.APP                  | sudoku
-Games/Solitaire.APP               | solitaire
+Games/Puzzle.APP                  | puzzle        | medium games
+Games/Sudoku.APP                  | sudoku        | full games
+Games/Solitaire.APP               | solitaire     | full games
 
-Multimedia/Audio Player.APP       | audioplayer
+Multimedia/Audio Player.APP       | audioplayer   | full media
 
-Internet/World View.APP           | worldview
+Internet/World View.APP           | worldview     | full net
 
 System Tools/ASMTerm.LNK          | @ASMTerm
 System Tools/Format Disk.LNK      | @Format Disk
-System Tools/HexView.APP          | hexview
+System Tools/HexView.APP          | hexview       | full
 System Tools/Monitor.LNK          | @Monitor

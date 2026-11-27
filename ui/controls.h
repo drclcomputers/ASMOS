@@ -19,8 +19,8 @@ typedef struct control control;
 
 /* events (second argument of a control's handler) */
 enum {
-    EV_CLICK = 1, /* button / checkbox / radio pressed                   */
-    EV_CHANGE,    /* text, value or selection changed                    */
+    EV_CLICK = 1, /* button pressed (a toggle button too)                */
+    EV_CHANGE,    /* text, value (check box, radio) or selection changed */
     EV_SUBMIT,    /* Enter in an edit / list, double-click in a list     */
     EV_KEY,       /* key the control did not use (see kb.*)             */
     EV_FOCUS,     /* custom control got keyboard focus                   */

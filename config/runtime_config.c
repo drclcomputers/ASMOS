@@ -6,6 +6,7 @@
 #include "config/runtime_config.h"
 #include "config/config.h"
 #include "fs/fs.h"
+#include "lib/cpu.h"
 #include "lib/memory.h"
 #include "lib/string.h"
 #include "os/os.h"
@@ -72,6 +73,16 @@ void cfg_set_low_end(bool low) {
     g_cfg.no_tooltips = v;
     g_cfg.no_power_anim = v;
     g_cfg.fps_cap = low ? 1 : 0;
+}
+
+void cfg_boot(bool setup_mode) {
+    cfg_init_defaults();
+    if (setup_mode || !cfg_load()) {
+        if (cpu_family() <= 3)
+            cfg_set_low_end(true);
+        if (!setup_mode)
+            cfg_save();
+    }
 }
 
 bool cfg_is_low_end(void) {

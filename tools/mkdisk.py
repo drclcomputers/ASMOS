@@ -22,6 +22,8 @@ The setup floppy (1.44 MB, FAT12) that installs ASMOS on a hard disk:
   /SYSTEM/KERNEL.SYS   the same kernel: booted from here it runs Setup
   /SETUP/ASMOS.ZIP     what Setup puts on the hard disk: the kernel again,
                        compressed (less floppy to read), and /APPS
+  /SETUP/SETUP.INF     the apps Setup lets the user choose (from the
+                       manifest's sizes and groups)
 
 KERNEL.SYS is hidden + system + read-only, like DOS's IO.SYS. Names may be
 long (up to 63 characters): Windows 95 long-name entries and an 8.3 alias,
@@ -399,8 +401,13 @@ class Vol:
 # ── what goes on the disks ───────────────────────────────────────────────────
 
 
-def manifest_files(manifest, appdir):
-    """[(path under APPS, data)] from extapps/MANIFEST"""
+TIERS = ("min", "medium", "full")
+GROUPS = ("media", "games", "net")
+
+
+def manifest_files(manifest, appdir, parts=None):
+    """[(path under APPS, data)] from extapps/MANIFEST; the apps Setup may
+    leave out appended to parts: (app, name, tier, group, path, KB)"""
     out = []
     for ln, line in enumerate(open(manifest), 1):
         line = line.split("#", 1)[0].strip()
@@ -408,7 +415,9 @@ def manifest_files(manifest, appdir):
             continue
         if "|" not in line:
             die("%s:%d: want 'path | what'" % (manifest, ln))
-        where, what = (x.strip() for x in line.split("|", 1))
+        cols = [x.strip() for x in line.split("|")]
+        where, what = cols[0], cols[1]
+        choice = cols[2].split() if len(cols) > 2 else []
         for part in ("APPS/" + where).split("/"):
             if not part or len(part) > 63 or any(c in '\\:*?"<>|' for c in part):
                 die("%s:%d: bad name '%s'" % (manifest, ln, part))
@@ -416,8 +425,41 @@ def manifest_files(manifest, appdir):
             data = (what[1:] + "\r\n").encode("ascii")
         else:
             data = open("%s/%s.APP" % (appdir, what), "rb").read()
+            if (
+                not choice
+                or choice[0] not in TIERS
+                or len(choice) > 2
+                or (len(choice) == 2 and choice[1] not in GROUPS)
+            ):
+                die(
+                    "%s:%d: an app wants '| min|medium|full [media|games|net]'"
+                    % (manifest, ln)
+                )
+            if parts is not None:
+                name = where.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                parts.append(
+                    (
+                        what,
+                        name,
+                        choice[0],
+                        choice[1] if len(choice) > 1 else "-",
+                        where,
+                        (len(data) + 1023) // 1024,
+                    )
+                )
         out.append(("APPS/" + where, data))
     return out
+
+
+def setup_inf(parts):
+    """SETUP.INF: the apps Setup lets the user choose (fs/install.h)"""
+    lines = [
+        "; ASMOS Setup: the apps it can leave out (made by tools/mkdisk.py)",
+        "; app | name | size (min, medium, full) | group | in APPS | KB",
+    ]
+    for p in parts:
+        lines.append("%s|%s|%s|%s|%s|%d" % p)
+    return ("\r\n".join(lines) + "\r\n").encode("ascii")
 
 
 def help_files(folder):
@@ -513,7 +555,7 @@ def build_hdd(out, mb, bootdir, kernel, files, video, fragment, heads=16):
     )
 
 
-def build_floppy(out, bootdir, kernel, files, video, fragment):
+def build_floppy(out, bootdir, kernel, files, video, fragment, parts=()):
     _, vbr, s2 = read_boot(bootdir)
     s2[4] = video
     reserved = 1 + len(s2) // 512
@@ -547,6 +589,7 @@ def build_floppy(out, bootdir, kernel, files, video, fragment):
         for path, data in files:
             zf.writestr(path, data)
     v.put("SETUP/ASMOS.ZIP", z.getvalue())
+    v.put("SETUP/SETUP.INF", setup_inf(parts))
     v.put("README.TXT", README.encode())
     v.finish()
     open(out, "wb").write(img)
@@ -565,6 +608,10 @@ and makes it bootable. Remove the floppy when it says, and restart.
 
   SYSTEM\\KERNEL.SYS   the ASMOS kernel (hidden)
   SETUP\\ASMOS.ZIP     the apps and folders Setup puts on the hard disk
+  SETUP\\SETUP.INF     the apps you can choose (Minimal, Medium, Full)
+
+Booted from the hard disk with this floppy in, Setup also adds and
+removes apps.
 """
 
 
@@ -587,7 +634,8 @@ def main():
     bootdir = opt("--boot", default="build/boot")
     kernel = open(opt("--kernel", default="kernel.bin"), "rb").read()
     apps = opt("--apps", 2)
-    files = manifest_files(*apps) if apps else []
+    parts = []
+    files = manifest_files(*apps, parts=parts) if apps else []
     if opt("--help"):
         files += help_files(opt("--help"))
     video = int(opt("--video", default="0"))
@@ -606,7 +654,7 @@ def main():
             heads=int(opt("--heads", default="16")),
         )
     else:
-        build_floppy(out, bootdir, kernel, files, video, frag)
+        build_floppy(out, bootdir, kernel, files, video, frag, parts)
 
 
 if __name__ == "__main__":

@@ -115,6 +115,16 @@ int scen_setup(const char *name) {
             sim_frames(2);                                                     \
         }                                                                      \
     } while (0)
+        /* (an ASMOS on HDA: Setup offers its apps first; installing is the
+         * other choice) */
+        for (control *c = w->controls; c; c = c->next)
+            if (c->type == CTL_RADIO &&
+                !strncmp(ctl_text(c), "Install ASMOS", 13)) {
+                T("an ASMOS on HDA: apps or install",
+                  !strcmp(name, "setupkeep"));
+                sim_click(c->ax + 3, c->ay + 3);
+                sim_frames(1);
+            }
         CLICK("Continue");
         sim_shot("su1");
         control *lst = NULL;
@@ -146,6 +156,55 @@ int scen_setup(const char *name) {
               erase && ctl_value(erase) && keep && !keep->enabled);
         }
         CLICK("Continue");
+        /* the apps, the settings: Continue till Install (setupmin: no
+         * network, media, games; Minimal) */
+        bool min = !strcmp(name, "setupmin");
+        extern int g_sim_cpu;
+        int cpu_was = g_sim_cpu;
+        if (min) /* (setupmin: on a 386) */
+            g_sim_cpu = 3;
+        bool saw_parts = false, saw_size = false, saw_set = false;
+        for (int pg = 0; pg < 8 && !BTN("Install"); pg++) {
+            control *net = NULL, *media = NULL, *games = NULL, *minr = NULL,
+                    *snd = NULL;
+            for (control *c = w->controls; c; c = c->next) {
+                const char *t = ctl_text(c);
+                if (c->type == CTL_CHECK && !strncmp(t, "Network", 7))
+                    net = c;
+                if (c->type == CTL_CHECK && !strncmp(t, "Pictures", 8))
+                    media = c;
+                if (c->type == CTL_CHECK && !strcmp(t, "Games"))
+                    games = c;
+                if (c->type == CTL_RADIO && !strncmp(t, "Minimal", 7))
+                    minr = c;
+                if (c->type == CTL_CHECK && !strncmp(t, "Sound", 5))
+                    snd = c;
+            }
+            if (net) {
+                saw_parts = true;
+                sim_shot("su_parts");
+                if (min) {
+                    ctl_set_value(net, 0);
+                    ctl_set_value(media, 0);
+                    ctl_set_value(games, 0);
+                }
+            }
+            if (minr) {
+                saw_size = true;
+                if (min) {
+                    sim_click(minr->ax + 3, minr->ay + 3);
+                    sim_frames(1);
+                }
+                sim_shot("su_size");
+            }
+            if (snd) {
+                saw_set = true;
+                sim_shot("su_settings");
+            }
+            CLICK("Continue");
+        }
+        T("the pages: what you want, how much, settings",
+          saw_parts && saw_set && (saw_size || !strcmp(name, "setupkeep")));
         sim_shot("su3");
         uint32_t t0 = 0;
         (void)t0;
@@ -193,11 +252,48 @@ int scen_setup(const char *name) {
         T("same as the floppy's",
           n1 == n2 && n1 > 100000 && !memcmp(k1, k2, n1));
         snprintf(p, sizeof p, "%s/APPS/Games/Sudoku.APP", root);
-        T("apps there", fs_find(p, &de) && de.file_size > 1000);
+        if (min) {
+            T("Minimal, no games: none", !fs_find(p, &de));
+            snprintf(p, sizeof p, "%s/APPS/Games", root);
+            T("... not even their folder", !fs_find(p, &de));
+            snprintf(p, sizeof p, "%s/APPS/Internet/World View.APP", root);
+            T("... no network: no World View", !fs_find(p, &de));
+            snprintf(p, sizeof p, "%s/APPS/Accessories/ASMDraw.APP", root);
+            T("... nor Medium's apps", !fs_find(p, &de));
+            snprintf(p, sizeof p, "%s/APPS/Accessories/Clock.APP", root);
+            T("... Clock", fs_find(p, &de) && de.file_size > 1000);
+            snprintf(p, sizeof p, "%s/APPS/Accessories/Calculator.APP", root);
+            T("... Calculator", fs_find(p, &de) && de.file_size > 1000);
+        } else {
+            T("apps there", fs_find(p, &de) && de.file_size > 1000);
+            snprintf(p, sizeof p, "%s/APPS/Internet/World View.APP", root);
+            T("... World View", fs_find(p, &de));
+        }
+        {
+            snprintf(p, sizeof p, "%s/ASMOS.CFG", root);
+            os_config_t c;
+            memset(&c, 0, sizeof c);
+            fat_file_t cf;
+            bool got = fs_open(p, &cf);
+            if (got) {
+                fs_read(&cf, &c, sizeof c);
+                fs_close(&cf);
+            }
+            T("the settings saved (ASMOS.CFG)",
+              got && c.magic == CFG_MAGIC &&
+                  c.networking_enabled == (min ? 0 : 1));
+            bool light = c.reduce_motion && c.outline_drag && c.fps_cap == 1;
+            if (min)
+                T("... on a 386: the light settings (as a first boot)", light);
+            else if (strcmp(name, "setupkeep"))
+                T("... not a 386: everything on", !light);
+            g_sim_cpu = cpu_was;
+        }
         snprintf(p, sizeof p, "%s/APPS/System Tools/ASMTerm.LNK", root);
         T("shortcuts there", fs_find(p, &de));
         snprintf(p, sizeof p, "%s/APPS/System Tools/Setup.LNK", root);
-        T("no Setup shortcut on the installed disk", !fs_find(p, &de));
+        T("no Setup shortcut on the installed disk (the floppy's only)",
+          !fs_find(p, &de));
 
         T("the SYSTEM folder is protected",
           fo_protected(u ? "/HDB/SYSTEM/KERNEL.SYS" : "/SYSTEM/KERNEL.SYS") &&
@@ -217,6 +313,193 @@ int scen_setup(const char *name) {
         cli_execute_command(u ? "sys hdb" : "sys hda", o, sizeof o);
         wr(1, "    sys: ");
         wr(1, o);
+        return fails;
+    }
+    if (!strcmp(name, "appschange")) {
+        /* started from the setup floppy, ASMOS on HDA: its apps out and
+         * in */
+        int fails = 0;
+        char b[300];
+        dir_entry_t de;
+        extern app_descriptor setup_app;
+        extern bool g_setup_mode;
+        T("started from the floppy: Setup", g_setup_mode);
+        T("the floppy in", fs_find(SETUP_INF, &de) && fs_find(SETUP_ZIP, &de));
+        window *w = NULL;
+#define FIND(type_, prefix)                                                    \
+    ({                                                                         \
+        control *r_ = NULL;                                                    \
+        for (control *c_ = w ? w->controls : NULL; c_; c_ = c_->next)          \
+            if (c_->type == (type_) &&                                         \
+                !strncmp(ctl_text(c_), prefix, strlen(prefix)))                \
+                r_ = c_;                                                       \
+        r_;                                                                    \
+    })
+#define PRESS(t)                                                               \
+    do {                                                                       \
+        control *c_ = FIND(CTL_BUTTON, t);                                     \
+        if (!c_) {                                                             \
+            snprintf(b, sizeof b, "    no button %s\n", t);                    \
+            wr(1, b);                                                          \
+            fails++;                                                           \
+        } else {                                                               \
+            sim_click(c_->ax + 5, c_->ay + 5);                                 \
+            sim_frames(2);                                                     \
+        }                                                                      \
+    } while (0)
+#define LABELS()                                                               \
+    do {                                                                       \
+        for (control *c_ = w ? w->controls : NULL; c_; c_ = c_->next)          \
+            if (c_->type == CTL_LABEL && ctl_text(c_)[0]) {                    \
+                snprintf(b, sizeof b, "    | %s\n", ctl_text(c_));             \
+                wr(1, b);                                                      \
+            }                                                                  \
+    } while (0)
+        /* 1: no games, no Clock */
+        w = wm_focused_window();
+        T("Setup opened by itself", w && !strcmp(w->title, "ASMOS Setup"));
+        T("Setup: add or take out apps (the first choice)",
+          w && FIND(CTL_RADIO, "Add or take out") &&
+              ctl_value(FIND(CTL_RADIO, "Add or take out")));
+        sim_shot("ac_welcome");
+        PRESS("Continue");
+        control *games = FIND(CTL_CHECK, "Games");
+        T("the questions: as it is now (games there: ticked)",
+          games && ctl_value(games) && ctl_value(FIND(CTL_CHECK, "Network")));
+        ctl_set_value(games, 0);
+        PRESS("Continue");
+        control *clock = FIND(CTL_CHECK, "Clock"),
+                *puzzle = FIND(CTL_CHECK, "Puzzle");
+        T("each app: ticked if there (games: no)",
+          clock && ctl_value(clock) && puzzle && !ctl_value(puzzle) &&
+              ctl_value(FIND(CTL_CHECK, "World View")));
+        sim_shot("ac_custom");
+        {
+            control *tot = FIND(CTL_LABEL, "9 apps"),
+                    *sud = FIND(CTL_CHECK, "Sudoku");
+            snprintf(b, sizeof b, "    before: %s\n",
+                     tot ? ctl_text(tot) : "-");
+            wr(1, b);
+            sim_click(sud->ax + 3, sud->ay + 3); /* a tick, by the mouse */
+            sim_frames(2);
+            snprintf(b, sizeof b, "    after a tick: %s (Sudoku %d)\n",
+                     tot ? ctl_text(tot) : "-", ctl_value(sud));
+            wr(1, b);
+            T("ticking an app: the count and the KB go up",
+              tot && ctl_value(sud) && !strncmp(ctl_text(tot), "10 apps", 7));
+            sim_click(sud->ax + 3, sud->ay + 3);
+            sim_frames(2);
+            T("... unticking: down again",
+              tot && !ctl_value(sud) && !strncmp(ctl_text(tot), "9 apps", 6));
+        }
+        ctl_set_value(clock, 0);
+        PRESS("Continue");
+        LABELS();
+        T("what changes", FIND(CTL_LABEL, "Take out: Clock, Puzzle") &&
+                              FIND(CTL_LABEL, "Add: nothing"));
+        sim_shot("ac_confirm");
+        PRESS("Change");
+        for (int i = 0; i < 40 && !FIND(CTL_BUTTON, "Close"); i++)
+            sim_frames(1);
+        LABELS();
+        T("done", FIND(CTL_BUTTON, "Close") != NULL);
+        T("Clock out", !fs_find("/HDA/APPS/Accessories/Clock.APP", &de));
+        T("the games out, their folder too", !fs_find("/HDA/APPS/Games", &de));
+        T("the rest stays",
+          fs_find("/HDA/APPS/Accessories/Calculator.APP", &de) &&
+              fs_find("/HDA/APPS/FileF.LNK", &de) &&
+              fs_find("/HDA/APPS/Internet/World View.APP", &de));
+        T("done: take the floppy out, Restart",
+          FIND(CTL_BUTTON, "Restart") && FIND(CTL_LABEL, "Take the floppy"));
+        PRESS("Close");
+        sim_frames(2);
+
+        /* 2: the games back, and Clock */
+        os_launch_app(&setup_app);
+        sim_frames(3);
+        w = wm_focused_window();
+        PRESS("Continue");
+        games = FIND(CTL_CHECK, "Games");
+        T("again: no games now", games && !ctl_value(games));
+        ctl_set_value(games, 1);
+        PRESS("Continue");
+        clock = FIND(CTL_CHECK, "Clock");
+        T("games said yes: all of them ticked",
+          ctl_value(FIND(CTL_CHECK, "Puzzle")) &&
+              ctl_value(FIND(CTL_CHECK, "Sudoku")) &&
+              ctl_value(FIND(CTL_CHECK, "Solitaire")) && clock &&
+              !ctl_value(clock));
+        ctl_set_value(clock, 1);
+        PRESS("Continue");
+        LABELS();
+        T("adds them", FIND(CTL_LABEL, "Add: Clock, Puzzle"));
+        PRESS("Change");
+        for (int i = 0; i < 60 && !FIND(CTL_BUTTON, "Close"); i++)
+            sim_frames(1);
+        T("back in", fs_find("/HDA/APPS/Accessories/Clock.APP", &de) &&
+                         de.file_size > 1000 &&
+                         fs_find("/HDA/APPS/Games/Sudoku.APP", &de) &&
+                         de.file_size > 1000);
+        PRESS("Close");
+        sim_frames(2);
+
+        /* 3: no network: World View out, networking off */
+        os_launch_app(&setup_app);
+        sim_frames(3);
+        w = wm_focused_window();
+        PRESS("Continue");
+        ctl_set_value(FIND(CTL_CHECK, "Network"), 0);
+        PRESS("Continue");
+        T("no network: World View unticked",
+          !ctl_value(FIND(CTL_CHECK, "World View")));
+        PRESS("Continue");
+        LABELS();
+        T("says the network goes off", FIND(CTL_LABEL, "Network: off"));
+        PRESS("Change");
+        for (int i = 0; i < 40 && !FIND(CTL_BUTTON, "Close"); i++)
+            sim_frames(1);
+        T("World View out, networking off",
+          !fs_find("/HDA/APPS/Internet/World View.APP", &de) &&
+              !fs_find("/HDA/APPS/Internet", &de) &&
+              !inst_read_network(DRIVE_HDA));
+        sim_shot("ac_done");
+        PRESS("Close");
+        return fails;
+    }
+    if (!strcmp(name, "cfgboot")) {
+        /* the settings at start-up (kernel.c: cfg_boot) on a 386 */
+        int fails = 0;
+        char b[300];
+        extern int g_sim_cpu;
+        int cpu_was = g_sim_cpu;
+        os_config_t keep = g_cfg;
+        dir_entry_t de;
+        g_sim_cpu = 3;
+        fs_delete(CFG_PATH);
+        cfg_boot(false);
+        T("a first boot on a 386: light, saved",
+          cfg_is_low_end() && fs_find(CFG_PATH, &de));
+        /* the user turned them off (Settings): kept */
+        cfg_set_low_end(false);
+        cfg_save();
+        cfg_boot(false);
+        T("next boots: ASMOS.CFG as it is (the user's)", !cfg_is_low_end());
+        /* from the setup floppy, that disk in: not its settings */
+        cfg_boot(true);
+        T("from the setup floppy on a 386: light, whatever HDA's ASMOS.CFG "
+          "says",
+          cfg_is_low_end());
+        cfg_boot(false);
+        T("... HDA's ASMOS.CFG left as it was", !cfg_is_low_end());
+        g_sim_cpu = 5;
+        fs_delete(CFG_PATH);
+        cfg_boot(false);
+        T("a first boot on a Pentium: everything on", !cfg_is_low_end());
+        cfg_boot(true);
+        T("... from the floppy too", !cfg_is_low_end());
+        g_sim_cpu = cpu_was;
+        fs_delete(CFG_PATH);
+        g_cfg = keep;
         return fails;
     }
     if (!strcmp(name, "tlbcost")) {

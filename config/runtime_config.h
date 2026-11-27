@@ -73,6 +73,7 @@ static inline uint8_t cfg_wall_px(int x, int y) {
 void cfg_default_pattern(uint8_t out[32]);
 
 void cfg_init_defaults(void);
+void cfg_boot(bool setup_mode);
 /* the Performance settings: true = everything light (for a 386), false =
  * everything on */
 void cfg_set_low_end(bool low);

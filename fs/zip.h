@@ -32,6 +32,12 @@ const char *zip_extract(const char *zip_path, const char *dst_dir,
                         bool overwrite, zip_progress_fn cb, void *user,
                         zip_stats_t *st);
 
+/* only the entries want says yes to (name: as in the zip, "APPS/A.APP") */
+typedef bool (*zip_want_fn)(void *user, const char *name);
+const char *zip_extract_some(const char *zip_path, const char *dst_dir,
+                             bool overwrite, zip_want_fn want, void *want_user,
+                             zip_progress_fn cb, void *user, zip_stats_t *st);
+
 /* the first bytes look like a zip (or an empty one) */
 bool zip_is_zip(const char *path);
 

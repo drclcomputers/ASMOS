@@ -809,7 +809,7 @@ static void sim_install_apps(void) {
             while (*w == ' ')
                 w++;
             k = 0;
-            while (w[k] && k < 63) {
+            while (w[k] && w[k] != '|' && k < 63) { /* (then size, group) */
                 what[k] = w[k];
                 k++;
             }

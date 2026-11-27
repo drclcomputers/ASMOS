@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.6.8
+Version 3.9.1
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -247,15 +247,31 @@ The full walk-through: [docs/BOOT_AND_SETUP.md](docs/BOOT_AND_SETUP.md).
       The boot code, `SYSTEM\KERNEL.SYS` and the bundled apps are replaced.
       Your settings (ASMOS.CFG), desktop and documents stay. Shortcuts you
       deleted from /APPS come back; apps no longer bundled are not removed.
+      The apps start ticked as they are on the disk.
     - Choose the screen mode (only the ones this machine can take are
       listed).
-5. Install. Take the floppy out and press Restart.
+5. What you want on it: the network (off: World View is left out and the
+   network isn't started, so more memory is free), pictures and sound
+   (Picture Viewer, Audio Player), games.
+6. How much: **Minimal** (the built-in apps, Clock, Calculator),
+   **Medium** (and Calendar, ASMDraw, ClipView, Picture Viewer, Puzzle),
+   **Full** (every app), or **Custom** (tick each app). Within what you
+   said yes to in step 5.
+7. Sound (on or off, the start-up chime) and the printer (its kind, its
+   port).
+8. Install. Take the floppy out and press Restart.
+
+To add or take out apps later, start the computer from the setup floppy
+again: when the hard disk has ASMOS, Setup asks first whether to change
+its apps (tick to add, untick to take out; your own files are never
+touched; the network on or off) or to install.
+
+On the setup floppy ASMOS runs "live": settings are not saved, and Setup is
+in the Apps menu. On an installed disk it isn't (`app run Setup` in ASMTerm
+still starts it).
 
 The shell can also do it: `sys hda` makes a FAT disk start ASMOS (boot code
 and kernel, files kept).
-
-On the setup floppy ASMOS runs "live": settings are not saved, and Setup is
-in the Apps menu. On an installed disk Setup is hidden.
 
 Using ASMOS
 =============================================================================
