@@ -3,7 +3,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
-/* .BMP pictures (lib/bmp.c): BMP Viewer shows each kind as the
+/* .BMP pictures (lib/bmp.c): Picture Viewer shows each kind as the
  * screen's colours (256 or 16: run with @640x256 too), scrolls a big one
  * both ways, says why it can't show a bad one; ASMDraw opens and saves
  * them and keeps its custom colours; the kernel's own calls read and save
@@ -11,6 +11,7 @@
 #include "lib/bmp.h"
 #include "scen.h"
 #include "ui/cursor.h"
+#include "ui/fileops.h"
 
 static uint8_t s_buf[400000], s_exp[400000];
 static int s_ew, s_eh;
@@ -52,7 +53,7 @@ static const char *status(window *w) {
 static window *view(const char *name) {
     char p[64];
     snprintf(p, sizeof p, "/%s.BMP", name);
-    appload_run_named("BMP Viewer", p);
+    appload_run_named("Picture Viewer", p);
     sim_frames(2);
     window *w = wm_focused_window();
     for (int i = 0; i < 600 && w && !strncmp(status(w), "Reading", 7); i++)
@@ -245,7 +246,7 @@ static int viewer(void) {
     /* ones it can't show */
     put("NOT");
     w = view("NOT");
-    T("not a picture: says so", strstr(status(w), "Not a BMP") != NULL);
+    T("not a picture: says so", strstr(status(w), "Not a picture") != NULL);
     wm_close(w);
     sim_frames(2);
     put("CUT");
@@ -1022,7 +1023,7 @@ static int scrapbook(void) {
     wm_close(w);
     sim_frames(2);
 
-    /* pasted into a folder: a new .BMP; BMP Viewer copies one */
+    /* pasted into a folder: a new .BMP; Picture Viewer copies one */
     fs_delete("/PICTURE.BMP");
     fs_delete("/PICTURE2.BMP");
     clipboard_set_image(40, 30, pix, 40, (const uint8_t (*)[3])s_pal);
@@ -1032,21 +1033,176 @@ static int scrapbook(void) {
       OK(fo_paste("/")) && bmp_is("/PICTURE2.BMP", 40, 30));
     clipboard_set_text("x", (int)strlen("x"));
     T("text: nothing to paste in a folder", !fo_can_paste());
-    appload_run_named("BMP Viewer", "/PICTURE.BMP");
+    appload_run_named("Picture Viewer", "/PICTURE.BMP");
     sim_frames(3);
     w = wm_focused_window();
     for (int i = 0; i < 600 && w && !strncmp(status(w), "Reading", 7); i++)
         sim_frames(1);
     run_menu(w, "Copy");
     const clip_image_t *im = clipboard_image();
-    T("BMP Viewer, Edit > Copy: the picture",
+    T("Picture Viewer, Edit > Copy: the picture",
       im && im->w == 40 && im->h == 30 && im->pix[0] == 4 && im->pix[39] == 1);
     wm_close(w);
     sim_frames(2);
     return fails;
 }
 
+// Picture Viewer: GIF, JPEG and .PIC too (lib/image.h), from FileF
+
+static void put_web(const char *fix, const char *path) {
+    static uint8_t b[16384];
+    uint32_t n = 0;
+    char f[80];
+    snprintf(f, sizeof f, FIXDIR "web/%s", fix);
+    fat_file_t ff;
+    if (load_file(f, b, sizeof b, &n) && fs_create(path, &ff)) {
+        fs_write(&ff, b, (int)n);
+        fs_close(&ff);
+    }
+}
+
+/* opened from FileF (fo_open): the viewer in front */
+static window *open_pic(const char *path) {
+    fo_open(NULL, path);
+    sim_frames(3);
+    window *w = wm_focused_window();
+    for (int i = 0; i < 300 && w && !strncmp(status(w), "Reading", 7); i++)
+        sim_frames(1);
+    sim_frames(1);
+    return w;
+}
+
+/* how many of the view's pixels are near (r, g, b) */
+static int share(window *w, int r, int g, int b) {
+    control *v = nth(w, CTL_CUSTOM, 0);
+    int near = 0, all = 0;
+    for (int y = 0; v && y < v->ah; y++)
+        for (int x = 0; x < v->aw; x++) {
+            const uint8_t *p =
+                s_pal[BACKBUF[(v->ay + y) * SCREEN_WIDTH + v->ax + x]];
+            int dr = b8(p[0]) - r, dg = b8(p[1]) - g, db = b8(p[2]) - b;
+            near += dr * dr + dg * dg + db * db < 90 * 90;
+            all++;
+        }
+    (void)all;
+    return near;
+}
+
+static int pic_formats(void) {
+    int fails = 0;
+    char b[200];
+    gpu_palette(s_pal, 256);
+    put_web("LOGO.GIF", "/LOGO.GIF");
+    put_web("PHOTO.JPG", "/PHOTO.JPG");
+    put_web("PROG.JPG", "/PROG.JPG");
+    put_web("BIG.JPG", "/BIG.JPG");
+
+    window *w = open_pic("/LOGO.GIF");
+    snprintf(b, sizeof b, "    %s: %s\n", w ? w->title : "-", status(w));
+    wr(1, b);
+    T("a GIF from FileF: Picture Viewer",
+      w && !strcmp(w->title, "LOGO.GIF - Picture Viewer") &&
+          !strncmp(status(w), "40 x 20, GIF", 12));
+    T("... its red and blue halves",
+      share(w, 200, 0, 0) > 100 && share(w, 0, 0, 200) > 100);
+    wm_close(w);
+    sim_frames(2);
+
+    w = open_pic("/PHOTO.JPG");
+    snprintf(b, sizeof b, "    %s\n", status(w));
+    wr(1, b);
+    T("a JPEG", w && !strncmp(status(w), "96 x 64, JPEG", 13));
+
+    snprintf(b, sizeof b, "    red %d, blue %d, green %d pixels\n",
+             share(w, 220, 30, 30), share(w, 30, 40, 220),
+             share(w, 30, 200, 40));
+    wr(1, b);
+    T("... red, blue, green", share(w, 220, 30, 30) > 400 &&
+                                  share(w, 30, 40, 220) > 400 &&
+                                  share(w, 30, 200, 40) > 150);
+    sim_shot("picview_jpeg");
+    wm_close(w);
+    sim_frames(2);
+
+    /* .jpeg (a long name) is a JPEG too */
+    put_web("PHOTO.JPG", "/Holiday photo.jpeg");
+    w = open_pic("/Holiday photo.jpeg");
+    T(".jpeg: opened in Picture Viewer",
+      w && !strncmp(status(w), "96 x 64, JPEG", 13));
+    T("... FileF calls it a JPEG picture",
+      !strcmp(fo_type_of("jpeg"), "JPEG picture") &&
+          !strcmp(fo_type_of("JPE"), "JPEG picture"));
+    wm_close(w);
+    sim_frames(2);
+    fs_delete("/Holiday photo.jpeg");
+
+    w = open_pic("/PROG.JPG");
+    T("a progressive JPEG: says why not",
+      w && strstr(status(w), "progressive"));
+    wm_close(w);
+    sim_frames(2);
+
+    /* a .PIC (ASMDraw's): 8 x 4, red then blue */
+    fat_file_t ff;
+    uint8_t pic[4 + 32] = {8, 0, 4, 0};
+    for (int i = 0; i < 32; i++)
+        pic[4 + i] = i % 8 < 4 ? 4 : 1;
+    if (fs_create("/TINY.PIC", &ff)) {
+        fs_write(&ff, pic, sizeof pic);
+        fs_close(&ff);
+    }
+    appload_run_named("Picture Viewer", "/TINY.PIC");
+    sim_frames(3);
+    w = wm_focused_window();
+    snprintf(b, sizeof b, "    .PIC: %s\n", status(w));
+    wr(1, b);
+    T("a .PIC: shown", w && strstr(status(w), "ASMDraw picture") &&
+                           share(w, 170, 0, 0) >= 16 &&
+                           share(w, 0, 0, 170) >= 16);
+    wm_close(w);
+    sim_frames(2);
+
+    /* a big GIF (1024 x 768): decoded into the picture itself, no second
+     * copy of it, so whole */
+    put_web("WIDE.GIF", "/WIDE.GIF");
+    w = open_pic("/WIDE.GIF");
+    snprintf(b, sizeof b, "    %s\n", status(w));
+    wr(1, b);
+    T("a 1024 x 768 GIF: shown whole",
+      w && !strncmp(status(w), "1024 x 768, GIF", 15) &&
+          !strstr(status(w), "shown at") && share(w, 200, 0, 0) > 1000);
+    wm_close(w);
+    sim_frames(2);
+
+    /* an interlaced GIF: its rows come out of order, each in its place */
+    put_web("INTER.GIF", "/INTER.GIF");
+    w = open_pic("/INTER.GIF");
+    {
+        control *v = nth(w, CTL_CUSTOM, 0);
+        int right = 0;
+        for (int k = 0; v && k < 6; k++)
+            for (int y = k * 8 + 1; y < k * 8 + 7; y++) {
+                const uint8_t *c = s_pal[shown(v, 64, 48, 0, 0, 30, y)];
+                right += k % 2 ? c[2] > c[0] : c[0] > c[2];
+            }
+        snprintf(b, sizeof b, "    interlaced: %d of 36 rows right\n", right);
+        wr(1, b);
+        T("an interlaced GIF: its stripes in order", right == 36);
+    }
+    wm_close(w);
+    sim_frames(2);
+
+    w = open_pic("/BIG.JPG");
+    T("a big JPEG (800 x 600)",
+      w && !strncmp(status(w), "800 x 600, JPEG", 15));
+    wm_close(w);
+    sim_frames(2);
+    return fails;
+}
+
 int scen_bmp(const char *name) {
+    if (!strcmp(name, "picformats"))
+        return pic_formats();
     if (!strcmp(name, "drawtools"))
         return draw_tools();
     if (!strcmp(name, "drawsel"))
@@ -1055,7 +1211,7 @@ int scen_bmp(const char *name) {
         return scrapbook();
     if (!strcmp(name, "bmplib"))
         return kernel_lib();
-    if (!strcmp(name, "bmpview"))
+    if (!strcmp(name, "picview"))
         return viewer();
     if (!strcmp(name, "drawbmp"))
         return draw_files();

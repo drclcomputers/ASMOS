@@ -40,7 +40,7 @@ int scen_help(const char *name) {
         }
         T("brushing Games on the way keeps Accessories",
           g_menubar.sub_item == 0);
-        sim_move(apps->bar_x + 120, MENUBAR_H + 20 + 4); /* (3rd row) */
+        sim_move(apps->bar_x + 120, MENUBAR_H + 10 + 4); /* (2nd row) */
         sim_frames(2);
         T("still open while inside it", g_menubar.sub_item == 0);
         sim_shot("sm2");
@@ -51,7 +51,7 @@ int scen_help(const char *name) {
         window *w = wm_focused_window();
         snprintf(b, sizeof b, "launched: %s\n", w ? w->title : "-");
         wr(1, b);
-        T("Calculator launched from the submenu (3rd, sorted)",
+        T("Calculator launched from the submenu (2nd, sorted)",
           w && strstr(w->title, "Calc"));
         T("menu closed", g_menubar.open_index < 0);
         /* a .APP in /APPS/GAMES joins Games */
@@ -326,7 +326,7 @@ int scen_help(const char *name) {
         T("Accessories: bundled .APPs + TEditor shortcut",
           acc && acc->item_count == 8 && HAS(acc, "Calculator") &&
               HAS(acc, "TEditor") && HAS(acc, "ASMDraw") &&
-              HAS(acc, "BMP Viewer") && HAS(acc, "Character Map"));
+              HAS(acc, "Picture Viewer") && HAS(acc, "Character Map"));
         T("System Tools: HexView .APP + built-in shortcuts",
           sys && HAS(sys, "HexView") && HAS(sys, "Monitor") &&
               HAS(sys, "ASMTerm") && HAS(sys, "Format Disk") &&

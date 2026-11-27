@@ -176,7 +176,8 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
     memset(di, 0, sizeof(*di));
     /* the heap the app asked for (header flags), else 64 KB; failing
      * that in the frame pool, a block of the kernel heap of that size (a
-     * paint program's canvas needs it), then the least that runs */
+     * paint program's canvas needs it); then half that, a quarter...,
+     * then the least that runs */
     uint32_t heap = (la->hdr.flags & ASMA_HEAP_MASK) >> ASMA_HEAP_SHIFT;
     heap = heap ? heap * 16384u : APP_HEAP_DEFAULT;
     if (la->hdr.flags & ASMA_FLAG_HEAP_SCREEN) /* (its canvas: the screen) */
@@ -184,12 +185,16 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
     uint32_t want = (size + heap + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint32_t least = (size + APP_HEAP_MIN + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uint32_t bytes = want;
-    uint32_t mem = pmm_alloc_frames(want / PAGE_SIZE);
+    uint32_t mem = 0;
+    /* (not that much free: half, a quarter... before the least) */
+    while (!(mem = pmm_alloc_frames(bytes / PAGE_SIZE)) &&
+           !(di->mem = (uint8_t *)kmalloc(bytes)) && bytes / 2 > least)
+        bytes = (bytes / 2 + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     if (mem) {
         di->mem = (uint8_t *)(uintptr_t)mem;
         di->pages = bytes / PAGE_SIZE;
-    } else if ((di->mem = (uint8_t *)kmalloc(want)) != NULL) {
-        bytes = want; /* kernel heap block: still the app's own heap */
+    } else if (di->mem) {
+        /* kernel heap block: still the app's own heap */
     } else if ((mem = pmm_alloc_frames(least / PAGE_SIZE)) != 0) {
         bytes = least;
         di->mem = (uint8_t *)(uintptr_t)mem;
@@ -961,6 +966,25 @@ static const uint16_t *api_codepage(void) {
     return cp_unicode[g_codepage < CP_COUNT ? g_codepage : 0];
 }
 
+/* pictures: what the decoder works in, from the app's heap */
+static const char *api_image_decode(const uint8_t *b, uint32_t n, uint8_t *out,
+                                    int dw, int dh, int stride,
+                                    const image_target_t *t) {
+    if (!t)
+        return "Nothing to decode into.";
+    image_target_t mine = *t;
+    mine.alloc = api_kmalloc;
+    mine.free = api_kfree;
+    return image_decode(b, n, out, dw, dh, stride, &mine);
+}
+
+static const app_image_api_t s_image = {
+    .size = sizeof(app_image_api_t),
+    .kind = image_kind,
+    .info = image_info,
+    .decode = api_image_decode,
+};
+
 static const os_api_t s_api = {
     .version = OS_API_VERSION,
     .size = sizeof(os_api_t),
@@ -990,6 +1014,7 @@ static const os_api_t s_api = {
     .net = &s_net,
     .font_glyph = font_glyph,
     .codepage = api_codepage,
+    .image = &s_image,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

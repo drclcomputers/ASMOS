@@ -10,7 +10,7 @@ marked with >.
   again.
 - Delete takes it out of the scrapbook; Clear all empties it.
 - Save... keeps it in a file: text as a .TXT, a picture as a .BMP.
-- Pictures come from ASMDraw's selection and BMP Viewer's Edit > Copy.
+- Pictures come from ASMDraw's selection and Picture Viewer's Edit > Copy.
   Paste one in ASMDraw, or in a folder (FileF, the desktop) to make a
   PICTURE.BMP there.
 - Big pictures fill it fast: when they do, the oldest picture goes

@@ -318,3 +318,13 @@ int font_glyph(int size, unsigned char c, uint8_t rows[8], int *w) {
     return A->font_glyph(size, c, rows, w);
 }
 const uint16_t *app_codepage(void) { return A->codepage(); }
+
+// pictures from memory (API size 15): lib/image.h
+int image_kind(const uint8_t *b, uint32_t n) { return A->image->kind(b, n); }
+const char *image_info(const uint8_t *b, uint32_t n, int *w, int *h) {
+    return A->image->info(b, n, w, h);
+}
+const char *image_decode(const uint8_t *b, uint32_t n, uint8_t *out, int dw,
+                         int dh, int stride, const image_target_t *t) {
+    return A->image->decode(b, n, out, dw, dh, stride, t);
+}

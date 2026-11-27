@@ -15,6 +15,7 @@
 #include "drivers/mouse.h"
 #include "lib/bmp.h"
 #include "lib/core.h"
+#include "lib/image.h"
 #include "lib/time.h"
 #include "network/net.h"
 #include "os/clipboard.h"
@@ -278,6 +279,17 @@ typedef struct app_net_api {
     void (*tcp_abort)(int sock);
 } app_net_api_t;
 
+/* Pictures from memory (API size 15): lib/image.h, where they are
+ * explained. In an app the same names: image_kind, image_info,
+ * image_decode; what a decoder works in comes from the app's own heap. */
+typedef struct app_image_api {
+    uint32_t size;
+    int (*kind)(const uint8_t *b, uint32_t n);
+    const char *(*info)(const uint8_t *b, uint32_t n, int *w, int *h);
+    const char *(*decode)(const uint8_t *b, uint32_t n, uint8_t *out, int dw,
+                          int dh, int stride, const image_target_t *t);
+} app_image_api_t;
+
 typedef struct os_api {
     uint32_t version;
     uint32_t size; /* sizeof(os_api_t) – check before using newer members */
@@ -416,6 +428,9 @@ typedef struct os_api {
     /* the code points of bytes 0x80..0xFF in the code page in use (0:
      * nothing there): Unicode text to the bytes the fonts draw */
     const uint16_t *(*codepage)(void);
+
+    // appended in API size 15: GIF, JPEG, BMP from memory (lib/image.h)
+    const struct app_image_api *image;
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */

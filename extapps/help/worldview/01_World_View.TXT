@@ -2,16 +2,20 @@
 
 World View is a web browser for the web an old machine can still read:
 FrogFind (a search engine that turns any site into simple pages),
-68k.news, and plain http:// sites. It shows text, links, headings,
-lists, forms, and GIF, BMP and JPEG pictures. It doesn't run scripts or
-style sheets.
+68k.news, plain http:// sites, and the file servers of the old internet:
+gopher:// and ftp://. It shows text, links, headings, lists, forms, and
+GIF, BMP and JPG (JPEG, JPE) pictures. It doesn't run scripts or style
+sheets.
 
 - The address goes in the box at the top; Enter goes there. A site's
-  name alone is enough: frogfind.com.
+  name alone is enough: frogfind.com (gopher.something and ftp.something
+  go to gopher:// and ftp://).
 - The buttons: < Back, > Forward, R Reload, X Stop, H Home. Backspace
   goes back too.
 - Over a link the pointer becomes a hand, and the link's address shows
   in the status line. Click it to go there.
+- Right-click a link: Open Link, Save Link As..., Copy Link Address. A
+  picture: View Picture, Save Picture As..., Copy Picture Address.
 - Forms: click a field and type. Enter (or the form's button) sends it.
   Tab moves to the next field.
 - Scrolling: the scroll bar, or Up, Down, Page Up, Page Down, Space,
@@ -20,23 +24,45 @@ style sheets.
   turns them off, which is much faster on a slow machine.
 - Go > FrogFind and Go > 68k.news are good places to start.
 
+# Gopher and FTP
+
+- gopher://host/ shows the server's menu as a page: TXT a text, DIR
+  another menu, FIND a search (it asks what for), IMG a picture, BIN a
+  file to download, WEB a link to a web page.
+- ftp://host/folder/ shows the folder's files as links, with their
+  sizes; [Up a folder] goes up. A text file or a picture is shown; any
+  other file is downloaded. You go in as "anonymous"; for an account,
+  ftp://name:password@host/ (FTP sends the password as it is).
+- A web server's folder listing (Index of /...) works the same way:
+  click a file to get it.
+
+# Downloads
+
+- A link to anything that isn't a page or a picture (a ZIP, a program)
+  is a download: World View asks where to save it, and it goes straight
+  into the file as it comes, however big it is. You can keep browsing;
+  the status line says how far it got.
+- One download at a time. X (Stop), when no page is loading, stops it.
+- Save Link As... (right-click) saves anything, a page or a text too.
+
 # Secure sites and the modern web
 
 Most sites today only answer over https://, which is too much work for
 an old machine. A proxy on another computer can do that work: it
 fetches the page and hands it to World View as plain HTTP. Put its
 address in Options > Proxy (host:port, for example 192.168.1.10:8080).
-Retro proxies like WebOne or macproxy do this.
+Retro proxies like WebOne or macproxy do this. Gopher and FTP always go
+straight to the server.
 
 # Files
 
 - File > Save Page As keeps the page's HTML in a .HTM file.
-- A link to anything that isn't a page or a picture (a ZIP, a program)
-  is saved where you choose.
-- FileF opens .HTM, .GIF and .JPG files in World View.
+- FileF opens .HTM and .HTML files in World View (pictures open in
+  Picture Viewer).
 
 # Limits
 
-- Pages of up to 160 KB; pictures of up to 192 KB each.
+- Pages of up to 160 KB; pictures of up to 192 KB each (a bigger one
+  is downloaded instead). Downloads: any size.
 - No PNG and no progressive JPEG: their place is shown with a frame.
-- World View needs about 640 KB of free memory.
+- World View needs about 640 KB or more of free memory.

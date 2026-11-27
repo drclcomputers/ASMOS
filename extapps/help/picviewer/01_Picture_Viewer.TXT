@@ -1,8 +1,8 @@
-# BMP Viewer
+# Picture Viewer
 
-BMP Viewer shows .BMP pictures: Windows and OS/2 ones, 1, 4, 8, 16, 24
-and 32 bits a pixel, RLE-packed ones too. Double-click a .BMP in FileF,
-or File > Open.
+Picture Viewer shows pictures: BMP (Windows and OS/2, 1 to 32 bits a
+pixel, RLE-packed too), GIF, JPEG and ASMDraw's .PIC. Double-click one
+in FileF, or File > Open.
 
 - A picture bigger than the window scrolls: the bars, the arrows, PgUp
   and PgDn (Ctrl+PgUp/PgDn sideways), Home and End (Ctrl: the corners),
@@ -15,5 +15,8 @@ or File > Open.
 - Edit > Copy (Ctrl+C) puts the picture on the clipboard, in the
   colours it is shown in: paste it in ASMDraw. Up to 320 KB (a 640 x 480
   picture is 300 KB).
-- A big picture fills in from the bottom while it is read. One needs
-  about a byte a pixel of memory (1024 x 768: 768 KB).
+- A big BMP fills in while it is read. A GIF or JPEG is read whole
+  (files up to 2 MB); one too big for the memory is shown smaller, and
+  the status line says so. With little memory free (other apps open, a
+  small machine), pictures are shown smaller sooner.
+- Not shown: PNG, and progressive JPEGs (some photos from the web).

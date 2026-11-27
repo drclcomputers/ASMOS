@@ -6,9 +6,11 @@
 #include "network/dns.h"
 #include "network/ftpd.h"
 #include "network/net.h"
+#include "os/clipboard.h"
 #include "os/prefs.h"
 #include "scen.h"
 #include "ui/fileops.h"
+#include "ui/popup.h"
 
 extern int g_sim_hw, g_sim_dhcp, g_sim_dhcp_msgs[8], g_sim_drop, g_sim_dropped;
 extern uint32_t g_sim_dhcp_lease;
@@ -845,6 +847,44 @@ static void web_answer(web_conn_t *c) {
         web_file(c, "PROG.JPG", "image/jpeg");
     } else if (!strcmp(path, "/pic.bmp")) {
         web_file(c, "PIC.BMP", "image/bmp");
+    } else if (!strcmp(path, "/files/")) { /* Apache's kind of listing */
+        web_html(c,
+                 "<html><head><title>Index of /files</title></head><body>"
+                 "<h1>Index of /files</h1><table><tr><th><img "
+                 "src=\"/icons/blank.gif\" alt=\"[ICO]\"></th><th><a "
+                 "href=\"?C=N;O=D\">Name</a></th><th>Size</th></tr>"
+                 "<tr><td><img src=\"/icons/back.gif\" alt=\"[PARENTDIR]\">"
+                 "</td><td><a href=\"/\">Parent Directory</a></td><td>-</td>"
+                 "</tr><tr><td><img src=\"/icons/text.gif\" alt=\"[TXT]\">"
+                 "</td><td><a href=\"notes.txt\">notes.txt</a></td><td>1K"
+                 "</td></tr><tr><td><img src=\"/icons/binary.gif\" "
+                 "alt=\"[   ]\"></td><td><a href=\"big.bin\">big.bin</a></td>"
+                 "<td>200K</td></tr><tr><td><img src=\"/icons/folder.gif\" "
+                 "alt=\"[DIR]\"></td><td><a href=\"old/\">old/</a></td><td>-"
+                 "</td></tr></table><address>Apache Server</address>"
+                 "</body></html>");
+    } else if (!strcmp(path, "/files/old/")) { /* nginx's kind */
+        web_html(c, "<html><head><title>Index of /files/old/</title></head>"
+                    "<body><h1>Index of /files/old/</h1><hr><pre><a "
+                    "href=\"../\">../</a>\n<a href=\"game.zip\">game.zip"
+                    "</a>          01-Jan-1995 10:00     11\n</pre><hr>"
+                    "</body></html>");
+    } else if (!strcmp(path, "/files/old/game.zip")) {
+        web_put(c, "application/zip", "PK\x03\x04oldgame", 11, 200, "");
+    } else if (!strcmp(path, "/files/notes.txt")) {
+        web_put(c, "text/plain", "Some notes.\n", 12, 200, "");
+    } else if (!strcmp(path, "/files/big.bin")) { /* 200 KB: a pattern */
+        int n = 200 * 1024;
+        c->out = (char *)kmalloc((uint32_t)n + 200);
+        if (c->out) {
+            int h = snprintf(c->out, 200,
+                             "HTTP/1.0 200 OK\r\nContent-Type: application/"
+                             "octet-stream\r\nContent-Length: %d\r\n\r\n",
+                             n);
+            for (int k = 0; k < n; k++)
+                c->out[h + k] = (char)(k * 7 + k / 251);
+            c->out_len = h + n;
+        }
     } else if (!strcmp(path, "/file.zip")) {
         web_put(c, "application/zip", "PK\x03\x04zipdata", 11, 200, "");
     } else {
@@ -901,9 +941,108 @@ static void web_step(void) {
     }
 }
 
+// a gopher server (port 70): a menu, a text, a search, a picture, a file
+
+static int s_go_listen = -1;
+static web_conn_t s_go[3];
+static char s_go_last[200]; /* the last selector asked for */
+
+static void go_answer(web_conn_t *c) {
+    char sel[200];
+    int i = 0;
+    while (c->req[i] && c->req[i] != '\r' && c->req[i] != '\n' &&
+           i < (int)sizeof sel - 1)
+        sel[i] = c->req[i], i++;
+    sel[i] = 0;
+    strlcpy(s_go_last, sel, sizeof s_go_last);
+    const char *out;
+    char buf[1024];
+    if (!sel[0]) {
+        out = "iWelcome to the Frog Hole\t\terror.host\t1\r\n"
+              "i\t\terror.host\t1\r\n"
+              "0About this server\t/about.txt\tgopher.example\t70\r\n"
+              "1Files & things\t/files\tgopher.example\t70\r\n"
+              "7Search the hole\t/find\tgopher.example\t70\r\n"
+              "gThe frog\t/frog.gif\tgopher.example\t70\r\n"
+              "9A program\t/prog.zip\tgopher.example\t70\r\n"
+              "hFrogFind on the web\tURL:http://frogfind.com/\t"
+              "gopher.example\t70\r\n"
+              ".\r\n";
+    } else if (!strcmp(sel, "/about.txt")) {
+        out = "This is the Frog Hole.\r\nIt has <angles> & things.\r\n.\r\n";
+    } else if (!strncmp(sel, "/find\t", 6)) {
+        snprintf(buf, sizeof buf,
+                 "iResults for %s\t\terror.host\t1\r\n"
+                 "0A result\t/about.txt\tgopher.example\t70\r\n.\r\n",
+                 sel + 6);
+        out = buf;
+    } else if (!strcmp(sel, "/frog.gif")) {
+        static uint8_t b[16384];
+        uint32_t n = 0;
+        load_file(FIXDIR "web/LOGO.GIF", b, sizeof b, &n);
+        c->out = (char *)kmalloc(n);
+        if (c->out) {
+            memcpy(c->out, b, n);
+            c->out_len = (int)n;
+        }
+        return;
+    } else if (!strcmp(sel, "/prog.zip")) {
+        out = "PK\x03\x04gopherzip";
+    } else {
+        out = "3Not here\t\terror.host\t1\r\n.\r\n";
+    }
+    c->out = strdup(out);
+    c->out_len = (int)strlen(out);
+}
+
+static void go_step(void) {
+    if (s_go_listen < 0)
+        s_go_listen = tcp_listen(70);
+    int ns = tcp_accept(s_go_listen);
+    for (int k = 0; ns >= 0 && k < 3; k++)
+        if (!s_go[k].sock) {
+            memset(&s_go[k], 0, sizeof s_go[k]);
+            s_go[k].sock = ns + 1;
+            ns = -1;
+        }
+    for (int k = 0; k < 3; k++) {
+        web_conn_t *c = &s_go[k];
+        if (!c->sock)
+            continue;
+        int sock = c->sock - 1;
+        if (!c->answered) {
+            int n = tcp_recv(sock, (uint8_t *)c->req + c->req_len,
+                             (uint16_t)(sizeof c->req - 1 - c->req_len));
+            if (n > 0)
+                c->req_len += n;
+            c->req[c->req_len] = 0;
+            if (strchr(c->req, '\n')) {
+                go_answer(c);
+                c->answered = true;
+            }
+        }
+        if (c->answered && c->out && c->out_sent < c->out_len) {
+            int n = tcp_write(sock, (const uint8_t *)c->out + c->out_sent,
+                              (uint16_t)(c->out_len - c->out_sent > 1400
+                                             ? 1400
+                                             : c->out_len - c->out_sent));
+            if (n > 0)
+                c->out_sent += n;
+        }
+        if (c->answered && (!c->out || c->out_sent >= c->out_len)) {
+            tcp_release(sock);
+            kfree(c->out);
+            memset(c, 0, sizeof *c);
+        }
+    }
+}
+
 static void web_frames(int n) {
     for (int i = 0; i < n; i++) {
         web_step();
+        go_step();
+        if (ftpd_running())
+            ftpd_poll();
         net_poll();
         sim_frame();
     }
@@ -1211,9 +1350,263 @@ static int web_test(void) {
     return fails;
 }
 
+// World View and file servers: HTTP listings, gopher, FTP (the OS's own
+// server, through the mirror), downloads streamed to the disk, the
+// right-click menu
+
+/* the save dialog: a name typed, Enter */
+static bool save_as(window *w, const char *name) {
+    window *d = wm_focused_window();
+    if (!d || d == w)
+        return false;
+    control *e = NULL;
+    for (control *c = d->controls; c; c = c->next)
+        if (c->type == CTL_EDIT && !e)
+            e = c;
+    if (!e)
+        return false;
+    ctl_set_text(e, name);
+    ctl_focus(e);
+    sim_key(0x1C);
+    web_frames(2);
+    return true;
+}
+
+/* until the download is done */
+static void dl_wait(wv_state_t *s) {
+    for (int i = 0; i < 3000 && s->dl_on; i++)
+        web_frames(1);
+}
+
+static uint32_t file_size(const char *path) {
+    fat_file_t ff;
+    if (!fs_open(path, &ff))
+        return 0;
+    uint32_t n = ff.entry.file_size;
+    fs_close(&ff);
+    return n;
+}
+
+/* the open popup menu's item, by its first letter, then Enter */
+static void popup_pick(char letter, uint8_t sc) {
+    sim_key2(sc, letter, false, false);
+    sim_key(0x1C);
+    web_frames(2);
+}
+
+static int web_files_test(void) {
+    int fails = 0;
+    char b[300];
+    net_up();
+    static const uint8_t ip[4] = {10, 0, 2, 15}, gw[4] = {10, 0, 2, 2},
+                         nm[4] = {255, 255, 255, 0}, dns[4] = {10, 0, 2, 3};
+    net_set_ip(ip, gw, nm);
+    dns_set_server(dns);
+    app_prefs_set("WorldView", "Proxy", "");
+    app_prefs_set("WorldView", "Home", "http://frogfind.com/files/");
+
+    /* an HTTP folder (Apache's listing): links to its files */
+    sim_launch("World View");
+    wv_state_t *s = wv_wait();
+    window *w = wv_window();
+    T("an HTTP folder listing: its files are links",
+      s && link_named(s, "/files/notes.txt") >= 0 &&
+          link_named(s, "/files/big.bin") >= 0 &&
+          link_named(s, "/files/old/") >= 0);
+    sim_shot("wv_listing");
+    int big = link_named(s, "/files/big.bin");
+
+    /* a big file: asks where, then goes into the file as it comes */
+    fs_delete("/BIG.BIN");
+    wv_click(s, wv_item(s, IT_TEXT, -1, big));
+    web_frames(10);
+    T("a file (200 KB): Save asks where, named as it is",
+      s->dl_on && s->dl_asking && !strcmp(s->dl_name, "big.bin"));
+    T("... the page stays", !s->loading && page_has(s, "Index of /files"));
+    T("... held (not all read) while it asks",
+      s->dl.len <= DL_HOLD + 2048 && s->dl.total < 200 * 1024);
+    save_as(w, "BIG.BIN");
+    T("... downloading after", s->dl_on && !s->dl_asking);
+    sim_move(1, 1); /* (off the link: the status line is the download's) */
+    web_frames(5);
+    snprintf(b, sizeof b, "    %s\n", s->line);
+    wr(1, b);
+    T("... the status line says how far",
+      strstr(s->line, "Downloading BIG.BIN") != NULL);
+    dl_wait(s);
+    snprintf(b, sizeof b, "    %s\n", s->line);
+    wr(1, b);
+    uint32_t got = file_size("/BIG.BIN");
+    bool same = got == 200 * 1024;
+    if (same) {
+        static uint8_t chk[4096];
+        fat_file_t ff;
+        fs_open("/BIG.BIN", &ff);
+        for (int k = 0; k < 200 * 1024 && same; k += 4096) {
+            fs_read(&ff, chk, 4096);
+            for (int j = 0; j < 4096; j++)
+                same = same && chk[j] == (uint8_t)((k + j) * 7 + (k + j) / 251);
+        }
+        fs_close(&ff);
+    }
+    T("... saved whole (200 KB, more than a page can be), byte for byte",
+      same && strstr(s->line, "Saved BIG.BIN: 200 KB"));
+
+    /* nginx's listing; a file in it */
+    wv_address(s, "http://frogfind.com/files/old/");
+    s = wv_wait();
+    T("nginx's listing", link_named(s, "/files/old/game.zip") >= 0 &&
+                             link_named(s, "/files/") >= 0);
+
+    /* right-click: Save Link As (a text file, which would be shown) */
+    fs_delete("/NOTES.TXT");
+    wv_address(s, "http://frogfind.com/files/");
+    s = wv_wait();
+    const wv_item_t *it = wv_item(s, IT_TEXT, -1, link_named(s, "notes.txt"));
+    if (it)
+        sim_rclick(s->view->ax + 2 + it->x + 2,
+                   s->view->ay + 2 + (int)(it->y - s->scroll) + 3);
+    web_frames(2);
+    T("a right-click on a link: its menu", popup_is_open());
+    popup_pick('s', 0x1F);
+    T("... Save Link As: where?", s->dl_on && s->dl_asking);
+    save_as(w, "NOTES.TXT");
+    dl_wait(s);
+    T("... the text saved, not shown",
+      file_size("/NOTES.TXT") == 12 && page_has(s, "Index of /files"));
+    it = wv_item(s, IT_TEXT, -1, link_named(s, "notes.txt"));
+    if (it)
+        sim_rclick(s->view->ax + 2 + it->x + 2,
+                   s->view->ay + 2 + (int)(it->y - s->scroll) + 3);
+    web_frames(2);
+    popup_pick('c', 0x2E);
+    {
+        const char *clip = clipboard_text();
+        T("... Copy Link Address",
+          clip && !strcmp(clip, "http://frogfind.com/files/notes.txt"));
+    }
+
+    /* gopher: a menu as a page */
+    wv_address(s, "gopher://gopher.example/");
+    s = wv_wait();
+    snprintf(b, sizeof b, "    %s; %d links\n", w ? w->title : "-",
+             s->doc.nlinks);
+    wr(1, b);
+    T("gopher: the menu, a page", page_has(s, "Welcome to the Frog Hole") &&
+                                      page_has(s, "Files & things") &&
+                                      s->doc.nlinks == 6);
+    T("... its links",
+      link_named(s, "gopher://gopher.example/0/about.txt") >= 0 &&
+          link_named(s, "gopher://gopher.example/1/files") >= 0 &&
+          link_named(s, "http://frogfind.com/") >= 0);
+    sim_shot("wv_gopher");
+    wv_click(s, wv_item(s, IT_TEXT, -1, link_named(s, "/0/about.txt")));
+    s = wv_wait();
+    T("a text: shown as it is (no '.' line)",
+      !strcmp(s_go_last, "/about.txt") && page_has(s, "<angles>") &&
+          page_has(s, "& things") && s->doc.html_len > 7 &&
+          !strncmp(s->doc.html + s->doc.html_len - 7, "things.", 7));
+    sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
+    s = wv_wait();
+    wv_click(s, wv_item(s, IT_TEXT, -1, link_named(s, "/7/find")));
+    s = wv_wait();
+    T("a search: a page asking what for", s->doc.nfields == 2);
+    wv_click(s, wv_item(s, IT_FIELD, 0, -1));
+    sim_type("green frogs");
+    sim_key(0x1C);
+    s = wv_wait();
+    snprintf(b, sizeof b, "    asked: %s\n", s_go_last);
+    wr(1, b);
+    T("... sent with a tab, the results a menu",
+      !strcmp(s_go_last, "/find\tgreen frogs") &&
+          page_has(s, "Results for green frogs"));
+    wv_address(s, "gopher://gopher.example/g/frog.gif");
+    s = wv_wait();
+    T("a picture", s->doc.nimages == 1 && s->doc.images[0].state == IMG_DONE);
+    fs_delete("/PROG.ZIP");
+    wv_address(s, "gopher://gopher.example/9/prog.zip");
+    web_frames(20);
+    T("a file (type 9): a download",
+      s->dl_on && s->dl_asking && !strcmp(s->dl_name, "prog.zip"));
+    save_as(w, "PROG.ZIP");
+    dl_wait(s);
+    T("... saved", file_size("/PROG.ZIP") == 13);
+
+    /* FTP: the OS's own server */
+    fs_mkdir("/PUB");
+    {
+        fat_file_t ff;
+        if (fs_create("/PUB/README.TXT", &ff)) {
+            fs_write(&ff, "Read me first.\r\n", 16);
+            fs_close(&ff);
+        }
+        static uint8_t d[60000];
+        for (int k = 0; k < (int)sizeof d; k++)
+            d[k] = (uint8_t)(k * 13);
+        if (fs_create("/PUB/DATA.BIN", &ff)) {
+            fs_write(&ff, d, sizeof d);
+            fs_close(&ff);
+        }
+    }
+    const char *err = NULL;
+    T("the FTP server (21)", ftpd_start(21, true, "", &err));
+    wv_address(s, "ftp://ftp.example/HDA/PUB");
+    s = wv_wait();
+    snprintf(b, sizeof b, "    %s: %s\n", s->url, s->line);
+    wr(1, b);
+    T("ftp: a folder (CWD worked), its URL ends in /",
+      !strcmp(s->url, "ftp://ftp.example/HDA/PUB/"));
+    T("... its files, links",
+      link_named(s, "ftp://ftp.example/HDA/PUB/README.TXT") >= 0 &&
+          link_named(s, "ftp://ftp.example/HDA/PUB/DATA.BIN") >= 0 &&
+          page_has(s, "60000"));
+    sim_shot("wv_ftp");
+    wv_click(s, wv_item(s, IT_TEXT, -1, link_named(s, "README.TXT")));
+    s = wv_wait();
+    T("a text file: shown", page_has(s, "Read me first."));
+    sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
+    s = wv_wait();
+    fs_delete("/DATA.BIN");
+    wv_click(s, wv_item(s, IT_TEXT, -1, link_named(s, "DATA.BIN")));
+    web_frames(20);
+    T("a file: a download", s->dl_on && !strcmp(s->dl_name, "DATA.BIN"));
+    save_as(w, "DATA.BIN");
+    dl_wait(s);
+    snprintf(b, sizeof b, "    %s\n", s->line);
+    wr(1, b);
+    {
+        bool same = file_size("/DATA.BIN") == 60000;
+        static uint8_t d[60000];
+        fat_file_t ff;
+        if (same && fs_open("/DATA.BIN", &ff)) {
+            fs_read(&ff, d, sizeof d);
+            fs_close(&ff);
+            for (int k = 0; k < 60000 && same; k++)
+                same = d[k] == (uint8_t)(k * 13);
+        }
+        T("... saved, byte for byte", same);
+    }
+    wv_address(s, "ftp://ftp.example/NOPE/");
+    s = wv_wait();
+    T("a folder that isn't there: says so", page_has(s, "No such folder"));
+    wv_address(s, "ftp://ftp.example/");
+    s = wv_wait();
+    T("the top: the drives", link_named(s, "ftp://ftp.example/HDA/") >= 0);
+    ftpd_stop();
+
+    wm_close(w);
+    web_frames(5);
+    T("closed", !wv_window());
+    app_prefs_set("WorldView", "Home", "");
+    fs_rm_rf("/PUB");
+    return fails;
+}
+
 int scen_net(const char *name) {
     if (!strcmp(name, "web"))
         return web_test();
+    if (!strcmp(name, "webfiles"))
+        return web_files_test();
     if (!strcmp(name, "ftpui"))
         return ftp_ui();
     if (!strcmp(name, "ftp"))

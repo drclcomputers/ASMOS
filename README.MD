@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.8.3
+Version 3.8.7
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -86,8 +86,9 @@ Features
 - **Sound**: Sound Blaster 16 (WAV), OPL2 FM (MIDI), the PC speaker.
 - **Network**: NE2000 (ISA, or PCI clones), IPv4 from DHCP or typed in,
   TCP that resends what is lost, ping, DNS, a Gopher browser, a web
-  browser (World View). An FTP server's folder as a drive (/NET0), and an
-  FTP server for the disks.
+  browser (World View: web pages, gopher:// and ftp:// servers,
+  downloads). An FTP server's folder as a drive (/NET0), and an FTP
+  server for the disks.
 - **Printing**: parallel port, plain text, Epson ESC/P or HP PCL, with a
   print queue.
 - **Shell**: a command line with a built-in x86 assembler.
@@ -290,8 +291,8 @@ The bundled apps:
 | Calculator, Calendar (with notes), Clock (text or classic, alarm) | accessories                                               |
 | Audio Player                                                      | WAV and MIDI files, audio CDs                             |
 | HexView                                                           | files in hex                                              |
-| BMP Viewer                                                        | .BMP pictures, scrolled, in 256 or 16 colours             |
-| World View                                                        | a web browser: FrogFind, 68k.news, HTTP sites, a proxy    |
+| Picture Viewer                                                    | BMP, GIF, JPEG and .PIC pictures, in 256 or 16 colours    |
+| World View                                                        | a web browser: HTTP sites, gopher, FTP, downloads         |
 | Puzzle, Sudoku, Solitaire (Klondike, Spider, FreeCell)            | games                                                     |
 
 The first group is built into the kernel. The rest are .APP files in /APPS,
@@ -500,7 +501,8 @@ Known limitations
   The UI uses 16 colours in all of them.
 - **Network**: NE2000 only, IPv4 only. Ping, DNS, Gopher, FTP and the web
   over plain HTTP (World View: https:// through a proxy on another
-  computer; no scripts, no style sheets). No SMB/Windows shares. FTP is plain text: passwords go over
+  computer; no scripts, no style sheets; one download at a time). No
+  PNG pictures, no progressive JPEGs. No SMB/Windows shares. FTP is plain text: passwords go over
   the wire as they are, as in any FTP. /NET0 writes a file from the start
   or at its end, not in the middle (FTP can't).
 - **Keyboard**: US layout only; other characters with Alt + number pad or

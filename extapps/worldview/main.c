@@ -9,7 +9,10 @@
  * fetched one after another, each put in when it comes. Links: the hand
  * over them, their address in the status line. Forms: click a field and
  * type; Enter (or its button) sends it. Options: the home page, a proxy
- * (for https:// and the modern web), pictures on or off. */
+ * (for https:// and the modern web), pictures on or off. gopher:// and
+ * ftp:// too: their menus and folders as pages. What isn't a page is a
+ * download: it asks where, and goes on beside the pages. A right-click
+ * on a link or a picture: open it, save it, copy its address. */
 
 #include "extapps/worldview/wv.h"
 
@@ -67,7 +70,7 @@ static void clamp_scroll(wv_state_t *s) {
 static void buttons(wv_state_t *s) {
     ctl_enable(s->btn[0], s->at > 0);
     ctl_enable(s->btn[1], s->at < s->nhist - 1);
-    ctl_enable(s->btn[3], s->loading || s->pic_k >= 0);
+    ctl_enable(s->btn[3], s->loading || s->pic_k >= 0 || s->dl_on);
 }
 
 static void set_title(wv_state_t *s) {
@@ -168,12 +171,18 @@ static void go_post(wv_state_t *s, const char *url, const char *post,
                     int post_len) {
     stop(s);
     char u[WV_URL];
-    if (!strncasecmp(url, "http://", 7) || !strncasecmp(url, "https://", 8))
+    wv_url_t parts;
+    if (url_split(url, &parts))
         strlcpy(u, url, sizeof(u));
+    else if (!strncasecmp(url, "gopher.", 7)) /* ("gopher.floodgap.com") */
+        snprintf(u, sizeof(u), "gopher://%s", url);
+    else if (!strncasecmp(url, "ftp.", 4))
+        snprintf(u, sizeof(u), "ftp://%s", url);
     else /* ("frogfind.com": http:// in front) */
         snprintf(u, sizeof(u), "http://%s", url);
     ctl_set_text(s->addr, u);
     fetch_start(&s->page, u, post, post_len, WV_HTML_MAX);
+    s->page.may_download = true;
     s->loading = true;
     s->want_scroll = 0;
     buttons(s);
@@ -239,12 +248,27 @@ static void show_bytes(wv_state_t *s, const char *url, uint8_t *body,
         }
     } else if (html || strstr(ct, "text/")) {
         char *h = (char *)body;
-        if (!html) { /* text: as it is */
-            char *t = (char *)kmalloc(len + 16);
+        if (!html) { /* text: as it is (its < and & not read as HTML) */
+            uint32_t more = 0;
+            for (uint32_t i = 0; i < len; i++)
+                more += h[i] == '<' ? 3 : h[i] == '&' ? 4 : 0;
+            char *t = (char *)kmalloc(len + more + 16);
             if (t) {
-                memcpy(t, "<plaintext>", 11);
-                memcpy(t + 11, h, len);
-                len += 11;
+                uint32_t n = 5;
+                memcpy(t, "<pre>", 5);
+                for (uint32_t i = 0; i < len; i++) {
+                    if (h[i] == '<') {
+                        memcpy(t + n, "&lt;", 4);
+                        n += 4;
+                    } else if (h[i] == '&') {
+                        memcpy(t + n, "&amp;", 5);
+                        n += 5;
+                    } else {
+                        t[n++] = h[i];
+                    }
+                }
+                t[n] = 0;
+                len = n;
                 kfree(h);
                 h = t;
             }
@@ -314,6 +338,135 @@ static void save_download(void *user, const char *path) {
     }
     fetch_free(&s->page);
     buttons(s);
+}
+
+// downloads: one at a time, beside the pages
+
+/* the name a URL's file has: its last part */
+static void file_name(const char *url, char *out, int sz) {
+    char u[WV_URL];
+    strlcpy(u, url, sizeof(u));
+    char *q = strchr(u, '?');
+    if (q)
+        *q = 0;
+    int n = (int)strlen(u);
+    while (n && u[n - 1] == '/')
+        u[--n] = 0;
+    const char *name = strrchr(u, '/');
+    name = name && name[1] && !strstr(name - 1, "//") ? name + 1 : "DOWNLOAD";
+    char nm[WV_URL];
+    strlcpy(nm, name, sizeof(nm));
+    url_decode(nm, false);
+    int k = 0;
+    for (int i = 0; nm[i] && k < sz - 1; i++) /* (what a FAT name can have) */
+        if (nm[i] != '/' && nm[i] != '\\' && nm[i] != ':' && nm[i] != '"' &&
+            (uint8_t)nm[i] >= 32)
+            out[k++] = nm[i];
+    out[k] = 0;
+    if (!k)
+        strlcpy(out, "DOWNLOAD", (size_t)sz);
+}
+
+static void dl_end(wv_state_t *s, const char *why) {
+    fetch_free(&s->dl);
+    s->dl_on = false;
+    s->dl_asking = false;
+    say(s, why);
+    buttons(s);
+}
+
+static void dl_saved(void *user, const char *path) {
+    wv_state_t *s = user;
+    if (!s->dl_on)
+        return;
+    s->dl_asking = false;
+    if (!path) {
+        dl_end(s, "The download was cancelled.");
+        return;
+    }
+    if (s->dl.state == F_FAILED) {
+        char why[128];
+        snprintf(why, sizeof(why), "The download stopped: %s", s->dl.err);
+        dl_end(s, why);
+        return;
+    }
+    const char *base = strrchr(path, '/');
+    strlcpy(s->dl_name, base ? base + 1 : path, sizeof(s->dl_name));
+    if (!fetch_save_to(&s->dl, path))
+        dl_end(s, "Could not make the file.");
+}
+
+/* a download asked for: where it goes */
+static void dl_ask(wv_state_t *s) {
+    file_name(s->dl.url, s->dl_name, sizeof(s->dl_name));
+    s->dl_on = true;
+    s->dl_asking = true;
+    dlg_save_file(s->win, "Save the file", "/", s->dl_name, NULL, dl_saved, s);
+    buttons(s);
+}
+
+/* the page's fetch turned out a file: it goes on as the download */
+static void page_to_download(wv_state_t *s) {
+    s->loading = false;
+    if (s->dl_on) {
+        fetch_free(&s->page);
+        say(s, "One download at a time: this one waits till the other is "
+               "done.");
+        buttons(s);
+        return;
+    }
+    s->dl = s->page;
+    memset(&s->page, 0, sizeof(s->page));
+    s->page.sock = s->page.dns = s->page.data = -1;
+    dl_ask(s);
+}
+
+/* Save Link As: whatever is there, into a file */
+static void save_url(wv_state_t *s, const char *url) {
+    if (s->dl_on) {
+        say(s, "One download at a time: wait for this one.");
+        return;
+    }
+    fetch_start(&s->dl, url, NULL, 0, WV_HTML_MAX);
+    s->dl.save_any = true;
+    dl_ask(s);
+}
+
+/* how it goes, for the status line */
+static void dl_status(wv_state_t *s) {
+    char t[160];
+    unsigned got = (unsigned)(s->dl.total / 1024);
+    if (s->dl.state != F_RECV || s->dl_asking)
+        fetch_status(&s->dl, t, sizeof(t));
+    else if (s->dl.clen > 0)
+        snprintf(t, sizeof(t), "Downloading %s: %u of %u KB", s->dl_name, got,
+                 (unsigned)((uint32_t)s->dl.clen / 1024));
+    else
+        snprintf(t, sizeof(t), "Downloading %s: %u KB", s->dl_name, got);
+    if (s->dl_asking && s->dl.state == F_RECV)
+        snprintf(t, sizeof(t), "%s: where to save it?", s->dl_name);
+    say(s, t);
+}
+
+static void dl_frame(wv_state_t *s) {
+    int st = fetch_step(&s->dl);
+    if (s->dl_asking)
+        return; /* (done or not: it finishes once it has its file) */
+    char t[160];
+    if (st == F_DONE) {
+        if (s->dl.save_failed)
+            snprintf(t, sizeof(t), "Could not write %s (is the disk full?)",
+                     s->dl_name);
+        else
+            snprintf(t, sizeof(t), "Saved %s: %u KB.", s->dl_name,
+                     (unsigned)((s->dl.total + 1023) / 1024));
+        dl_end(s, t);
+    } else if (st == F_FAILED) {
+        snprintf(t, sizeof(t), "The download stopped: %s", s->dl.err);
+        dl_end(s, t);
+    } else if (!s->loading && s->pic_k < 0 && s->hover < 0) {
+        dl_status(s);
+    }
 }
 
 // history
@@ -633,12 +786,118 @@ static void follow(wv_state_t *s, int link) {
     if (link < 0 || link >= s->doc.nlinks)
         return;
     const char *u = doc_str(&s->doc, s->doc.links[link]);
-    if (!strncasecmp(u, "mailto:", 7) || !strncasecmp(u, "ftp:", 4)) {
-        say(s, "World View opens web pages only (http:// and https://).");
+    wv_url_t parts;
+    if (!url_split(u, &parts)) {
+        say(s, "World View opens http://, https://, gopher:// and ftp:// "
+               "only.");
         return;
     }
     s->hist[s->at].scroll = s->scroll;
     go(s, u);
+}
+
+// the right-click menu
+
+/* the link of the item right-clicked, or its picture's address */
+static const char *menu_link(wv_state_t *s) {
+    int i = s->menu_item;
+    if (i < 0 || i >= s->doc.nitems || s->doc.items[i].link < 0)
+        return NULL;
+    return doc_str(&s->doc, s->doc.links[s->doc.items[i].link]);
+}
+
+static const char *menu_picture(wv_state_t *s) {
+    int i = s->menu_item;
+    if (i < 0 || i >= s->doc.nitems || s->doc.items[i].kind != IT_IMAGE)
+        return NULL;
+    return doc_str(&s->doc, s->doc.images[s->doc.items[i].ref].src);
+}
+
+static void ctx_open(void) {
+    wv_state_t *s = me();
+    if (s && menu_link(s))
+        follow(s, s->doc.items[s->menu_item].link);
+}
+static void ctx_save_link(void) {
+    wv_state_t *s = me();
+    if (s && menu_link(s))
+        save_url(s, menu_link(s));
+}
+static void ctx_copy_link(void) {
+    wv_state_t *s = me();
+    if (s && menu_link(s)) {
+        clipboard_set_text(menu_link(s), (int)strlen(menu_link(s)));
+        say(s, "The address is on the clipboard.");
+    }
+}
+static void ctx_view_pic(void) {
+    wv_state_t *s = me();
+    if (s && menu_picture(s)) {
+        s->hist[s->at].scroll = s->scroll;
+        char u[WV_URL];
+        strlcpy(u, menu_picture(s), sizeof(u));
+        go(s, u);
+    }
+}
+static void ctx_save_pic(void) {
+    wv_state_t *s = me();
+    if (s && menu_picture(s))
+        save_url(s, menu_picture(s));
+}
+static void ctx_copy_pic(void) {
+    wv_state_t *s = me();
+    if (s && menu_picture(s)) {
+        clipboard_set_text(menu_picture(s), (int)strlen(menu_picture(s)));
+        say(s, "The picture's address is on the clipboard.");
+    }
+}
+static void ctx_back(void) {
+    wv_state_t *s = me();
+    if (s)
+        history_go(s, s->at - 1);
+}
+static void ctx_reload(void) {
+    wv_state_t *s = me();
+    if (s && s->url[0]) {
+        s->hist[s->at].scroll = s->scroll;
+        s->from_history = true;
+        go(s, s->url);
+        s->want_scroll = s->scroll;
+    }
+}
+static void ctx_copy_page(void) {
+    wv_state_t *s = me();
+    if (s && s->url[0]) {
+        clipboard_set_text(s->url, (int)strlen(s->url));
+        say(s, "The page's address is on the clipboard.");
+    }
+}
+
+static void context_menu(wv_state_t *s, control *c) {
+    s->menu_item = item_at(s, c->mx - 2, s->scroll + c->my - 2);
+    menu *m = popup_menu();
+    bool any = false;
+    if (menu_link(s)) {
+        menu_add_item(m, "Open Link", ctx_open);
+        menu_add_item(m, "Save Link As...", ctx_save_link);
+        menu_add_item(m, "Copy Link Address", ctx_copy_link);
+        any = true;
+    }
+    if (menu_picture(s)) {
+        if (any)
+            menu_add_separator(m);
+        menu_add_item(m, "View Picture", ctx_view_pic);
+        menu_add_item(m, "Save Picture As...", ctx_save_pic);
+        menu_add_item(m, "Copy Picture Address", ctx_copy_pic);
+        any = true;
+    }
+    if (!any) {
+        menu_add_item(m, "Back", ctx_back);
+        menu_enable_last(m, s->at > 0);
+        menu_add_item(m, "Reload", ctx_reload);
+        menu_add_item(m, "Copy Page Address", ctx_copy_page);
+    }
+    popup_show_for(c);
 }
 
 static void scroll_by(wv_state_t *s, int32_t dy) {
@@ -660,6 +919,8 @@ static void on_view(control *c, int ev) {
             s->focus = -1;
             wm_invalidate(s->win);
         }
+    } else if (ev == EV_MENU) {
+        context_menu(s, c);
     } else if (ev == EV_KEY) {
         if (s->focus >= 0 && field_key(s))
             return;
@@ -727,6 +988,10 @@ static void on_btn(control *c, int ev) {
         }
         break;
     case 3:
+        if (!s->loading && s->pic_k < 0 && s->dl_on) {
+            dl_end(s, "The download was stopped.");
+            break;
+        }
         stop(s);
         say(s, "Stopped.");
         break;
@@ -798,9 +1063,10 @@ MENU_ACTION(menu_images, {
 })
 MENU_ACTION(menu_about,
             dlg_message(s->win, "About World View",
-                        "World View 1.0\nA web browser for the web old "
+                        "World View 1.1\nA web browser for the web old "
                         "machines can read: FrogFind, 68k.news, plain HTTP "
-                        "sites. HTML, forms, GIF, BMP and JPEG pictures.\n"
+                        "sites, gopher:// and ftp:// servers. HTML, forms, "
+                        "GIF, BMP and JPEG pictures, downloads.\n"
                         "Secure (https) sites: through a proxy (Options)."))
 
 // the app
@@ -830,6 +1096,8 @@ static void wv_init(void *state) {
     s->focus = -1;
     s->hover = -1;
     s->page.sock = s->page.dns = s->pic.sock = s->pic.dns = -1;
+    s->page.data = s->pic.data = s->dl.sock = s->dl.dns = s->dl.data = -1;
+    s->menu_item = -1;
     if (!app_prefs_get("WorldView", "Home", s->home, sizeof(s->home)) ||
         !s->home[0])
         strcpy(s->home, HOME_URL);
@@ -907,7 +1175,9 @@ static void wv_frame(void *state) {
     char t[160];
     if (s->loading) {
         int st = fetch_step(&s->page);
-        if (st == F_DONE) {
+        if (s->page.download) {
+            page_to_download(s);
+        } else if (st == F_DONE) {
             page_arrived(s);
         } else if (st == F_FAILED) {
             s->loading = false;
@@ -939,6 +1209,8 @@ static void wv_frame(void *state) {
             buttons(s);
         }
     }
+    if (s->dl_on)
+        dl_frame(s);
     /* laid out again: the window's width changed, or pictures came (at
      * most once a second while they come) */
     uint32_t now = time_millis();
@@ -979,11 +1251,11 @@ static void wv_frame(void *state) {
         s->hover = hover;
         if (hover >= 0)
             say(s, doc_str(&s->doc, s->doc.links[hover]));
-        else if (!s->loading && s->pic_k < 0)
+        else if (!s->loading && s->pic_k < 0 && !s->dl_on)
             say(s, "Done.");
         wm_invalidate(s->win);
     }
-    if (s->focus >= 0) /* (the caret blinks) */
+    if (s->focus >= 0)
         wm_invalidate(s->win);
 }
 
@@ -991,6 +1263,7 @@ static void wv_destroy(void *state) {
     wv_state_t *s = state;
     fetch_free(&s->page);
     fetch_free(&s->pic);
+    fetch_free(&s->dl);
     doc_free(&s->doc);
     if (S == s)
         S = NULL;

@@ -9,6 +9,8 @@
  * GIF, BMP and JPEG pictures. No scripts, no style sheets.
  *
  *   http.c   URLs, and HTTP without waiting (one step a frame)
+ *   proto.c  gopher:// and ftp:// the same way; their menus and folder
+ *            listings made into pages
  *   text.c   characters (UTF-8, Windows-1252, entities -> the code page),
  *            fonts: measuring, and drawing twice as big
  *   html.c   the page: parsed and laid out to the window's width
@@ -38,8 +40,12 @@
 
 // URLs (http.c)
 
+enum { SCH_HTTP, SCH_HTTPS, SCH_GOPHER, SCH_FTP };
+
 typedef struct {
     bool https;
+    int scheme;              /* SCH_ */
+    char user[32], pass[32]; /* ftp://user:pass@host/ (else anonymous) */
     char host[80];
     uint16_t port;
     char path[WV_URL]; /* from the first '/', with the query */
@@ -51,6 +57,8 @@ void url_join(const char *base, const char *rel, char *out, int sz);
 /* application/x-www-form-urlencoded: bytes in the code page go out as
  * UTF-8; returns the length (out is cut at sz) */
 int url_encode(const char *in, char *out, int sz);
+/* %xx (and '+' for a space, if plus) back to bytes, in place */
+void url_decode(char *s, bool plus);
 
 // fetching (http.c): fetch_step every frame until DONE or FAILED
 
@@ -85,7 +93,26 @@ typedef struct {
     bool truncated; /* more than max: cut */
     int redirects;
     char err[96];
+    int scheme; /* SCH_ */
+    /* a download: what isn't a page stops at DL_HOLD bytes until it has
+     * a file (fetch_save_to), then goes on into the file, as long as it
+     * is */
+    bool may_download; /* (the page's fetch: may turn into one) */
+    bool save_any;     /* Save Link As: whatever it is (kept by begin) */
+    bool download;
+    char save[96];  /* the file, once it has one */
+    uint32_t total; /* bytes that came (into the file too) */
+    bool save_failed;
+    /* gopher: the item's type; ftp: the control connection is sock */
+    char gtype;
+    int data; /* ftp: the data connection, -1 */
+    int fstep;
+    char fline[256];
+    int fline_len, fmulti, fcode;
+    bool fdir, data_done, ctl_done;
 } wv_fetch_t;
+
+#define DL_HOLD (32u * 1024u)
 
 typedef struct {
     char proxy[80]; /* "host:port", "" none */
@@ -98,6 +125,21 @@ int fetch_step(wv_fetch_t *f);
 void fetch_free(wv_fetch_t *f); /* (stops it, if it runs) */
 /* what it is doing, for the status line */
 void fetch_status(const wv_fetch_t *f, char *out, int sz);
+/* a download: into this file (made new); false: it can't be made */
+bool fetch_save_to(wv_fetch_t *f, const char *path);
+
+// gopher and ftp (proto.c), used by http.c
+
+void fetch_keep(wv_fetch_t *f, const uint8_t *b, uint32_t n);
+void fetch_fail(wv_fetch_t *f, const char *why);
+void fetch_headed(wv_fetch_t *f); /* what it is: known */
+/* the request for a gopher URL (selector, tab, query); false: a search
+ * with no words yet (then f->body is a page asking for them) */
+bool gopher_request(wv_fetch_t *f, const wv_url_t *u, char *out, int sz);
+void gopher_done(wv_fetch_t *f); /* a menu: made a page */
+void ftp_begin(wv_fetch_t *f);   /* (connected) */
+void ftp_step(wv_fetch_t *f);
+void ftp_free(wv_fetch_t *f);
 
 // characters and fonts (text.c)
 
@@ -268,6 +310,11 @@ typedef struct {
     int laid_w;
     int menu_field; /* a select's options shown */
     uint32_t blink;
+    /* a download, going on beside the pages */
+    wv_fetch_t dl;
+    bool dl_on, dl_asking;
+    char dl_name[64];
+    int menu_item; /* the item right-clicked */
 } wv_state_t;
 
 #endif

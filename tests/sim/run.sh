@@ -24,10 +24,10 @@ SCREENS="desktop@640x480 desktop@800 alttab@800 winpos@800 pattern@800
          alttab@800x2 zipui@640x2 setup@800x2 pattern@640x2 lazy@800x2
          charset@320 help@320 joystick@320 desktop@320x16 desktop@640x256
          desktop@640x480x256 desktop@800x256 zoom@800x256 setup@800x256
-         bmpview@640x256 bmpview@320 drawbmp@640x256 drawbmp@320
+         picview@640x256 picview@320 picformats picformats@320 drawbmp@640x256 drawbmp@320
          drawtools@640x256 drawtools@320 drawsel@320 drawsel@640x256 asksave asksave@320
          clockfaces clockfaces@320 multisector
-         web web@640x256 web@320
+         web web@640x256 web@320 webfiles webfiles@320
          scrapbook@640x256 memreport@320 memreport@640x256"
 
 if [ $# -gt 0 ]; then list="$*"; else

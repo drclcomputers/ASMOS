@@ -194,7 +194,7 @@ if (pix)
 
 For a big picture, `bmp_start` then `bmp_rows(r, n)` from `on_frame` (it
 returns the rows done; `bmp_error(r)` says why it stopped), then
-`bmp_end(r)`: BMP Viewer fills its window that way. The reader's memory
+`bmp_end(r)`: Picture Viewer fills its window that way. The reader's memory
 (`bmp_work_size`: about 40 KB for 24 bits) comes from the app's own heap.
 `n` 248 leaves out the 8 custom colours, which other apps change.
 `bmp_save(path, pix, w, h, stride, pal, 16 or 256)` writes one.
@@ -267,6 +267,28 @@ fonts. World View measures its pages with it, and draws headings twice as
 big. `app_codepage()`: the code points of bytes 0x80..0xFF in the code page
 in use, for showing Unicode text (or sending it: World View's forms go out
 as UTF-8).
+
+## API size 15: GIF, JPEG and BMP from memory
+
+`api->image` (lib/image.h; in an app the same names): pictures already in
+memory (a file read whole, or what came over the network), decoded to
+the screen's colour indexes at any size (made smaller or bigger as it
+goes, dithered or not). Picture Viewer and World View use it.
+
+```c
+int w, h;
+const char *why = image_info(buf, n, &w, &h);   /* NULL: it can be shown */
+image_target_t t = {pal, ncolors, true, {96, 96, 96}, NULL, NULL};
+why = image_decode(buf, n, pix, dw, dh, dw, &t);  /* dw x dh indexes */
+```
+
+`image_kind(buf, n)`: `IMAGE_GIF`, `IMAGE_JPEG`, `IMAGE_BMP` (`IMAGE_PNG`
+is recognised, not decoded), 0 for none. `pal`/`ncolors`: the colours to
+use (`A->screen_palette`); `bg`: what a GIF's see-through pixels become.
+The decoder's tables (GIF's LZW, JPEG's) come from the app's heap while
+it runs and go back after. Baseline JPEG only (not progressive); GIF up
+to 1024 x 768 (the first frame of an animated one); BMP not RLE-packed
+(lib/bmp.h reads those from a file).
 
 ## An app of several files
 
