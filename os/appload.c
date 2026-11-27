@@ -985,6 +985,11 @@ static const app_image_api_t s_image = {
     .decode = api_image_decode,
 };
 
+static void api_open_path(const char *path) {
+    if (path)
+        fo_open(NULL, path);
+}
+
 static const os_api_t s_api = {
     .version = OS_API_VERSION,
     .size = sizeof(os_api_t),
@@ -1015,6 +1020,8 @@ static const os_api_t s_api = {
     .font_glyph = font_glyph,
     .codepage = api_codepage,
     .image = &s_image,
+    .open_path = api_open_path,
+    .reveal_path = fo_reveal,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,

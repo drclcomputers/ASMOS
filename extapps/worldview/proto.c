@@ -22,14 +22,9 @@ void fetch_complete(wv_fetch_t *f);
 
 #define FTP_IDLE_MS 30000
 
-// a page being written
+// a page being written (wv.h)
 
-typedef struct {
-    char *p;
-    uint32_t n, cap;
-} buf_t;
-
-static void bput_n(buf_t *b, const char *s, uint32_t n) {
+void bput_n(buf_t *b, const char *s, uint32_t n) {
     if (!b->p && b->cap)
         return; /* (out of memory before: stays empty) */
     if (b->n + n + 1 > b->cap) {
@@ -54,10 +49,10 @@ static void bput_n(buf_t *b, const char *s, uint32_t n) {
     b->p[b->n] = 0;
 }
 
-static void bput(buf_t *b, const char *s) { bput_n(b, s, (uint32_t)strlen(s)); }
+void bput(buf_t *b, const char *s) { bput_n(b, s, (uint32_t)strlen(s)); }
 
 /* text, its < > & " made entities */
-static void bput_text(buf_t *b, const char *s, int n) {
+void bput_text(buf_t *b, const char *s, int n) {
     for (int i = 0; i < n && s[i]; i++) {
         char c = s[i];
         if (c == '<')
@@ -74,7 +69,7 @@ static void bput_text(buf_t *b, const char *s, int n) {
 }
 
 /* a path or selector in a URL: what would break it as %xx */
-static void bput_url(buf_t *b, const char *s, int n) {
+void bput_url(buf_t *b, const char *s, int n) {
     static const char HEX[] = "0123456789ABCDEF";
     for (int i = 0; i < n && s[i]; i++) {
         uint8_t c = (uint8_t)s[i];
@@ -349,7 +344,7 @@ static void ftp_refused(wv_fetch_t *f, const char *what) {
     fetch_fail(f, why);
 }
 
-static const char *ftp_ctype(const char *path) {
+const char *wv_ctype(const char *path) {
     const char *dot = strrchr(path, '.'), *slash = strrchr(path, '/');
     if (!dot || (slash && dot < slash))
         return "text/plain"; /* (README, INDEX) */
@@ -572,7 +567,7 @@ void ftp_step(wv_fetch_t *f) {
                 strcpy(f->ctype, "text/html");
             } else {
                 ftp_send(f, "RETR", path);
-                strlcpy(f->ctype, ftp_ctype(path), sizeof(f->ctype));
+                strlcpy(f->ctype, wv_ctype(path), sizeof(f->ctype));
                 fetch_headed(f);
             }
             f->fstep = FS_XFER;

@@ -53,6 +53,9 @@ const char *fo_type_of(const char *ext);
 /* Open by type: folder -> FileF, .APP -> run, text -> TEditor,
  * .WAV -> play, .PIC -> ASMDraw, anything else -> HexView. */
 void fo_open(window *owner, const char *path);
+/* FileF at the folder a file is in, the file selected; false: the file
+ * isn't there (moved, deleted) */
+bool fo_reveal(const char *path);
 /* Run NAME.APP: package at that path, else on /apps /FDD0 /FDD1 /DESKTOP,
  * else the built-in app called NAME (desktop shortcuts). */
 bool fo_launch_app(window *owner, const char *path);

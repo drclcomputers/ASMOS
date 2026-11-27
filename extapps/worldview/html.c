@@ -45,6 +45,7 @@ static struct {
     bool list_ol[10];
     int bullet; /* owed at the next line's start: -1 a disc, n: "n." */
     int form;
+    bool frames; /* a frameset seen: its frames are links */
     int nimg, nfld;
     /* what the last layout had: kept if the same */
     wv_image_t old_img[WV_IMAGES];
@@ -555,14 +556,35 @@ static int attr_color(const char *a, int n, const char *name) {
 }
 
 static int attr_align(const char *a, int n, int def) {
-    char b[12];
+    char b[12], st[160];
+    /* style="text-align: center" (the only style read) */
+    if (attr_text(a, n, "style", st, sizeof(st))) {
+        for (char *p = st; *p; p++)
+            if (!strncasecmp(p, "text-align", 10)) {
+                p += 10;
+                while (*p == ' ' || *p == ':')
+                    p++;
+                int k = 0;
+                while (k < (int)sizeof(b) - 1 &&
+                       ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')))
+                    b[k++] = *p++;
+                b[k] = 0;
+                if (!strcasecmp(b, "center"))
+                    return AL_CENTER;
+                if (!strcasecmp(b, "right"))
+                    return AL_RIGHT;
+                if (!strcasecmp(b, "left") || !strcasecmp(b, "justify"))
+                    return AL_LEFT;
+                break;
+            }
+    }
     if (!attr_text(a, n, "align", b, sizeof(b)))
         return def;
     if (!strcasecmp(b, "center") || !strcasecmp(b, "middle"))
         return AL_CENTER;
     if (!strcasecmp(b, "right"))
         return AL_RIGHT;
-    if (!strcasecmp(b, "left"))
+    if (!strcasecmp(b, "left") || !strcasecmp(b, "justify"))
         return AL_LEFT;
     return def;
 }
@@ -930,6 +952,8 @@ static uint32_t button_field(const char *h, uint32_t len, uint32_t i,
 
 static bool is(const char *t, const char *name) { return !strcmp(t, name); }
 
+static void frame_link(wv_doc_t *d, const char *a, int n, bool inline_);
+
 /* the heading levels: font, scale, the space around them */
 static void heading(int level, const char *a, int n) {
     block(level <= 2 ? 10 : 8);
@@ -1191,13 +1215,61 @@ static uint32_t tag(const char *t, bool close, const char *a, int n,
         if (!d->title[0])
             plain(h, next, end, d->title, sizeof(d->title), false);
         return tag_end(h, len, end);
+    } else if (is(t, "frame") && !close) {
+        frame_link(d, a, n, false);
+    } else if (is(t, "iframe") && !close) { /* a link, what's in it skipped */
+        frame_link(d, a, n, true);
+        return tag_end(h, len, find_close(h, len, next, t));
     } else if ((is(t, "script") || is(t, "style") || is(t, "svg") ||
-                is(t, "template") || is(t, "iframe") || is(t, "object") ||
-                is(t, "noembed")) &&
+                is(t, "template") || is(t, "object") || is(t, "noembed") ||
+                is(t, "noframes")) &&
                !close) {
+        /* (noframes: for browsers without frames; frames are links here,
+         * so the "your browser doesn't do frames" text isn't shown) */
         return tag_end(h, len, find_close(h, len, next, t));
     }
     return next;
+}
+
+/* a frame (or an iframe): a link to its page, as Lynx shows them. Its
+ * name: title=, else name=, else the file it shows */
+static void frame_link(wv_doc_t *d, const char *a, int n, bool inline_) {
+    char src[WV_URL], url[WV_URL], label[80];
+    if (!attr_url(a, n, "src", src, sizeof(src)) || !src[0] ||
+        !strncasecmp(src, "javascript:", 11) || !strcmp(src, "about:blank"))
+        return;
+    url_join(d->base, src, url, sizeof(url));
+    if (!attr_text(a, n, "title", label, sizeof(label)) || !label[0]) {
+        if (!attr_text(a, n, "name", label, sizeof(label)) || !label[0]) {
+            const char *b = strrchr(src, '/');
+            strlcpy(label, b && b[1] ? b + 1 : src, sizeof(label));
+        }
+    }
+    if (!inline_) {
+        if (!L.frames) { /* the first: what this page is */
+            L.frames = true;
+            block(6);
+            text("This page is in frames. Each one opens as a page:", 51);
+            block(4);
+        }
+        block(0);
+        text("Frame: ", 7);
+    } else {
+        text(" [Frame: ", 9);
+    }
+    if (grow((void **)&d->links, &d->cap_links, d->nlinks, sizeof(uint32_t),
+             64)) {
+        push("a");
+        d->links[d->nlinks] = pool_str(url);
+        L.st.link = (int16_t)d->nlinks++;
+        bool seen = d->visited && d->visited(d->user, url);
+        L.st.color = seen ? d->vlink_c : d->link_c;
+        L.st.flags |= IF_UNDER;
+        text(label, (uint32_t)strlen(label));
+        pop("a");
+    }
+    if (inline_)
+        text("] ", 2);
 }
 
 // the page

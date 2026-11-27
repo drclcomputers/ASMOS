@@ -4,8 +4,7 @@ World View is a web browser for the web an old machine can still read:
 FrogFind (a search engine that turns any site into simple pages),
 68k.news, plain http:// sites, and the file servers of the old internet:
 gopher:// and ftp://. It shows text, links, headings, lists, forms, and
-GIF, BMP and JPG (JPEG, JPE) pictures. It doesn't run scripts or style
-sheets.
+GIF, BMP and JPEG pictures. It doesn't run scripts or style sheets.
 
 - The address goes in the box at the top; Enter goes there. A site's
   name alone is enough: frogfind.com (gopher.something and ftp.something
@@ -23,6 +22,24 @@ sheets.
 - Pictures come after the page, one by one. Options > Pictures On/Off
   turns them off, which is much faster on a slow machine.
 - Go > FrogFind and Go > 68k.news are good places to start.
+- A page in frames (two or three pages side by side, from the late
+  90s) is shown as a list of its frames: click one to open it as a
+  page. A frame inside a page (iframe) is a link where it was.
+
+# Bookmarks, History, Downloads
+
+- Bookmarks > Add Bookmark (Ctrl+D) keeps the page you're on. Bookmarks
+  > Show Bookmarks (Ctrl+B) lists them: click one to go there, Remove to
+  forget it.
+- Go > History (Ctrl+H): the pages you visited, newest first, by day.
+  Clear History forgets them all.
+- Go > Downloads (Ctrl+J): what you downloaded, and the one going on
+  (with Stop). For each: Open, Show in FileF (its folder, the file
+  selected), Remove from List. A file that was moved or deleted says
+  so; one that failed or was stopped has Try again.
+- They are kept in /PREFS (WVBOOK.TXT, WVHIST.TXT, WVDOWN.TXT), plain
+  text you can edit, and are pages of World View's own: about:bookmarks,
+  about:history and about:downloads. A web page can't reach them.
 
 # Gopher and FTP
 
@@ -39,11 +56,15 @@ sheets.
 # Downloads
 
 - A link to anything that isn't a page or a picture (a ZIP, a program)
-  is a download: World View asks where to save it, and it goes straight
-  into the file as it comes, however big it is. You can keep browsing;
-  the status line says how far it got.
-- One download at a time. X (Stop), when no page is loading, stops it.
-- Save Link As... (right-click) saves anything, a page or a text too.
+  is a download: it goes into the DOWNLOAD folder (on the first disk,
+  made the first time), straight into the file as it comes, however big
+  it is. A name already there gets a number: GAME (2).ZIP. You can keep
+  browsing; the status line says how far it got.
+- One download at a time. X (Stop), when no page is loading, stops it;
+  so does Stop in Go > Downloads. A stopped download's half a file is
+  deleted.
+- Save Link As... (right-click) saves anything, a page or a text too,
+  and asks where (it starts in DOWNLOAD).
 
 # Secure sites and the modern web
 
@@ -57,12 +78,17 @@ straight to the server.
 # Files
 
 - File > Save Page As keeps the page's HTML in a .HTM file.
-- FileF opens .HTM and .HTML files in World View (pictures open in
-  Picture Viewer).
+- FileF opens .HTM and .HTML files in World View (in the one already
+  open, if it is), with the pictures and pages they point to beside
+  them. Their address is file:/the/path, and you can type one too.
+  A page from the web can't reach the files on your disks.
+- Pictures on their own open in Picture Viewer.
 
 # Limits
 
 - Pages of up to 160 KB; pictures of up to 192 KB each (a bigger one
   is downloaded instead). Downloads: any size.
 - No PNG and no progressive JPEG: their place is shown with a frame.
-- World View needs about 640 KB or more of free memory.
+- Style sheets are skipped; of styles, only text-align is read
+  (center, right). <center> and align= work too.
+- World View needs about 640 KB of free memory.

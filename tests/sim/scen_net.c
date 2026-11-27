@@ -696,6 +696,7 @@ typedef struct {
     char *out;
     int out_len, out_sent;
     bool answered;
+    bool slow; /* (64 bytes a frame: a download to stop) */
 } web_conn_t;
 static web_conn_t s_web[6];
 static int s_web_listen = -1, s_web_requests;
@@ -885,6 +886,40 @@ static void web_answer(web_conn_t *c) {
                 c->out[h + k] = (char)(k * 7 + k / 251);
             c->out_len = h + n;
         }
+    } else if (!strcmp(path, "/frames")) { /* a frames page of 1998 */
+        web_html(c, "<html><head><title>Old Site</title></head>"
+                    "<frameset cols=\"150,*\"><frame name=\"menu\" "
+                    "src=\"menu.htm\"><frameset rows=\"50,*\"><frame "
+                    "src=\"top.htm\"><frame name=\"main\" title=\"Main "
+                    "page\" src=\"main.htm\"></frameset><noframes><body>"
+                    "Your browser doesn't support frames. Get Netscape!"
+                    "</body></noframes></frameset></html>");
+    } else if (!strcmp(path, "/main.htm")) {
+        web_html(c, "<title>Main</title><p>The main frame's page.");
+    } else if (!strcmp(path, "/iframe")) {
+        web_html(c, "<title>Embed</title><p>Before <iframe src=\"/ad.htm\" "
+                    "title=\"An ad\">no iframes here</iframe> after.");
+    } else if (!strcmp(path, "/sneakyform")) { /* pressing our buttons */
+        web_html(c, "<title>Sneaky</title><form action=\"about:bookmarks\">"
+                    "<input type=hidden name=n value=0><input type=submit "
+                    "name=do value=Remove></form>");
+    } else if (!strcmp(path, "/slow.bin")) {
+        int n = 100 * 1024;
+        c->out = (char *)kmalloc((uint32_t)n + 200);
+        if (c->out) {
+            int h = snprintf(c->out, 200,
+                             "HTTP/1.0 200 OK\r\nContent-Type: application/"
+                             "octet-stream\r\nContent-Length: %d\r\n\r\n",
+                             n);
+            memset(c->out + h, 'x', (uint32_t)n);
+            c->out_len = h + n;
+            c->slow = true;
+        }
+    } else if (!strcmp(path, "/sneaky")) { /* reaching for the disk */
+        web_html(c, "<title>Sneaky</title><img src=\"file:/WEB/LOGO.GIF\">"
+                    "<a href=\"file:/WEB/PAGE.HTM\">a file</a>");
+    } else if (!strcmp(path, "/tofile")) {
+        web_put(c, "text/html", "", 0, 302, "Location: file:/WEB/PAGE.HTM\r\n");
     } else if (!strcmp(path, "/file.zip")) {
         web_put(c, "application/zip", "PK\x03\x04zipdata", 11, 200, "");
     } else {
@@ -926,9 +961,10 @@ static void web_step(void) {
             }
         }
         if (c->answered && c->out && c->out_sent < c->out_len) {
+            int most = c->slow ? 64 : 1400;
             int n = tcp_write(sock, (const uint8_t *)c->out + c->out_sent,
-                              (uint16_t)(c->out_len - c->out_sent > 1400
-                                             ? 1400
+                              (uint16_t)(c->out_len - c->out_sent > most
+                                             ? most
                                              : c->out_len - c->out_sent));
             if (n > 0)
                 c->out_sent += n;
@@ -1084,6 +1120,18 @@ static const wv_item_t *wv_item(const wv_state_t *s, int kind, int ref,
         const wv_item_t *it = &s->doc.items[i];
         if (it->kind == kind && (ref < 0 || it->ref == ref) &&
             (link < 0 || it->link == link))
+            return it;
+    }
+    return NULL;
+}
+
+/* the text item that starts with a word */
+static const wv_item_t *wv_word(const wv_state_t *s, const char *word) {
+    int n = (int)strlen(word);
+    for (int i = 0; s && i < s->doc.nitems; i++) {
+        const wv_item_t *it = &s->doc.items[i];
+        if (it->kind == IT_TEXT && it->len >= n &&
+            !memcmp(s->doc.pool + it->text, word, (size_t)n))
             return it;
     }
     return NULL;
@@ -1296,57 +1344,133 @@ static int web_test(void) {
     sim_key(0x1C);
     web_frames(2);
 
-    /* a file that isn't a page: saved where the user says */
-    fs_delete("/GOT.ZIP");
+    /* a file that isn't a page: straight into /DOWNLOAD, no questions */
+    fs_delete("/DOWNLOAD/file.zip");
     wv_address(s, "http://frogfind.com/file.zip");
     web_frames(60);
-    d = wm_focused_window();
-    T("a file: Save asks where", d && d != w);
-    e = NULL;
-    for (control *c = d ? d->controls : NULL; c; c = c->next)
-        if (c->type == CTL_EDIT && !e)
-            e = c;
-    if (e) {
-        ctl_set_text(e, "GOT.ZIP");
-        ctl_focus(e);
-    }
-    sim_key(0x1C);
-    web_frames(3);
+    T("a file: no dialog", wm_focused_window() == w);
     {
         fat_file_t ff;
         char got[16] = {0};
-        bool there = fs_open("/GOT.ZIP", &ff);
+        bool there = fs_open("/DOWNLOAD/file.zip", &ff);
         if (there) {
             fs_read(&ff, got, 11);
             fs_close(&ff);
         }
-        T("... saved, as it came",
-          there && !memcmp(got, "PK\x03\x04zipdata", 11));
+        snprintf(b, sizeof b, "    %s\n", s->line);
+        wr(1, b);
+        T("... saved in /DOWNLOAD, as it came",
+          there && !memcmp(got, "PK\x03\x04zipdata", 11) &&
+              strstr(s->line, "Saved /DOWNLOAD/file.zip"));
     }
+    wv_address(s, "http://frogfind.com/file.zip");
+    web_frames(60);
+    {
+        dir_entry_t de;
+        T("... again: a name of its own",
+          fs_find("/DOWNLOAD/file (2).zip", &de));
+    }
+    fs_delete("/DOWNLOAD/file (2).zip");
+
+    /* a web page can't reach the disk (pictures, links, redirects) */
+    fs_mkdir("/WEB");
+    {
+        static uint8_t g[16384];
+        uint32_t n = 0;
+        fat_file_t ff;
+        load_file(FIXDIR "web/LOGO.GIF", g, sizeof g, &n);
+        if (fs_create("/WEB/LOGO.GIF", &ff)) {
+            fs_write(&ff, g, (int)n);
+            fs_close(&ff);
+        }
+        const char *pg = "<title>On Disk</title><h1>Saved page</h1>"
+                         "<img src=\"LOGO.GIF\"><p><a href=\"TWO.HTM\">two</a>";
+        if (fs_create("/WEB/PAGE.HTM", &ff)) {
+            fs_write(&ff, pg, (int)strlen(pg));
+            fs_close(&ff);
+        }
+        pg = "<title>Two</title><p>Page two<p style=\"text-align:center\">"
+             "Middle<div style=\"color: red; text-align: right\">Far</div>"
+             "<p align=right>Right<center>Centred</center>";
+        if (fs_create("/WEB/TWO.HTM", &ff)) {
+            fs_write(&ff, pg, (int)strlen(pg));
+            fs_close(&ff);
+        }
+    }
+    wv_address(s, "http://frogfind.com/sneaky");
+    s = wv_wait();
+    T("a web page's picture from the disk: not loaded",
+      s->doc.nimages == 1 && s->doc.images[0].state == IMG_FAILED);
+    wv_click(s, wv_item(s, IT_TEXT, -1, 0));
+    web_frames(5);
+    T("... its link to a file: not followed",
+      !strcmp(s->url, "http://frogfind.com/sneaky") &&
+          strstr(s->line, "can't open files"));
+    wv_address(s, "http://frogfind.com/tofile");
+    s = wv_wait();
+    T("... a redirect to a file: not followed", page_has(s, "not followed"));
 
     /* closed: its connections are gone */
     wm_close(w);
     web_frames(5);
     T("closed", !wv_window());
 
-    /* a page on the disk: opened from FileF (.HTM) */
+    /* a page on the disk: opened from FileF (.HTM), its picture and link
+     * beside it */
+    fo_open(NULL, "/WEB/PAGE.HTM");
+    s = wv_wait();
+    w = wv_window();
+    T("a .HTM file opens in World View",
+      w && !strcmp(w->title, "On Disk - World View") &&
+          page_has(s, "Saved page") && !strcmp(s->url, "file:/WEB/PAGE.HTM"));
+    T("... the picture beside it",
+      s->doc.nimages == 1 && s->doc.images[0].state == IMG_DONE);
+    wv_click(s, wv_item(s, IT_TEXT, -1, link_named(s, "TWO.HTM")));
+    s = wv_wait();
+    T("... a link to the page beside it", page_has(s, "Page two"));
+    {
+        const wv_item_t *mid = wv_word(s, "Middle"), *far = wv_word(s, "Far"),
+                        *rt = wv_word(s, "Right"), *cn = wv_word(s, "Centred"),
+                        *two = wv_word(s, "Page");
+        int vw = s->doc.width;
+        snprintf(b, sizeof b,
+                 "    width %d: page %d, middle %d, far %d+%d, "
+                 "right %d+%d, centred %d\n",
+                 vw, two ? two->x : -1, mid ? mid->x : -1, far ? far->x : -1,
+                 far ? far->w : 0, rt ? rt->x : -1, rt ? rt->w : 0,
+                 cn ? cn->x : -1);
+        wr(1, b);
+        T("... style=\"text-align\": center and right",
+          two && mid && far && two->x < 8 &&
+              abs(mid->x + mid->w / 2 - vw / 2) < 8 &&
+              far->x + far->w > vw - 8);
+        T("... align=right, <center>", rt && cn && rt->x + rt->w > vw - 8 &&
+                                           abs(cn->x + cn->w / 2 - vw / 2) < 8);
+    }
+    sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
+    s = wv_wait();
+    T("... and Back", page_has(s, "Saved page"));
+    /* another one, World View running: shown in it */
     {
         fat_file_t ff;
-        const char *pg = "<title>On Disk</title><h1>Saved page</h1>";
+        const char *pg = "<title>Another</title><p>Another page";
         if (fs_create("/SAVED.HTM", &ff)) {
             fs_write(&ff, pg, (int)strlen(pg));
             fs_close(&ff);
         }
-        fo_open(NULL, "/SAVED.HTM");
-        s = wv_wait();
-        w = wv_window();
-        T("a .HTM file opens in World View",
-          w && !strcmp(w->title, "On Disk - World View") &&
-              page_has(s, "Saved page"));
-        if (w)
-            wm_close(w);
-        web_frames(3);
     }
+    fo_open(NULL, "/SAVED.HTM");
+    web_frames(2);
+    s = wv_wait();
+    T("a .HTM with World View open: shown in it",
+      wv_window() == w && page_has(s, "Another page"));
+    sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
+    s = wv_wait();
+    T("... Back to the one before", page_has(s, "Saved page"));
+    if (w)
+        wm_close(w);
+    web_frames(3);
+    fs_rm_rf("/WEB");
     return fails;
 }
 
@@ -1416,32 +1540,28 @@ static int web_files_test(void) {
     sim_shot("wv_listing");
     int big = link_named(s, "/files/big.bin");
 
-    /* a big file: asks where, then goes into the file as it comes */
-    fs_delete("/BIG.BIN");
+    /* a big file: into /DOWNLOAD as it comes */
+    fs_rm_rf("/DOWNLOAD");
     wv_click(s, wv_item(s, IT_TEXT, -1, big));
-    web_frames(10);
-    T("a file (200 KB): Save asks where, named as it is",
-      s->dl_on && s->dl_asking && !strcmp(s->dl_name, "big.bin"));
+    web_frames(6);
+    T("a file (200 KB): downloading, named as it is",
+      s->dl_on && !s->dl_asking && !strcmp(s->dl_name, "big.bin"));
     T("... the page stays", !s->loading && page_has(s, "Index of /files"));
-    T("... held (not all read) while it asks",
-      s->dl.len <= DL_HOLD + 2048 && s->dl.total < 200 * 1024);
-    save_as(w, "BIG.BIN");
-    T("... downloading after", s->dl_on && !s->dl_asking);
     sim_move(1, 1); /* (off the link: the status line is the download's) */
-    web_frames(5);
+    web_frames(3);
     snprintf(b, sizeof b, "    %s\n", s->line);
     wr(1, b);
     T("... the status line says how far",
-      strstr(s->line, "Downloading BIG.BIN") != NULL);
+      strstr(s->line, "Downloading big.bin") != NULL);
     dl_wait(s);
     snprintf(b, sizeof b, "    %s\n", s->line);
     wr(1, b);
-    uint32_t got = file_size("/BIG.BIN");
+    uint32_t got = file_size("/DOWNLOAD/big.bin");
     bool same = got == 200 * 1024;
     if (same) {
         static uint8_t chk[4096];
         fat_file_t ff;
-        fs_open("/BIG.BIN", &ff);
+        fs_open("/DOWNLOAD/big.bin", &ff);
         for (int k = 0; k < 200 * 1024 && same; k += 4096) {
             fs_read(&ff, chk, 4096);
             for (int j = 0; j < 4096; j++)
@@ -1450,7 +1570,7 @@ static int web_files_test(void) {
         fs_close(&ff);
     }
     T("... saved whole (200 KB, more than a page can be), byte for byte",
-      same && strstr(s->line, "Saved BIG.BIN: 200 KB"));
+      same && strstr(s->line, "Saved /DOWNLOAD/big.bin (200 KB)"));
 
     /* nginx's listing; a file in it */
     wv_address(s, "http://frogfind.com/files/old/");
@@ -1470,7 +1590,8 @@ static int web_files_test(void) {
     T("a right-click on a link: its menu", popup_is_open());
     popup_pick('s', 0x1F);
     T("... Save Link As: where?", s->dl_on && s->dl_asking);
-    save_as(w, "NOTES.TXT");
+    T("... held (not read on) while it asks", s->dl.len <= DL_HOLD + 2048);
+    save_as(w, "/NOTES.TXT");
     dl_wait(s);
     T("... the text saved, not shown",
       file_size("/NOTES.TXT") == 12 && page_has(s, "Index of /files"));
@@ -1523,14 +1644,11 @@ static int web_files_test(void) {
     wv_address(s, "gopher://gopher.example/g/frog.gif");
     s = wv_wait();
     T("a picture", s->doc.nimages == 1 && s->doc.images[0].state == IMG_DONE);
-    fs_delete("/PROG.ZIP");
     wv_address(s, "gopher://gopher.example/9/prog.zip");
     web_frames(20);
-    T("a file (type 9): a download",
-      s->dl_on && s->dl_asking && !strcmp(s->dl_name, "prog.zip"));
-    save_as(w, "PROG.ZIP");
+    T("a file (type 9): a download", !strcmp(s->dl_name, "prog.zip"));
     dl_wait(s);
-    T("... saved", file_size("/PROG.ZIP") == 13);
+    T("... saved", file_size("/DOWNLOAD/prog.zip") == 13);
 
     /* FTP: the OS's own server */
     fs_mkdir("/PUB");
@@ -1566,19 +1684,17 @@ static int web_files_test(void) {
     T("a text file: shown", page_has(s, "Read me first."));
     sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
     s = wv_wait();
-    fs_delete("/DATA.BIN");
     wv_click(s, wv_item(s, IT_TEXT, -1, link_named(s, "DATA.BIN")));
-    web_frames(20);
-    T("a file: a download", s->dl_on && !strcmp(s->dl_name, "DATA.BIN"));
-    save_as(w, "DATA.BIN");
+    web_frames(5);
+    T("a file: a download", !strcmp(s->dl_name, "DATA.BIN"));
     dl_wait(s);
     snprintf(b, sizeof b, "    %s\n", s->line);
     wr(1, b);
     {
-        bool same = file_size("/DATA.BIN") == 60000;
+        bool same = file_size("/DOWNLOAD/DATA.BIN") == 60000;
         static uint8_t d[60000];
         fat_file_t ff;
-        if (same && fs_open("/DATA.BIN", &ff)) {
+        if (same && fs_open("/DOWNLOAD/DATA.BIN", &ff)) {
             fs_read(&ff, d, sizeof d);
             fs_close(&ff);
             for (int k = 0; k < 60000 && same; k++)
@@ -1599,6 +1715,210 @@ static int web_files_test(void) {
     T("closed", !wv_window());
     app_prefs_set("WorldView", "Home", "");
     fs_rm_rf("/PUB");
+    fs_rm_rf("/DOWNLOAD");
+    return fails;
+}
+
+// World View: frames as links; bookmarks, history, downloads (its own
+// pages, about:...)
+
+/* the k-th button (a submit field) labelled so, clicked */
+static bool press(wv_state_t *s, const char *label, int k) {
+    for (int i = 0; s && i < s->doc.nfields; i++) {
+        const wv_field_t *f = &s->doc.fields[i];
+        if (f->type == FLD_SUBMIT && !strcmp(f->value, label) && k-- == 0) {
+            wv_click(s, wv_item(s, IT_FIELD, i, -1));
+            web_frames(3);
+            return true;
+        }
+    }
+    return false;
+}
+
+static int links_to(const wv_state_t *s, const char *url) {
+    int n = 0;
+    for (int i = 0; i < s->doc.nlinks; i++)
+        n += !strcmp(doc_str(&s->doc, s->doc.links[i]), url);
+    return n;
+}
+
+static int web_lists_test(void) {
+    int fails = 0;
+    char b[300];
+    net_up();
+    static const uint8_t ip[4] = {10, 0, 2, 15}, gw[4] = {10, 0, 2, 2},
+                         nm[4] = {255, 255, 255, 0}, dns[4] = {10, 0, 2, 3};
+    net_set_ip(ip, gw, nm);
+    dns_set_server(dns);
+    app_prefs_set("WorldView", "Proxy", "");
+    app_prefs_set("WorldView", "Home", "http://frogfind.com/frames");
+    fs_delete("/PREFS/WVBOOK.TXT");
+    fs_delete("/PREFS/WVHIST.TXT");
+    fs_delete("/PREFS/WVDOWN.TXT");
+    fs_rm_rf("/DOWNLOAD");
+
+    /* frames: a link each (nested ones too), no "get Netscape" */
+    sim_launch("World View");
+    wv_state_t *s = wv_wait();
+    window *w = wv_window();
+    T("a frameset: its frames, links",
+      page_has(s, "This page is in frames") &&
+          links_to(s, "http://frogfind.com/menu.htm") &&
+          links_to(s, "http://frogfind.com/top.htm") &&
+          links_to(s, "http://frogfind.com/main.htm"));
+    T("... named by title, name, file", page_has(s, "Main page") &&
+                                            page_has(s, "menu") &&
+                                            page_has(s, "top.htm"));
+    T("... the noframes text not shown", !page_has(s, "Netscape"));
+    sim_shot("wv_frames");
+    wv_click(s, wv_item(s, IT_TEXT, -1,
+                        link_named(s, "http://frogfind.com/main.htm")));
+    s = wv_wait();
+    T("... a frame opens as a page", page_has(s, "main frame's page"));
+    wv_address(s, "http://frogfind.com/iframe");
+    s = wv_wait();
+    T("an iframe: a link in its place, what's in it skipped",
+      links_to(s, "http://frogfind.com/ad.htm") && page_has(s, "An ad") &&
+          !page_has(s, "no iframes"));
+
+    /* bookmarks */
+    wv_address(s, "http://frogfind.com/");
+    s = wv_wait();
+    T("Add Bookmark",
+      run_menu(w, "Add Bookmark") && strstr(s->line, "Added to the bookmarks"));
+    run_menu(w, "Add Bookmark");
+    T("... twice: once", strstr(s->line, "already") != NULL);
+    wv_address(s, "http://frogfind.com/main.htm");
+    s = wv_wait();
+    ctl_focus(s->view);
+    sim_key2(0x20, 'd', false, true); /* Ctrl+D */
+    web_frames(1);
+    T("... Ctrl+D", strstr(s->line, "Added to the bookmarks") != NULL);
+    sim_key2(0x30, 'b', false, true); /* Ctrl+B */
+    s = wv_wait();
+    snprintf(b, sizeof b, "    %s: %d links, %d fields\n", s->url,
+             s->doc.nlinks, s->doc.nfields);
+    wr(1, b);
+    T("Show Bookmarks (Ctrl+B): both, by title",
+      !strcmp(s->url, "about:bookmarks") && page_has(s, "FrogFind!") &&
+          page_has(s, "Main") && links_to(s, "http://frogfind.com/") == 1 &&
+          links_to(s, "http://frogfind.com/main.htm") == 1);
+    sim_shot("wv_bookmarks");
+
+    /* a web page's form can't press those buttons */
+    wv_address(s, "http://frogfind.com/sneakyform");
+    s = wv_wait();
+    press(s, "Remove", 0);
+    T("a web page's form to about:bookmarks: not sent",
+      strstr(s->url, "sneakyform") && strstr(s->line, "can't send"));
+    run_menu(w, "Show Bookmarks");
+    s = wv_wait();
+    T("... the bookmark still there", links_to(s, "http://frogfind.com/") == 1);
+
+    T("Remove", press(s, "Remove", 0));
+    s = wv_wait();
+    T("... the first gone, the page at its plain address",
+      !strcmp(s->url, "about:bookmarks") &&
+          !links_to(s, "http://frogfind.com/") &&
+          links_to(s, "http://frogfind.com/main.htm") == 1);
+    wv_click(s, wv_item(s, IT_TEXT, -1,
+                        link_named(s, "http://frogfind.com/main.htm")));
+    s = wv_wait();
+    T("... a bookmark opens its page", page_has(s, "main frame's page"));
+    sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
+    s = wv_wait();
+    T("... Back: the bookmarks (not removing again)",
+      !strcmp(s->url, "about:bookmarks") &&
+          links_to(s, "http://frogfind.com/main.htm") == 1);
+
+    /* the history: each page once, newest first, under Today */
+    run_menu(w, "History");
+    s = wv_wait();
+    snprintf(b, sizeof b, "    history: %d links\n", s->doc.nlinks);
+    wr(1, b);
+    T("History: the pages visited, each once",
+      !strcmp(s->url, "about:history") && page_has(s, "Today") &&
+          links_to(s, "http://frogfind.com/main.htm") == 1 &&
+          links_to(s, "http://frogfind.com/") == 1 &&
+          links_to(s, "http://frogfind.com/frames") == 1 &&
+          page_has(s, "Old Site"));
+    T("... not its own pages", !links_to(s, "about:bookmarks"));
+    sim_shot("wv_history");
+    press(s, "Clear History", 0);
+    s = wv_wait();
+    T("... Clear History", page_has(s, "Nothing yet"));
+
+    /* downloads: listed; Show in FileF; moved or deleted; stopped */
+    wv_address(s, "http://frogfind.com/file.zip");
+    web_frames(40);
+    ctl_focus(s->view);
+    sim_key2(0x24, 'j', false, true); /* Ctrl+J */
+    s = wv_wait();
+    T("Downloads (Ctrl+J): the file, where it is",
+      !strcmp(s->url, "about:downloads") && page_has(s, "file.zip") &&
+          page_has(s, "/DOWNLOAD/file.zip"));
+    sim_shot("wv_downloads");
+    T("... Show in FileF", press(s, "Show in FileF", 0));
+    web_frames(3);
+    window *ff = wm_focused_window();
+    snprintf(b, sizeof b, "    in front: %s\n", ff ? ff->title : "-");
+    wr(1, b);
+    T("... FileF at /DOWNLOAD", ff && ff != w && strstr(ff->title, "DOWNLOAD"));
+    sim_shot("wv_reveal");
+    if (ff && ff != w)
+        wm_close(ff);
+    web_frames(3);
+    wm_focus(w);
+    fs_delete("/DOWNLOAD/file.zip");
+    run_menu(w, "Reload");
+    s = wv_wait();
+    T("... the file deleted: says so, no buttons for it",
+      page_has(s, "Moved or deleted") && !press(s, "Show in FileF", 0));
+    wv_address(s, "http://frogfind.com/slow.bin");
+    for (int i = 0; i < 100 && !s->dl_on; i++)
+        web_frames(1);
+    run_menu(w, "Downloads");
+    s = wv_wait();
+    T("... one going on: how far, Stop",
+      s->dl_on && page_has(s, "slow.bin") && page_has(s, "Downloading"));
+    T("... Stop", press(s, "Stop", 0));
+    s = wv_wait();
+    T("... stopped: Try again",
+      !s->dl_on && page_has(s, "Stopped") &&
+          links_to(s, "http://frogfind.com/slow.bin"));
+    {
+        dir_entry_t de;
+        T("... its half a file deleted", !fs_find("/DOWNLOAD/slow.bin", &de));
+    }
+    T("... Remove from List", press(s, "Remove from List", 0));
+    s = wv_wait();
+    T("... that one gone", !page_has(s, "slow.bin") && page_has(s, "file.zip"));
+    press(s, "Clear List", 0);
+    s = wv_wait();
+    T("... Clear List", page_has(s, "Nothing downloaded"));
+
+    /* a download that ends while the page is open: it shows again */
+    wv_address(s, "http://frogfind.com/slow.bin");
+    for (int i = 0; i < 100 && !s->dl_on; i++)
+        web_frames(1);
+    run_menu(w, "Downloads");
+    s = wv_wait();
+    T("... the page open, downloading", page_has(s, "Downloading"));
+    for (int i = 0; i < 4000 && s->dl_on; i++)
+        web_frames(1);
+    web_frames(3);
+    s = wv_wait();
+    T("... it ended: the page shows it saved",
+      !strcmp(s->url, "about:downloads") && !page_has(s, "Downloading") &&
+          page_has(s, "/DOWNLOAD/slow.bin"));
+
+    wm_close(w);
+    web_frames(5);
+    app_prefs_set("WorldView", "Home", "");
+    fs_rm_rf("/DOWNLOAD");
+    fs_delete("/PREFS/WVBOOK.TXT");
+    fs_delete("/PREFS/WVHIST.TXT");
+    fs_delete("/PREFS/WVDOWN.TXT");
     return fails;
 }
 
@@ -1607,6 +1927,8 @@ int scen_net(const char *name) {
         return web_test();
     if (!strcmp(name, "webfiles"))
         return web_files_test();
+    if (!strcmp(name, "weblists"))
+        return web_lists_test();
     if (!strcmp(name, "ftpui"))
         return ftp_ui();
     if (!strcmp(name, "ftp"))

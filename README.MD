@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.8.7
+Version 3.6.8
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -292,7 +292,7 @@ The bundled apps:
 | Audio Player                                                      | WAV and MIDI files, audio CDs                             |
 | HexView                                                           | files in hex                                              |
 | Picture Viewer                                                    | BMP, GIF, JPEG and .PIC pictures, in 256 or 16 colours    |
-| World View                                                        | a web browser: HTTP sites, gopher, FTP, downloads         |
+| World View                                                        | a web browser: HTTP, gopher, FTP, bookmarks, downloads    |
 | Puzzle, Sudoku, Solitaire (Klondike, Spider, FreeCell)            | games                                                     |
 
 The first group is built into the kernel. The rest are .APP files in /APPS,

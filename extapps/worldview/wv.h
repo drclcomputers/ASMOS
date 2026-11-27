@@ -40,7 +40,7 @@
 
 // URLs (http.c)
 
-enum { SCH_HTTP, SCH_HTTPS, SCH_GOPHER, SCH_FTP };
+enum { SCH_HTTP, SCH_HTTPS, SCH_GOPHER, SCH_FTP, SCH_FILE, SCH_ABOUT };
 
 typedef struct {
     bool https;
@@ -128,6 +128,39 @@ void fetch_status(const wv_fetch_t *f, char *out, int sz);
 /* a download: into this file (made new); false: it can't be made */
 bool fetch_save_to(wv_fetch_t *f, const char *path);
 
+// a page being written (proto.c): grows as it goes; p NULL if memory
+// ran out
+
+typedef struct {
+    char *p;
+    uint32_t n, cap;
+} buf_t;
+
+void bput_n(buf_t *b, const char *s, uint32_t n);
+void bput(buf_t *b, const char *s);
+void bput_text(buf_t *b, const char *s, int n); /* < > & " as entities */
+void bput_url(buf_t *b, const char *s, int n);  /* what would break: %xx */
+
+// bookmarks, the history, the downloads (lists.c): files in /PREFS;
+// about:bookmarks, about:history, about:downloads show them
+
+#define WV_BOOKMARKS "/PREFS/WVBOOK.TXT"
+#define WV_VISITS "/PREFS/WVHIST.TXT"
+#define WV_DOWNLOADS "/PREFS/WVDOWN.TXT"
+
+/* false: it was there already */
+bool list_bookmark(const char *url, const char *title);
+void list_visit(const char *url, const char *title);
+/* a download that ended: 'D' done, 'F' failed (why), 'S' stopped */
+void list_download(char state, const char *path, const char *url, uint32_t size,
+                   const char *why);
+char *list_page(const char *url, uint32_t *len, char *show_at, int sz);
+
+/* main.c, for the downloads page: the one going on (NULL: none), and
+ * stopping it */
+const wv_fetch_t *wv_download(const char **name);
+void wv_download_stop(void);
+
 // gopher and ftp (proto.c), used by http.c
 
 void fetch_keep(wv_fetch_t *f, const uint8_t *b, uint32_t n);
@@ -137,7 +170,16 @@ void fetch_headed(wv_fetch_t *f); /* what it is: known */
  * with no words yet (then f->body is a page asking for them) */
 bool gopher_request(wv_fetch_t *f, const wv_url_t *u, char *out, int sz);
 void gopher_done(wv_fetch_t *f); /* a menu: made a page */
-void ftp_begin(wv_fetch_t *f);   /* (connected) */
+/* about:name?query: World View's own pages (bookmarks, history,
+ * downloads), made by main.c: the HTML (kmalloc'd), *len its length; the
+ * URL it is shown at (the query, an action, done and dropped) into
+ * show_at. NULL: no such page */
+extern char *(*g_wv_about)(const char *url, uint32_t *len, char *show_at,
+                           int sz);
+
+/* the type of a file, by its name ("text/html", "image/gif"...) */
+const char *wv_ctype(const char *path);
+void ftp_begin(wv_fetch_t *f); /* (connected) */
 void ftp_step(wv_fetch_t *f);
 void ftp_free(wv_fetch_t *f);
 

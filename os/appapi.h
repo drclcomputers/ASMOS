@@ -431,6 +431,14 @@ typedef struct os_api {
 
     // appended in API size 15: GIF, JPEG, BMP from memory (lib/image.h)
     const struct app_image_api *image;
+
+    // appended in API size 16: files opened as FileF opens them
+    /* a file opened by its type (a .TXT in TEditor, a picture in Picture
+     * Viewer...), a folder in FileF */
+    void (*open_path)(const char *path);
+    /* FileF at the folder a file is in, the file selected; false: it isn't
+     * there (moved, deleted) */
+    bool (*reveal_path)(const char *path);
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */

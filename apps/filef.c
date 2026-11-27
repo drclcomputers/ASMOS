@@ -538,6 +538,28 @@ void ff_open_dir_pub(uint16_t cluster, const char *path) {
     }
 }
 
+static void ff_select(ff_inst_t *s, int idx);
+
+/* in the FileF window in front (just opened at its folder): the item of
+ * that name selected; false: not there */
+bool ff_select_name_pub(const char *name) {
+    ff_inst_t *s = active_finder();
+    for (int i = 0; !s && i < MAX_RUNNING_APPS; i++)
+        if (running_apps[i].running && running_apps[i].desc == &filef_app)
+            s = (ff_inst_t *)running_apps[i].state;
+    if (!s)
+        return false;
+    for (int i = 0; i < s->item_count; i++)
+        if (!s->items[i].is_dotdot && !s->items[i].is_vdrive &&
+            !strcasecmp(s->items[i].name, name)) {
+            ff_select(s, i);
+            ff_sync(s);
+            wm_invalidate(s->win);
+            return true;
+        }
+    return false;
+}
+
 // Drawing
 /* base: content origin, already offset by scroll; clipped by the view */
 static void ff_draw_item(ff_inst_t *s, int i, int base_x, int base_y) {

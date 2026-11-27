@@ -22,6 +22,7 @@
 
 /* openers living in the apps */
 extern void ff_open_dir_pub(uint16_t cluster, const char *path);
+extern bool ff_select_name_pub(const char *name);
 extern void ff_dir_changed_pub(const char *dir);
 extern void teditor_open_file(const char *path);
 
@@ -524,6 +525,24 @@ static bool ext_is(const char *name, const char *const *list) {
         if (!strcasecmp(dot + 1, *list))
             return true;
     return false;
+}
+
+bool fo_reveal(const char *path) {
+    dir_entry_t de;
+    if (!path || !path[0] || !fs_find(path, &de))
+        return false;
+    char dir[FS_PATH_SZ];
+    strlcpy(dir, path, sizeof(dir));
+    char *slash = strrchr(dir, '/');
+    if (!slash)
+        return false;
+    if (slash == dir)
+        slash[1] = 0; /* (in the top folder) */
+    else
+        *slash = 0;
+    fo_open(NULL, dir);
+    ff_select_name_pub(fo_base(path));
+    return true;
 }
 
 void fo_open(window *owner, const char *path) {

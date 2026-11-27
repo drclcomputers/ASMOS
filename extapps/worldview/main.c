@@ -16,6 +16,8 @@
 
 #include "extapps/worldview/wv.h"
 
+#define DL_DIR "/DOWNLOAD" /* where downloads go */
+
 app_descriptor worldview_app;
 static wv_state_t *S; /* (the one running: menus, dialogs) */
 
@@ -93,6 +95,16 @@ static void layout(wv_state_t *s) {
     wm_invalidate(s->win);
 }
 
+/* a web page can't reach files on this computer (a file's page can) */
+static bool may_reach(const wv_state_t *s, const char *url) {
+    if (!strncasecmp(url, "about:", 6)) /* (its buttons: its own pages) */
+        return !strncasecmp(s->doc.base, "about:", 6);
+    return strncasecmp(url, "file:", 5) == 0
+               ? strncasecmp(s->doc.base, "file:", 5) == 0 ||
+                     !strncasecmp(s->doc.base, "about:", 6)
+               : true;
+}
+
 // pictures: one after another
 
 static void next_picture(wv_state_t *s) {
@@ -100,7 +112,10 @@ static void next_picture(wv_state_t *s) {
     if (!s->images)
         return;
     for (int k = 0; k < s->doc.nimages; k++)
-        if (s->doc.images[k].state == IMG_WAIT) {
+        if (s->doc.images[k].state == IMG_WAIT &&
+            !may_reach(s, doc_str(&s->doc, s->doc.images[k].src))) {
+            s->doc.images[k].state = IMG_FAILED;
+        } else if (s->doc.images[k].state == IMG_WAIT) {
             s->doc.images[k].state = IMG_LOADING;
             s->pic_k = k;
             fetch_start(&s->pic, doc_str(&s->doc, s->doc.images[k].src), NULL,
@@ -181,14 +196,27 @@ static void go_post(wv_state_t *s, const char *url, const char *post,
     else /* ("frogfind.com": http:// in front) */
         snprintf(u, sizeof(u), "http://%s", url);
     ctl_set_text(s->addr, u);
+    /* (a button on one of World View's own pages: it stays where it was) */
+    int32_t keep = -1;
+    if (!strncasecmp(u, "about:", 6) && !strncasecmp(s->url, u, 9))
+        keep = s->scroll;
     fetch_start(&s->page, u, post, post_len, WV_HTML_MAX);
     s->page.may_download = true;
     s->loading = true;
-    s->want_scroll = 0;
+    s->want_scroll = keep >= 0 ? keep : 0;
     buttons(s);
 }
 
 static void go(wv_state_t *s, const char *url) { go_post(s, url, NULL, 0); }
+
+/* a file on the disk, as file:/path (pictures and links beside it work) */
+static void open_local(wv_state_t *s, const char *path) {
+    char u[WV_URL];
+    snprintf(u, sizeof(u), "file:%s", path);
+    if (s->nhist)
+        s->hist[s->at].scroll = s->scroll;
+    go(s, u);
+}
 
 /* a page (or an error page) to show */
 static void show_html(wv_state_t *s, const char *url, char *html,
@@ -288,7 +316,8 @@ static void show_bytes(wv_state_t *s, const char *url, uint8_t *body,
         s->page.body = body; /* (kept until it is saved) */
         s->page.len = len;
         s->page.truncated = truncated;
-        dlg_save_file(s->win, "Save the file", "/", nm, NULL, save_download, s);
+        dlg_save_file(s->win, "Save the file", DL_DIR, nm, NULL, save_download,
+                      s);
         return;
     }
     if (s->doc.full)
@@ -326,6 +355,7 @@ static void page_arrived(wv_state_t *s) {
     f->body = NULL;
     fetch_free(f);
     show_bytes(s, url, body, len, ct, cut);
+    list_visit(url, s->doc.title);
 }
 
 static void save_download(void *user, const char *path) {
@@ -340,7 +370,26 @@ static void save_download(void *user, const char *path) {
     buttons(s);
 }
 
-// downloads: one at a time, beside the pages
+// downloads: one at a time, beside the pages, into DL_DIR
+
+/* DL_DIR/name, made if it isn't there; a name taken: "name (2).ext" */
+static bool dl_path(const char *name, char *out, int sz) {
+    app_dirent_t de;
+    if (!A->file_info(DL_DIR, &de) && !A->make_dir(DL_DIR))
+        return false;
+    char base[64];
+    strlcpy(base, name, sizeof(base));
+    char *dot = strrchr(base, '.');
+    const char *ext = "";
+    if (dot && dot != base) {
+        ext = name + (dot - base);
+        *dot = 0;
+    }
+    snprintf(out, sz, DL_DIR "/%s", name);
+    for (int k = 2; A->file_info(out, &de) && k < 100; k++)
+        snprintf(out, sz, DL_DIR "/%s (%d)%s", base, k, ext);
+    return !A->file_info(out, &de);
+}
 
 /* the name a URL's file has: its last part */
 static void file_name(const char *url, char *out, int sz) {
@@ -367,12 +416,46 @@ static void file_name(const char *url, char *out, int sz) {
         strlcpy(out, "DOWNLOAD", (size_t)sz);
 }
 
-static void dl_end(wv_state_t *s, const char *why) {
+/* the download over: kept in the list (rec 'D' done, 'F' failed, 'S'
+ * stopped, its half a file deleted; 0 not: cancelled before it had a
+ * file), the downloads page shown again if it is the one open */
+static void dl_end_as(wv_state_t *s, const char *why, char rec,
+                      const char *reason, bool show_again) {
+    if (rec)
+        list_download(rec, s->dl.save, s->dl.url, s->dl.total, reason);
     fetch_free(&s->dl);
+    if (rec && rec != 'D' && s->dl.save[0]) /* (half a file: not kept) */
+        A->remove(s->dl.save);
     s->dl_on = false;
     s->dl_asking = false;
     say(s, why);
     buttons(s);
+    if (show_again && !s->loading && !strcmp(s->url, "about:downloads")) {
+        int32_t at = s->scroll;
+        s->from_history = true;
+        go(s, "about:downloads");
+        s->want_scroll = at;
+    }
+}
+
+static void dl_end(wv_state_t *s, const char *why, char rec,
+                   const char *reason) {
+    dl_end_as(s, why, rec, reason, true);
+}
+
+/* (the downloads page) */
+const wv_fetch_t *wv_download(const char **name) {
+    wv_state_t *s = me();
+    if (!s || !s->dl_on || s->dl_asking)
+        return NULL;
+    *name = s->dl_name;
+    return &s->dl;
+}
+
+void wv_download_stop(void) {
+    wv_state_t *s = me();
+    if (s && s->dl_on) /* (from the page being made: not made again) */
+        dl_end_as(s, "The download was stopped.", 'S', "", false);
 }
 
 static void dl_saved(void *user, const char *path) {
@@ -381,19 +464,19 @@ static void dl_saved(void *user, const char *path) {
         return;
     s->dl_asking = false;
     if (!path) {
-        dl_end(s, "The download was cancelled.");
+        dl_end(s, "The download was cancelled.", 0, NULL);
         return;
     }
     if (s->dl.state == F_FAILED) {
         char why[128];
         snprintf(why, sizeof(why), "The download stopped: %s", s->dl.err);
-        dl_end(s, why);
+        dl_end(s, why, 0, NULL);
         return;
     }
     const char *base = strrchr(path, '/');
     strlcpy(s->dl_name, base ? base + 1 : path, sizeof(s->dl_name));
     if (!fetch_save_to(&s->dl, path))
-        dl_end(s, "Could not make the file.");
+        dl_end(s, "Could not make the file.", 0, NULL);
 }
 
 /* a download asked for: where it goes */
@@ -401,9 +484,15 @@ static void dl_ask(wv_state_t *s) {
     file_name(s->dl.url, s->dl_name, sizeof(s->dl_name));
     s->dl_on = true;
     s->dl_asking = true;
-    dlg_save_file(s->win, "Save the file", "/", s->dl_name, NULL, dl_saved, s);
+    app_dirent_t de;
+    if (!A->file_info(DL_DIR, &de))
+        A->make_dir(DL_DIR);
+    dlg_save_file(s->win, "Save the file", DL_DIR, s->dl_name, NULL, dl_saved,
+                  s);
     buttons(s);
 }
+
+static void dl_status(wv_state_t *s);
 
 /* the page's fetch turned out a file: it goes on as the download */
 static void page_to_download(wv_state_t *s) {
@@ -418,7 +507,18 @@ static void page_to_download(wv_state_t *s) {
     s->dl = s->page;
     memset(&s->page, 0, sizeof(s->page));
     s->page.sock = s->page.dns = s->page.data = -1;
-    dl_ask(s);
+    /* straight into /DOWNLOAD (Save Link As asks where) */
+    char name[64], path[96];
+    file_name(s->dl.url, name, sizeof(name));
+    if (!dl_path(name, path, sizeof(path)) || !fetch_save_to(&s->dl, path)) {
+        dl_ask(s); /* (no folder for it: asks) */
+        return;
+    }
+    strlcpy(s->dl_name, path + sizeof(DL_DIR), sizeof(s->dl_name));
+    s->dl_on = true;
+    s->dl_asking = false;
+    buttons(s);
+    dl_status(s);
 }
 
 /* Save Link As: whatever is there, into a file */
@@ -454,16 +554,18 @@ static void dl_frame(wv_state_t *s) {
         return; /* (done or not: it finishes once it has its file) */
     char t[160];
     if (st == F_DONE) {
-        if (s->dl.save_failed)
+        if (s->dl.save_failed) {
             snprintf(t, sizeof(t), "Could not write %s (is the disk full?)",
                      s->dl_name);
-        else
-            snprintf(t, sizeof(t), "Saved %s: %u KB.", s->dl_name,
+            dl_end(s, t, 'F', "could not write the file");
+        } else {
+            snprintf(t, sizeof(t), "Saved %s (%u KB).", s->dl.save,
                      (unsigned)((s->dl.total + 1023) / 1024));
-        dl_end(s, t);
+            dl_end(s, t, 'D', "");
+        }
     } else if (st == F_FAILED) {
         snprintf(t, sizeof(t), "The download stopped: %s", s->dl.err);
-        dl_end(s, t);
+        dl_end(s, t, 'F', s->dl.err);
     } else if (!s->loading && s->pic_k < 0 && s->hover < 0) {
         dl_status(s);
     }
@@ -496,6 +598,11 @@ static void submit(wv_state_t *s, int form, int button) {
         return;
     int n = doc_form_query(&s->doc, form, button, q, 2048);
     const char *action = doc_str(&s->doc, s->doc.forms[form].action);
+    if (!may_reach(s, action)) {
+        kfree(q);
+        say(s, "A web page can't send that to World View's own pages.");
+        return;
+    }
     if (s->doc.forms[form].post) {
         go_post(s, action, q, n);
     } else {
@@ -792,8 +899,29 @@ static void follow(wv_state_t *s, int link) {
                "only.");
         return;
     }
+    if (!may_reach(s, u)) {
+        say(s, "A web page can't open files on this computer.");
+        return;
+    }
     s->hist[s->at].scroll = s->scroll;
     go(s, u);
+}
+
+/* the page you're on, into the bookmarks */
+static void add_bookmark(wv_state_t *s) {
+    if (!s->url[0] || !strncasecmp(s->url, "about:", 6)) {
+        say(s, "This page can't be a bookmark.");
+        return;
+    }
+    say(s, list_bookmark(s->url, s->doc.title)
+               ? "Added to the bookmarks (Bookmarks > Show Bookmarks)."
+               : "It is in the bookmarks already.");
+}
+
+/* one of World View's own pages, scrolled where it was if it is open */
+static void own_page(wv_state_t *s, const char *url) {
+    s->hist[s->at].scroll = s->scroll;
+    go(s, url);
 }
 
 // the right-click menu
@@ -924,6 +1052,23 @@ static void on_view(control *c, int ev) {
     } else if (ev == EV_KEY) {
         if (s->focus >= 0 && field_key(s))
             return;
+        if (kb.ctrl) { /* Ctrl+D bookmark, B bookmarks, H history, J
+                          downloads */
+            switch (kb.last_scancode) {
+            case 0x20:
+                add_bookmark(s);
+                return;
+            case 0x30:
+                own_page(s, "about:bookmarks");
+                return;
+            case 0x23:
+                own_page(s, "about:history");
+                return;
+            case 0x24:
+                own_page(s, "about:downloads");
+                return;
+            }
+        }
         int vh = view_h(s);
         switch (kb.last_scancode) {
         case UP_ARROW:
@@ -989,7 +1134,7 @@ static void on_btn(control *c, int ev) {
         break;
     case 3:
         if (!s->loading && s->pic_k < 0 && s->dl_on) {
-            dl_end(s, "The download was stopped.");
+            dl_end(s, "The download was stopped.", 'S', "");
             break;
         }
         stop(s);
@@ -1036,7 +1181,7 @@ static void proxy_set(void *user, const char *text) {
 }
 
 MENU_ACTION(menu_open, ctl_focus(s->addr))
-MENU_ACTION(menu_save, dlg_save_file(s->win, "Save the page", "/", "PAGE",
+MENU_ACTION(menu_save, dlg_save_file(s->win, "Save the page", DL_DIR, "PAGE",
                                      "HTM", saved_page, s))
 MENU_ACTION(menu_close, os_quit_app_by_desc(&worldview_app))
 MENU_ACTION(menu_back, history_go(s, s->at - 1))
@@ -1045,6 +1190,10 @@ MENU_ACTION(menu_home, go(s, s->home))
 MENU_ACTION(menu_reload, on_btn(s->btn[2], EV_CLICK))
 MENU_ACTION(menu_stop, on_btn(s->btn[3], EV_CLICK))
 MENU_ACTION(menu_frogfind, go(s, HOME_URL))
+MENU_ACTION(menu_bookmark, add_bookmark(s))
+MENU_ACTION(menu_bookmarks, own_page(s, "about:bookmarks"))
+MENU_ACTION(menu_history, own_page(s, "about:history"))
+MENU_ACTION(menu_downloads, own_page(s, "about:downloads"))
 MENU_ACTION(menu_68k, go(s, "http://68k.news/"))
 MENU_ACTION(menu_home_set, dlg_input(s->win, "Home Page",
                                      "The page World View opens with:", s->home,
@@ -1137,8 +1286,14 @@ static void wv_init(void *state) {
     menu_add_item(g, "Reload", menu_reload);
     menu_add_item(g, "Stop", menu_stop);
     menu_add_separator(g);
+    menu_add_item(g, "History", menu_history);
+    menu_add_item(g, "Downloads", menu_downloads);
+    menu_add_separator(g);
     menu_add_item(g, "FrogFind", menu_frogfind);
     menu_add_item(g, "68k.news", menu_68k);
+    menu *bm = window_add_menu(s->win, "Bookmarks");
+    menu_add_item(bm, "Add Bookmark", menu_bookmark);
+    menu_add_item(bm, "Show Bookmarks", menu_bookmarks);
     menu *o = window_add_menu(s->win, "Options");
     menu_add_item(o, "Home Page...", menu_home_set);
     menu_add_item(o, "Proxy...", menu_proxy);
@@ -1146,23 +1301,12 @@ static void wv_init(void *state) {
     menu_add_separator(o);
     menu_add_item(o, "About World View", menu_about);
 
+    g_wv_about = list_page;
     char start[WV_URL];
-    if (app_open_request(start, sizeof(start)) && start[0]) {
-        /* (a .HTM file: shown from the disk) */
-        int n = 0;
-        char *buf = (char *)kmalloc(WV_HTML_MAX + 1);
-        if (buf && (n = A->file_read(start, buf, (int)WV_HTML_MAX)) >= 0) {
-            buf[n] = 0;
-            char u[WV_URL];
-            snprintf(u, sizeof(u), "file:%s", start);
-            show_bytes(s, u, (uint8_t *)buf, (uint32_t)n, "", false);
-        } else {
-            kfree(buf);
-            say(s, "Could not read the file.");
-        }
-    } else {
+    if (app_open_request(start, sizeof(start)) && start[0])
+        open_local(s, start); /* (a .HTM file, from FileF) */
+    else
         go(s, s->home);
-    }
     buttons(s);
     ctl_focus(s->view);
 }
@@ -1173,6 +1317,10 @@ static void wv_frame(void *state) {
         return;
     S = s;
     char t[160];
+    /* a .HTM opened in FileF while World View is running: shown here */
+    char req[WV_URL];
+    if (app_open_request(req, sizeof(req)) && req[0])
+        open_local(s, req);
     if (s->loading) {
         int st = fetch_step(&s->page);
         if (s->page.download) {
@@ -1255,7 +1403,7 @@ static void wv_frame(void *state) {
             say(s, "Done.");
         wm_invalidate(s->win);
     }
-    if (s->focus >= 0)
+    if (s->focus >= 0) /* (the caret blinks) */
         wm_invalidate(s->win);
 }
 

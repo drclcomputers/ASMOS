@@ -8,8 +8,9 @@
  * alive. Redirects are followed (5 at most), chunked answers put back
  * together. Through a proxy ("host:port") the whole URL is asked for,
  * https:// too: the proxy does the encryption. gopher:// and ftp:// go
- * the same way, straight to the server (proto.c). A download (what isn't
- * a page) waits at DL_HOLD bytes for its file, then goes into it. */
+ * the same way, straight to the server (proto.c); file:/path is read from
+ * the disk. A download (what isn't a page) waits at DL_HOLD bytes for its
+ * file, then goes into it. */
 
 #include "extapps/worldview/wv.h"
 
@@ -25,13 +26,30 @@ static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 static const struct {
     const char *name;
     uint16_t port;
-} SCHEME[4] = {{"http", 80}, {"https", 443}, {"gopher", 70}, {"ftp", 21}};
+} SCHEME[6] = {{"http", 80}, {"https", 443}, {"gopher", 70},
+               {"ftp", 21},  {"file", 0},    {"about", 0}};
 
 bool url_split(const char *url, wv_url_t *u) {
     memset(u, 0, sizeof(*u));
     const char *p = url;
+    if (!strncasecmp(p, "about:", 6)) { /* about:bookmarks */
+        u->scheme = SCH_ABOUT;
+        strlcpy(u->path, p + 6, sizeof(u->path));
+        return true;
+    }
+    if (!strncasecmp(p, "file:", 5)) { /* file:/HDA/PAGE.HTM, file:///... */
+        p += 5;
+        while (p[0] == '/' && p[1] == '/')
+            p++;
+        u->scheme = SCH_FILE;
+        snprintf(u->path, sizeof(u->path), "%s%s", *p == '/' ? "" : "/", p);
+        char *hash = strchr(u->path, '#');
+        if (hash)
+            *hash = 0;
+        return true;
+    }
     u->scheme = -1;
-    for (int k = 0; k < 4; k++) {
+    for (int k = 0; k < 4; k++) { /* (the network ones: file, about above) */
         int n = (int)strlen(SCHEME[k].name);
         if (!strncasecmp(p, SCHEME[k].name, (size_t)n) &&
             !strncmp(p + n, "://", 3)) {
@@ -148,7 +166,10 @@ void url_join(const char *base, const char *rel, char *out, int sz) {
     char origin[128];
     const char *sch = SCHEME[b.scheme].name;
     bool std_port = b.port == SCHEME[b.scheme].port;
-    snprintf(origin, sizeof(origin), "%s://%s", sch, b.host);
+    if (b.scheme == SCH_FILE)
+        strcpy(origin, "file:");
+    else
+        snprintf(origin, sizeof(origin), "%s://%s", sch, b.host);
     if (!std_port) {
         char pt[8];
         snprintf(pt, sizeof(pt), ":%u", b.port);
@@ -275,6 +296,61 @@ static void goto_dns(wv_fetch_t *f, const char *host, uint16_t port) {
     f->since = time_millis();
 }
 
+char *(*g_wv_about)(const char *url, uint32_t *len, char *show_at, int sz);
+
+/* about:...: World View's own page, made now */
+static void about_page(wv_fetch_t *f) {
+    char at[WV_URL];
+    strlcpy(at, f->url, sizeof(at));
+    uint32_t n = 0;
+    char *h = g_wv_about ? g_wv_about(f->url, &n, at, sizeof(at)) : NULL;
+    if (!h) {
+        fetch_fail(f, "There is no such page.");
+        return;
+    }
+    strlcpy(f->url, at, sizeof(f->url));
+    kfree(f->body);
+    f->body = (uint8_t *)h;
+    f->len = f->total = f->cap = n;
+    strcpy(f->ctype, "text/html");
+    f->status = 200;
+    f->head_done = true;
+    f->state = F_DONE;
+}
+
+/* file:/path: read from the disk, all at once */
+static void local_file(wv_fetch_t *f, char *path) {
+    url_decode(path, false);
+    app_dirent_t de;
+    if (!A->file_info(path, &de) || (de.attr & APP_ATTR_DIR)) {
+        fetch_fail(f, "There is no such file.");
+        return;
+    }
+    strlcpy(f->ctype, wv_ctype(path), sizeof(f->ctype));
+    if (!strcmp(f->ctype, "application/octet-stream")) {
+        fetch_fail(f, "World View shows pages, texts and pictures: open "
+                      "this file from FileF.");
+        return;
+    }
+    uint32_t n = de.size < f->max ? de.size : f->max;
+    f->body = (uint8_t *)kmalloc(n + 1);
+    if (!f->body) {
+        fetch_fail(f, "Not enough memory.");
+        return;
+    }
+    int got = n ? A->file_read(path, f->body, (int)n) : 0;
+    if (got < 0) {
+        fetch_fail(f, "Could not read the file.");
+        return;
+    }
+    f->len = f->total = f->cap = (uint32_t)got;
+    f->body[f->len] = 0;
+    f->truncated = de.size > f->max;
+    f->status = 200;
+    f->head_done = true;
+    f->state = F_DONE;
+}
+
 static void begin(wv_fetch_t *f) {
     wv_url_t u;
     char host[80];
@@ -295,6 +371,16 @@ static void begin(wv_fetch_t *f) {
     f->data = -1;
     f->fstep = f->fline_len = f->fmulti = f->fcode = 0;
     f->fdir = f->data_done = f->ctl_done = false;
+    if (url_split(f->url, &u) && u.scheme == SCH_FILE) {
+        f->scheme = SCH_FILE;
+        local_file(f, u.path);
+        return;
+    }
+    if (u.scheme == SCH_ABOUT) {
+        f->scheme = SCH_ABOUT;
+        about_page(f);
+        return;
+    }
     if (!target(f, &u, host, sizeof(host), &port)) {
         fetch_fail(f, "That is not an address World View knows (http://, "
                       "gopher://, ftp://).");
@@ -626,6 +712,12 @@ void fetch_complete(wv_fetch_t *f) {
         }
         char next[WV_URL];
         url_join(f->url, f->location, next, sizeof(next));
+        if (!strncasecmp(next, "file:", 5) || !strncasecmp(next, "about:", 6)) {
+            /* (a site can't read files, or work World View's own pages) */
+            fetch_fail(f, "The site sent it to a file on this computer: "
+                          "not followed.");
+            return;
+        }
         strlcpy(f->url, next, sizeof(f->url));
         if (f->status != 307 && f->status != 308) { /* (then a GET) */
             kfree(f->post);

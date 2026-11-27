@@ -290,6 +290,16 @@ it runs and go back after. Baseline JPEG only (not progressive); GIF up
 to 1024 x 768 (the first frame of an animated one); BMP not RLE-packed
 (lib/bmp.h reads those from a file).
 
+## API size 16: files opened as FileF opens them
+
+```c
+A->open_path("/DOWNLOAD/GAME.ZIP");   /* by its type; a folder: FileF */
+A->reveal_path("/DOWNLOAD/GAME.ZIP"); /* FileF at its folder, selected;
+                                         false: it isn't there */
+```
+
+World View's Downloads page uses them.
+
 ## An app of several files
 
 `extapps/<name>/*.c`, linked into one `<name>.APP`: put `<name>` in
