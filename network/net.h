@@ -166,6 +166,10 @@ int udp_recv(int sock, uint8_t *buf, uint16_t maxlen, uint8_t src_ip[4],
 /* waits until connected (5 s); local_port 0 = any */
 int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
                 uint16_t local_port);
+/* doesn't wait: SYN sent, the socket in TCP_SYN_SENT; tcp_state says when
+ * it is TCP_ESTABLISHED (or tcp_was_reset: refused). Give up with
+ * tcp_abort. (The address's MAC: ARP, which may wait a moment.) */
+int tcp_open(const uint8_t dst_ip[4], uint16_t dst_port, uint16_t local_port);
 /* closes and waits (3 s) for the rest to be acknowledged */
 void tcp_close(int sock);
 /* closes and returns: the stack finishes the closing in the background */

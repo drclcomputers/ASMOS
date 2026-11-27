@@ -18,6 +18,11 @@
 #include "lib/math.h"
 #include "lib/memory.h"
 #include "lib/selbox.h"
+#include "network/dns.h"
+#include "network/net.h"
+
+/* the code points of bytes 0x80..0xFF in the code page in use (API 14) */
+const uint16_t *app_codepage(void);
 #include "lib/string.h"
 #include "lib/time.h"
 #include "os/clipboard.h"
@@ -26,7 +31,7 @@
 #include "ui/ui.h"
 #include "ui/uifont.h"
 
-extern const os_api_t *A;
+extern const os_api_t *A; /* the API, set on every call into the app */
 
 typedef struct {
     char name[32];

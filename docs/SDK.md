@@ -122,6 +122,9 @@ From `asmos.h` you can use what ASMOS's own apps use:
   scrapbook's `clipboard_history_*` (`os/clipboard.h`)
 - the mouse pointer and a selection box: `A->pointer(APP_POINTER_...)`,
   `selbox_*` (below)
+- the network: `net_ready`, `dns_start`/`dns_poll`, `tcp_open`,
+  `tcp_state`, `tcp_write`, `tcp_recv`, `tcp_release`
+  (docs/DYNAMIC_APPS.md, API size 14)
 - drawing: `fill_rect`, `draw_line`, `draw_string`, `draw_pixels`,
   `text_width`... colours `BLACK` .. `WHITE`, fonts `FONT_SYSTEM`...
 - strings and numbers: `strlen`, `strcpy`, `strcmp`, `snprintf`,

@@ -412,11 +412,13 @@ static const char *type_name(const char *name, bool is_dir) {
     const char *dot = strrchr(name, '.');
     const char *e = dot ? dot + 1 : "";
     static const char *const map[][2] = {
-        {"TXT", "Text file"}, {"APP", "Application"},
-        {"PIC", "Picture"},   {"BMP", "Bitmap picture"},
-        {"WAV", "Sound"},     {"MID", "MIDI music"},
-        {"CFG", "Settings"},  {"ASM", "Assembly source"},
-        {"BIN", "Binary"},    {"CDA", "CD audio track"},
+        {"TXT", "Text file"},   {"APP", "Application"},
+        {"PIC", "Picture"},     {"BMP", "Bitmap picture"},
+        {"WAV", "Sound"},       {"MID", "MIDI music"},
+        {"CFG", "Settings"},    {"ASM", "Assembly source"},
+        {"BIN", "Binary"},      {"CDA", "CD audio track"},
+        {"HTM", "Web page"},    {"HTML", "Web page"},
+        {"GIF", "GIF picture"}, {"JPG", "JPEG picture"},
     };
     for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
         if (!strcasecmp(e, map[i][0]))
@@ -544,6 +546,8 @@ void fo_open(window *owner, const char *path) {
     static const char *const pic[] = {"PIC", NULL};
     static const char *const bmp[] = {"BMP", NULL};
     static const char *const zip[] = {"ZIP", NULL};
+    static const char *const web[] = {"HTM", "HTML", "GIF",
+                                      "JPG", "JPEG", NULL};
     if (ext_is(name, app)) {
         fo_launch_app(owner, path);
     } else if (ext_is(name, zip)) {
@@ -560,6 +564,7 @@ void fo_open(window *owner, const char *path) {
         const char *app = ext_is(name, wav)   ? "Audio Player"
                           : ext_is(name, pic) ? "ASMDraw"
                           : ext_is(name, bmp) ? "BMP Viewer"
+                          : ext_is(name, web) ? "World View"
                                               : "HexView";
         if (!appload_run_named(app, path)) {
             char m[96];

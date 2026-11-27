@@ -781,7 +781,7 @@ app_descriptor *sim_find(const char *name) { return os_find_app(name); }
 /* /APPS as the disk image gets it (extapps/MANIFEST, the built .APPs) */
 #include "os/appload.h"
 static void sim_install_apps(void) {
-    static uint8_t buf[64 * 1024];
+    static uint8_t buf[256 * 1024]; /* (an .APP: up to ASMA_MAX_CODE_SIZE) */
     static char man[4096];
     uint32_t n = 0;
     fs_rm_rf("/APPS");

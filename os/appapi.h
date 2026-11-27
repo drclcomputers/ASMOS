@@ -16,6 +16,7 @@
 #include "lib/bmp.h"
 #include "lib/core.h"
 #include "lib/time.h"
+#include "network/net.h"
 #include "os/clipboard.h"
 #include "ui/controls.h"
 #include "ui/dialogs.h"
@@ -253,6 +254,30 @@ typedef struct {
                         int stride, const uint8_t (*pal)[3], int colors);
 } app_bmp_api_t;
 
+/* The network (API size 14): DNS and TCP, none of it waits (network/
+ * net.h, network/dns.h: the same names in an app). Look up a name with
+ * dns_start and dns_poll it every frame; tcp_open a connection and watch
+ * tcp_state (TCP_ESTABLISHED: talk; tcp_was_reset: refused or cut);
+ * tcp_write and tcp_recv take what fits now. tcp_close closes it in the
+ * background. An app uses only its own connections; those it still has
+ * when it ends are cut. */
+typedef struct app_net_api {
+    uint32_t size;
+    bool (*ready)(void); /* a network card and an address */
+    int (*resolve_start)(const char *host);
+    int (*resolve_poll)(int lookup, uint8_t ip[4]);
+    void (*resolve_cancel)(int lookup);
+    int (*tcp_open)(const uint8_t ip[4], uint16_t port);
+    int (*tcp_state)(int sock); /* tcp_state_t */
+    bool (*tcp_was_reset)(int sock);
+    int (*tcp_write)(int sock, const uint8_t *data, uint16_t len);
+    int (*tcp_recv)(int sock, uint8_t *buf, uint16_t maxlen);
+    uint16_t (*tcp_available)(int sock);
+    uint16_t (*tcp_pending)(int sock);
+    void (*tcp_close)(int sock);
+    void (*tcp_abort)(int sock);
+} app_net_api_t;
+
 typedef struct os_api {
     uint32_t version;
     uint32_t size; /* sizeof(os_api_t) – check before using newer members */
@@ -381,6 +406,16 @@ typedef struct os_api {
      * thing it is for): APP_POINTER_ARROW, _HAND, _CROSS, _TEXT, _MOVE,
      * _SIZE_NWSE, _SIZE_NESW, _SIZE_WE, _SIZE_NS. */
     void (*pointer)(int shape);
+
+    // appended in API size 14: the network, glyphs, the code page
+    const struct app_net_api *net;
+    /* a character's glyph (lib/graphics.h): rows, the left column in bit
+     * 7; *w its ink width (the advance: w + 1 in the proportional fonts,
+     * 8 in FONT_MONO8, 5 in FONT_MONO). Returns the rows. */
+    int (*font_glyph)(int size, unsigned char c, uint8_t rows[8], int *w);
+    /* the code points of bytes 0x80..0xFF in the code page in use (0:
+     * nothing there): Unicode text to the bytes the fonts draw */
+    const uint16_t *(*codepage)(void);
 } os_api_t;
 
 /* api->list_dir / file_info (API size 6) */

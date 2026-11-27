@@ -290,3 +290,31 @@ void clipboard_history_clear(void) { A->clip->history_clear(); }
 const char *clipboard_history_get_text(int i) {
     return A->clip->history_text(i);
 }
+
+// the network (API size 14): network/net.h, network/dns.h
+bool net_ready(void) { return A->net->ready(); }
+int dns_start(const char *host) { return A->net->resolve_start(host); }
+int dns_poll(int h, uint8_t ip[4]) { return A->net->resolve_poll(h, ip); }
+void dns_cancel(int h) { A->net->resolve_cancel(h); }
+int tcp_open(const uint8_t ip[4], uint16_t port, uint16_t local_port) {
+    (void)local_port; /* (any) */
+    return A->net->tcp_open(ip, port);
+}
+tcp_state_t tcp_state(int sock) { return (tcp_state_t)A->net->tcp_state(sock); }
+bool tcp_was_reset(int sock) { return A->net->tcp_was_reset(sock); }
+int tcp_write(int sock, const uint8_t *d, uint16_t n) {
+    return A->net->tcp_write(sock, d, n);
+}
+int tcp_recv(int sock, uint8_t *b, uint16_t n) {
+    return A->net->tcp_recv(sock, b, n);
+}
+uint16_t tcp_available(int sock) { return A->net->tcp_available(sock); }
+uint16_t tcp_pending(int sock) { return A->net->tcp_pending(sock); }
+void tcp_release(int sock) { A->net->tcp_close(sock); }
+void tcp_abort(int sock) { A->net->tcp_abort(sock); }
+
+// glyphs and the code page (API size 14)
+int font_glyph(int size, unsigned char c, uint8_t rows[8], int *w) {
+    return A->font_glyph(size, c, rows, w);
+}
+const uint16_t *app_codepage(void) { return A->codepage(); }

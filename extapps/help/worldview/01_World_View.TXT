@@ -1,0 +1,42 @@
+# World View
+
+World View is a web browser for the web an old machine can still read:
+FrogFind (a search engine that turns any site into simple pages),
+68k.news, and plain http:// sites. It shows text, links, headings,
+lists, forms, and GIF, BMP and JPEG pictures. It doesn't run scripts or
+style sheets.
+
+- The address goes in the box at the top; Enter goes there. A site's
+  name alone is enough: frogfind.com.
+- The buttons: < Back, > Forward, R Reload, X Stop, H Home. Backspace
+  goes back too.
+- Over a link the pointer becomes a hand, and the link's address shows
+  in the status line. Click it to go there.
+- Forms: click a field and type. Enter (or the form's button) sends it.
+  Tab moves to the next field.
+- Scrolling: the scroll bar, or Up, Down, Page Up, Page Down, Space,
+  Home and End.
+- Pictures come after the page, one by one. Options > Pictures On/Off
+  turns them off, which is much faster on a slow machine.
+- Go > FrogFind and Go > 68k.news are good places to start.
+
+# Secure sites and the modern web
+
+Most sites today only answer over https://, which is too much work for
+an old machine. A proxy on another computer can do that work: it
+fetches the page and hands it to World View as plain HTTP. Put its
+address in Options > Proxy (host:port, for example 192.168.1.10:8080).
+Retro proxies like WebOne or macproxy do this.
+
+# Files
+
+- File > Save Page As keeps the page's HTML in a .HTM file.
+- A link to anything that isn't a page or a picture (a ZIP, a program)
+  is saved where you choose.
+- FileF opens .HTM, .GIF and .JPG files in World View.
+
+# Limits
+
+- Pages of up to 160 KB; pictures of up to 192 KB each.
+- No PNG and no progressive JPEG: their place is shown with a frame.
+- World View needs about 640 KB of free memory.

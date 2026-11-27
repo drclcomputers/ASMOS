@@ -278,12 +278,62 @@ static void dhcp_reply(const uint8_t *d, uint16_t len) {
     ip_csum(r);
     q_push(42 + 300);
 }
+/* a DNS answer: every name is 10.0.2.99 (the mirror: a server in the OS
+ * answers), but names ending ".invalid" don't exist */
+int g_sim_dns_queries;
+static void dns_reply(const uint8_t *d, uint16_t len) {
+    uint8_t *r = q_slot();
+    if (!r || len < 42 + 12 || len > 512)
+        return;
+    g_sim_dns_queries++;
+    const uint8_t *q = d + 42;
+    int qn = len - 42; /* the question as it came */
+    char name[128];
+    int o = 0;
+    for (int i = 12; i < qn && q[i] && o < 120;) {
+        int l = q[i++];
+        if (o)
+            name[o++] = '.';
+        for (int k = 0; k < l && i < qn; k++)
+            name[o++] = (char)q[i++];
+    }
+    name[o] = 0;
+    bool none = o >= 8 && !strcmp(name + o - 8, ".invalid");
+    memcpy(r, d, len);
+    memcpy(r, d + 6, 6);
+    memcpy(r + 6, s_peer, 6);
+    memcpy(r + 26, d + 30, 4); /* from the server asked */
+    memcpy(r + 30, d + 26, 4);
+    r[34] = d[36], r[35] = d[37]; /* ports swapped */
+    r[36] = d[34], r[37] = d[35];
+    uint8_t *m = r + 42;
+    m[2] = 0x81;
+    m[3] = none ? 0x83 : 0x80; /* (3: no such name) */
+    m[7] = none ? 0 : 1;       /* one answer */
+    int n = qn;
+    if (!none) {
+        static const uint8_t ans[16] = {0xC0, 0x0C, 0, 1, 0,  1, 0, 0,
+                                        0x0E, 0x10, 0, 4, 10, 0, 2, 99};
+        memcpy(m + n, ans, 16);
+        n += 16;
+    }
+    uint16_t ul = (uint16_t)(8 + n);
+    r[38] = (uint8_t)(ul >> 8), r[39] = (uint8_t)ul;
+    r[40] = r[41] = 0; /* (no UDP checksum) */
+    r[16] = (uint8_t)((20 + ul) >> 8), r[17] = (uint8_t)(20 + ul);
+    ip_csum(r);
+    q_push((uint16_t)(42 + n));
+}
 bool ne2000_send(const uint8_t *d, uint16_t len) {
     if (len > 1600)
         return true;
     bool ip = d[12] == 0x08 && d[13] == 0x00;
     if (ip && d[23] == 17 && d[36] == 0 && d[37] == 67) {
         dhcp_reply(d, len);
+        return true;
+    }
+    if (ip && d[23] == 17 && d[36] == 0 && d[37] == 53) {
+        dns_reply(d, len);
         return true;
     }
     uint8_t *r = q_slot();

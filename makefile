@@ -60,6 +60,20 @@ $(EXT_DIR)/%.APP: $(EXT_DIR)/extapps/%.o $(EXT_LIB_OBJ) $(EXT_HELP)
 	python3 tools/mkapp.py --elf $(EXT_DIR)/$*.elf --meta --out $@ \
 	      $(if $(wildcard extapps/help/$*),--help-dir extapps/help/$*) >/dev/null
 
+# an app of several files: extapps/<name>/*.c, one .APP (World View)
+EXT_MULTI   = worldview
+EXT_PKGS   += $(patsubst %,$(EXT_DIR)/%.APP,$(EXT_MULTI))
+
+define multi_app
+$(EXT_DIR)/$(1).APP: $(patsubst %.c,$(EXT_DIR)/%.o,$(wildcard extapps/$(1)/*.c)) $(EXT_LIB_OBJ) $(EXT_HELP)
+	$(LD) -m elf_i386 -N -Ttext 0 -nostdlib --emit-relocs --gc-sections \
+	      -e init -u on_frame -u destroy -u app_meta -o $(EXT_DIR)/$(1).elf \
+	      $(patsubst %.c,$(EXT_DIR)/%.o,$(wildcard extapps/$(1)/*.c)) $(EXT_LIB_OBJ)
+	python3 tools/mkapp.py --elf $(EXT_DIR)/$(1).elf --meta --out $$@ \
+	      $(if $(wildcard extapps/help/$(1)),--help-dir extapps/help/$(1)) >/dev/null
+endef
+$(foreach a,$(EXT_MULTI),$(eval $(call multi_app,$(a))))
+
 apps: $(EXT_PKGS)
 
 # SDK: building apps without the source tree (tools/mksdk.py, sdk/)
@@ -122,6 +136,7 @@ setup.img: $(MKDISK_IN)
 
 -include $(OBJ:.o=.d)
 -include $(EXT_LIB_OBJ:.o=.d) $(patsubst %,$(EXT_DIR)/extapps/%.d,$(EXT_APPS))
+-include $(foreach a,$(EXT_MULTI),$(patsubst %.c,$(EXT_DIR)/%.d,$(wildcard extapps/$(a)/*.c)))
 
 # Run
 QEMU_FLAGS = -drive format=raw,file=os_image.bin \

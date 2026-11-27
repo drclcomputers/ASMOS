@@ -7,8 +7,10 @@
 #include "config/config.h"
 #include "drivers/opl2.h"
 #include "drivers/speaker.h"
+#include "fonts/fonts.h"
 #include "lib/audio.h"
 #include "lib/cpu.h"
+#include "network/dns.h"
 #include "os/clipboard.h"
 #include "ui/cursor.h"
 
@@ -230,11 +232,14 @@ static void *state_alloc(app_descriptor *d, uint32_t size) {
     return state;
 }
 
+static void drop_net_of(void *state);
+
 static void dyn_state_free(app_descriptor *d, void *state) {
     (void)d;
     dyn_inst_t *di = inst_of(state);
     if (!di)
         return;
+    drop_net_of(state); /* (killed or crashed: destroy didn't run) */
     uint32_t cr3 = vmm_current();
     if (di->ctx && cr3 == di->ctx->pd_phys)
         cr3 = g_kernel_pd_phys;
@@ -854,6 +859,108 @@ static const app_bmp_api_t s_bmp = {
     .save = api_bmp_save,
 };
 
+// the network: an app's lookups and connections, cut when it ends
+
+static void *s_sock_owner[NET_MAX_SOCKETS];
+static void *s_dns_owner[8];
+
+static bool sock_mine(int sock) {
+    return sock >= 0 && sock < NET_MAX_SOCKETS && s_calling_state &&
+           s_sock_owner[sock] == s_calling_state;
+}
+
+static int api_resolve_start(const char *host) {
+    int h = dns_start(host);
+    if (h >= 0 && h < 8)
+        s_dns_owner[h] = s_calling_state;
+    return h;
+}
+static int api_resolve_poll(int h, uint8_t ip[4]) {
+    if (h < 0 || h >= 8 || s_dns_owner[h] != s_calling_state)
+        return -1;
+    int r = dns_poll(h, ip);
+    if (r)
+        s_dns_owner[h] = NULL;
+    return r;
+}
+static void api_resolve_cancel(int h) {
+    if (h < 0 || h >= 8 || s_dns_owner[h] != s_calling_state)
+        return;
+    dns_cancel(h);
+    s_dns_owner[h] = NULL;
+}
+static int api_tcp_open(const uint8_t ip[4], uint16_t port) {
+    int sock = tcp_open(ip, port, 0);
+    if (sock >= 0 && sock < NET_MAX_SOCKETS)
+        s_sock_owner[sock] = s_calling_state;
+    return sock;
+}
+static int api_tcp_state(int sock) {
+    return sock_mine(sock) ? (int)tcp_state(sock) : (int)TCP_CLOSED;
+}
+static bool api_tcp_was_reset(int sock) {
+    return !sock_mine(sock) || tcp_was_reset(sock);
+}
+static int api_tcp_write(int sock, const uint8_t *d, uint16_t n) {
+    return sock_mine(sock) ? tcp_write(sock, d, n) : -1;
+}
+static int api_tcp_recv(int sock, uint8_t *b, uint16_t n) {
+    return sock_mine(sock) ? tcp_recv(sock, b, n) : -1;
+}
+static uint16_t api_tcp_available(int sock) {
+    return sock_mine(sock) ? tcp_available(sock) : 0;
+}
+static uint16_t api_tcp_pending(int sock) {
+    return sock_mine(sock) ? tcp_pending(sock) : 0;
+}
+static void api_tcp_close(int sock) {
+    if (!sock_mine(sock))
+        return;
+    s_sock_owner[sock] = NULL;
+    tcp_release(sock);
+}
+static void api_tcp_abort(int sock) {
+    if (!sock_mine(sock))
+        return;
+    s_sock_owner[sock] = NULL;
+    tcp_abort(sock);
+}
+
+/* the app ended: what it left open */
+static void drop_net_of(void *state) {
+    for (int i = 0; i < NET_MAX_SOCKETS; i++)
+        if (s_sock_owner[i] == state) {
+            s_sock_owner[i] = NULL;
+            tcp_abort(i);
+        }
+    for (int i = 0; i < 8; i++)
+        if (s_dns_owner[i] == state) {
+            s_dns_owner[i] = NULL;
+            dns_cancel(i);
+        }
+}
+
+static const app_net_api_t s_net = {
+    .size = sizeof(app_net_api_t),
+    .ready = net_ready,
+    .resolve_start = api_resolve_start,
+    .resolve_poll = api_resolve_poll,
+    .resolve_cancel = api_resolve_cancel,
+    .tcp_open = api_tcp_open,
+    .tcp_state = api_tcp_state,
+    .tcp_was_reset = api_tcp_was_reset,
+    .tcp_write = api_tcp_write,
+    .tcp_recv = api_tcp_recv,
+    .tcp_available = api_tcp_available,
+    .tcp_pending = api_tcp_pending,
+    .tcp_close = api_tcp_close,
+    .tcp_abort = api_tcp_abort,
+};
+
+static const uint16_t *api_codepage(void) {
+    return cp_unicode[g_codepage < CP_COUNT ? g_codepage : 0];
+}
+
 static const os_api_t s_api = {
     .version = OS_API_VERSION,
     .size = sizeof(os_api_t),
@@ -880,6 +987,9 @@ static const os_api_t s_api = {
     .palette256 = gpu_palette256,
     .bmp = &s_bmp,
     .pointer = api_pointer,
+    .net = &s_net,
+    .font_glyph = font_glyph,
+    .codepage = api_codepage,
     .file_read = api_file_read,
     .file_write = api_file_write,
     .snprintf = snprintf,
@@ -1041,6 +1151,7 @@ static void tramp_destroy(void *state) {
     if (la)
         run_entry(d, la->hdr.entry_destroy, state, "destroy");
     drop_windows_of(state); /* whatever the app forgot to unregister */
+    drop_net_of(state);     /* and its connections */
 }
 
 // unload

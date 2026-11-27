@@ -239,6 +239,40 @@ closing"). With it on and changes not saved, closing the window asks
 Save / Don't save / Cancel; the title shows a `*`. File > Close should
 call `wm_close(win)` (not `os_quit_app_by_desc`) so that it asks too.
 
+## API size 14: the network, glyphs, the code page
+
+`api->net` (network/net.h, network/dns.h; in an app the same names):
+DNS and TCP, none of which waits, so an app's window stays alive while a
+site answers.
+
+```c
+int h = dns_start("frogfind.com");   /* then each frame: */
+uint8_t ip[4];
+int r = dns_poll(h, ip);             /* 1 found, 0 still asking, -1 not */
+int sock = tcp_open(ip, 80, 0);      /* then watch tcp_state(sock): */
+                                     /* TCP_ESTABLISHED, or tcp_was_reset */
+tcp_write(sock, req, n);             /* what fits now */
+tcp_recv(sock, buf, sizeof buf);     /* what came; 0: nothing yet */
+tcp_release(sock);                   /* closes in the background */
+```
+
+`net_ready()` says if there is a card and an address. An app reaches only
+its own connections; any it leaves open are cut when it ends (even if it
+crashed). `tcp_open` sends the SYN and returns; the ARP for a new address
+may wait a moment.
+
+`api->font_glyph(size, c, rows, &w)`: a character's glyph (rows, the left
+column in bit 7) and ink width; the advance is w + 1 in the proportional
+fonts. World View measures its pages with it, and draws headings twice as
+big. `app_codepage()`: the code points of bytes 0x80..0xFF in the code page
+in use, for showing Unicode text (or sending it: World View's forms go out
+as UTF-8).
+
+## An app of several files
+
+`extapps/<name>/*.c`, linked into one `<name>.APP`: put `<name>` in
+EXT_MULTI (makefile). World View (`extapps/worldview/`) is one.
+
 ## What an app needs: --min-cpu, --min-ram
 
 `mkapp.py --min-cpu 486 --min-ram 4096` (KB) writes the least CPU and RAM
@@ -310,8 +344,9 @@ APP_META("Name", x_state_t, single_instance, heap_kb, x_init, x_frame, x_destroy
 
 then `x` in EXT_APPS (makefile) and a line in extapps/MANIFEST.
 
-FileF opens .PIC files in ASMDraw, WAV/MID in Audio Player, others in
-HexView: the .APP of that name in /APPS (any folder), with open_request.
+FileF opens .PIC files in ASMDraw, WAV/MID in Audio Player, .BMP in BMP
+Viewer, .HTM, .GIF and .JPG in World View, others in HexView: the .APP of
+that name in /APPS (any folder), with open_request.
 
 ## The Apps menu is the /APPS folder
 

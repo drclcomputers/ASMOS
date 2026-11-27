@@ -6,7 +6,9 @@
 #include "network/dns.h"
 #include "network/ftpd.h"
 #include "network/net.h"
+#include "os/prefs.h"
 #include "scen.h"
+#include "ui/fileops.h"
 
 extern int g_sim_hw, g_sim_dhcp, g_sim_dhcp_msgs[8], g_sim_drop, g_sim_dropped;
 extern uint32_t g_sim_dhcp_lease;
@@ -664,7 +666,554 @@ static int ftp_ui(void) {
     return fails;
 }
 
+// World View on a FrogFind of its own: the sites' names all lead to a
+// server here (the sim's DNS says 10.0.2.99, the mirror), which answers
+// like FrogFind, with pictures from fixtures/web
+
+#define WV_SIM
+#include "extapps/worldview/wv.h"
+
+extern int g_sim_dns_queries;
+
+static bool run_menu(window *w, const char *prefix) {
+    for (int m = 0; w && m < w->win_menu_count; m++)
+        for (int k = 0; k < w->win_menus[m].item_count; k++) {
+            menu_item *it = &w->win_menus[m].items[k];
+            if (it->label && !strncmp(it->label, prefix, strlen(prefix))) {
+                menu_item_run(it);
+                return true;
+            }
+        }
+    return false;
+}
+
+typedef struct {
+    int sock;
+    char req[4096];
+    int req_len;
+    char *out;
+    int out_len, out_sent;
+    bool answered;
+} web_conn_t;
+static web_conn_t s_web[6];
+static int s_web_listen = -1, s_web_requests;
+static char s_web_last[600]; /* the last request line, and a POST's body */
+static char s_web_body[600];
+
+static void web_put(web_conn_t *c, const char *type, const void *body, int n,
+                    int status, const char *extra) {
+    c->out = (char *)kmalloc((uint32_t)n + 400);
+    if (!c->out)
+        return;
+    int h = snprintf(c->out, 400,
+                     "HTTP/1.0 %d %s\r\nContent-Type: %s\r\n%sContent-Length: "
+                     "%d\r\n\r\n",
+                     status, status == 200 ? "OK" : "Moved", type, extra, n);
+    memcpy(c->out + h, body, (uint32_t)n);
+    c->out_len = h + n;
+}
+
+static void web_html(web_conn_t *c, const char *html) {
+    web_put(c, "text/html; charset=utf-8", html, (int)strlen(html), 200, "");
+}
+
+static void web_file(web_conn_t *c, const char *name, const char *type) {
+    static uint8_t b[16384];
+    uint32_t n = 0;
+    char path[64];
+    snprintf(path, sizeof path, FIXDIR "web/%s", name);
+    if (!load_file(path, b, sizeof b, &n))
+        n = 0;
+    web_put(c, type, b, (int)n, 200, "");
+}
+
+static const char *ARTICLE =
+    "<html><head><title>The Story</title></head><body>"
+    "<p><font size=\"4\"><a href=\"/?q=\">Back to <b><font "
+    "color=\"#008000\">Frog</font>Find!</b></a></font></p><hr>"
+    "<h3>The Story of Old Computers</h3>"
+    "<p>A caf\xc3\xa9 in Bra\xc8\x99ov &amp; \xe2\x80\x9cquotes\xe2\x80\x9d "
+    "&mdash; and &eacute;t&eacute;. Lorem ipsum dolor sit amet, consectetur "
+    "adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore "
+    "magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.</p>"
+    "<img src=\"/photo.jpg\"><br>"
+    "<img src=\"/big.jpg\" width=\"100\" height=\"75\"> "
+    "<img src=\"/pic.bmp\"> <img src=\"/prog.jpg\" alt=\"[prog]\">"
+    "<ul><li>One<li>Two<ul><li>Two and a half</ul><li>Three</ul>"
+    "<ol><li>First</li><li>Second</li></ol>"
+    "<pre>  code\tlines\n  kept</pre>"
+    "<blockquote>Quoted words, set in.</blockquote>"
+    "<p align=\"center\">Centred</p>"
+    "<p>More text to make the page longer than the window. More text to make "
+    "the page longer than the window. More text to make the page longer than "
+    "the window.</p><p>End of the story. <a href=\"/old\">An old link</a></p>"
+    "</body></html>";
+
+static void web_answer(web_conn_t *c) {
+    s_web_requests++;
+    char line[600];
+    int i = 0;
+    while (c->req[i] && c->req[i] != '\r' && i < (int)sizeof line - 1)
+        line[i] = c->req[i], i++;
+    line[i] = 0;
+    strlcpy(s_web_last, line, sizeof s_web_last);
+    char *body = strstr(c->req, "\r\n\r\n");
+    strlcpy(s_web_body, body ? body + 4 : "", sizeof s_web_body);
+    /* the path: "GET /x HTTP/1.0", or through a proxy "GET http://h/x" */
+    char path[512];
+    const char *p = strchr(line, ' ');
+    p = p ? p + 1 : "/";
+    if (!strncmp(p, "http://", 7) || !strncmp(p, "https://", 8)) {
+        char page[700], want[500];
+        strlcpy(want, p, sizeof want);
+        char *sp = strchr(want, ' ');
+        if (sp)
+            *sp = 0;
+        snprintf(page, sizeof page,
+                 "<title>Proxied</title><p>The proxy was asked for %s", want);
+        web_html(c, page);
+        return;
+    }
+    i = 0;
+    while (p[i] && p[i] != ' ' && i < (int)sizeof path - 1)
+        path[i] = p[i], i++;
+    path[i] = 0;
+    if (!strcmp(path, "/")) {
+        web_html(c, "<!DOCTYPE html><html lang=\"en\"><head><meta "
+                    "charset=\"UTF-8\"><title>FrogFind!</title></head><body>"
+                    "<br><br><center><h1><font size=7><font color=\"#008000\">"
+                    "Frog</font>Find!</font></h1></center><center><h3>The "
+                    "Search Engine for Vintage Computers</h3></center><br><br>"
+                    "<center><form action=\"/\" method=\"get\">Leap to: <input "
+                    "type=\"text\" size=\"30\" name=\"q\"><br><input "
+                    "type=\"submit\" value=\"Ribbbit!\"></center><br><small>"
+                    "<center>Built by <b><a href=\"https://youtube.com/"
+                    "ActionRetro\" target=\"_blank\">Action Retro</a></b> on "
+                    "YouTube | <a href=\"about.php\">Why build such a thing?"
+                    "</a></center></small></form>"
+                    "<center><img src=\"/logo.gif\" alt=\"logo\"></center>"
+                    "</body></html>");
+    } else if (!strncmp(path, "/?q=", 4) ||
+               !strncmp(path, "/index.php?q=", 13)) {
+        char page[2048];
+        snprintf(page, sizeof page,
+                 "<html><head><title>FrogFind!</title></head><body><p>Search "
+                 "results for: <b>%s</b></p><hr>"
+                 "<a href=\"/read.php?a=http://www.example.com/story\">The "
+                 "Story</a><br><font size=\"2\" color=\"#008000\">"
+                 "www.example.com/story</font><br>A story about old "
+                 "computers.<br><br><a href=\"/read.php?a=http://b.example/"
+                 "\">Another</a><br>Second result.<br><br></body></html>",
+                 path + 4);
+        web_html(c, page);
+    } else if (!strncmp(path, "/read.php?a=", 12)) {
+        web_html(c, ARTICLE);
+    } else if (!strcmp(path, "/old")) {
+        web_put(c, "text/html", "moved", 5, 302,
+                "Location: /read.php?a=moved\r\n");
+    } else if (!strcmp(path, "/chunked")) {
+        const char *ch = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                         "Transfer-Encoding: chunked\r\n\r\n"
+                         "7\r\n<title>\r\n"
+                         "10\r\nChunks</title><h1\r\n"
+                         "9\r\n>In parts\r\n"
+                         "0\r\n\r\n";
+        c->out = strdup(ch);
+        c->out_len = (int)strlen(ch);
+    } else if (!strcmp(path, "/form")) {
+        web_html(c,
+                 "<title>Form</title><form method=\"post\" action=\"/posted\">"
+                 "Name: <input name=\"who\" value=\"Ana\"> <input "
+                 "type=\"checkbox\" name=\"retro\" value=\"yes\" checked> "
+                 "<input type=\"checkbox\" name=\"modern\"> <select "
+                 "name=\"os\"><option>DOS<option selected value=\"asm\">"
+                 "ASMOS<option>OS/2</select><input type=\"hidden\" "
+                 "name=\"k\" value=\"a b&c\"><input type=\"submit\" "
+                 "name=\"go\" value=\"Send\"></form>");
+    } else if (!strcmp(path, "/posted")) {
+        char page[800];
+        snprintf(page, sizeof page, "<title>Posted</title><p>Got: %s",
+                 s_web_body);
+        web_html(c, page);
+    } else if (!strcmp(path, "/logo.gif")) {
+        web_file(c, "LOGO.GIF", "image/gif");
+    } else if (!strcmp(path, "/photo.jpg")) {
+        web_file(c, "PHOTO.JPG", "image/jpeg");
+    } else if (!strcmp(path, "/big.jpg")) {
+        web_file(c, "BIG.JPG", "image/jpeg");
+    } else if (!strcmp(path, "/prog.jpg")) {
+        web_file(c, "PROG.JPG", "image/jpeg");
+    } else if (!strcmp(path, "/pic.bmp")) {
+        web_file(c, "PIC.BMP", "image/bmp");
+    } else if (!strcmp(path, "/file.zip")) {
+        web_put(c, "application/zip", "PK\x03\x04zipdata", 11, 200, "");
+    } else {
+        web_put(c, "text/html", "<title>Not Found</title>Not here.", 33, 404,
+                "");
+    }
+}
+
+/* the server's turn: new connections, requests read, answers sent */
+static void web_step(void) {
+    if (s_web_listen < 0)
+        s_web_listen = tcp_listen(80);
+    int ns = tcp_accept(s_web_listen);
+    for (int k = 0; ns >= 0 && k < 6; k++)
+        if (!s_web[k].sock) {
+            memset(&s_web[k], 0, sizeof s_web[k]);
+            s_web[k].sock = ns + 1;
+            ns = -1;
+        }
+    for (int k = 0; k < 6; k++) {
+        web_conn_t *c = &s_web[k];
+        if (!c->sock)
+            continue;
+        int sock = c->sock - 1;
+        if (!c->answered) {
+            int n = tcp_recv(sock, (uint8_t *)c->req + c->req_len,
+                             (uint16_t)(sizeof c->req - 1 - c->req_len));
+            if (n > 0)
+                c->req_len += n;
+            c->req[c->req_len] = 0;
+            char *end = strstr(c->req, "\r\n\r\n");
+            if (end) {
+                char *cl = strstr(c->req, "Content-Length: ");
+                int want = cl ? (int)str_to_uint32(cl + 16) : 0;
+                if (c->req_len - (int)(end + 4 - c->req) >= want) {
+                    web_answer(c);
+                    c->answered = true;
+                }
+            }
+        }
+        if (c->answered && c->out && c->out_sent < c->out_len) {
+            int n = tcp_write(sock, (const uint8_t *)c->out + c->out_sent,
+                              (uint16_t)(c->out_len - c->out_sent > 1400
+                                             ? 1400
+                                             : c->out_len - c->out_sent));
+            if (n > 0)
+                c->out_sent += n;
+        }
+        if (c->answered && (!c->out || c->out_sent >= c->out_len)) {
+            tcp_release(sock);
+            kfree(c->out);
+            memset(c, 0, sizeof *c);
+        }
+    }
+}
+
+static void web_frames(int n) {
+    for (int i = 0; i < n; i++) {
+        web_step();
+        net_poll();
+        sim_frame();
+    }
+}
+
+static window *wv_window(void) {
+    for (int i = 0; i < win_count; i++) {
+        const char *t = win_stack[i]->title;
+        int n = t ? (int)strlen(t) : 0;
+        if (n >= 10 && !strcmp(t + n - 10, "World View"))
+            return win_stack[i];
+    }
+    return NULL;
+}
+
+/* until the page and its pictures are in (or a time is up) */
+static wv_state_t *wv_wait(void) {
+    wv_state_t *s = NULL;
+    for (int i = 0; i < 1500; i++) {
+        web_frames(1);
+        window *w = wv_window();
+        s = w ? (wv_state_t *)w->userdata : NULL;
+        if (s && !s->loading && s->pic_k < 0 && s->page.state != F_RECV)
+            break;
+    }
+    web_frames(3);
+    return s;
+}
+
+static bool page_has(const wv_state_t *s, const char *t) {
+    return s && s->doc.pool &&
+           memmem(s->doc.pool, s->doc.pool_len, t, strlen(t)) != NULL;
+}
+
+/* the item of a field, or of a link's text (first one) */
+static const wv_item_t *wv_item(const wv_state_t *s, int kind, int ref,
+                                int link) {
+    for (int i = 0; s && i < s->doc.nitems; i++) {
+        const wv_item_t *it = &s->doc.items[i];
+        if (it->kind == kind && (ref < 0 || it->ref == ref) &&
+            (link < 0 || it->link == link))
+            return it;
+    }
+    return NULL;
+}
+
+/* click an item on the page (scrolled there first) */
+static void wv_click(wv_state_t *s, const wv_item_t *it) {
+    if (!it)
+        return;
+    if (it->y < s->scroll || it->y + it->h > s->scroll + s->view->ah - 4) {
+        s->scroll = it->y - 8;
+        s->scroll = s->scroll < 0 ? 0 : s->scroll;
+        web_frames(1);
+    }
+    sim_click(s->view->ax + 2 + it->x + 2,
+              s->view->ay + 2 + (int)(it->y - s->scroll) + it->h / 2);
+    web_frames(2);
+}
+
+static int link_named(const wv_state_t *s, const char *url_part) {
+    for (int k = 0; s && k < s->doc.nlinks; k++)
+        if (strstr(doc_str(&s->doc, s->doc.links[k]), url_part))
+            return k;
+    return -1;
+}
+
+static void wv_address(wv_state_t *s, const char *url) {
+    ctl_set_text(s->addr, url);
+    ctl_focus(s->addr);
+    sim_key(0x1C);
+}
+
+static int web_test(void) {
+    int fails = 0;
+    char b[300];
+    net_up();
+    static const uint8_t ip[4] = {10, 0, 2, 15}, gw[4] = {10, 0, 2, 2},
+                         nm[4] = {255, 255, 255, 0}, dns[4] = {10, 0, 2, 3};
+    net_set_ip(ip, gw, nm);
+    dns_set_server(dns);
+    app_prefs_set("WorldView", "Proxy", "");
+    app_prefs_set("WorldView", "Home", "");
+
+    /* the home page: FrogFind, by its name */
+    sim_launch("World View");
+    wv_state_t *s = wv_wait();
+    window *w = wv_window();
+    T("World View opens on FrogFind", s && !strcmp(s->url, HOME_URL));
+    T("... found by name (DNS), fetched",
+      g_sim_dns_queries > 0 && s_web_requests >= 1);
+    snprintf(b, sizeof b, "    title: %s; %d items, %d links, %d fields\n",
+             w ? w->title : "-", s ? s->doc.nitems : 0, s ? s->doc.nlinks : 0,
+             s ? s->doc.nfields : 0);
+    wr(1, b);
+    T("its title in the window's",
+      w && !strcmp(w->title, "FrogFind! - World View"));
+    T("its words, its form", page_has(s, "Vintage Computers") &&
+                                 s->doc.nforms == 1 && s->doc.nfields == 2);
+    T("the logo: a GIF, shown", s->doc.nimages == 1 &&
+                                    s->doc.images[0].state == IMG_DONE &&
+                                    s->doc.images[0].w == 40);
+    const wv_item_t *big = NULL;
+    for (int i = 0; i < s->doc.nitems; i++)
+        if (s->doc.items[i].scale == 2)
+            big = &s->doc.items[i];
+    T("the big heading: twice the size, centred",
+      big && big->h >= 16 && big->x > 20);
+    sim_shot("wv_home");
+
+    /* searching: the field, typed in, Enter */
+    wv_click(s, wv_item(s, IT_FIELD, 0, -1));
+    T("a click in the field: typing goes there", s->focus == 0);
+    sim_type("retro computers");
+    sim_key(0x1C);
+    s = wv_wait();
+    snprintf(b, sizeof b, "    asked: %s\n", s_web_last);
+    wr(1, b);
+    T("Enter: the search sent (GET, the words encoded)",
+      !strcmp(s_web_last, "GET /?q=retro+computers HTTP/1.0"));
+    T("the results",
+      page_has(s, "Search results for:") && page_has(s, "retro+computers"));
+    sim_shot("wv_results");
+
+    /* a result: the article, its pictures */
+    int story = link_named(s, "read.php?a=http://www.example.com/story");
+    T("the first result is a link", story >= 0);
+    wv_click(s, wv_item(s, IT_TEXT, -1, story));
+    s = wv_wait();
+    T("clicked: the article", w && !strcmp(w->title, "The Story - World View"));
+    /* (Windows-1252, the sim's code page: it has the curly quotes and the
+     * dash; not the s with a comma below: a plain s) */
+    T("UTF-8 and entities in the code page",
+      page_has(s, "caf\xe9") && page_has(s, "\x93quotes\x94") &&
+          page_has(s, "& \x93") && page_has(s, "\xe9t\xe9") &&
+          page_has(s, "\x97") && page_has(s, "Brasov"));
+    int ok = 0, failed = 0;
+    for (int k = 0; k < s->doc.nimages; k++) {
+        ok += s->doc.images[k].state == IMG_DONE;
+        failed += s->doc.images[k].state == IMG_FAILED;
+    }
+    snprintf(b, sizeof b, "    pictures: %d shown, %d not (of %d)\n", ok,
+             failed, s->doc.nimages);
+    wr(1, b);
+    T("JPEG, JPEG, BMP shown; a progressive JPEG not",
+      s->doc.nimages == 4 && ok == 3 && failed == 1 &&
+          s->doc.images[3].state == IMG_FAILED);
+    T("the big JPEG at its width=, height=",
+      s->doc.images[1].w == 100 && s->doc.images[1].h == 75);
+    /* the photo on the screen: red on the left, blue on the right */
+    const wv_item_t *ph = wv_item(s, IT_IMAGE, 0, -1);
+    s->scroll = ph ? ph->y - 4 : 0;
+    web_frames(2);
+    uint8_t pal[256][3];
+    gpu_palette(pal, 256);
+    int red = 0, blue = 0;
+    if (ph) {
+        int x0 = s->view->ax + 2 + ph->x, y0 = s->view->ay + 2 + 4;
+        for (int y = 0; y < 20; y++)
+            for (int x = 0; x < 20; x++) {
+                const uint8_t *l =
+                    pal[BACKBUF[(y0 + y) * SCREEN_WIDTH + x0 + 4 + x]];
+                const uint8_t *r =
+                    pal[BACKBUF[(y0 + y) * SCREEN_WIDTH + x0 + 60 + x]];
+                red += l[0] > 40 && l[2] < 30;
+                blue += r[2] > 40 && r[0] < 30;
+            }
+    }
+    snprintf(b, sizeof b, "    photo: %d red, %d blue of 400\n", red, blue);
+    wr(1, b);
+    T("the photo on the screen: red left, blue right", red > 300 && blue > 300);
+    sim_shot("wv_article");
+    T("lists: bullets and numbers", page_has(s, "1.") && page_has(s, "2."));
+    int32_t before = s->scroll;
+    ctl_focus(s->view);
+    sim_key(0x51); /* Page Down */
+    web_frames(1);
+    T("Page Down scrolls", s->scroll > before);
+
+    /* Back: the results again */
+    sim_click(s->btn[0]->ax + 4, s->btn[0]->ay + 4);
+    s = wv_wait();
+    T("Back: the results", page_has(s, "Search results for:"));
+    sim_click(s->btn[1]->ax + 4, s->btn[1]->ay + 4);
+    s = wv_wait();
+    T("Forward: the article", page_has(s, "Old Computers"));
+
+    /* a redirect; chunks; a form sent by POST */
+    wv_address(s, "http://frogfind.com/old");
+    s = wv_wait();
+    T("a redirect followed", strstr(s->url, "/read.php?a=moved") != NULL);
+    wv_address(s, "frogfind.com/chunked");
+    s = wv_wait();
+    T("chunks put together",
+      w && !strcmp(w->title, "Chunks - World View") && page_has(s, "In parts"));
+    wv_address(s, "http://frogfind.com/form");
+    s = wv_wait();
+    T("a form: its fields", s->doc.nfields == 6);
+    wv_click(s, wv_item(s, IT_FIELD, 0, -1));
+    sim_type(" Bob");
+    int send = -1;
+    for (int k = 0; k < s->doc.nfields; k++)
+        if (s->doc.fields[k].type == FLD_SUBMIT)
+            send = k;
+    wv_click(s, wv_item(s, IT_FIELD, send, -1));
+    s = wv_wait();
+    snprintf(b, sizeof b, "    posted: %s\n", s_web_body);
+    wr(1, b);
+    T("POST: the fields as they were set",
+      !strcmp(s_web_body, "who=Ana+Bob&retro=yes&os=asm&k=a+b%26c&go=Send"));
+    T("... the answer shown", page_has(s, "Got: who=Ana"));
+
+    /* what can't be had */
+    wv_address(s, "http://nowhere.invalid/");
+    s = wv_wait();
+    T("a name that doesn't exist: an error page",
+      w && !strcmp(w->title, "Can't open the page - World View") &&
+          page_has(s, "Could not find that site"));
+    wv_address(s, "https://www.example.com/");
+    s = wv_wait();
+    T("https without a proxy: says a proxy is needed",
+      page_has(s, "need a proxy"));
+
+    /* through a proxy: the whole URL asked for, https too */
+    run_menu(w, "Proxy...");
+    web_frames(2);
+    window *d = wm_focused_window();
+    control *e = NULL;
+    for (control *c = d ? d->controls : NULL; c; c = c->next)
+        if (c->type == CTL_EDIT && !e)
+            e = c;
+    if (e) {
+        ctl_set_text(e, "proxy.lan:80");
+        ctl_focus(e);
+    }
+    sim_key(0x1C);
+    web_frames(2);
+    wv_address(s, "https://secure.example/page");
+    s = wv_wait();
+    snprintf(b, sizeof b, "    the proxy got: %s\n", s_web_last);
+    wr(1, b);
+    T("a proxy: asked for the whole https:// URL",
+      !strcmp(s_web_last, "GET https://secure.example/page HTTP/1.0") &&
+          page_has(s, "asked for https://secure.example/page"));
+    run_menu(w, "Proxy...");
+    web_frames(2);
+    d = wm_focused_window();
+    for (control *c = d ? d->controls : NULL; c; c = c->next)
+        if (c->type == CTL_EDIT)
+            ctl_set_text(c, "");
+    sim_key(0x1C);
+    web_frames(2);
+
+    /* a file that isn't a page: saved where the user says */
+    fs_delete("/GOT.ZIP");
+    wv_address(s, "http://frogfind.com/file.zip");
+    web_frames(60);
+    d = wm_focused_window();
+    T("a file: Save asks where", d && d != w);
+    e = NULL;
+    for (control *c = d ? d->controls : NULL; c; c = c->next)
+        if (c->type == CTL_EDIT && !e)
+            e = c;
+    if (e) {
+        ctl_set_text(e, "GOT.ZIP");
+        ctl_focus(e);
+    }
+    sim_key(0x1C);
+    web_frames(3);
+    {
+        fat_file_t ff;
+        char got[16] = {0};
+        bool there = fs_open("/GOT.ZIP", &ff);
+        if (there) {
+            fs_read(&ff, got, 11);
+            fs_close(&ff);
+        }
+        T("... saved, as it came",
+          there && !memcmp(got, "PK\x03\x04zipdata", 11));
+    }
+
+    /* closed: its connections are gone */
+    wm_close(w);
+    web_frames(5);
+    T("closed", !wv_window());
+
+    /* a page on the disk: opened from FileF (.HTM) */
+    {
+        fat_file_t ff;
+        const char *pg = "<title>On Disk</title><h1>Saved page</h1>";
+        if (fs_create("/SAVED.HTM", &ff)) {
+            fs_write(&ff, pg, (int)strlen(pg));
+            fs_close(&ff);
+        }
+        fo_open(NULL, "/SAVED.HTM");
+        s = wv_wait();
+        w = wv_window();
+        T("a .HTM file opens in World View",
+          w && !strcmp(w->title, "On Disk - World View") &&
+              page_has(s, "Saved page"));
+        if (w)
+            wm_close(w);
+        web_frames(3);
+    }
+    return fails;
+}
+
 int scen_net(const char *name) {
+    if (!strcmp(name, "web"))
+        return web_test();
     if (!strcmp(name, "ftpui"))
         return ftp_ui();
     if (!strcmp(name, "ftp"))

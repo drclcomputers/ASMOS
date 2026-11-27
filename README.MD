@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.7.9
+Version 3.8.3
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -85,8 +85,9 @@ Features
   paging). A crashing app is closed and the rest keeps running.
 - **Sound**: Sound Blaster 16 (WAV), OPL2 FM (MIDI), the PC speaker.
 - **Network**: NE2000 (ISA, or PCI clones), IPv4 from DHCP or typed in,
-  TCP that resends what is lost, ping, DNS, a Gopher browser. An FTP
-  server's folder as a drive (/NET0), and an FTP server for the disks.
+  TCP that resends what is lost, ping, DNS, a Gopher browser, a web
+  browser (World View). An FTP server's folder as a drive (/NET0), and an
+  FTP server for the disks.
 - **Printing**: parallel port, plain text, Epson ESC/P or HP PCL, with a
   print queue.
 - **Shell**: a command line with a built-in x86 assembler.
@@ -290,6 +291,7 @@ The bundled apps:
 | Audio Player                                                      | WAV and MIDI files, audio CDs                             |
 | HexView                                                           | files in hex                                              |
 | BMP Viewer                                                        | .BMP pictures, scrolled, in 256 or 16 colours             |
+| World View                                                        | a web browser: FrogFind, 68k.news, HTTP sites, a proxy    |
 | Puzzle, Sudoku, Solitaire (Klondike, Spider, FreeCell)            | games                                                     |
 
 The first group is built into the kernel. The rest are .APP files in /APPS,
@@ -496,8 +498,9 @@ Known limitations
 - **Video**: 320x200x256, 640x400x16, 640x480x16, 800x600x16 (SVGA). No
   256 colours above 320x200, nothing above 800x600, no accelerated drivers.
   The UI uses 16 colours in all of them.
-- **Network**: NE2000 only, IPv4 only. Ping, DNS, Gopher and FTP (no web
-  browser, no SMB/Windows shares). FTP is plain text: passwords go over
+- **Network**: NE2000 only, IPv4 only. Ping, DNS, Gopher, FTP and the web
+  over plain HTTP (World View: https:// through a proxy on another
+  computer; no scripts, no style sheets). No SMB/Windows shares. FTP is plain text: passwords go over
   the wire as they are, as in any FTP. /NET0 writes a file from the start
   or at its end, not in the middle (FTP can't).
 - **Keyboard**: US layout only; other characters with Alt + number pad or
@@ -724,7 +727,7 @@ shell/       Shell, commands, built-in assembler
 apps/        Built-in apps (FileF, TEditor, Settings, Help, Character Map...)
 help/        The built-in apps' help pages (and ASMOS's), for /HELP
 extapps/     External .APP apps, MANIFEST (what goes in /APPS), help/ (their
-             help pages)
+             help pages), worldview/ (the web browser: several files)
 lib/         Freestanding libs: memory, strings, math, time, graphics,
              paging, APM, FPU emulator
 config/      Compile-time and saved settings (ASMOS.CFG)

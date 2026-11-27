@@ -3,6 +3,7 @@
 /sim
 /gputest
 /atapitest
+/hdtest
 /rtcfg.c
 /simguard.c
 /out/

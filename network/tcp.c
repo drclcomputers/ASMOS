@@ -729,8 +729,7 @@ static bool port_used(uint16_t port) {
     return false;
 }
 
-int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
-                uint16_t local_port) {
+int tcp_open(const uint8_t dst_ip[4], uint16_t dst_port, uint16_t local_port) {
     uint8_t mac[6];
     if (!s_socks || !resolve_mac(dst_ip, mac))
         return -1;
@@ -760,6 +759,15 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
     t->rtt_t0 = time_millis();
     xmit(s, t->iss, TCP_SYN, 0, 0);
     timer_start(t);
+    return i;
+}
+
+int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
+                uint16_t local_port) {
+    int i = tcp_open(dst_ip, dst_port, local_port);
+    if (i < 0)
+        return -1;
+    net_socket_t *s = &s_socks[i];
     uint32_t until = time_millis() + 5000;
     while (s->tcp_state == TCP_SYN_SENT && SEQ_LT(time_millis(), until)) {
         net_poll(); /* (the timer sends the SYN again) */
@@ -768,7 +776,7 @@ int tcp_connect(const uint8_t dst_ip[4], uint16_t dst_port,
     if (s->tcp_state == TCP_ESTABLISHED)
         return i;
     if (s->tcp_state == TCP_SYN_SENT)
-        xmit(s, t->iss + 1, TCP_RST, 0, 0);
+        xmit(s, s->tcb->iss + 1, TCP_RST, 0, 0);
     free_sock(s);
     return -1;
 }

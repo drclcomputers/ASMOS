@@ -76,165 +76,197 @@ static uint16_t skip_name(const uint8_t *pkt, uint16_t pkt_len, uint16_t pos) {
     return 0;
 }
 
-bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
-    if (!hostname)
-        return false;
-
-    bool all_digits = true;
-    int dots = 0;
-    for (int i = 0; hostname[i]; i++) {
-        char c = hostname[i];
-        if (c == '.') {
-            dots++;
-        } else if (c < '0' || c > '9') {
-            all_digits = false;
-            break;
+/* a dotted IPv4 address ("10.0.2.2"): its 4 bytes */
+static bool ip_literal(const char *h, uint8_t ip[4]) {
+    int part = 0, digits = 0;
+    uint32_t val = 0;
+    for (int i = 0;; i++) {
+        char c = h[i];
+        if (c >= '0' && c <= '9') {
+            val = val * 10 + (uint32_t)(c - '0');
+            if (++digits > 3 || val > 255)
+                return false;
+        } else if ((c == '.' || !c) && digits && part < 4) {
+            ip[part++] = (uint8_t)val;
+            val = 0;
+            digits = 0;
+            if (!c)
+                return part == 4;
+        } else {
+            return false;
         }
     }
-    if (all_digits && dots == 3) {
-        uint8_t parts[4] = {0};
-        int part = 0;
-        uint16_t val = 0;
-        for (int i = 0; hostname[i]; i++) {
-            char c = hostname[i];
-            if (c == '.') {
-                parts[part++] = (uint8_t)val;
-                val = 0;
-            } else {
-                val = val * 10 + (c - '0');
-            }
-        }
-        parts[3] = (uint8_t)val;
-        memcpy(ip_out, parts, 4);
-        return true;
-    }
+}
 
-    /* small cache: gopher menus repeat the same host on every line */
+static bool cache_find(const char *name, uint8_t ip[4]) {
     for (int c = 0; c < DNS_CACHE_N; c++)
-        if (s_cache[c].used && strcmp(s_cache[c].name, hostname) == 0) {
-            memcpy(ip_out, s_cache[c].ip, 4);
+        if (s_cache[c].used && strcmp(s_cache[c].name, name) == 0) {
+            memcpy(ip, s_cache[c].ip, 4);
             return true;
         }
+    return false;
+}
 
-    uint8_t *pkt = (uint8_t *)kmalloc(DNS_PKT_SIZE);
-    uint8_t *resp = (uint8_t *)kmalloc(DNS_PKT_SIZE);
-    if (!pkt || !resp) {
-        kfree(pkt);
-        kfree(resp);
-        return false;
-    }
+static void cache_keep(const char *name, const uint8_t ip[4]) {
+    if (strlen(name) >= sizeof(s_cache[0].name))
+        return;
+    dns_cache_t *e = &s_cache[s_cache_next++ % DNS_CACHE_N];
+    e->used = true;
+    strcpy(e->name, name);
+    memcpy(e->ip, ip, 4);
+}
 
-    bool found = false;
-    uint16_t txn_id = s_dns_txn_id;
+/* the question for name, id: its length in pkt, 0 if the name is bad */
+static uint16_t build_query(uint8_t *pkt, uint16_t id, const char *name) {
+    memset(pkt, 0, 12);
+    pkt[0] = (uint8_t)(id >> 8);
+    pkt[1] = (uint8_t)id;
+    pkt[2] = 0x01; /* RD: recursion, please */
+    pkt[5] = 0x01; /* QDCOUNT=1 */
+    uint16_t n = encode_name(pkt + 12, DNS_PKT_SIZE - 12 - 4, name);
+    if (!n)
+        return 0;
+    uint16_t pos = 12 + n;
+    pkt[pos++] = 0x00;
+    pkt[pos++] = 0x01; /* QTYPE  A  */
+    pkt[pos++] = 0x00;
+    pkt[pos++] = 0x01; /* QCLASS IN */
+    return pos;
+}
 
-    for (int attempt = 0; attempt < DNS_RETRIES && !found; attempt++) {
-        uint16_t sent_id = txn_id;
-        memset(pkt, 0, DNS_PKT_SIZE);
-        pkt[0] = (uint8_t)(txn_id >> 8);
-        pkt[1] = (uint8_t)(txn_id & 0xFF);
-        pkt[2] = 0x00;
-        pkt[3] = 0x01; /* RD */
-        pkt[4] = 0x00;
-        pkt[5] = 0x01; /* QDCOUNT=1 */
-
-        uint16_t pos = 12;
-        uint16_t name_len =
-            encode_name(pkt + pos, DNS_PKT_SIZE - pos - 4, hostname);
-        if (name_len == 0) {
-            txn_id++;
-            continue;
+/* the answer to question id: its first A record. 1 found, 0 not this
+ * answer (or none in it) */
+static int parse_answer(const uint8_t *resp, int rlen, uint16_t id,
+                        uint8_t ip_out[4]) {
+    if (rlen <= 12 || ((resp[0] << 8) | resp[1]) != id || !(resp[2] & 0x80) ||
+        (resp[3] & 0x0F) != 0)
+        return 0;
+    uint16_t ancount = (uint16_t)((resp[6] << 8) | resp[7]);
+    uint16_t pos = skip_name(resp, (uint16_t)rlen, 12);
+    if (pos == 0 || pos + 4 > rlen)
+        return 0;
+    pos += 4;
+    for (uint16_t a = 0; a < ancount; a++) {
+        pos = skip_name(resp, (uint16_t)rlen, pos);
+        if (pos == 0 || pos + 10 > rlen)
+            return 0;
+        uint16_t type = (uint16_t)((resp[pos] << 8) | resp[pos + 1]);
+        uint16_t rdlen = (uint16_t)((resp[pos + 8] << 8) | resp[pos + 9]);
+        pos += 10;
+        if (pos + rdlen > rlen)
+            return 0;
+        if (type == 1 && rdlen == 4) {
+            memcpy(ip_out, resp + pos, 4);
+            return 1;
         }
-        pos += name_len;
-        pkt[pos++] = 0x00;
-        pkt[pos++] = 0x01; /* QTYPE  A  */
-        pkt[pos++] = 0x00;
-        pkt[pos++] = 0x01; /* QCLASS IN */
+        pos += rdlen;
+    }
+    return 0;
+}
 
+// lookups that don't wait: dns_start, then dns_poll every frame
+
+#define DNS_Q_N 4
+typedef struct {
+    bool used;
+    int8_t result; /* 1 found, -1 failed, 0 asking */
+    char name[64];
+    uint8_t ip[4];
+    uint16_t id;
+    int sock, attempt;
+    uint32_t deadline;
+} dns_q_t;
+static dns_q_t s_q[DNS_Q_N];
+
+/* (the question sent again: the next attempt) */
+static void q_send(dns_q_t *q) {
+    if (q->sock >= 0)
+        udp_close(q->sock);
+    q->sock = -1;
+    while (q->attempt < DNS_RETRIES) {
+        q->attempt++;
+        q->id = s_dns_txn_id++;
+        q->deadline = time_millis() + DNS_TIMEOUT_MS;
+        uint8_t *pkt = (uint8_t *)kmalloc(DNS_PKT_SIZE);
+        uint16_t len = pkt ? build_query(pkt, q->id, q->name) : 0;
         uint16_t local =
             DNS_LOCAL_BASE + (s_dns_local_port++ % DNS_LOCAL_COUNT);
-        int sock = udp_open(local);
-        if (sock < 0) {
-            txn_id++;
-            continue;
+        int sock = len ? udp_open(local) : -1;
+        bool sent =
+            sock >= 0 && udp_send(sock, s_dns_server, DNS_PORT, pkt, len);
+        kfree(pkt);
+        if (sent) {
+            q->sock = sock;
+            return;
         }
-
-        if (!udp_send(sock, s_dns_server, DNS_PORT, pkt, pos)) {
+        if (sock >= 0)
             udp_close(sock);
-            txn_id++;
-            continue;
-        }
-
-        uint32_t deadline = time_millis() + DNS_TIMEOUT_MS;
-        int rlen = 0;
-        while (time_millis() < deadline) {
-            net_poll();
-            task_yield();
-            rlen = udp_recv(sock, resp, DNS_PKT_SIZE, NULL, NULL);
-            if (rlen > 12)
-                break;
-        }
-        udp_close(sock);
-
-        if (rlen <= 12) {
-            txn_id++;
-            continue;
-        }
-
-        uint16_t resp_id = (resp[0] << 8) | resp[1];
-        if (resp_id != sent_id) {
-            txn_id++;
-            continue;
-        }
-        if (!(resp[2] & 0x80)) {
-            txn_id++;
-            continue;
-        }
-        if ((resp[3] & 0x0F) != 0) {
-            txn_id++;
-            continue;
-        }
-
-        uint16_t ancount = (resp[6] << 8) | resp[7];
-        if (ancount == 0) {
-            txn_id++;
-            continue;
-        }
-
-        pos = 12;
-        pos = skip_name(resp, (uint16_t)rlen, pos);
-        if (pos == 0 || pos + 4 > rlen) {
-            txn_id++;
-            continue;
-        }
-        pos += 4;
-
-        for (uint16_t a = 0; a < ancount; a++) {
-            pos = skip_name(resp, (uint16_t)rlen, pos);
-            if (pos == 0 || pos + 10 > rlen)
-                break;
-            uint16_t type = (resp[pos] << 8) | resp[pos + 1];
-            uint16_t rdlen = (resp[pos + 8] << 8) | resp[pos + 9];
-            pos += 10;
-            if (pos + rdlen > rlen)
-                break;
-            if (type == 1 && rdlen == 4) {
-                memcpy(ip_out, resp + pos, 4);
-                found = true;
-                break;
-            }
-            pos += rdlen;
-        }
-        txn_id++;
+        if (!len)
+            break; /* (a bad name: no use trying again) */
     }
-    s_dns_txn_id = txn_id;
+    q->result = -1;
+}
 
-    kfree(pkt);
-    kfree(resp);
-    if (found && strlen(hostname) < sizeof(s_cache[0].name)) {
-        dns_cache_t *e = &s_cache[s_cache_next++ % DNS_CACHE_N];
-        e->used = true;
-        strcpy(e->name, hostname);
-        memcpy(e->ip, ip_out, 4);
+int dns_start(const char *hostname) {
+    if (!hostname || !hostname[0] || strlen(hostname) >= 64)
+        return -1;
+    for (int i = 0; i < DNS_Q_N; i++) {
+        dns_q_t *q = &s_q[i];
+        if (q->used)
+            continue;
+        memset(q, 0, sizeof(*q));
+        q->used = true;
+        q->sock = -1;
+        strcpy(q->name, hostname);
+        if (ip_literal(hostname, q->ip) || cache_find(hostname, q->ip))
+            q->result = 1;
+        else
+            q_send(q);
+        return i;
     }
-    return found;
+    return -1;
+}
+
+int dns_poll(int h, uint8_t ip_out[4]) {
+    if (h < 0 || h >= DNS_Q_N || !s_q[h].used)
+        return -1;
+    dns_q_t *q = &s_q[h];
+    if (q->result == 0 && q->sock >= 0) {
+        uint8_t *resp = (uint8_t *)kmalloc(DNS_PKT_SIZE);
+        int rlen = resp ? udp_recv(q->sock, resp, DNS_PKT_SIZE, NULL, NULL) : 0;
+        if (rlen > 0 && parse_answer(resp, rlen, q->id, q->ip)) {
+            q->result = 1;
+            cache_keep(q->name, q->ip);
+        }
+        kfree(resp);
+        if (!q->result && (int32_t)(time_millis() - q->deadline) >= 0)
+            q_send(q); /* (no answer in time: again, or failed) */
+    }
+    int r = q->result;
+    if (r == 1)
+        memcpy(ip_out, q->ip, 4);
+    if (r != 0)
+        dns_cancel(h);
+    return r;
+}
+
+void dns_cancel(int h) {
+    if (h < 0 || h >= DNS_Q_N || !s_q[h].used)
+        return;
+    if (s_q[h].sock >= 0)
+        udp_close(s_q[h].sock);
+    s_q[h].used = false;
+}
+
+/* waits (gopher, ftp, the shell): the same, polled here */
+bool dns_resolve(const char *hostname, uint8_t ip_out[4]) {
+    int h = dns_start(hostname);
+    if (h < 0)
+        return false;
+    int r;
+    while ((r = dns_poll(h, ip_out)) == 0) {
+        net_poll();
+        task_yield();
+    }
+    return r == 1;
 }
