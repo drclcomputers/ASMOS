@@ -330,7 +330,8 @@ int scen_help(const char *name) {
         T("System Tools: HexView .APP + built-in shortcuts",
           sys && HAS(sys, "HexView") && HAS(sys, "Monitor") &&
               HAS(sys, "ASMTerm") && HAS(sys, "Format Disk") &&
-              !HAS(sys, "Print Queue") && !HAS(sys, "Joystick"));
+              !HAS(sys, "Print Queue") && !HAS(sys, "Joystick") &&
+              !HAS(sys, "Mouse"));
         T("Games has Puzzle, Solitaire, Sudoku",
           games && games->item_count == 3 && HAS(games, "Puzzle") &&
               HAS(games, "Solitaire") && HAS(games, "Sudoku"));

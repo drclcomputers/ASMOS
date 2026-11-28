@@ -4,6 +4,7 @@
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
 #include "ui/window.h"
+#include "drivers/mousemove.h"
 #include "ui/dialogs.h"
 #include "ui/menubar.h"
 #include "ui/uifont.h"
@@ -761,7 +762,8 @@ bool window_update(window *win) {
     if (mouse.left_clicked && !g_menubar_click_consumed &&
         !win->pinned_bottom && in_titlebar(win, mouse.x, mouse.y)) {
         uint32_t now = time_millis();
-        if (win->title_click_t && now - win->title_click_t < 450) {
+        if (win->title_click_t &&
+            now - win->title_click_t < mouse_dblclick_ms()) {
             win->title_click_t = 0;
             wm_shade(win, !win->shaded);
             return true;

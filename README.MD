@@ -1,7 +1,7 @@
 ASMOS - x86 Operating System
 =============================================================================
 
-Version 3.9.1
+Version 3.9.3
 
 A 32-bit x86 OS for the 386 era, written from scratch in assembly and C. No
 external kernel libraries. It looks and feels like a desktop from around
@@ -67,6 +67,9 @@ Features
   and DOS (437: box drawing, blocks, Greek). Settings > Display >
   Characters picks the one in use. Character Map shows them all; Alt and a
   code on the number pad types one anywhere (Alt+0233).
+- **Mouse**: a PS/2 or serial (COM) mouse. Settings > Devices, double-click
+  the mouse: the pointer's speed, the double-click speed (with a box to
+  try it on) and the buttons swapped for the left hand.
 - **Joystick**: a stick on the game port (the 15-pin one, 201h): up to 4
   axes and 4 buttons. Settings > Devices lists what is plugged in;
   double-click the joystick to calibrate it (centre, then every edge), set
@@ -300,6 +303,7 @@ The bundled apps:
 | Format Disk                                                       | format a floppy (FDD0, FDD1), or erase HDB                |
 | Print Queue                                                       | the printer's jobs (from Settings > Printers)             |
 | Joystick                                                          | calibrate the game port's stick (Settings > Devices)      |
+| Mouse                                                             | pointer and double-click speed (Settings > Devices)       |
 | ASMDraw                                                           | paint: 11 tools, selection, .PIC and .BMP, 24 colours     |
 | Help                                                              | the help pages of every app                               |
 | Character Map                                                     | every character of the code page, to copy                 |

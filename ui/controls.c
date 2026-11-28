@@ -11,6 +11,7 @@
 #include "config/config.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
+#include "drivers/mousemove.h"
 #include "lib/graphics.h"
 #include "lib/memory.h"
 #include "lib/string.h"
@@ -34,7 +35,8 @@ static int s_last_down_item = -1;
 static int s_drag_off; /* scrollbar thumb grab offset */
 static int s_drag_part;
 
-#define DBLCLICK_MS 450
+/* (a double-click's time: the mouse settings, drivers/mousemove.h) */
+#define DBLCLICK_MS mouse_dblclick_ms()
 #define SB_W 8 /* built-in scrollbar width */
 #define POPUP_ROWS 8
 

@@ -22,7 +22,7 @@ SCREENS="desktop@640x480 desktop@800 alttab@800 winpos@800 pattern@800
          setup@640x480 setup@800 busycur@800 zipui@800 lazy@640x480 lazy@800
          zoom@320 zoom@800 zoom@640x2 zoom@640x480x2 zoom@800x2 desktop@800x2
          alttab@800x2 zipui@640x2 setup@800x2 pattern@640x2 lazy@800x2
-         charset@320 help@320 joystick@320 desktop@320x16 desktop@640x256
+         charset@320 help@320 joystick@320 mouseset@320 desktop@320x16 desktop@640x256
          desktop@640x480x256 desktop@800x256 zoom@800x256 setup@800x256
          picview@640x256 picview@320 picformats picformats@320 drawbmp@640x256 drawbmp@320
          drawtools@640x256 drawtools@320 drawsel@320 drawsel@640x256 asksave asksave@320

@@ -1,6 +1,7 @@
 /* the game port: the driver on a fake port (sim.c), the calibration, the
  * Devices tab and the Joystick app */
 #include "drivers/joystick.h"
+#include "drivers/mousemove.h"
 #include "scen.h"
 
 extern unsigned g_sim_joy_t[4], g_sim_joy_btn;
@@ -21,7 +22,144 @@ static void click_ctl(control *c) { sim_click(c->ax + 3, c->ay + 3); }
 
 static int near(int a, int b, int d) { return a - b <= d && b - a <= d; }
 
+/* two clicks on (x, y), ms apart (16 ms a frame) */
+static void two_clicks(int x, int y, int ms) {
+    sim_click(x, y);
+    for (int t = 32; t < ms; t += 16) /* (the click's up + the next down) */
+        sim_frame();
+    sim_click(x, y);
+}
+
+/* the Mouse settings: from Settings > Devices only */
+static int mouse_settings(void) {
+    int fails = 0;
+    char b[300];
+    mouse_cfg_t was = g_cfg.mouse;
+    memset(&g_cfg.mouse, 0, sizeof g_cfg.mouse);
+
+    /* what the settings do to a mouse's moves */
+    int dx = 8, dy = -8;
+    bool l = true, r = false;
+    mouse_shape(&dx, &dy, &l, &r);
+    T("speed 5 (the default): as the mouse moves", dx == 8 && dy == -8 && l);
+    g_cfg.mouse.speed = 1;
+    int sum = 0;
+    for (int i = 0; i < 8; i++) {
+        dx = 1, dy = 0;
+        mouse_shape(&dx, &dy, &l, &r);
+        sum += dx;
+    }
+    T("speed 1: 3/8 as far (small moves add up, none lost)", sum == 3);
+    g_cfg.mouse.speed = 9;
+    dx = 8, dy = 4;
+    mouse_shape(&dx, &dy, &l, &r);
+    T("speed 9: twice as far", dx == 16 && dy == 8);
+    g_cfg.mouse.speed = 0;
+    g_cfg.mouse.swap = 1;
+    l = true, r = false;
+    mouse_shape(&dx, &dy, &l, &r);
+    T("swapped: the left button is the right one", !l && r);
+    g_cfg.mouse.swap = 0;
+    T("double-click: 450 ms normally, 200 fast, 900 slow",
+      mouse_dblclick_ms() == 450 && mouse_dblclick_ms_at(9) == 200 &&
+          mouse_dblclick_ms_at(1) == 900);
+
+    /* Settings > Devices: a double-click on the mouse opens it */
+    sim_launch("Settings");
+    sim_frames(3);
+    window *sw = wm_focused_window();
+    control *tabs = find(sw, CTL_TABS, NULL);
+    ctl_set_value(tabs, 5);
+    sim_frames(2);
+    control *list = find(sw, CTL_LIST, NULL);
+    int row = -1;
+    for (int i = 1; i < list_count(list); i++)
+        if (strstr(list_get(list, i), "Mouse"))
+            row = i;
+    T("Devices: a Mouse row", row > 0);
+    sim_dblclick(list->ax + 20, list->ay + 2 + row * 9 + 4); /* (on it) */
+    sim_frames(2);
+    window *mw = wm_focused_window();
+    T("a double-click on it opens Mouse",
+      mw && !strcmp(mw->title, "Mouse") && find(mw, CTL_BUTTON, "Defaults"));
+    if (!mw || strcmp(mw->title, "Mouse"))
+        return fails;
+    sim_shot("mouse_app");
+    control *sl[2] = {NULL, NULL};
+    int n = 0;
+    for (control *c = mw->controls; c; c = c->next)
+        if (c->type == CTL_SLIDER && n < 2)
+            sl[n++] = c;
+    control *test = find(mw, CTL_CUSTOM, NULL);
+    T("speed and double-click sliders, a box to try it",
+      sl[0] && sl[1] && test && ctl_value(sl[0]) == 5 && ctl_value(sl[1]) == 5);
+
+    /* double-click speed: the box tells */
+    int tx = test->ax + test->aw / 2, ty = test->ay + test->ah / 2;
+    ctl_set_value(sl[1], 9); /* fast: 200 ms */
+    ctl_invoke(sl[1], EV_CHANGE);
+    sim_frames(2);
+    two_clicks(tx, ty, 300);
+    sim_frames(1);
+    bool lit = false;
+    for (int y = test->ay + 2; y < test->ay + test->ah - 2 && !lit; y++)
+        lit = BACKBUF[y * SCREEN_WIDTH + test->ax + 3] == LIGHT_GREEN;
+    T("fast: two clicks 300 ms apart aren't a double-click", !lit);
+    ctl_set_value(sl[1], 1); /* slow: 900 ms */
+    ctl_invoke(sl[1], EV_CHANGE);
+    sim_frames(2);
+    two_clicks(tx, ty, 300);
+    sim_frames(1);
+    for (int y = test->ay + 2; y < test->ay + test->ah - 2 && !lit; y++)
+        lit = BACKBUF[y * SCREEN_WIDTH + test->ax + 3] == LIGHT_GREEN;
+    T("slow: the same 300 ms is one (the box goes green)", lit);
+    T("... the label says 900 ms", find(mw, CTL_LABEL, "900 ms") != NULL);
+    sim_shot("mouse_dbl");
+    T("... it works at once, everywhere", mouse_dblclick_ms() == 900);
+
+    /* Cancel: as it was */
+    ctl_set_value(sl[0], 8);
+    ctl_invoke(sl[0], EV_CHANGE);
+    T("speed: at once", g_cfg.mouse.speed == 8);
+    click_ctl(find(mw, CTL_BUTTON, "Cancel"));
+    sim_frames(2);
+    T("Cancel: the settings it started with",
+      g_cfg.mouse.speed == 0 && g_cfg.mouse.dbl == 0 &&
+          !find(wm_focused_window(), CTL_BUTTON, "Defaults"));
+
+    /* OK: kept */
+    list = find(sw, CTL_LIST, NULL);
+    list_set_sel(list, row);
+    ctl_invoke(list, EV_SUBMIT); /* (what a double-click on it sends) */
+    sim_frames(2);
+    mw = wm_focused_window();
+    control *sw_chk = find(mw, CTL_CHECK, "Swap");
+    ctl_set_value(sw_chk, 1);
+    ctl_invoke(sw_chk, EV_CHANGE);
+    T("swap: at once", g_cfg.mouse.swap == 1);
+    ctl_set_value(sw_chk, 0); /* (back: the test clicks with the left) */
+    ctl_invoke(sw_chk, EV_CHANGE);
+    for (control *c = mw->controls; c; c = c->next)
+        if (c->type == CTL_SLIDER) {
+            ctl_set_value(c, 3);
+            ctl_invoke(c, EV_CHANGE);
+            break;
+        }
+    click_ctl(find(mw, CTL_BUTTON, "OK"));
+    sim_frames(2);
+    T("OK: kept", g_cfg.mouse.speed == 3);
+    snprintf(b, sizeof b, "    speed %d dbl %d swap %d\n", g_cfg.mouse.speed,
+             g_cfg.mouse.dbl, g_cfg.mouse.swap);
+    wr(1, b);
+    wm_close(sw);
+    sim_frames(2);
+    g_cfg.mouse = was;
+    return fails;
+}
+
 int scen_joy(const char *name) {
+    if (!strcmp(name, "mouseset"))
+        return mouse_settings();
     if (strcmp(name, "joystick"))
         return -1;
     int fails = 0;
@@ -84,12 +222,14 @@ int scen_joy(const char *name) {
     click_ctl(find(sw, CTL_BUTTON, "Refresh"));
     T("Refresh: plugged again", joy.present);
 
-    /* double-click the row: the Joystick app */
+    /* double-click the row: the Joystick app (the row itself: the mouse's
+     * opens Mouse) */
     list = find(sw, CTL_LIST, NULL);
-    list_set_sel(list, 1);
-    for (int r = 0;
-         r < 12 && !find(wm_focused_window(), CTL_BUTTON, "Calibrate"); r++)
-        sim_dblclick(list->ax + 20, list->ay + 2 + 9 + (r % 4) * 9);
+    for (int i = 1; i < list_count(list); i++)
+        if (strstr(list_get(list, i), "Joystick"))
+            jrow = i;
+    list_set_sel(list, jrow);
+    ctl_invoke(list, EV_SUBMIT); /* (what a double-click on it sends) */
     sim_frames(2);
     window *jw = wm_focused_window();
     control *cal = find(jw, CTL_BUTTON, "Calibrate");

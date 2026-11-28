@@ -9,6 +9,7 @@
 #include "drivers/cdrom.h"
 #include "drivers/fdd.h"
 #include "drivers/gpu.h"
+#include "drivers/mousemove.h"
 #include "os/help.h"
 #include "os/meminfo.h"
 #include "os/watchdog.h"
@@ -536,7 +537,7 @@ static void launch_ext(void *ud) {
     const ext_app_t *e = ud;
     if (e->desc)
         os_launch_app(e->desc);
-    else if (!appload_launch(e->path))
+    else if (!appload_launch(e->path) && appload_last_error()[0])
         dlg_message(NULL, e->label, appload_last_error());
 }
 
@@ -1283,7 +1284,7 @@ void desktop_on_frame(void) {
 
             uint32_t now = pit_ticks;
             if (hit == s_last_click_idx &&
-                (now - s_last_click_tick) <= DOUBLE_CLICK_SPEED) {
+                (now - s_last_click_tick) <= mouse_dblclick_ms()) {
                 open_item(hit);
                 s_press_idx = -1; /* no drag out of a double-click */
                 s_last_click_idx = -1;

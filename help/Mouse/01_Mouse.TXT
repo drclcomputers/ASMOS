@@ -1,0 +1,15 @@
+# Mouse
+
+Mouse sets up the mouse, on the PS/2 port or a serial port (COM). It
+opens from Settings > Devices: double-click the mouse.
+
+- Pointer speed: how far the pointer goes when the mouse moves. Slow
+  helps with a jumpy mouse or exact drawing, fast with a big screen.
+- Double-click speed: how quick the two clicks of a double-click must
+  be. Fast wants them close together; slow lets them be further apart.
+  Try it on the box under it: a double-click turns it green.
+- Swap the left and right buttons: for the left hand. From the next
+  click, the right button is the one that clicks.
+- Every change works at once. OK keeps them (in ASMOS.CFG); Cancel, Esc
+  or the window's X put back the old ones. Defaults: the normal speeds,
+  the buttons as they were made.

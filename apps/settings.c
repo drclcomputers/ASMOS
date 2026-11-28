@@ -858,8 +858,8 @@ static void on_prn_test(control *c, int ev) {
 
 // Devices tab: what is plugged in. A double-click sets one up.
 
-extern app_descriptor joyconf_app;
-enum { DEV_NONE, DEV_JOY, DEV_SOUND, DEV_NET, DEV_PRINT };
+extern app_descriptor joyconf_app, mousecfg_app;
+enum { DEV_NONE, DEV_JOY, DEV_SOUND, DEV_NET, DEV_PRINT, DEV_MOUSE };
 
 static void dev_add(settings_state_t *s, int action, const char *fmt, ...) {
     char t[96];
@@ -876,9 +876,9 @@ static void dev_fill(settings_state_t *s) {
     dev_add(s, DEV_NONE, "Keyboard\tPS/2 port\tConnected");
     mouse_kind_t mk = mouse_kinds();
     if (mk & MOUSE_PS2)
-        dev_add(s, DEV_NONE, "Mouse\tPS/2 port\tConnected");
+        dev_add(s, DEV_MOUSE, "Mouse\tPS/2 port\tConnected");
     if (mk & MOUSE_SERIAL)
-        dev_add(s, DEV_NONE, "Mouse\tCOM%d\tSerial", sermouse_port());
+        dev_add(s, DEV_MOUSE, "Mouse\tCOM%d\tSerial", sermouse_port());
     if (joy.present) {
         int n = 0;
         for (int i = 0; i < JOY_AXES; i++)
@@ -912,6 +912,9 @@ static void on_dev(control *c, int ev) {
     switch (list_data(c, list_sel(c))) {
     case DEV_JOY:
         os_launch_app(&joyconf_app);
+        break;
+    case DEV_MOUSE:
+        os_launch_app(&mousecfg_app);
         break;
     case DEV_SOUND:
         ctl_set_value(s->tabs, P_SOUND);

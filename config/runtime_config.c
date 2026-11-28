@@ -104,7 +104,6 @@ bool cfg_load(void) {
     int n = fs_read(&f, &tmp, sizeof(os_config_t));
     fs_close(&f);
 
-    /* version 2 files end before wall_custom, version 3 before joy */
     if (n < (int)__builtin_offsetof(os_config_t, wall_custom))
         return false;
     if (n < (int)__builtin_offsetof(os_config_t, joy))

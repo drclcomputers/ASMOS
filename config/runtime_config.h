@@ -9,7 +9,7 @@
 #include "lib/core.h"
 
 #define CFG_MAGIC 0x4153434F
-#define CFG_VERSION 4
+#define CFG_VERSION 5
 #define CFG_PATH "/ASMOS.CFG"
 
 typedef struct __attribute__((packed)) {
@@ -18,6 +18,13 @@ typedef struct __attribute__((packed)) {
     uint8_t invert;   /* bit per axis */
     uint8_t calibrated;
 } joy_cfg_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t speed;  /* how far the pointer goes for a move */
+    uint8_t dbl;    /* how quick a double-click must be */
+    uint8_t swap;   /* the left and right buttons swapped (left-handed) */
+    uint8_t unused; /* (room) */
+} mouse_cfg_t;
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
@@ -61,6 +68,7 @@ typedef struct __attribute__((packed)) {
     uint8_t _reserved[19];
     uint8_t wall_custom[32];
     joy_cfg_t joy;
+    mouse_cfg_t mouse;
 } os_config_t;
 
 extern os_config_t g_cfg;

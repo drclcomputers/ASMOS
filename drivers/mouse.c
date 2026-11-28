@@ -5,6 +5,7 @@
 
 #include "drivers/mouse.h"
 #include "config/config.h"
+#include "drivers/mousemove.h"
 #include "drivers/sermouse.h"
 #include "lib/core.h"
 
@@ -83,6 +84,7 @@ static mousevar s_live = {160, 100, 0, 0, 0, 0, 0, 0, 0};
 const mousevar *mouse_live(void) { return &s_live; }
 
 void mouse_apply(int dx, int dy, bool left, bool right, bool middle) {
+    mouse_shape(&dx, &dy, &left, &right); /* (the mouse settings) */
     mousevar *m = &s_live;
     bool prev_left = m->left, prev_right = m->right;
     m->left = left;

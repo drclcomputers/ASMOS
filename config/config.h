@@ -6,7 +6,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VER "3.9.1"
+#define VER "3.9.3"
 
 extern int g_screen_width;
 extern int g_screen_height;
@@ -18,7 +18,6 @@ extern int g_video_mode;
 
 #define TARGET_FPS 60
 #define FRAME_TIME_MS (1000 / TARGET_FPS)
-#define DOUBLE_CLICK_SPEED 500
 #define WIN_ANIM_DEFAULT_FRAMES (TARGET_FPS / 3)
 
 /* the back buffer: after the kernel's zeroed data, above 1 MB (linker.ld) */
